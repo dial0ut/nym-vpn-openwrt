@@ -39,6 +39,9 @@ vergen = { workspace = true, default-features = false, features = [
     "cargo",
 ] }
 
+[target.'cfg(windows)'.dependencies]
+winapi = { version="0.3", features = ["winnt", "excpt", "winerror"] }
+
 # Debian
 [package.metadata.deb]
 name = "nym-vpnc"
