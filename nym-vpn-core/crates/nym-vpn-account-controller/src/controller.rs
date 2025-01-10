@@ -6,7 +6,7 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use nym_http_api_client::UserAgent;
 use nym_vpn_api_client::{
     response::{NymVpnDevice, NymVpnUsage},
-    types::VpnApiAccount,
+    types::{DeviceStatus, VpnApiAccount},
 };
 use nym_vpn_network_config::Network;
 use nym_vpn_store::{mnemonic::Mnemonic, VpnStorage};
@@ -287,6 +287,9 @@ where
         // TODO: here we should put the controller in some sort of idle state, and wait for all
         // currently running operations to finish before proceeding with the reset
 
+        //delete device from nym vpn api
+        self.unregister_device_from_api().await?;
+
         self.account_storage
             .remove_account()
             .await
@@ -346,6 +349,30 @@ where
         }
 
         Ok(())
+    }
+
+    async fn unregister_device_from_api(&self) -> Result<NymVpnDevice, AccountCommandError> {
+        if self.shared_state().is_ready_to_register_device().await
+            == ReadyToRegisterDevice::InProgress
+        {
+            return Err(AccountCommandError::RegistrationInProgress);
+        }
+
+        let device = self
+            .account_storage
+            .load_device_keys()
+            .await
+            .map_err(|_err| AccountCommandError::NoDeviceStored)?;
+
+        let account = self
+            .update_mnemonic_state()
+            .await
+            .map_err(|_err| AccountCommandError::NoAccountStored)?;
+
+        self.vpn_api_client
+            .update_device(&account, &device, DeviceStatus::DeleteMe)
+            .await
+            .map_err(|err| AccountCommandError::UnregisterDeviceApiClientFailure(err.to_string()))
     }
 
     async fn handle_sync_account_state(&mut self, command: AccountCommand) {

@@ -176,6 +176,12 @@ impl From<nym_vpn_account_controller::AccountCommandError> for VpnError {
             AccountCommandError::InitDeviceKeys(e) => VpnError::InternalError { details: e },
             AccountCommandError::General(err) => VpnError::InternalError { details: err },
             AccountCommandError::Internal(err) => VpnError::InternalError { details: err },
+            AccountCommandError::UnregisterDeviceApiClientFailure(err) => {
+                VpnError::InternalError { details: err }
+            }
+            AccountCommandError::RegistrationInProgress => VpnError::InternalError {
+                details: value.to_string(),
+            },
         }
     }
 }

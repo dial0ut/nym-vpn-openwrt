@@ -76,8 +76,14 @@ pub enum AccountCommandError {
     #[error("no device stored")]
     NoDeviceStored,
 
+    #[error("device registration is in progress")]
+    RegistrationInProgress,
+
     #[error("failed to remove account: {0}")]
     RemoveAccount(String),
+
+    #[error("failed to remove device from nym vpn api: {0}")]
+    UnregisterDeviceApiClientFailure(String),
 
     #[error("failed to remove device identity: {0}")]
     RemoveDeviceIdentity(String),
