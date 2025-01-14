@@ -4161,6 +4161,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "nym-offline-monitor"
+version = "1.2.0-dev"
+dependencies = [
+ "debounced",
+ "futures",
+ "nym-apple-dispatch",
+ "nym-apple-network",
+ "nym-common",
+ "nym-routing",
+ "nym-windows",
+ "thiserror 2.0.9",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "nym-ordered-buffer"
 version = "0.1.0"
 source = "git+https://github.com/nymtech/nym?rev=3d2914b3e5d707cd56e45508cfda6b656d483190#3d2914b3e5d707cd56e45508cfda6b656d483190"
@@ -4772,6 +4790,7 @@ dependencies = [
  "nym-ip-packet-requests",
  "nym-mixnet-client 1.2.0-dev",
  "nym-node-requests",
+ "nym-offline-monitor",
  "nym-pemstore",
  "nym-routing",
  "nym-sdk",
@@ -5009,6 +5028,8 @@ dependencies = [
  "nym-common",
  "socket2",
  "thiserror 2.0.9",
+ "tokio",
+ "tracing",
  "windows-sys 0.52.0",
 ]
 

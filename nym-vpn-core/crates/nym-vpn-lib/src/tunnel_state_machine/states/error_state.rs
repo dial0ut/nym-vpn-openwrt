@@ -17,7 +17,7 @@ use crate::tunnel_provider::{ios::OSTunProvider, tunnel_settings::TunnelSettings
 #[cfg(target_os = "ios")]
 use crate::tunnel_state_machine::tunnel::wireguard::two_hop_config::MIN_IPV6_MTU;
 use crate::tunnel_state_machine::{
-    states::{ConnectingState, DisconnectedState},
+    states::{ConnectingState, DisconnectedState, OfflineState},
     ErrorStateReason, NextTunnelState, PrivateTunnelState, SharedState, TunnelCommand,
     TunnelStateHandler,
 };
@@ -74,20 +74,30 @@ impl TunnelStateHandler for ErrorState {
         shared_state: &'async_trait mut SharedState,
     ) -> NextTunnelState {
         tokio::select! {
-            _ = shutdown_token.cancelled() => {
-                NextTunnelState::Finished
-            }
             Some(command) = command_rx.recv() => {
                 match command {
                     TunnelCommand::Connect => {
-                        NextTunnelState::NewState(ConnectingState::enter(0, None, shared_state))
+                        if shared_state.offline_monitor.connectivity().await.is_offline() {
+                            NextTunnelState::NewState(OfflineState::enter(true,  0, None))
+                        } else {
+                            NextTunnelState::NewState(ConnectingState::enter(0, None, shared_state).await)
+                        }
                     },
-                    TunnelCommand::Disconnect => NextTunnelState::NewState(DisconnectedState::enter()),
+                    TunnelCommand::Disconnect => {
+                        if shared_state.offline_monitor.connectivity().await.is_offline() {
+                            NextTunnelState::NewState(OfflineState::enter(false,  0, None))
+                        } else {
+                            NextTunnelState::NewState(DisconnectedState::enter())
+                        }
+                    },
                     TunnelCommand::SetTunnelSettings(tunnel_settings) => {
                         shared_state.tunnel_settings = tunnel_settings;
                         NextTunnelState::SameState(self)
                     }
                 }
+            }
+            _ = shutdown_token.cancelled() => {
+                NextTunnelState::Finished
             }
             else => NextTunnelState::Finished
         }

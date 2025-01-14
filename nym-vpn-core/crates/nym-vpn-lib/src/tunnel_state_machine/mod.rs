@@ -15,9 +15,6 @@ pub mod tunnel;
 mod tunnel_monitor;
 #[cfg(windows)]
 mod wintun;
-use nym_sdk::UserAgent;
-#[cfg(windows)]
-use wintun::SetupWintunAdapterError;
 
 #[cfg(any(target_os = "ios", target_os = "android"))]
 use std::sync::Arc;
@@ -36,8 +33,13 @@ use nym_gateway_directory::{
     Config as GatewayDirectoryConfig, EntryPoint, ExitPoint, NodeIdentity, Recipient,
 };
 use nym_ip_packet_requests::IpPair;
+use nym_sdk::UserAgent;
 use nym_wg_gateway_client::{Error as WgGatewayClientError, GatewayData};
 use nym_wg_go::PublicKey;
+
+use tunnel::SelectedGateways;
+#[cfg(windows)]
+use wintun::SetupWintunAdapterError;
 
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 use dns_handler::DnsHandlerHandle;
@@ -52,7 +54,7 @@ use crate::{
 };
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 use route_handler::RouteHandler;
-use states::DisconnectedState;
+use states::{DisconnectedState, OfflineState};
 
 #[async_trait::async_trait]
 trait TunnelStateHandler: Send {
@@ -272,17 +274,30 @@ pub struct WireguardConnectionData {
 /// Public enum describing the tunnel state
 #[derive(Debug, Clone, Eq, PartialEq, uniffi::Enum)]
 pub enum TunnelState {
+    /// Tunnel is disconnected and network connectivity is available.
     Disconnected,
+
+    /// Tunnel connection is being established.
     Connecting {
         connection_data: Option<ConnectionData>,
     },
-    Connected {
-        connection_data: ConnectionData,
-    },
+
+    /// Tunnel is connected.
+    Connected { connection_data: ConnectionData },
+
+    /// Tunnel is disconnecting.
     Disconnecting {
         after_disconnect: ActionAfterDisconnect,
     },
+
+    /// Tunnel is disconnected due to failure.
     Error(ErrorStateReason),
+
+    /// Tunnel is disconnected, network connectivity is unavailable.
+    Offline {
+        /// Whether tunnel will be reconnected upon gaining the network connectivity.
+        reconnect: bool,
+    },
 }
 
 impl From<PrivateTunnelState> for TunnelState {
@@ -299,6 +314,7 @@ impl From<PrivateTunnelState> for TunnelState {
                 after_disconnect: ActionAfterDisconnect::from(after_disconnect),
             },
             PrivateTunnelState::Error(reason) => Self::Error(reason),
+            PrivateTunnelState::Offline { reconnect } => Self::Offline { reconnect },
         }
     }
 }
@@ -317,6 +333,10 @@ enum PrivateTunnelState {
         after_disconnect: PrivateActionAfterDisconnect,
     },
     Error(ErrorStateReason),
+    Offline {
+        /// Whether to reconnect after gaining the network connectivity.
+        reconnect: bool,
+    },
 }
 
 /// Public enum describing action to perform after disconnect
@@ -328,6 +348,9 @@ pub enum ActionAfterDisconnect {
     /// Reconnect after disconnect
     Reconnect,
 
+    /// Enter offline after disconnect
+    Offline,
+
     /// Enter error state
     Error,
 }
@@ -335,9 +358,10 @@ pub enum ActionAfterDisconnect {
 impl From<PrivateActionAfterDisconnect> for ActionAfterDisconnect {
     fn from(value: PrivateActionAfterDisconnect) -> Self {
         match value {
-            PrivateActionAfterDisconnect::Error(_) => Self::Error,
             PrivateActionAfterDisconnect::Nothing => Self::Nothing,
             PrivateActionAfterDisconnect::Reconnect { .. } => Self::Reconnect,
+            PrivateActionAfterDisconnect::Offline { .. } => Self::Offline,
+            PrivateActionAfterDisconnect::Error(_) => Self::Error,
         }
     }
 }
@@ -350,6 +374,18 @@ enum PrivateActionAfterDisconnect {
 
     /// Reconnect after disconnect, providing the retry attempt counter
     Reconnect { retry_attempt: u32 },
+
+    /// Enter offline state after disconnect
+    Offline {
+        /// Whether to reconnect the tunnel once back online.
+        reconnect: bool,
+
+        /// The last recorded retry attempt passed to connecting state upon reconnect.
+        retry_attempt: u32,
+
+        /// The last known gateways passed to connecting state upon reconnect.
+        gateways: Option<SelectedGateways>,
+    },
 
     /// Enter error state
     Error(ErrorStateReason),
@@ -508,6 +544,7 @@ pub struct SharedState {
     //firewall_handler: FirewallHandler,
     #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
     dns_handler: DnsHandlerHandle,
+    offline_monitor: nym_offline_monitor::MonitorHandle,
     nym_config: NymConfig,
     tunnel_settings: TunnelSettings,
     status_listener_handle: Option<JoinHandle<()>>,
@@ -544,12 +581,11 @@ impl TunnelStateMachine {
         #[cfg(target_os = "android")] tun_provider: Arc<dyn AndroidTunProvider>,
         shutdown_token: CancellationToken,
     ) -> Result<JoinHandle<()>> {
-        let (current_state_handler, _) = DisconnectedState::enter();
-
         #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
         let route_handler = RouteHandler::new()
             .await
             .map_err(Error::CreateRouteHandler)?;
+
         #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
         let (dns_handler, dns_handler_task) = DnsHandlerHandle::spawn(
             #[cfg(target_os = "linux")]
@@ -557,6 +593,21 @@ impl TunnelStateMachine {
             shutdown_token.child_token(),
         )
         .map_err(Error::CreateDnsHandler)?;
+
+        let offline_monitor = nym_offline_monitor::spawn_monitor(
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            route_handler.inner_handle(),
+            #[cfg(target_os = "linux")]
+            Some(route_handler::TUNNEL_FWMARK),
+        )
+        .await;
+
+        let (current_state_handler, _) = if offline_monitor.connectivity().await.is_offline() {
+            OfflineState::enter(false, 0, None)
+        } else {
+            DisconnectedState::enter()
+        };
+
         //let firewall_handler = FirewallHandler::new().map_err(Error::CreateFirewallHandler)?;
 
         let (mixnet_event_sender, mixnet_event_receiver) = mpsc::unbounded_channel();
@@ -568,6 +619,7 @@ impl TunnelStateMachine {
             //firewall_handler,
             #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
             dns_handler,
+            offline_monitor,
             nym_config,
             tunnel_settings,
             status_listener_handle: None,
@@ -806,9 +858,19 @@ impl fmt::Display for TunnelState {
                 ActionAfterDisconnect::Nothing => f.write_str("Disconnecting"),
                 ActionAfterDisconnect::Reconnect => f.write_str("Disconnecting to reconnect"),
                 ActionAfterDisconnect::Error => f.write_str("Disconnecting because of an error"),
+                ActionAfterDisconnect::Offline => {
+                    f.write_str("Disconnecting because device is offline")
+                }
             },
             Self::Error(reason) => {
                 write!(f, "Error state: {:?}", reason)
+            }
+            Self::Offline { reconnect } => {
+                if *reconnect {
+                    write!(f, "Offline, auto-connect once back online")
+                } else {
+                    write!(f, "Offline")
+                }
             }
         }
     }

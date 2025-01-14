@@ -5,8 +5,8 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::tunnel_state_machine::{
-    states::ConnectingState, NextTunnelState, PrivateTunnelState, SharedState, TunnelCommand,
-    TunnelStateHandler,
+    states::{ConnectingState, OfflineState},
+    NextTunnelState, PrivateTunnelState, SharedState, TunnelCommand, TunnelStateHandler,
 };
 
 pub struct DisconnectedState;
@@ -26,13 +26,10 @@ impl TunnelStateHandler for DisconnectedState {
         shared_state: &'async_trait mut SharedState,
     ) -> NextTunnelState {
         tokio::select! {
-            _ = shutdown_token.cancelled() => {
-                NextTunnelState::Finished
-            }
             Some(command) = command_rx.recv() => {
                 match command {
                     TunnelCommand::Connect => {
-                        NextTunnelState::NewState(ConnectingState::enter(0, None, shared_state))
+                        NextTunnelState::NewState(ConnectingState::enter(0, None, shared_state).await)
                     },
                     TunnelCommand::Disconnect => NextTunnelState::SameState(self),
                     TunnelCommand::SetTunnelSettings(tunnel_settings) => {
@@ -40,6 +37,16 @@ impl TunnelStateHandler for DisconnectedState {
                         NextTunnelState::SameState(self)
                     }
                 }
+            }
+            Some(connectivity) = shared_state.offline_monitor.next() => {
+                if connectivity.is_offline() {
+                    NextTunnelState::NewState(OfflineState::enter(false, 0, None))
+                } else {
+                    NextTunnelState::SameState(self)
+                }
+            }
+            _ = shutdown_token.cancelled() => {
+                NextTunnelState::Finished
             }
             else => NextTunnelState::Finished
         }

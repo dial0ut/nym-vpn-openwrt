@@ -81,6 +81,13 @@ impl RouteHandler {
         }
     }
 
+    #[cfg(target_os = "macos")]
+    pub async fn refresh_routes(&mut self) {
+        if let Err(e) = self.route_manager.refresh_routes() {
+            tracing::error!("Failed to refresh routes: {}", e);
+        }
+    }
+
     #[cfg(windows)]
     pub async fn add_default_route_listener(
         &mut self,
@@ -98,7 +105,7 @@ impl RouteHandler {
         _ = tokio::task::spawn_blocking(|| drop(self.route_manager)).await;
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     pub(super) fn inner_handle(&self) -> nym_routing::RouteManagerHandle {
         self.route_manager.clone()
     }

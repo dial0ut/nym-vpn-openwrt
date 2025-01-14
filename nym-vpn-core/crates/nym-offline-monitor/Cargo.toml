@@ -1,0 +1,26 @@
+[package]
+name = "nym-offline-monitor"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+tracing.workspace = true
+futures.workspace = true
+tokio.workspace = true
+debounced.workspace = true
+tokio-stream.workspace = true
+tokio-util.workspace = true
+
+nym-common = { path = "../nym-common" }
+nym-routing = { path = "../nym-routing" }
+nym-windows = { path = "../nym-windows" }
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
+nym-apple-dispatch = { path = "../nym-apple-dispatch" }
+nym-apple-network = { path = "../nym-apple-network" }
