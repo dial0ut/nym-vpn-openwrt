@@ -52,6 +52,8 @@ pub mod swift;
 mod account;
 mod environment;
 mod state_machine;
+mod uniffi_custom_impls;
+mod uniffi_lib_types;
 
 use std::{env, path::PathBuf, sync::Arc, time::Duration};
 
@@ -59,22 +61,18 @@ use account::AccountControllerHandle;
 use lazy_static::lazy_static;
 use tokio::{runtime::Runtime, sync::Mutex};
 
-use state_machine::StateMachineHandle;
-
 use self::error::VpnError;
+use crate::gateway_directory::GatewayClient;
 #[cfg(target_os = "android")]
 use crate::tunnel_provider::android::AndroidTunProvider;
 #[cfg(target_os = "ios")]
 use crate::tunnel_provider::ios::OSTunProvider;
-use crate::{
-    gateway_directory::GatewayClient,
-    tunnel_state_machine::{BandwidthEvent, ConnectionEvent, TunnelEvent, TunnelState},
-    uniffi_custom_impls::{
-        AccountLinks, AccountStateSummary, BandwidthStatus, ConnectionStatus, EntryPoint,
-        ExitPoint, GatewayMinPerformance, GatewayType, Location, NetworkEnvironment, SystemMessage,
-        TunStatus, UserAgent,
-    },
+use state_machine::StateMachineHandle;
+use uniffi_custom_impls::{
+    AccountLinks, AccountStateSummary, EntryPoint, ExitPoint, GatewayMinPerformance, GatewayType,
+    Location, NetworkEnvironment, SystemMessage, UserAgent,
 };
+use uniffi_lib_types::TunnelEvent;
 
 lazy_static! {
     static ref RUNTIME: Runtime = Runtime::new().unwrap();
@@ -370,41 +368,4 @@ pub struct VPNConfig {
 #[uniffi::export(with_foreign)]
 pub trait TunnelStatusListener: Send + Sync {
     fn on_event(&self, event: TunnelEvent);
-}
-
-impl From<&TunnelState> for TunStatus {
-    fn from(value: &TunnelState) -> Self {
-        // TODO: this cannot be accurate so we must switch frontends to use TunnelState instead! But for now that will do.
-        match value {
-            TunnelState::Connecting { .. } => Self::EstablishingConnection,
-            TunnelState::Connected { .. } => Self::Up,
-            TunnelState::Disconnecting { .. } => Self::Disconnecting,
-            TunnelState::Disconnected => Self::Down,
-            TunnelState::Error(_) => Self::Down,
-            TunnelState::Offline { .. } => Self::Down,
-        }
-    }
-}
-
-impl From<BandwidthEvent> for BandwidthStatus {
-    fn from(value: BandwidthEvent) -> Self {
-        match value {
-            BandwidthEvent::NoBandwidth => Self::NoBandwidth,
-            BandwidthEvent::RemainingBandwidth(bandwidth) => Self::RemainingBandwidth { bandwidth },
-        }
-    }
-}
-
-impl From<ConnectionEvent> for ConnectionStatus {
-    fn from(value: ConnectionEvent) -> Self {
-        match value {
-            ConnectionEvent::ConnectedIpv4 => Self::ConnectedIpv4,
-            ConnectionEvent::ConnectedIpv6 => Self::ConnectedIpv6,
-            ConnectionEvent::EntryGatewayDown => Self::EntryGatewayDown,
-            ConnectionEvent::ExitGatewayDownIpv4 => Self::ExitGatewayDownIpv4,
-            ConnectionEvent::ExitGatewayDownIpv6 => Self::ExitGatewayDownIpv6,
-            ConnectionEvent::ExitGatewayRoutingErrorIpv4 => Self::ExitGatewayRoutingErrorIpv4,
-            ConnectionEvent::ExitGatewayRoutingErrorIpv6 => Self::ExitGatewayRoutingErrorIpv6,
-        }
-    }
 }
