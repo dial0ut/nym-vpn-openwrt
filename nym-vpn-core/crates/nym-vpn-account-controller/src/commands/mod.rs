@@ -8,11 +8,10 @@ pub(crate) mod sync_device;
 
 use nym_vpn_store::mnemonic::Mnemonic;
 pub use register_device::RegisterDeviceError;
-pub use request_zknym::{
-    RequestZkNymError, RequestZkNymErrorSummary, RequestZkNymSuccess, RequestZkNymSuccessSummary,
-};
+use request_zknym::RequestZkNymSummary;
+pub use request_zknym::{RequestZkNymError, RequestZkNymSuccess};
 
-use std::{collections::HashMap, fmt, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use nym_vpn_api_client::response::{NymVpnAccountSummaryResponse, NymVpnDevice, NymVpnUsage};
 use serde::{Deserialize, Serialize};
@@ -70,6 +69,9 @@ pub enum AccountCommandError {
         failed: Vec<RequestZkNymError>,
     },
 
+    #[error("failed to request zk nym")]
+    RequestZkNymGeneral(RequestZkNymError),
+
     #[error("no account stored")]
     NoAccountStored,
 
@@ -117,12 +119,9 @@ impl From<RegisterDeviceError> for AccountCommandError {
     }
 }
 
-impl From<RequestZkNymErrorSummary> for AccountCommandError {
-    fn from(summary: RequestZkNymErrorSummary) -> Self {
-        AccountCommandError::RequestZkNym {
-            successes: summary.successes,
-            failed: summary.failed,
-        }
+impl From<RequestZkNymError> for AccountCommandError {
+    fn from(err: RequestZkNymError) -> Self {
+        AccountCommandError::RequestZkNymGeneral(err)
     }
 }
 
@@ -136,20 +135,31 @@ impl AccountCommandError {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(thiserror::Error, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[error("nym-vpn-api error: message={message}, message_id={message_id:?}, code_reference_id={code_reference_id:?}")]
 pub struct VpnApiEndpointFailure {
     pub message: String,
     pub message_id: Option<String>,
     pub code_reference_id: Option<String>,
 }
 
-impl fmt::Display for VpnApiEndpointFailure {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "message={}, message_id={:?}, code_reference_id={:?}",
-            self.message, self.message_id, self.code_reference_id
-        )
+impl From<nym_vpn_api_client::response::NymErrorResponse> for VpnApiEndpointFailure {
+    fn from(response: nym_vpn_api_client::response::NymErrorResponse) -> Self {
+        Self {
+            message: response.message,
+            message_id: response.message_id,
+            code_reference_id: response.code_reference_id,
+        }
+    }
+}
+
+impl TryFrom<nym_vpn_api_client::VpnApiClientError> for VpnApiEndpointFailure {
+    type Error = nym_vpn_api_client::VpnApiClientError;
+
+    fn try_from(response: nym_vpn_api_client::VpnApiClientError) -> Result<Self, Self::Error> {
+        nym_vpn_api_client::response::extract_error_response(&response)
+            .map(VpnApiEndpointFailure::from)
+            .ok_or(response)
     }
 }
 
@@ -191,7 +201,7 @@ pub enum AccountCommand {
     RegisterDevice(Option<ReturnSender<NymVpnDevice>>),
     GetDevices(ReturnSender<Vec<NymVpnDevice>>),
     GetActiveDevices(ReturnSender<Vec<NymVpnDevice>>),
-    RequestZkNym(Option<ReturnSender<RequestZkNymSuccessSummary>>),
+    RequestZkNym(Option<ReturnSender<RequestZkNymSummary>>),
     GetDeviceZkNym,
     GetZkNymsAvailableForDownload,
     GetZkNymById(String),
@@ -224,13 +234,14 @@ impl AccountCommand {
     }
 }
 
+// WIP: Fix this clippy
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub(crate) enum AccountCommandResult {
     SyncAccountState(Result<NymVpnAccountSummaryResponse, AccountCommandError>),
     SyncDeviceState(Result<DeviceState, AccountCommandError>),
     RegisterDevice(Result<NymVpnDevice, AccountCommandError>),
-    RequestZkNym(Result<RequestZkNymSuccessSummary, AccountCommandError>),
+    RequestZkNym(Result<RequestZkNymSummary, AccountCommandError>),
 }
 
 #[cfg(test)]

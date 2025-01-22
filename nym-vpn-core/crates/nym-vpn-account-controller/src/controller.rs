@@ -229,8 +229,8 @@ where
         }
     }
 
-    async fn register_device_if_ready(&self) -> Result<(), Error> {
-        match self.shared_state().is_ready_to_register_device().await {
+    async fn register_device_if_ready(&self) {
+        match self.shared_state().ready_to_register_device().await {
             ReadyToRegisterDevice::Ready => {
                 self.queue_command(AccountCommand::RegisterDevice(None));
             }
@@ -238,7 +238,6 @@ where
                 tracing::debug!("Not trying to register device: {not_ready}");
             }
         }
-        Ok(())
     }
 
     async fn is_background_zk_nym_refresh_active(&self) -> bool {
@@ -249,20 +248,18 @@ where
                 .await
     }
 
-    async fn request_zk_nym_if_ready(&self) -> Result<(), Error> {
+    async fn request_zk_nym_if_ready(&self) {
         if !self.is_background_zk_nym_refresh_active().await {
-            return Ok(());
+            return;
         }
-        match self.shared_state().is_ready_to_request_zk_nym().await {
+        match self.shared_state().ready_to_request_zk_nym().await {
             ReadyToRequestZkNym::Ready => {
                 self.queue_command(AccountCommand::RequestZkNym(None));
             }
             not_ready => {
-                // TODO: turn down to trace
-                tracing::info!("Not trying to request zk-nym: {not_ready}");
+                tracing::debug!("Not trying to request zk-nym: {not_ready}");
             }
         }
-        Ok(())
     }
 
     async fn handle_store_account(&self, mnemonic: Mnemonic) -> Result<(), AccountCommandError> {
@@ -277,6 +274,7 @@ where
 
         // We don't need to wait for the sync to finish, so queue it up and return
         self.queue_command(AccountCommand::SyncAccountState(None));
+        self.queue_command(AccountCommand::SyncDeviceState(None));
 
         Ok(())
     }
@@ -352,8 +350,8 @@ where
     }
 
     async fn unregister_device_from_api(&self) -> Result<NymVpnDevice, AccountCommandError> {
-        if self.shared_state().is_ready_to_register_device().await
-            == ReadyToRegisterDevice::InProgress
+        tracing::info!("Unregistering device from API");
+        if self.shared_state().ready_to_register_device().await == ReadyToRegisterDevice::InProgress
         {
             return Err(AccountCommandError::RegistrationInProgress);
         }
@@ -723,6 +721,8 @@ where
     }
 
     async fn handle_command_result(&self, result: Result<AccountCommandResult, JoinError>) {
+        // WIP: this can be a problem. We need to remove the commands from the running_commands for
+        // this error case
         let Ok(result) = result else {
             tracing::error!("Joining task failed: {:#?}", result);
             return;
@@ -741,8 +741,8 @@ where
                     }
                 }
                 if r.is_ok() {
-                    self.register_device_if_ready().await.ok();
-                    self.request_zk_nym_if_ready().await.ok();
+                    self.register_device_if_ready().await;
+                    self.request_zk_nym_if_ready().await;
                 }
             }
             AccountCommandResult::SyncDeviceState(r) => {
@@ -757,8 +757,8 @@ where
                     }
                 }
                 if r.is_ok() {
-                    self.register_device_if_ready().await.ok();
-                    self.request_zk_nym_if_ready().await.ok();
+                    self.register_device_if_ready().await;
+                    self.request_zk_nym_if_ready().await;
                 }
             }
             AccountCommandResult::RegisterDevice(r) => {
@@ -774,7 +774,7 @@ where
                 }
                 if r.is_ok() {
                     self.queue_command(AccountCommand::SyncAccountState(None));
-                    self.request_zk_nym_if_ready().await.ok();
+                    self.request_zk_nym_if_ready().await;
                 }
             }
             AccountCommandResult::RequestZkNym(r) => {
@@ -831,6 +831,7 @@ where
     }
 
     pub async fn run(mut self) {
+        tracing::info!("Account controller initialized successfully");
         self.print_info().await;
 
         // Timer to check if any command tasks have finished. This just needs to be something small
@@ -862,9 +863,7 @@ where
                 }
                 // On a timer to check if we need to request more zk-nyms
                 _ = update_zk_nym_timer.tick() => {
-                    if self.is_background_zk_nym_refresh_active().await {
-                        self.queue_command(AccountCommand::RequestZkNym(None));
-                    }
+                    self.request_zk_nym_if_ready().await;
                 }
                 _ = self.cancel_token.cancelled() => {
                     tracing::trace!("Received cancellation signal");

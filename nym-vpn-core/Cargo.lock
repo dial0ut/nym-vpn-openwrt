@@ -4673,6 +4673,7 @@ dependencies = [
 name = "nym-vpn-account-controller"
 version = "1.2.0-dev"
 dependencies = [
+ "bincode",
  "futures",
  "nym-client-core",
  "nym-compact-ecash",
@@ -4693,6 +4694,7 @@ dependencies = [
  "serde",
  "serde_json",
  "si-scale",
+ "sqlx",
  "strum",
  "strum_macros",
  "thiserror 2.0.11",
@@ -4702,6 +4704,7 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]

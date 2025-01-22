@@ -13,10 +13,7 @@ use tokio::sync::MutexGuard;
 
 use crate::commands::{
     register_device::RegisterDeviceError,
-    request_zknym::{
-        RequestZkNymError, RequestZkNymErrorSummary, RequestZkNymSuccess,
-        RequestZkNymSuccessSummary,
-    },
+    request_zknym::{RequestZkNymError, RequestZkNymSuccess},
 };
 
 #[derive(Clone)]
@@ -182,6 +179,15 @@ impl SharedAccountState {
         guard.request_zk_nym_result = Some(request);
     }
 
+    pub(crate) async fn is_zk_nym_request_in_progress(&self) -> bool {
+        self.lock()
+            .await
+            .request_zk_nym_result
+            .as_ref()
+            .map(|r| matches!(r, RequestZkNymResult::InProgress))
+            .unwrap_or(false)
+    }
+
     pub async fn is_account_stored(&self) -> bool {
         self.lock()
             .await
@@ -195,16 +201,16 @@ impl SharedAccountState {
         self.lock().await.mnemonic.clone().and_then(|m| m.id())
     }
 
-    pub(crate) async fn is_ready_to_register_device(&self) -> ReadyToRegisterDevice {
-        self.lock().await.is_ready_to_register_device()
+    pub(crate) async fn ready_to_register_device(&self) -> ReadyToRegisterDevice {
+        self.lock().await.ready_to_register_device()
     }
 
-    pub(crate) async fn is_ready_to_request_zk_nym(&self) -> ReadyToRequestZkNym {
-        self.lock().await.is_ready_to_request_zk_nym()
+    pub(crate) async fn ready_to_request_zk_nym(&self) -> ReadyToRequestZkNym {
+        self.lock().await.ready_to_request_zk_nym()
     }
 
-    pub async fn is_ready_to_connect(&self, credential_mode: bool) -> ReadyToConnect {
-        self.lock().await.is_ready_to_connect(credential_mode)
+    pub async fn is_ready_to_connect(&self) -> ReadyToConnect {
+        self.lock().await.is_ready_to_connect()
     }
 }
 
@@ -338,43 +344,38 @@ pub enum RequestZkNymResult {
     // The zk-nym request is in progress
     InProgress,
 
-    // The last zk-nym request was successful
-    Success {
-        successes: Vec<RequestZkNymSuccess>,
-    },
-
-    // The last zk-nym request failed
-    Failed {
+    // The the last zk-nym request finished
+    Done {
         successes: Vec<RequestZkNymSuccess>,
         failures: Vec<RequestZkNymError>,
     },
+
+    // The last zk-nym request failed before any requests were made
+    Error(RequestZkNymError),
 }
 
-impl From<RequestZkNymSuccessSummary> for RequestZkNymResult {
-    fn from(success: RequestZkNymSuccessSummary) -> Self {
-        RequestZkNymResult::Success {
-            successes: success.successful_zknym_requests().cloned().collect(),
+impl From<Vec<Result<RequestZkNymSuccess, RequestZkNymError>>> for RequestZkNymResult {
+    fn from(results: Vec<Result<RequestZkNymSuccess, RequestZkNymError>>) -> Self {
+        let (successes, failures): (Vec<_>, Vec<_>) = results.into_iter().partition(Result::is_ok);
+
+        let successes = successes.into_iter().map(Result::unwrap).collect();
+        let failures = failures.into_iter().map(Result::unwrap_err).collect();
+
+        RequestZkNymResult::Done {
+            successes,
+            failures,
         }
     }
 }
 
-impl From<RequestZkNymErrorSummary> for RequestZkNymResult {
-    fn from(summary: RequestZkNymErrorSummary) -> Self {
-        if summary.failed.is_empty() {
-            RequestZkNymResult::Success {
-                successes: summary.successes,
-            }
-        } else {
-            RequestZkNymResult::Failed {
-                successes: summary.successes,
-                failures: summary.failed,
-            }
-        }
+impl From<RequestZkNymError> for RequestZkNymResult {
+    fn from(err: RequestZkNymError) -> Self {
+        RequestZkNymResult::Error(err)
     }
 }
 
 impl AccountStateSummary {
-    pub(crate) fn is_ready_to_register_device(&self) -> ReadyToRegisterDevice {
+    pub(crate) fn ready_to_register_device(&self) -> ReadyToRegisterDevice {
         match self.device {
             Some(DeviceState::NotRegistered) => {}
             Some(DeviceState::Inactive) => {}
@@ -428,11 +429,11 @@ impl AccountStateSummary {
         ReadyToRegisterDevice::Ready
     }
 
-    pub(crate) fn is_ready_to_request_zk_nym(&self) -> ReadyToRequestZkNym {
+    pub(crate) fn ready_to_request_zk_nym(&self) -> ReadyToRequestZkNym {
         match self.request_zk_nym_result {
             Some(RequestZkNymResult::InProgress) => return ReadyToRequestZkNym::InProgress,
-            Some(RequestZkNymResult::Success { .. }) => {}
-            Some(RequestZkNymResult::Failed { .. }) => {}
+            Some(RequestZkNymResult::Done { .. }) => {}
+            Some(RequestZkNymResult::Error(_)) => {}
             None => {}
         }
 
@@ -477,7 +478,7 @@ impl AccountStateSummary {
     }
 
     // If we are ready right right now.
-    pub(crate) fn is_ready_to_connect(&self, credential_mode: bool) -> ReadyToConnect {
+    pub(crate) fn is_ready_to_connect(&self) -> ReadyToConnect {
         match self.mnemonic {
             Some(MnemonicState::NotStored) => return ReadyToConnect::NoMnemonicStored,
             Some(MnemonicState::Stored { .. }) => {}
@@ -511,12 +512,6 @@ impl AccountStateSummary {
             Some(DeviceState::Inactive) => return ReadyToConnect::DeviceNotActive,
             Some(DeviceState::DeleteMe) => return ReadyToConnect::DeviceNotActive,
             None => return ReadyToConnect::DeviceNotRegistered,
-        }
-
-        if credential_mode {
-            //if !local_credentials_available {
-            //    return ReadyToConnect::NoCredentialsAvailable
-            //}
         }
 
         ReadyToConnect::Ready
