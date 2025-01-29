@@ -15,17 +15,16 @@ use nym_vpn_lib_types::TunnelEvent;
 use nym_vpn_proto::{
     conversions::ConversionError, nym_vpnd_server::NymVpnd, AccountError,
     ConfirmZkNymDownloadedRequest, ConfirmZkNymDownloadedResponse, ConnectRequest, ConnectResponse,
-    ConnectionStateChange, ConnectionStatusUpdate, DisconnectResponse, ForgetAccountResponse,
-    GetAccountIdentityResponse, GetAccountLinksRequest, GetAccountLinksResponse,
-    GetAccountStateResponse, GetAccountUsageResponse, GetActiveDevicesResponse,
-    GetAvailableTicketsResponse, GetDeviceIdentityResponse, GetDeviceZkNymsResponse,
-    GetDevicesResponse, GetFeatureFlagsResponse, GetSystemMessagesResponse, GetZkNymByIdRequest,
-    GetZkNymByIdResponse, GetZkNymsAvailableForDownloadResponse, InfoResponse,
-    IsAccountStoredResponse, IsReadyToConnectResponse, ListCountriesRequest, ListCountriesResponse,
-    ListGatewaysRequest, ListGatewaysResponse, RefreshAccountStateResponse, RegisterDeviceResponse,
+    DisconnectResponse, ForgetAccountResponse, GetAccountIdentityResponse, GetAccountLinksRequest,
+    GetAccountLinksResponse, GetAccountStateResponse, GetAccountUsageResponse,
+    GetActiveDevicesResponse, GetAvailableTicketsResponse, GetDeviceIdentityResponse,
+    GetDeviceZkNymsResponse, GetDevicesResponse, GetFeatureFlagsResponse,
+    GetSystemMessagesResponse, GetZkNymByIdRequest, GetZkNymByIdResponse,
+    GetZkNymsAvailableForDownloadResponse, InfoResponse, IsAccountStoredResponse,
+    IsReadyToConnectResponse, ListCountriesRequest, ListCountriesResponse, ListGatewaysRequest,
+    ListGatewaysResponse, RefreshAccountStateResponse, RegisterDeviceResponse,
     RequestZkNymResponse, ResetDeviceIdentityRequest, ResetDeviceIdentityResponse,
-    SetNetworkRequest, SetNetworkResponse, StatusResponse, StoreAccountRequest,
-    StoreAccountResponse, TunnelState,
+    SetNetworkRequest, SetNetworkResponse, StoreAccountRequest, StoreAccountResponse, TunnelState,
 };
 use zeroize::Zeroizing;
 
@@ -36,7 +35,7 @@ use super::{
 };
 use crate::{
     command_interface::protobuf::info_response::into_proto_available_tickets,
-    service::{ConnectOptions, VpnServiceCommand, VpnServiceStateChange},
+    service::{ConnectOptions, VpnServiceCommand},
 };
 
 enum ListenerType {
@@ -45,9 +44,6 @@ enum ListenerType {
 }
 
 pub(super) struct CommandInterface {
-    // Listen to state changes from the VPN service
-    vpn_state_changes_rx: broadcast::Receiver<VpnServiceStateChange>,
-
     // Send commands to the VPN service
     vpn_command_tx: UnboundedSender<VpnServiceCommand>,
 
@@ -59,13 +55,11 @@ pub(super) struct CommandInterface {
 
 impl CommandInterface {
     pub(super) fn new_with_path(
-        vpn_state_changes_rx: broadcast::Receiver<VpnServiceStateChange>,
         vpn_command_tx: UnboundedSender<VpnServiceCommand>,
         tunnel_event_rx: broadcast::Receiver<TunnelEvent>,
         socket_path: &Path,
     ) -> Self {
         Self {
-            vpn_state_changes_rx,
             vpn_command_tx,
             tunnel_event_rx,
             listener: ListenerType::Path(socket_path.to_path_buf()),
@@ -73,13 +67,11 @@ impl CommandInterface {
     }
 
     pub(super) fn new_with_uri(
-        vpn_state_changes_rx: broadcast::Receiver<VpnServiceStateChange>,
         vpn_command_tx: UnboundedSender<VpnServiceCommand>,
         tunnel_event_rx: broadcast::Receiver<TunnelEvent>,
         uri: SocketAddr,
     ) -> Self {
         Self {
-            vpn_state_changes_rx,
             vpn_command_tx,
             tunnel_event_rx,
             listener: ListenerType::Uri(uri),
@@ -239,96 +231,53 @@ impl NymVpnd for CommandInterface {
         Ok(tonic::Response::new(response))
     }
 
-    async fn vpn_status(
+    async fn get_tunnel_state(
         &self,
         _request: tonic::Request<()>,
-    ) -> Result<tonic::Response<StatusResponse>, tonic::Status> {
-        let status = CommandInterfaceConnectionHandler::new(self.vpn_command_tx.clone())
+    ) -> Result<tonic::Response<TunnelState>, tonic::Status> {
+        let tunnel_state = CommandInterfaceConnectionHandler::new(self.vpn_command_tx.clone())
             .handle_status()
-            .await?;
+            .await
+            .map(TunnelState::from)?;
 
-        let response = StatusResponse::from(status);
-        tracing::debug!("Returning status response: {:?}", response);
-        Ok(tonic::Response::new(response))
+        tracing::debug!("Returning tunnel state: {:?}", tunnel_state);
+        Ok(tonic::Response::new(tunnel_state))
     }
 
-    type ListenToConnectionStatusStream =
-        BoxStream<'static, Result<ConnectionStatusUpdate, tonic::Status>>;
-
-    async fn listen_to_connection_status(
+    type ListenToTunnelStateStream = BoxStream<'static, Result<TunnelState, tonic::Status>>;
+    async fn listen_to_tunnel_state(
         &self,
         request: tonic::Request<()>,
-    ) -> Result<tonic::Response<Self::ListenToConnectionStatusStream>, tonic::Status> {
+    ) -> Result<tonic::Response<Self::ListenToTunnelStateStream>, tonic::Status> {
         tracing::debug!("Got connection status stream request: {request:?}");
-        let rx = self.tunnel_event_rx.resubscribe();
-        let stream = tokio_stream::wrappers::BroadcastStream::new(rx)
-            .filter_map(|event| {
-                async move {
-                    event
-                        .map(|event| {
-                            if let TunnelEvent::MixnetState(mixnet_event) = event {
-                                Some(crate::command_interface::protobuf::status_update::status_update_from_event(mixnet_event))
-                            } else {
-                                None
-                            }
-                        })
-                        .map_err(|err| {
-                            tracing::error!("Failed to receive connection status update: {:?}", err);
-                            tonic::Status::internal("Failed to receive connection status update")
-                        })
-                        .transpose()
-            }
-        });
+
+        let rx = CommandInterfaceConnectionHandler::new(self.vpn_command_tx.clone())
+            .handle_subscribe_to_tunnel_state()
+            .await?;
+        let stream = tokio_stream::wrappers::WatchStream::new(rx)
+            .map(|new_state| Ok(TunnelState::from(new_state)));
         Ok(tonic::Response::new(
-            Box::pin(stream) as Self::ListenToConnectionStatusStream
+            Box::pin(stream) as Self::ListenToTunnelStateStream
         ))
     }
 
-    type ListenToConnectionStateChangesStream =
-        BoxStream<'static, Result<ConnectionStateChange, tonic::Status>>;
-
-    async fn listen_to_connection_state_changes(
+    type ListenToEventsStream =
+        BoxStream<'static, Result<nym_vpn_proto::TunnelEvent, tonic::Status>>;
+    async fn listen_to_events(
         &self,
         request: tonic::Request<()>,
-    ) -> Result<tonic::Response<Self::ListenToConnectionStateChangesStream>, tonic::Status> {
-        tracing::debug!("Got connection status stream request: {request:?}");
-        let rx = self.vpn_state_changes_rx.resubscribe();
-        let stream = tokio_stream::wrappers::BroadcastStream::new(rx).map(|status| {
-            status.map(ConnectionStateChange::from).map_err(|err| {
-                tracing::error!("Failed to receive connection state change: {:?}", err);
-                tonic::Status::internal("Failed to receive connection state change")
+    ) -> Result<tonic::Response<Self::ListenToEventsStream>, tonic::Status> {
+        tracing::debug!("Got daemon events stream request: {request:?}");
+
+        let rx = self.tunnel_event_rx.resubscribe();
+        let stream = tokio_stream::wrappers::BroadcastStream::new(rx).map(|event| {
+            event.map(nym_vpn_proto::TunnelEvent::from).map_err(|err| {
+                tracing::error!("Failed to receive tunnel event: {:?}", err);
+                tonic::Status::internal("Failed to receive tunnel event")
             })
         });
         Ok(tonic::Response::new(
-            Box::pin(stream) as Self::ListenToConnectionStateChangesStream
-        ))
-    }
-
-    type ListenToTunnelStateChangesStream = BoxStream<'static, Result<TunnelState, tonic::Status>>;
-    async fn listen_to_tunnel_state_changes(
-        &self,
-        request: tonic::Request<()>,
-    ) -> Result<tonic::Response<Self::ListenToTunnelStateChangesStream>, tonic::Status> {
-        tracing::debug!("Got connection status stream request: {request:?}");
-        let rx = self.tunnel_event_rx.resubscribe();
-        let stream =
-            tokio_stream::wrappers::BroadcastStream::new(rx).filter_map(|event| async move {
-                event
-                    .map(|event| {
-                        if let TunnelEvent::NewState(tunnel_state) = event {
-                            Some(TunnelState::from(tunnel_state))
-                        } else {
-                            None
-                        }
-                    })
-                    .map_err(|err| {
-                        tracing::error!("Failed to receive tunnel state update: {:?}", err);
-                        tonic::Status::internal("Failed to receive tunnel state update")
-                    })
-                    .transpose()
-            });
-        Ok(tonic::Response::new(
-            Box::pin(stream) as Self::ListenToTunnelStateChangesStream
+            Box::pin(stream) as Self::ListenToEventsStream
         ))
     }
 

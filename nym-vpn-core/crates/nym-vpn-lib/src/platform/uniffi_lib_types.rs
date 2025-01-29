@@ -5,18 +5,17 @@
 
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 
-use nym_gateway_directory::{NodeIdentity, Recipient};
 use nym_vpn_lib_types::{
     ActionAfterDisconnect as CoreActionAfterDisconnect, BandwidthEvent as CoreBandwidthEvent,
     ConnectionData as CoreConnectionData, ConnectionEvent as CoreConnectionEvent,
     ConnectionStatisticsEvent as CoreConnectionStatisticsEvent,
-    ErrorStateReason as CoreErrorStateReason, MixnetConnectionData as CoreMixnetConnectionData,
-    MixnetEvent as CoreMixnetEvent, SphinxPacketRates as CoreSphinxPacketRates,
+    ErrorStateReason as CoreErrorStateReason, Gateway as CoreGateway,
+    MixnetConnectionData as CoreMixnetConnectionData, MixnetEvent as CoreMixnetEvent,
+    NymAddress as CoreNymAddress, SphinxPacketRates as CoreSphinxPacketRates,
     TunnelConnectionData as CoreTunnelConnectionData, TunnelEvent as CoreTunnelEvent,
     TunnelState as CoreTunnelState, WireguardConnectionData as CoreWireguardConnectionData,
     WireguardNode as CoreWireguardNode,
 };
-use nym_wg_go::PublicKey;
 use time::OffsetDateTime;
 
 #[derive(uniffi::Enum)]
@@ -248,9 +247,34 @@ impl From<CoreErrorStateReason> for ErrorStateReason {
 }
 
 #[derive(uniffi::Record)]
+pub struct Gateway {
+    /// Gateway id in base58.
+    pub id: String,
+}
+
+impl From<CoreGateway> for Gateway {
+    fn from(value: CoreGateway) -> Self {
+        Self { id: value.id }
+    }
+}
+
+#[derive(uniffi::Record)]
+pub struct NymAddress {
+    pub nym_address: String,
+}
+
+impl From<CoreNymAddress> for NymAddress {
+    fn from(value: CoreNymAddress) -> Self {
+        Self {
+            nym_address: value.nym_address,
+        }
+    }
+}
+
+#[derive(uniffi::Record)]
 pub struct ConnectionData {
-    pub entry_gateway: Box<NodeIdentity>,
-    pub exit_gateway: Box<NodeIdentity>,
+    pub entry_gateway: Gateway,
+    pub exit_gateway: Gateway,
     pub connected_at: Option<OffsetDateTime>,
     pub tunnel: TunnelConnectionData,
 }
@@ -258,8 +282,8 @@ pub struct ConnectionData {
 impl From<CoreConnectionData> for ConnectionData {
     fn from(value: CoreConnectionData) -> Self {
         Self {
-            entry_gateway: value.entry_gateway,
-            exit_gateway: value.exit_gateway,
+            entry_gateway: Gateway::from(value.entry_gateway),
+            exit_gateway: Gateway::from(value.exit_gateway),
             connected_at: value.connected_at,
             tunnel: TunnelConnectionData::from(value.tunnel),
         }
@@ -282,8 +306,8 @@ impl From<CoreTunnelConnectionData> for TunnelConnectionData {
 impl From<CoreMixnetConnectionData> for MixnetConnectionData {
     fn from(value: CoreMixnetConnectionData) -> Self {
         Self {
-            nym_address: value.nym_address,
-            exit_ipr: value.exit_ipr,
+            nym_address: NymAddress::from(value.nym_address),
+            exit_ipr: NymAddress::from(value.exit_ipr),
             ipv4: value.ipv4,
             ipv6: value.ipv6,
         }
@@ -307,8 +331,8 @@ pub enum TunnelConnectionData {
 
 #[derive(uniffi::Record)]
 pub struct MixnetConnectionData {
-    pub nym_address: Box<Recipient>,
-    pub exit_ipr: Box<Recipient>,
+    pub nym_address: NymAddress,
+    pub exit_ipr: NymAddress,
     pub ipv4: Ipv4Addr,
     pub ipv6: Ipv6Addr,
 }
@@ -322,7 +346,7 @@ pub struct WireguardConnectionData {
 #[derive(uniffi::Record)]
 pub struct WireguardNode {
     pub endpoint: SocketAddr,
-    pub public_key: Box<PublicKey>,
+    pub public_key: String,
     pub private_ipv4: Ipv4Addr,
     pub private_ipv6: Ipv6Addr,
 }

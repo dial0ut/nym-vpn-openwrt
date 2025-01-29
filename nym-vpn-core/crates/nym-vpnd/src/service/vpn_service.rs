@@ -1,12 +1,7 @@
 // Copyright 2024 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{
-    fmt,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    path::PathBuf,
-    sync::Arc,
-};
+use std::{net::IpAddr, path::PathBuf, sync::Arc};
 
 use bip39::Mnemonic;
 use futures::FutureExt;
@@ -16,7 +11,7 @@ use nym_vpn_network_config::{
 use serde::{Deserialize, Serialize};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use tokio::{
-    sync::{broadcast, mpsc, oneshot},
+    sync::{broadcast, mpsc, oneshot, watch},
     task::JoinHandle,
 };
 use tokio_util::sync::CancellationToken;
@@ -35,61 +30,18 @@ use nym_vpn_lib::{
         DnsOptions, GatewayPerformanceOptions, MixnetTunnelOptions, NymConfig, TunnelCommand,
         TunnelSettings, TunnelStateMachine, WireguardMultihopMode, WireguardTunnelOptions,
     },
-    MixnetClientConfig, NodeIdentity, Recipient, UserAgent,
+    MixnetClientConfig, Recipient, UserAgent,
 };
-use nym_vpn_lib_types::{
-    ConnectionData, TunnelConnectionData, TunnelEvent, TunnelState, TunnelType,
-};
+use nym_vpn_lib_types::{TunnelEvent, TunnelState, TunnelType};
 use zeroize::Zeroizing;
 
 use crate::{config::GlobalConfigFile, service::AccountNotReady};
 
 use super::{
     config::{ConfigSetupError, NetworkEnvironments, NymVpnServiceConfig, DEFAULT_CONFIG_FILE},
-    error::{AccountError, ConnectionFailedError, Error, Result, SetNetworkError},
+    error::{AccountError, Error, Result, SetNetworkError},
     VpnServiceConnectError, VpnServiceDisconnectError,
 };
-
-#[derive(Debug, Clone)]
-pub struct MixConnectedStateDetails {
-    pub nym_address: Recipient,
-    pub exit_ipr: Recipient,
-    pub ipv4: Ipv4Addr,
-    pub ipv6: Ipv6Addr,
-}
-
-#[derive(Debug, Clone)]
-pub struct WgConnectedStateDetails {
-    pub entry_ipv4: Ipv4Addr,
-    pub exit_ipv4: Ipv4Addr,
-}
-
-#[derive(Debug, Clone)]
-pub enum ConnectedStateDetails {
-    Mix(Box<MixConnectedStateDetails>),
-    Wg(WgConnectedStateDetails),
-}
-
-impl fmt::Display for ConnectedStateDetails {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Mix(details) => {
-                write!(
-                    f,
-                    "nym_address: {}, exit_ipr: {}, ipv4: {}, ipv6: {}",
-                    details.nym_address, details.exit_ipr, details.ipv4, details.ipv6
-                )
-            }
-            Self::Wg(details) => {
-                write!(
-                    f,
-                    "entry_ipv4: {}, exit_ipv4: {}",
-                    details.entry_ipv4, details.exit_ipv4
-                )
-            }
-        }
-    }
-}
 
 // Seed used to generate device identity keys
 type Seed = [u8; 32];
@@ -108,7 +60,8 @@ pub enum VpnServiceCommand {
         ConnectArgs,
     ),
     Disconnect(oneshot::Sender<Result<(), VpnServiceDisconnectError>>, ()),
-    Status(oneshot::Sender<VpnServiceStatus>, ()),
+    GetTunnelState(oneshot::Sender<TunnelState>, ()),
+    SubscribeToTunnelState(oneshot::Sender<watch::Receiver<TunnelState>>, ()),
     StoreAccount(oneshot::Sender<Result<(), AccountError>>, Zeroizing<String>),
     IsAccountStored(oneshot::Sender<Result<bool, AccountError>>, ()),
     ForgetAccount(oneshot::Sender<Result<(), AccountError>>, ()),
@@ -162,163 +115,15 @@ pub(crate) struct ConnectOptions {
     pub(crate) user_agent: Option<UserAgent>,
 }
 
-// Respond with the current state of the VPN service. This is currently almost the same as VpnState,
-// but it's conceptually not the same thing, so we keep them separate.
-#[derive(Clone, Debug)]
-pub enum VpnServiceStatus {
-    NotConnected,
-    Connecting,
-    Connected(Box<ConnectedResultDetails>),
-    Disconnecting,
-    ConnectionFailed(ConnectionFailedError),
-}
-
-impl From<ConnectionData> for ConnectedResultDetails {
-    fn from(value: ConnectionData) -> Self {
-        ConnectedResultDetails {
-            entry_gateway: *value.entry_gateway,
-            exit_gateway: *value.exit_gateway,
-            specific_details: ConnectedStateDetails::from(value.tunnel),
-            // FIXME: this cannot be mapped correctly
-            since: value.connected_at.unwrap_or(OffsetDateTime::now_utc()),
-        }
-    }
-}
-
-impl From<TunnelConnectionData> for ConnectedStateDetails {
-    fn from(value: TunnelConnectionData) -> Self {
-        match value {
-            TunnelConnectionData::Mixnet(data) => {
-                ConnectedStateDetails::Mix(Box::new(MixConnectedStateDetails {
-                    nym_address: *data.nym_address,
-                    exit_ipr: *data.exit_ipr,
-                    ipv4: data.ipv4,
-                    ipv6: data.ipv6,
-                }))
-            }
-            TunnelConnectionData::Wireguard(data) => {
-                // FIXME: we must accept ipv6 too in the future!
-                ConnectedStateDetails::Wg(WgConnectedStateDetails {
-                    entry_ipv4: match data.entry.endpoint.ip() {
-                        IpAddr::V4(addr) => addr,
-                        IpAddr::V6(_) => Ipv4Addr::LOCALHOST,
-                    },
-                    exit_ipv4: match data.exit.endpoint.ip() {
-                        IpAddr::V4(addr) => addr,
-                        IpAddr::V6(_) => Ipv4Addr::LOCALHOST,
-                    },
-                })
-            }
-        }
-    }
-}
-
-impl From<TunnelState> for VpnServiceStatus {
-    fn from(value: TunnelState) -> Self {
-        match value {
-            TunnelState::Connected { connection_data } => {
-                Self::Connected(Box::new(ConnectedResultDetails {
-                    entry_gateway: *connection_data.entry_gateway,
-                    exit_gateway: *connection_data.exit_gateway,
-                    specific_details: ConnectedStateDetails::from(connection_data.tunnel),
-                    // FIXME: impossible to map this correctly
-                    since: connection_data
-                        .connected_at
-                        .unwrap_or(OffsetDateTime::now_utc()),
-                }))
-            }
-            TunnelState::Connecting { .. } => Self::Connecting,
-            TunnelState::Disconnected | TunnelState::Offline { .. } => Self::NotConnected,
-            TunnelState::Disconnecting { .. } => Self::Disconnecting,
-            TunnelState::Error(e) => Self::ConnectionFailed(ConnectionFailedError::InternalError(
-                format!("Error state: {:?}", e),
-            )),
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct VpnServiceInfo {
     pub version: String,
-    pub build_timestamp: Option<time::OffsetDateTime>,
+    pub build_timestamp: Option<OffsetDateTime>,
     pub triple: String,
     pub platform: String,
     pub git_commit: String,
     pub nym_network: NymNetwork,
     pub nym_vpn_network: NymVpnNetwork,
-}
-
-impl fmt::Display for VpnServiceStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            VpnServiceStatus::NotConnected => write!(f, "NotConnected"),
-            VpnServiceStatus::Connecting => write!(f, "Connecting"),
-            VpnServiceStatus::Connected(details) => write!(f, "Connected({})", details),
-            VpnServiceStatus::Disconnecting => write!(f, "Disconnecting"),
-            VpnServiceStatus::ConnectionFailed(reason) => {
-                write!(f, "ConnectionFailed({})", reason)
-            }
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct ConnectedResultDetails {
-    pub entry_gateway: NodeIdentity,
-    pub exit_gateway: NodeIdentity,
-    pub specific_details: ConnectedStateDetails,
-    pub since: time::OffsetDateTime,
-}
-
-impl fmt::Display for ConnectedResultDetails {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "entry_gateway: {}, exit_gateway: {}, specific_details: {}, since: {}",
-            self.entry_gateway, self.exit_gateway, self.specific_details, self.since
-        )
-    }
-}
-
-impl VpnServiceStatus {
-    pub fn error(&self) -> Option<ConnectionFailedError> {
-        match self {
-            VpnServiceStatus::ConnectionFailed(reason) => Some(reason.clone()),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub enum VpnServiceStateChange {
-    NotConnected,
-    Connecting,
-    Connected,
-    Disconnecting,
-    ConnectionFailed(ConnectionFailedError),
-}
-
-impl From<TunnelState> for VpnServiceStateChange {
-    fn from(value: TunnelState) -> Self {
-        match value {
-            TunnelState::Connecting { .. } => Self::Connecting,
-            TunnelState::Connected { .. } => Self::Connected,
-            TunnelState::Disconnected | TunnelState::Offline { .. } => Self::NotConnected,
-            TunnelState::Disconnecting { .. } => Self::Disconnecting,
-            TunnelState::Error(reason) => Self::ConnectionFailed(
-                ConnectionFailedError::InternalError(format!("Error state: {:?}", reason)),
-            ),
-        }
-    }
-}
-
-impl VpnServiceStateChange {
-    pub fn error(&self) -> Option<ConnectionFailedError> {
-        match self {
-            VpnServiceStateChange::ConnectionFailed(reason) => Some(reason.clone()),
-            _ => None,
-        }
-    }
 }
 
 pub(crate) struct NymVpnService<S>
@@ -338,9 +143,6 @@ where
     // commands.
     vpn_command_rx: mpsc::UnboundedReceiver<VpnServiceCommand>,
 
-    // Broadcast channel for sending state changes to the outside world
-    vpn_state_changes_tx: broadcast::Sender<VpnServiceStateChange>,
-
     // Broadcast channel for sending tunnel events to the outside world
     tunnel_event_tx: broadcast::Sender<TunnelEvent>,
 
@@ -356,8 +158,8 @@ where
     // Storage backend
     storage: Arc<tokio::sync::Mutex<S>>,
 
-    // Last known tunnel state.
-    tunnel_state: TunnelState,
+    // Last known tunnel state wrapped in a `watch::Sender` that can be used to track tunnel state individually.
+    tunnel_state: watch::Sender<TunnelState>,
 
     // Tunnel state machine handle.
     state_machine_handle: JoinHandle<()>,
@@ -377,7 +179,6 @@ where
 
 impl NymVpnService<nym_vpn_lib::storage::VpnClientOnDiskStorage> {
     pub(crate) fn spawn(
-        vpn_state_changes_tx: broadcast::Sender<VpnServiceStateChange>,
         vpn_command_rx: mpsc::UnboundedReceiver<VpnServiceCommand>,
         tunnel_event_tx: broadcast::Sender<TunnelEvent>,
         shutdown_token: CancellationToken,
@@ -387,7 +188,6 @@ impl NymVpnService<nym_vpn_lib::storage::VpnClientOnDiskStorage> {
         tracing::info!("Starting VPN service");
         tokio::spawn(async {
             match NymVpnService::new(
-                vpn_state_changes_tx,
                 vpn_command_rx,
                 tunnel_event_tx,
                 shutdown_token,
@@ -416,7 +216,6 @@ impl NymVpnService<nym_vpn_lib::storage::VpnClientOnDiskStorage> {
     }
 
     pub(crate) async fn new(
-        vpn_state_changes_tx: broadcast::Sender<VpnServiceStateChange>,
         vpn_command_rx: mpsc::UnboundedReceiver<VpnServiceCommand>,
         tunnel_event_tx: broadcast::Sender<TunnelEvent>,
         shutdown_token: CancellationToken,
@@ -491,13 +290,12 @@ impl NymVpnService<nym_vpn_lib::storage::VpnClientOnDiskStorage> {
             user_agent,
             shared_account_state,
             vpn_command_rx,
-            vpn_state_changes_tx,
             tunnel_event_tx,
             account_command_tx,
             config_file,
             data_dir,
             storage,
-            tunnel_state: TunnelState::Disconnected,
+            tunnel_state: watch::Sender::new(TunnelState::Disconnected),
             state_machine_handle,
             command_sender,
             event_receiver,
@@ -525,11 +323,8 @@ where
 
                     match event {
                         TunnelEvent::NewState(new_state) => {
-                            self.tunnel_state = new_state.clone();
-                            let vpn_state_change = VpnServiceStateChange::from(new_state);
-                            if let Err(e) = self.vpn_state_changes_tx.send(vpn_state_change) {
-                                tracing::error!("Failed to send vpn state change: {}", e);
-                            }
+                            // Replace value even when there are no receivers.
+                            let _ = self.tunnel_state.send_replace(new_state.clone());
                         }
                         TunnelEvent::MixnetState(_) => {}
                     }
@@ -580,9 +375,13 @@ where
                 let result = self.handle_disconnect().await;
                 let _ = tx.send(result);
             }
-            VpnServiceCommand::Status(tx, ()) => {
-                let result = self.handle_status().await;
+            VpnServiceCommand::GetTunnelState(tx, ()) => {
+                let result = self.handle_get_tunnel_state();
                 let _ = tx.send(result);
+            }
+            VpnServiceCommand::SubscribeToTunnelState(tx, ()) => {
+                let rx = self.handle_subscribe_to_tunnel_state();
+                let _ = tx.send(rx);
             }
             VpnServiceCommand::StoreAccount(tx, account) => {
                 let result = self.handle_store_account(account).await;
@@ -862,8 +661,12 @@ where
             })
     }
 
-    async fn handle_status(&self) -> VpnServiceStatus {
-        VpnServiceStatus::from(self.tunnel_state.clone())
+    fn handle_get_tunnel_state(&self) -> TunnelState {
+        self.tunnel_state.borrow().to_owned()
+    }
+
+    fn handle_subscribe_to_tunnel_state(&self) -> watch::Receiver<TunnelState> {
+        self.tunnel_state.subscribe()
     }
 
     async fn handle_info(&self) -> VpnServiceInfo {
@@ -871,7 +674,7 @@ where
 
         VpnServiceInfo {
             version: bin_info.build_version.to_string(),
-            build_timestamp: time::OffsetDateTime::parse(bin_info.build_timestamp, &Rfc3339).ok(),
+            build_timestamp: OffsetDateTime::parse(bin_info.build_timestamp, &Rfc3339).ok(),
             triple: bin_info.cargo_triple.to_string(),
             platform: self.user_agent.platform.clone(),
             git_commit: bin_info.commit_sha.to_string(),
@@ -930,7 +733,7 @@ where
     }
 
     async fn handle_forget_account(&mut self) -> Result<(), AccountError> {
-        if self.tunnel_state != TunnelState::Disconnected {
+        if *self.tunnel_state.borrow() != TunnelState::Disconnected {
             return Err(AccountError::IsConnected);
         }
 
@@ -993,7 +796,7 @@ where
         &mut self,
         seed: Option<[u8; 32]>,
     ) -> Result<(), AccountError> {
-        if self.tunnel_state != TunnelState::Disconnected {
+        if *self.tunnel_state.borrow() != TunnelState::Disconnected {
             return Err(AccountError::IsConnected);
         }
 

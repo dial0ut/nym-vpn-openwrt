@@ -36,8 +36,8 @@ use super::{
     Error, NymConfig, Result, TunnelSettings,
 };
 use nym_vpn_lib_types::{
-    ConnectionData, ErrorStateReason, MixnetConnectionData, MixnetEvent, TunnelConnectionData,
-    TunnelType, WireguardConnectionData, WireguardNode,
+    ConnectionData, ErrorStateReason, Gateway, MixnetConnectionData, MixnetEvent, NymAddress,
+    TunnelConnectionData, TunnelType, WireguardConnectionData, WireguardNode,
 };
 
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
@@ -109,7 +109,7 @@ pub enum TunnelMonitorEvent {
     EstablishingTunnel(Box<ConnectionData>),
 
     /// Tunnel is up
-    Up(ConnectionData),
+    Up(Box<ConnectionData>),
 
     /// Tunnel went down
     Down(Option<ErrorStateReason>),
@@ -331,8 +331,8 @@ impl TunnelMonitor {
         };
 
         let conn_data = ConnectionData {
-            entry_gateway: Box::new(selected_gateways.entry.identity()),
-            exit_gateway: Box::new(selected_gateways.exit.identity()),
+            entry_gateway: Gateway::from(*selected_gateways.entry),
+            exit_gateway: Gateway::from(*selected_gateways.exit),
             connected_at: None,
             tunnel: tunnel_conn_data,
         };
@@ -346,7 +346,7 @@ impl TunnelMonitor {
             connected_at: Some(OffsetDateTime::now_utc()),
             ..conn_data
         };
-        self.send_event(TunnelMonitorEvent::Up(conn_data));
+        self.send_event(TunnelMonitorEvent::Up(Box::new(conn_data)));
 
         let task_error = self
             .cancel_token
@@ -444,8 +444,8 @@ impl TunnelMonitor {
         }
 
         let tunnel_conn_data = TunnelConnectionData::Mixnet(MixnetConnectionData {
-            nym_address: Box::new(assigned_addresses.mixnet_client_address),
-            exit_ipr: Box::new(assigned_addresses.exit_mix_addresses.0),
+            nym_address: NymAddress::from(assigned_addresses.mixnet_client_address),
+            exit_ipr: NymAddress::from(assigned_addresses.exit_mix_addresses.0),
             ipv4: assigned_addresses.interface_addresses.ipv4,
             ipv6: assigned_addresses.interface_addresses.ipv6,
         });

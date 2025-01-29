@@ -4850,7 +4850,6 @@ dependencies = [
  "nym-gateway-directory",
  "nym-statistics-common",
  "nym-wg-gateway-client",
- "nym-wg-go",
  "si-scale",
  "time",
 ]
@@ -4928,6 +4927,7 @@ dependencies = [
  "nym-bin-common",
  "nym-gateway-directory",
  "nym-http-api-client",
+ "nym-vpn-lib-types",
  "nym-vpn-network-config",
  "nym-vpn-proto",
  "nym-vpnd-types",

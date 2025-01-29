@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use nym_vpn_lib_types::{
-    ActionAfterDisconnect, ConnectionData, ErrorStateReason, MixnetConnectionData,
+    ActionAfterDisconnect, ConnectionData, ErrorStateReason, Gateway, MixnetConnectionData,
     TunnelConnectionData, TunnelState, WireguardConnectionData, WireguardNode,
 };
 
@@ -84,7 +84,7 @@ impl From<TunnelState> for ProtoTunnelState {
 impl From<WireguardNode> for ProtoWireguardNode {
     fn from(value: WireguardNode) -> ProtoWireguardNode {
         ProtoWireguardNode {
-            public_key: value.public_key.to_base64(),
+            public_key: value.public_key,
             endpoint: value.endpoint.to_string(),
             private_ipv4: value.private_ipv4.to_string(),
             private_ipv6: value.private_ipv6.to_string(),
@@ -95,12 +95,8 @@ impl From<WireguardNode> for ProtoWireguardNode {
 impl From<ConnectionData> for ProtoConnectionData {
     fn from(value: ConnectionData) -> ProtoConnectionData {
         ProtoConnectionData {
-            entry_gateway: Some(ProtoGateway {
-                id: value.entry_gateway.to_string(),
-            }),
-            exit_gateway: Some(ProtoGateway {
-                id: value.exit_gateway.to_string(),
-            }),
+            entry_gateway: Some(ProtoGateway::from(value.entry_gateway)),
+            exit_gateway: Some(ProtoGateway::from(value.exit_gateway)),
             connected_at: value
                 .connected_at
                 .map(crate::conversions::prost::offset_datetime_into_proto_timestamp),
@@ -149,5 +145,11 @@ impl From<TunnelConnectionData> for ProtoTunnelConnectionData {
         };
 
         ProtoTunnelConnectionData { state: Some(state) }
+    }
+}
+
+impl From<Gateway> for ProtoGateway {
+    fn from(value: Gateway) -> Self {
+        Self { id: value.id }
     }
 }
