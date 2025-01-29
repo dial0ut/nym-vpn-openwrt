@@ -105,6 +105,9 @@ impl From<AccountCommandError> for AccountNotReady {
             AccountCommandError::RegistrationInProgress => {
                 AccountNotReady::Internal(err.to_string())
             }
+            AccountCommandError::GetAccountEndpointFailure(err) => {
+                AccountNotReady::Internal(err.to_string())
+            }
         }
     }
 }
