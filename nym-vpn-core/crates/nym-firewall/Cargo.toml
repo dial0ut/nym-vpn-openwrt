@@ -1,0 +1,46 @@
+[package]
+name = "nym-firewall"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ipnetwork.workspace = true
+libc.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+nym-dns = { path = "../nym-dns" }
+nym-common = { path = "../nym-common" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+pfctl.workspace = true
+nym-platform-metadata = { path = "../nym-platform-metadata" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+nix.workspace = true
+inotify.workspace = true
+resolv-conf.workspace = true
+nftnl = { workspace = true, features = ["nftnl-1-1-0"] }
+mnl = { workspace = true, features = ["mnl-1-0-4"] }
+nym-common = { path = "../nym-common" }
+
+[target.'cfg(windows)'.dependencies]
+nym-windows = { path = "../nym-windows" }
+
+log.workspace = true
+wmi.workspace = true
+windows-core.workspace = true
+widestring.workspace = true
+
+[target.'cfg(windows)'.dependencies.windows-sys]
+workspace = true
+features = ["Win32_Foundation"]
+
+[target.'cfg(windows)'.dependencies.windows]
+workspace = true
+features = ["Win32", "Win32_System", "Win32_System_Wmi"]

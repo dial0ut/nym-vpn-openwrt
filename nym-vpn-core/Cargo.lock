@@ -1350,6 +1350,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "darling"
+version = "0.20.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f63b86c8a8826a49b8c21f08a2d07338eec8d900540f8630dc76284be802989"
+dependencies = [
+ "darling_core",
+ "darling_macro",
+]
+
+[[package]]
+name = "darling_core"
+version = "0.20.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "95133861a8032aaea082871032f5815eb9e98cef03fa916ab4500513994df9e5"
+dependencies = [
+ "fnv",
+ "ident_case",
+ "proc-macro2",
+ "quote",
+ "strsim",
+ "syn 2.0.95",
+]
+
+[[package]]
+name = "darling_macro"
+version = "0.20.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d336a2a514f6ccccaa3e09b02d41d35330c07ddf03a62165fcec10bb561c7806"
+dependencies = [
+ "darling_core",
+ "quote",
+ "syn 2.0.95",
+]
+
+[[package]]
 name = "dashmap"
 version = "5.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1420,6 +1455,37 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "derive_builder"
+version = "0.20.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "507dfb09ea8b7fa618fcf76e953f4f5e192547945816d5358edffe39f6f94947"
+dependencies = [
+ "derive_builder_macro",
+]
+
+[[package]]
+name = "derive_builder_core"
+version = "0.20.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d5bcf7b024d6835cfb3d473887cd966994907effbe9227e8c8219824d06c4e8"
+dependencies = [
+ "darling",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.95",
+]
+
+[[package]]
+name = "derive_builder_macro"
+version = "0.20.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab63b0e2bf4d5928aff72e83a7dace85d7bba5fe12dcc3c5a572d78caffd3f3c"
+dependencies = [
+ "derive_builder_core",
+ "syn 2.0.95",
 ]
 
 [[package]]
@@ -2615,6 +2681,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "ident_case"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
+
+[[package]]
 name = "idna"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2721,9 +2793,9 @@ checksum = "ddc24109865250148c2e0f3d25d4f0f479571723792d3802153c60922a4fb708"
 
 [[package]]
 name = "ipnetwork"
-version = "0.16.0"
+version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8eca9f51da27bc908ef3dd85c21e1bbba794edaf94d7841e37356275b82d31e"
+checksum = "bf466541e9d546596ee94f9f69590f89473455f88372423e0008fc1a7daf100e"
 dependencies = [
  "serde",
 ]
@@ -2999,6 +3071,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "mnl"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d1a5469630da93e1813bb257964c0ccee3b26b6879dd858039ddec35cc8681ed"
+dependencies = [
+ "libc",
+ "log",
+ "mnl-sys",
+]
+
+[[package]]
+name = "mnl-sys"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9750685b201e1ecfaaf7aa5d0387829170fa565989cc481b49080aa155f70457"
+dependencies = [
+ "libc",
+ "pkg-config",
+]
+
+[[package]]
 name = "multimap"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3098,6 +3191,28 @@ dependencies = [
  "libc",
  "log",
  "tokio",
+]
+
+[[package]]
+name = "nftnl"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06a7491dd91b71643f65546389f25506da70723d1f1ec8c8d6d20444d1c23f27"
+dependencies = [
+ "bitflags 2.8.0",
+ "log",
+ "nftnl-sys",
+]
+
+[[package]]
+name = "nftnl-sys"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b193f2c2a70e6421534c3f3b75eaaed4e4b9df45281b3d94f5bc8c32fb346cbb"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "pkg-config",
 ]
 
 [[package]]
@@ -3801,6 +3916,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "nym-firewall"
+version = "1.3.0-dev"
+dependencies = [
+ "inotify",
+ "ipnetwork",
+ "libc",
+ "log",
+ "mnl",
+ "nftnl",
+ "nix 0.29.0",
+ "nym-common",
+ "nym-dns",
+ "nym-platform-metadata",
+ "nym-windows",
+ "pfctl",
+ "resolv-conf",
+ "thiserror 2.0.11",
+ "tracing",
+ "widestring",
+ "windows 0.58.0",
+ "windows-core 0.58.0",
+ "windows-sys 0.52.0",
+ "wmi",
+]
+
+[[package]]
 name = "nym-gateway-client"
 version = "0.1.0"
 source = "git+https://github.com/nymtech/nym?branch=release%2F2025.2-hu#a7f7ebfbaec56cb23fc8289dc734d567644b6d3e"
@@ -4214,6 +4355,15 @@ version = "0.3.0"
 source = "git+https://github.com/nymtech/nym?branch=release%2F2025.2-hu#a7f7ebfbaec56cb23fc8289dc734d567644b6d3e"
 dependencies = [
  "pem",
+]
+
+[[package]]
+name = "nym-platform-metadata"
+version = "1.3.0-dev"
+dependencies = [
+ "nym-dbus",
+ "rs-release",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5324,6 +5474,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "pfctl"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a44e65c0d3523afa79a600a3964c3ac0fabdabe2d7c68da624b2bb0b441b9d61"
+dependencies = [
+ "derive_builder",
+ "ioctl-sys",
+ "ipnetwork",
+ "libc",
+]
+
+[[package]]
 name = "pin-project"
 version = "1.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5941,6 +6103,12 @@ checksum = "bd124222d17ad93a644ed9d011a40f4fb64aa54275c08cc216524a9ea82fb09f"
 dependencies = [
  "digest 0.10.7",
 ]
+
+[[package]]
+name = "rs-release"
+version = "0.1.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33046892e4d999dc17e3790cb23ade37b8308f4bd2f3b05ed51bc5351762c94b"
 
 [[package]]
 name = "rs_merkle"
@@ -8645,6 +8813,21 @@ dependencies = [
  "log",
  "thiserror 1.0.69",
  "windows 0.51.1",
+]
+
+[[package]]
+name = "wmi"
+version = "0.14.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c960b3124cc00cefb350159cb43aba8984ed69c93d443df09f3299693171b37"
+dependencies = [
+ "chrono",
+ "futures",
+ "log",
+ "serde",
+ "thiserror 2.0.11",
+ "windows 0.58.0",
+ "windows-core 0.58.0",
 ]
 
 [[package]]
