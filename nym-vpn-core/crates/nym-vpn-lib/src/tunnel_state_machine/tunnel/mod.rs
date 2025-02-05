@@ -96,6 +96,7 @@ impl ConnectedMixnet {
     pub async fn connect_wireguard_tunnel(
         self,
         enable_credentials_mode: bool,
+        cancel_token: CancellationToken,
     ) -> Result<wireguard::connected_tunnel::ConnectedTunnel> {
         let connector = wireguard::connector::Connector::new(
             self.task_manager,
@@ -109,6 +110,7 @@ impl ConnectedMixnet {
                 self.selected_gateways,
                 self.data_path,
                 self.reconnect_mixnet_client_data,
+                cancel_token,
             )
             .await
         {
@@ -245,7 +247,7 @@ async fn shutdown_task_manager(mut task_manager: TaskManager) {
         tracing::error!("Failed to signal task manager shutdown");
     }
 
-    task_manager.wait_for_shutdown().await;
+    task_manager.wait_for_graceful_shutdown().await;
     tracing::debug!("Task manager finished");
 }
 

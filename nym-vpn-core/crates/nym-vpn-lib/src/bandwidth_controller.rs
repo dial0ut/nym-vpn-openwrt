@@ -5,7 +5,7 @@ use std::time::Duration;
 #[cfg(unix)]
 use std::{os::fd::RawFd, sync::Arc};
 
-use tokio::sync::mpsc;
+use tokio::{sync::mpsc, time::timeout};
 use tokio_stream::{wrappers::IntervalStream, StreamExt};
 use tokio_util::sync::CancellationToken;
 
@@ -338,42 +338,51 @@ impl<St: Storage> BandwidthController<St> {
                 &mut self.exit_depletion_rate,
             )
         };
-        match wg_gateway_client.query_bandwidth().await {
-            Err(e) => tracing::warn!("Error querying remaining bandwidth {:?}", e),
-            Ok(Some(remaining_bandwidth)) => {
-                match current_depletion_rate
-                    .update_dynamic_check_interval(current_period, remaining_bandwidth as u64)
-                {
-                    Err(e) => tracing::warn!("Error while updating query coefficients: {:?}", e),
-                    Ok(Some(new_duration)) => {
-                        return Some(new_duration);
-                    }
-                    Ok(None) => {
-                        let ticketbook_type = if entry {
-                            TicketType::V1WireguardEntry
-                        } else {
-                            TicketType::V1WireguardExit
-                        };
-                        if let Err(e) = self
-                            .top_up_bandwidth(ticketbook_type, &mut wg_gateway_client)
-                            .await
+
+        tokio::select! {
+            _ = self.shutdown.recv() => {
+                self.cancel_token.cancel();
+                tracing::trace!("BandwidthController: Received shutdown");
+            }
+            ret = wg_gateway_client.query_bandwidth() => {
+                match ret {
+                    Err(e) => tracing::warn!("Error querying remaining bandwidth {:?}", e),
+                    Ok(Some(remaining_bandwidth)) => {
+                        match current_depletion_rate
+                            .update_dynamic_check_interval(current_period, remaining_bandwidth as u64)
                         {
-                            tracing::warn!("Error topping up with more bandwidth {:?}", e);
-                            // TODO: try to return this error in the JoinHandle instead
-                            self.shutdown
-                                .send_we_stopped(Box::new(ErrorMessage::OutOfBandwidth {
-                                    gateway_id: Box::new(
-                                        wg_gateway_client.auth_recipient().gateway(),
-                                    ),
-                                    authenticator_address: Box::new(
-                                        wg_gateway_client.auth_recipient(),
-                                    ),
-                                }));
+                            Err(e) => tracing::warn!("Error while updating query coefficients: {:?}", e),
+                            Ok(Some(new_duration)) => {
+                                return Some(new_duration);
+                            }
+                            Ok(None) => {
+                                let ticketbook_type = if entry {
+                                    TicketType::V1WireguardEntry
+                                } else {
+                                    TicketType::V1WireguardExit
+                                };
+                                if let Err(e) = self
+                                    .top_up_bandwidth(ticketbook_type, &mut wg_gateway_client)
+                                    .await
+                                {
+                                    tracing::warn!("Error topping up with more bandwidth {:?}", e);
+                                    // TODO: try to return this error in the JoinHandle instead
+                                    self.shutdown
+                                        .send_we_stopped(Box::new(ErrorMessage::OutOfBandwidth {
+                                            gateway_id: Box::new(
+                                                wg_gateway_client.auth_recipient().gateway(),
+                                            ),
+                                            authenticator_address: Box::new(
+                                                wg_gateway_client.auth_recipient(),
+                                            ),
+                                        }));
+                                }
+                            }
                         }
                     }
+                    Ok(None) => {}
                 }
             }
-            Ok(None) => {}
         }
         None
     }
@@ -418,6 +427,26 @@ impl<St: Storage> BandwidthController<St> {
             task_manager.signal_shutdown().ok();
             mixnet_error_tx.send(()).await.ok();
         });
+    }
+
+    async fn cleanup(mut self) {
+        self.reconnect_mixnet_client_data
+            .bw_controller_task_manager
+            .signal_shutdown()
+            .ok();
+        if timeout(
+            Duration::from_secs(10),
+            self.reconnect_mixnet_client_data
+                .bw_controller_task_manager
+                .wait_for_graceful_shutdown(),
+        )
+        .await
+        .is_err()
+        {
+            tracing::error!(
+                "Timeout waiting for task manager controlled by bandwidth controller to finish waiting for its tasks to all exit"
+            );
+        }
     }
 
     pub(crate) async fn run(mut self)
@@ -467,5 +496,8 @@ impl<St: Storage> BandwidthController<St> {
                 }
             }
         }
+
+        self.cleanup().await;
+        tracing::debug!("BandwidthController: Exiting");
     }
 }
