@@ -11,11 +11,14 @@ use tracing::error;
 
 use crate::{error::Result, AuthAddress, Country, Error, IpPacketRouterAddress};
 
+use super::score::Score;
+
 pub type NymNode = Gateway;
 
 #[derive(Clone)]
 pub struct Gateway {
     pub identity: NodeIdentity,
+    pub moniker: String,
     pub location: Option<Location>,
     pub ipr_address: Option<IpPacketRouterAddress>,
     pub authenticator_address: Option<AuthAddress>,
@@ -25,6 +28,9 @@ pub struct Gateway {
     pub clients_ws_port: Option<u16>,
     pub clients_wss_port: Option<u16>,
     pub mixnet_performance: Option<Percent>,
+    pub wg_performance: Option<Percent>,
+    pub wg_score: Option<Score>,
+    pub mixnet_score: Option<Score>,
     pub version: Option<String>,
 }
 
@@ -153,6 +159,21 @@ impl From<nym_vpn_api_client::response::Probe> for Probe {
     }
 }
 
+impl From<Percent> for Score {
+    fn from(percent: Percent) -> Self {
+        let rounded_percent = percent.round_to_integer();
+        if rounded_percent >= 80 {
+            Score::High
+        } else if rounded_percent >= 60 {
+            Score::Medium
+        } else if rounded_percent > 0 {
+            Score::Low
+        } else {
+            Score::None
+        }
+    }
+}
+
 impl From<nym_vpn_api_client::response::ProbeOutcome> for ProbeOutcome {
     fn from(outcome: nym_vpn_api_client::response::ProbeOutcome) -> Self {
         ProbeOutcome {
@@ -226,6 +247,7 @@ impl TryFrom<nym_vpn_api_client::response::NymDirectoryGateway> for Gateway {
 
         Ok(Gateway {
             identity,
+            moniker: gateway.name,
             location: Some(gateway.location.into()),
             ipr_address,
             authenticator_address,
@@ -235,6 +257,9 @@ impl TryFrom<nym_vpn_api_client::response::NymDirectoryGateway> for Gateway {
             clients_ws_port: Some(gateway.entry.ws_port),
             clients_wss_port: gateway.entry.wss_port,
             mixnet_performance: Some(gateway.performance),
+            mixnet_score: Some(Score::from(gateway.performance)),
+            wg_performance: Some(gateway.wg_performance),
+            wg_score: Some(Score::from(gateway.wg_performance)),
             version: gateway.build_information.map(|info| info.build_version),
         })
     }
@@ -295,6 +320,7 @@ impl TryFrom<nym_validator_client::models::NymNodeDescription> for Gateway {
         let ips = node_description.description.host_information.ip_address;
         Ok(Gateway {
             identity,
+            moniker: String::new(),
             location,
             ipr_address,
             authenticator_address,
@@ -304,6 +330,9 @@ impl TryFrom<nym_validator_client::models::NymNodeDescription> for Gateway {
             clients_ws_port,
             clients_wss_port,
             mixnet_performance: None,
+            wg_performance: None,
+            wg_score: None,
+            mixnet_score: None,
             version,
         })
     }

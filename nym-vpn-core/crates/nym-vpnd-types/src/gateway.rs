@@ -5,11 +5,16 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use nym_vpn_lib::gateway_directory::Score as GwScore;
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Gateway {
     pub identity_key: String,
+    pub moniker: String,
     pub location: Option<Location>,
     pub last_probe: Option<Probe>,
+    pub mixnet_score: Option<Score>,
+    pub wg_score: Option<Score>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -35,6 +40,28 @@ pub struct Probe {
 impl fmt::Display for Probe {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "last_updated_utc: {}", self.last_updated_utc)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub enum Score {
+    High,
+    Medium,
+    Low,
+    None,
+}
+
+impl Score {
+    pub fn from_i32(value: i32) -> Self {
+        if value == 3 {
+            Self::High
+        } else if value == 2 {
+            Self::Medium
+        } else if value == 1 {
+            Self::Low
+        } else {
+            Self::None
+        }
     }
 }
 
@@ -111,8 +138,11 @@ impl From<nym_validator_client::models::NymNodeDescription> for Gateway {
                 .keys
                 .ed25519
                 .to_string(),
+            moniker: String::new(),
             location: None,
             last_probe: None,
+            wg_score: None,
+            mixnet_score: None,
         }
     }
 }
@@ -123,6 +153,17 @@ impl From<nym_vpn_lib::gateway_directory::Location> for Location {
             two_letter_iso_country_code: location.two_letter_iso_country_code,
             latitude: Some(location.latitude),
             longitude: Some(location.longitude),
+        }
+    }
+}
+
+impl From<GwScore> for Score {
+    fn from(score: GwScore) -> Self {
+        match score {
+            GwScore::High => Score::High,
+            GwScore::Medium => Score::Medium,
+            GwScore::Low => Score::Low,
+            GwScore::None => Score::None,
         }
     }
 }
@@ -170,8 +211,11 @@ impl From<nym_vpn_lib::gateway_directory::Gateway> for Gateway {
     fn from(gateway: nym_vpn_lib::gateway_directory::Gateway) -> Self {
         Self {
             identity_key: gateway.identity.to_string(),
+            moniker: gateway.moniker,
             location: gateway.location.map(Location::from),
             last_probe: gateway.last_probe.map(Probe::from),
+            wg_score: gateway.wg_score.map(Score::from),
+            mixnet_score: gateway.mixnet_score.map(Score::from),
         }
     }
 }

@@ -19,6 +19,7 @@ pub use crate::{
             Entry, Exit, Gateway, GatewayList, GatewayType, Location, NymNode, Probe, ProbeOutcome,
         },
         ipr_addresses::IpPacketRouterAddress,
+        score::Score,
     },
     error::Error,
     gateway_client::{Config, GatewayClient},

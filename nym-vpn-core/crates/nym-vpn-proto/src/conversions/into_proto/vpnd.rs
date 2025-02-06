@@ -1,6 +1,7 @@
 // Copyright 2024 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
+use nym_vpnd_types::gateway::Score;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 impl From<nym_vpnd_types::gateway::Location> for crate::Location {
@@ -9,6 +10,17 @@ impl From<nym_vpnd_types::gateway::Location> for crate::Location {
             two_letter_iso_country_code: location.two_letter_iso_country_code,
             latitude: location.latitude,
             longitude: location.longitude,
+        }
+    }
+}
+
+impl From<Score> for crate::Score {
+    fn from(score: Score) -> Self {
+        match score {
+            Score::High => crate::Score::High,
+            Score::Medium => crate::Score::Medium,
+            Score::Low => crate::Score::Low,
+            Score::None => crate::Score::None,
         }
     }
 }
@@ -69,10 +81,18 @@ impl From<nym_vpnd_types::gateway::Gateway> for crate::GatewayResponse {
         });
         let location = gateway.location.map(crate::Location::from);
         let last_probe = gateway.last_probe.map(crate::Probe::from);
+        let moniker = gateway.moniker;
         crate::GatewayResponse {
             id,
             location,
             last_probe,
+            wg_score: gateway
+                .wg_score
+                .map(|score| crate::Score::from(score) as i32),
+            mixnet_score: gateway
+                .mixnet_score
+                .map(|score| crate::Score::from(score) as i32),
+            moniker,
         }
     }
 }

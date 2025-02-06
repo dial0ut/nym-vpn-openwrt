@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::conversions::ConversionError;
+use crate::Score;
 
 impl From<crate::Location> for nym_vpnd_types::gateway::Location {
     fn from(location: crate::Location) -> Self {
@@ -9,6 +10,17 @@ impl From<crate::Location> for nym_vpnd_types::gateway::Location {
             two_letter_iso_country_code: location.two_letter_iso_country_code,
             latitude: location.latitude,
             longitude: location.longitude,
+        }
+    }
+}
+
+impl From<crate::Score> for nym_vpnd_types::gateway::Score {
+    fn from(score: Score) -> Self {
+        match score {
+            Score::None => nym_vpnd_types::gateway::Score::None,
+            Score::Low => nym_vpnd_types::gateway::Score::Low,
+            Score::Medium => nym_vpnd_types::gateway::Score::Medium,
+            Score::High => nym_vpnd_types::gateway::Score::High,
         }
     }
 }
@@ -73,6 +85,7 @@ impl TryFrom<crate::GatewayResponse> for nym_vpnd_types::gateway::Gateway {
             .id
             .map(|id| id.id)
             .ok_or_else(|| ConversionError::generic("missing gateway id"))?;
+        let moniker = gateway.moniker;
         let location = gateway
             .location
             .map(nym_vpnd_types::gateway::Location::from);
@@ -80,10 +93,19 @@ impl TryFrom<crate::GatewayResponse> for nym_vpnd_types::gateway::Gateway {
             .last_probe
             .map(nym_vpnd_types::gateway::Probe::try_from)
             .transpose()?;
+        let mixnet_score = gateway
+            .mixnet_score
+            .map(nym_vpnd_types::gateway::Score::from_i32);
+        let wg_score = gateway
+            .wg_score
+            .map(nym_vpnd_types::gateway::Score::from_i32);
         Ok(Self {
             identity_key,
+            moniker,
             location,
             last_probe,
+            wg_score,
+            mixnet_score,
         })
     }
 }
