@@ -22,24 +22,13 @@ import (
 )
 
 var fileUrls = []string{
-	"https://hil-speed.hetzner.com/100MB.bin",
-	"https://nbg1-speed.hetzner.com/100MB.bin",
-	"https://fsn1-speed.hetzner.com/100MB.bin",
-	"https://ash-speed.hetzner.com/100MB.bin",
-	"https://hel1-speed.hetzner.com/100MB.bin",
-	"https://proof.ovh.net/files/100Mb.dat",
-	"http://cachefly.cachefly.net/100mb.test",
-	"https://sin-speed.hetzner.com/100MB.bin",
+	"https://proof.ovh.net/files/1Mb.dat",
+	"https://proof.ovh.net/files/10Mb.dat",
 }
 
 var fileUrlsV6 = []string{
-	"https://hil-speed.hetzner.com/100MB.bin",
-	"https://nbg1-speed.hetzner.com/100MB.bin",
-	"https://fsn1-speed.hetzner.com/100MB.bin",
-	"https://ash-speed.hetzner.com/100MB.bin",
-	"https://hel1-speed.hetzner.com/100MB.bin",
-	"https://proof.ovh.net/files/100Mb.dat",
-	"https://sin-speed.hetzner.com/100MB.bin",
+	"https://proof.ovh.net/files/1Mb.dat",
+	"https://proof.ovh.net/files/10Mb.dat",
 }
 
 type Netstack struct{}
