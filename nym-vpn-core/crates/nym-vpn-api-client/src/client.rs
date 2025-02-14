@@ -6,11 +6,11 @@ use std::{fmt, time::Duration};
 use backon::Retryable;
 use nym_credential_proxy_requests::api::v1::ticketbook::models::PartialVerificationKeysResponse;
 use nym_http_api_client::{HttpClientError, Params, PathSegments, UserAgent, NO_PARAMS};
-use reqwest::Url;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use url::Url;
 
 use crate::request::{UpdateDeviceRequestBody, UpdateDeviceRequestStatus};
-use crate::response::{NymVpnHealthResponse, NymVpnUsagesResponse};
+use crate::response::{NymVpnHealthResponse, NymVpnUsagesResponse, NymWellknownDiscoveryItem};
 use crate::types::DeviceStatus;
 use crate::{
     error::{Result, VpnApiClientError},
@@ -851,6 +851,22 @@ impl VpnApiClient {
         )
         .await
         .map_err(VpnApiClientError::FailedToGetDirectoryZkNymsTicketbookPartialVerificationKeys)
+    }
+
+    pub async fn get_wellknown_current_env(&self) -> Result<NymWellknownDiscoveryItem> {
+        tracing::debug!("Fetching nym vpn network details");
+        self.inner
+            .get_json(
+                &[
+                    routes::PUBLIC,
+                    routes::V1,
+                    routes::WELLKNOWN,
+                    routes::CURRENT_ENV,
+                ],
+                NO_PARAMS,
+            )
+            .await
+            .map_err(VpnApiClientError::FailedToGetVpnNetworkDetails)
     }
 }
 

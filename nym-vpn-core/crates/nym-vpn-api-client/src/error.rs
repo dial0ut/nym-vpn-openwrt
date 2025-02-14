@@ -105,6 +105,15 @@ pub enum VpnApiClientError {
 
     #[error("failed to get usage")]
     FailedToGetUsage(#[source] HttpClientError<UnexpectedError>),
+
+    #[error("failed to get registered network environments")]
+    FailedToGetNetworkEnvs(#[source] HttpClientError<UnexpectedError>),
+
+    #[error("failed to get discovery info")]
+    FailedToGetDiscoveryInfo(#[source] HttpClientError<UnexpectedError>),
+
+    #[error("failed to get vpn network Details")]
+    FailedToGetVpnNetworkDetails(#[source] HttpClientError<UnexpectedError>),
 }
 
 pub type Result<T> = std::result::Result<T, VpnApiClientError>;
