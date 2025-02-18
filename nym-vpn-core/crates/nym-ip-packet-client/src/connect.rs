@@ -6,6 +6,7 @@ use std::time::Duration;
 use nym_ip_packet_requests::IpPair;
 use nym_mixnet_client::SharedMixnetClient;
 use nym_sdk::mixnet::{MixnetClientSender, MixnetMessageSender, Recipient, TransmissionLane};
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 
 use crate::{
@@ -39,10 +40,11 @@ pub struct IprClientConnect {
     mixnet_sender: MixnetClientSender,
     nym_address: Recipient,
     connected: ConnectionState,
+    cancel_token: CancellationToken,
 }
 
 impl IprClientConnect {
-    pub async fn new(mixnet_client: SharedMixnetClient) -> Self {
+    pub async fn new(mixnet_client: SharedMixnetClient, cancel_token: CancellationToken) -> Self {
         let mixnet_sender = mixnet_client.lock().await.as_ref().unwrap().split_sender();
         let nym_address = *mixnet_client
             .inner()
@@ -56,6 +58,7 @@ impl IprClientConnect {
             mixnet_sender,
             nym_address,
             connected: ConnectionState::Disconnected,
+            cancel_token,
         }
     }
 
@@ -197,34 +200,40 @@ impl IprClientConnect {
 
         loop {
             tokio::select! {
+                _ = self.cancel_token.cancelled() => {
+                    error!("Cancelled while waiting for reply to connect request");
+                    return Err(Error::Cancelled);
+                },
                 _ = &mut timeout => {
                     error!("Timed out waiting for reply to connect request");
                     return Err(Error::TimeoutWaitingForConnectResponse);
-                }
-                Some(msgs) = mixnet_client.wait_for_messages() =>  {
-                    for msg in msgs {
-                        // Confirm that the version is correct
-                        if let Err(err) = check_ipr_message_version(&msg) {
-                            tracing::info!("Mixnet message version mismatch: {err}");
-                            continue;
-                        }
+                },
+                msgs = mixnet_client.wait_for_messages() => match msgs {
+                    None => {
+                        return Err(Error::NoMixnetMessagesReceived);
+                    }
+                    Some(msgs) => {
+                        for msg in msgs {
+                            // Confirm that the version is correct
+                            if let Err(err) = check_ipr_message_version(&msg) {
+                                tracing::info!("Mixnet message version mismatch: {err}");
+                                continue;
+                            }
 
-                        // Then we deserialize the message
-                        tracing::debug!("IprClient: got message while waiting for connect response");
-                        let Ok(response) = IpPacketResponse::from_reconstructed_message(&msg) else {
-                            // This is ok, it's likely just one of our self-pings
-                            tracing::debug!("Failed to deserialize mixnet message");
-                            continue;
-                        };
+                            // Then we deserialize the message
+                            tracing::debug!("IprClient: got message while waiting for connect response");
+                            let Ok(response) = IpPacketResponse::from_reconstructed_message(&msg) else {
+                                // This is ok, it's likely just one of our self-pings
+                                tracing::debug!("Failed to deserialize mixnet message");
+                                continue;
+                            };
 
-                        if response.id() == Some(request_id) {
-                            tracing::debug!("Got response with matching id");
-                            return self.handle_ip_packet_router_response(response, ips).await;
+                            if response.id() == Some(request_id) {
+                                tracing::debug!("Got response with matching id");
+                                return self.handle_ip_packet_router_response(response, ips).await;
+                            }
                         }
                     }
-                }
-                else => {
-                    return Err(Error::NoMixnetMessagesReceived);
                 }
             }
         }
