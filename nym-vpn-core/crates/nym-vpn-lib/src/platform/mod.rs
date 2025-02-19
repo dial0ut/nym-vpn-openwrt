@@ -59,6 +59,7 @@ use std::{env, path::PathBuf, sync::Arc};
 
 use account::AccountControllerHandle;
 use lazy_static::lazy_static;
+use nym_vpn_api_client::types::ScoreThresholds;
 use tokio::{runtime::Runtime, sync::Mutex};
 
 use self::error::VpnError;
@@ -271,11 +272,23 @@ async fn get_gateway_countries(
     let api_url = network_env.api_url();
     let nym_vpn_api_url = Some(network_env.vpn_api_url());
     let min_gateway_performance = min_gateway_performance.map(|p| p.try_into()).transpose()?;
+    let mix_score_thresholds = network_env.system_configuration.map(|sc| ScoreThresholds {
+        high: sc.mix_thresholds.high,
+        medium: sc.mix_thresholds.medium,
+        low: sc.mix_thresholds.low,
+    });
+    let wg_score_thresholds = network_env.system_configuration.map(|sc| ScoreThresholds {
+        high: sc.wg_thresholds.high,
+        medium: sc.wg_thresholds.medium,
+        low: sc.wg_thresholds.low,
+    });
     let directory_config = nym_gateway_directory::Config {
         nyxd_url,
         api_url,
         nym_vpn_api_url,
         min_gateway_performance,
+        mix_score_thresholds,
+        wg_score_thresholds,
     };
     GatewayClient::new(directory_config, user_agent.into())
         .map_err(VpnError::internal)?
@@ -308,11 +321,23 @@ async fn get_gateways(
     let api_url = network_env.api_url();
     let nym_vpn_api_url = Some(network_env.vpn_api_url());
     let min_gateway_performance = min_gateway_performance.map(|p| p.try_into()).transpose()?;
+    let mix_score_thresholds = network_env.system_configuration.map(|sc| ScoreThresholds {
+        high: sc.mix_thresholds.high,
+        medium: sc.mix_thresholds.medium,
+        low: sc.mix_thresholds.low,
+    });
+    let wg_score_thresholds = network_env.system_configuration.map(|sc| ScoreThresholds {
+        high: sc.wg_thresholds.high,
+        medium: sc.wg_thresholds.medium,
+        low: sc.wg_thresholds.low,
+    });
     let directory_config = nym_gateway_directory::Config {
         nyxd_url,
         api_url,
         nym_vpn_api_url,
         min_gateway_performance,
+        mix_score_thresholds,
+        wg_score_thresholds,
     };
     GatewayClient::new(directory_config, user_agent.into())
         .map_err(VpnError::internal)?

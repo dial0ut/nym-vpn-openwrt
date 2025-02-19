@@ -263,6 +263,8 @@ impl NymVpnService<nym_vpn_lib::storage::VpnClientOnDiskStorage> {
             api_url,
             nym_vpn_api_url: Some(network_env.vpn_api_url()),
             min_gateway_performance: None,
+            mix_score_thresholds: None,
+            wg_score_thresholds: None,
         };
         let nym_config = NymConfig {
             data_path: Some(data_dir.clone()),

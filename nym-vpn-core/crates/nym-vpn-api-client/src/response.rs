@@ -577,6 +577,7 @@ pub struct NymWellknownDiscoveryItemResponse {
     pub account_management: Option<AccountManagementResponse>,
     pub feature_flags: Option<serde_json::Value>,
     pub system_messages: Option<Vec<SystemMessageResponse>>,
+    pub system_configuration: Option<SystemConfigurationResponse>,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -600,6 +601,19 @@ pub struct SystemMessageResponse {
     pub display_until: String,
     pub message: String,
     pub properties: serde_json::Value,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct SystemConfigurationResponse {
+    pub mix_thresholds: ScoreThresholdsResponse,
+    pub wg_thresholds: ScoreThresholdsResponse,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct ScoreThresholdsResponse {
+    pub high: u8,
+    pub medium: u8,
+    pub low: u8,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]

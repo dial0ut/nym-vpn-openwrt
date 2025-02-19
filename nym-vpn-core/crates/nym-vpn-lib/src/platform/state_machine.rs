@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use nym_vpn_account_controller::AccountControllerCommander;
+use nym_vpn_api_client::types::ScoreThresholds;
 use nym_vpn_network_config::Network;
 use tokio::{sync::mpsc, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
@@ -71,12 +72,24 @@ pub(super) async fn start_state_machine(
     let api_url = network_env.api_url();
     let nyxd_url = network_env.nyxd_url();
     let nym_vpn_api_url = Some(network_env.vpn_api_url());
+    let mix_score_thresholds = network_env.system_configuration.map(|sc| ScoreThresholds {
+        high: sc.mix_thresholds.high,
+        medium: sc.mix_thresholds.medium,
+        low: sc.mix_thresholds.low,
+    });
+    let wg_score_thresholds = network_env.system_configuration.map(|sc| ScoreThresholds {
+        high: sc.wg_thresholds.high,
+        medium: sc.wg_thresholds.medium,
+        low: sc.wg_thresholds.low,
+    });
 
     let gateway_config = GatewayDirectoryConfig {
         nyxd_url,
         api_url,
         nym_vpn_api_url,
         min_gateway_performance: None,
+        mix_score_thresholds,
+        wg_score_thresholds,
     };
 
     let nym_config = NymConfig {

@@ -11,7 +11,7 @@ use futures::{stream::BoxStream, StreamExt};
 use nym_vpn_network_config::Network;
 use tokio::sync::{broadcast, mpsc::UnboundedSender};
 
-use nym_vpn_api_client::types::GatewayMinPerformance;
+use nym_vpn_api_client::types::{GatewayMinPerformance, ScoreThresholds};
 use nym_vpn_lib_types::TunnelEvent;
 use nym_vpn_proto::{
     conversions::ConversionError, nym_vpnd_server::NymVpnd, AccountError,
@@ -318,11 +318,29 @@ impl NymVpnd for CommandInterface {
             mixnet_min_performance: min_mixnet_performance,
             vpn_min_performance: min_vpn_performance,
         });
+        let mix_score_thresholds =
+            self.network_env
+                .system_configuration
+                .map(|sc| ScoreThresholds {
+                    high: sc.mix_thresholds.high,
+                    medium: sc.mix_thresholds.medium,
+                    low: sc.mix_thresholds.low,
+                });
+        let wg_score_thresholds = self
+            .network_env
+            .system_configuration
+            .map(|sc| ScoreThresholds {
+                high: sc.wg_thresholds.high,
+                medium: sc.wg_thresholds.medium,
+                low: sc.wg_thresholds.low,
+            });
         let directory_config = nym_vpn_lib::gateway_directory::Config {
             nyxd_url: self.network_env.nyxd_url(),
             api_url: self.network_env.api_url(),
             nym_vpn_api_url: Some(self.network_env.vpn_api_url()),
             min_gateway_performance,
+            mix_score_thresholds,
+            wg_score_thresholds,
         };
 
         let gateways = CommandInterfaceConnectionHandler::new(self.vpn_command_tx.clone())
@@ -377,11 +395,29 @@ impl NymVpnd for CommandInterface {
             mixnet_min_performance: min_mixnet_performance,
             vpn_min_performance: min_vpn_performance,
         });
+        let mix_score_thresholds =
+            self.network_env
+                .system_configuration
+                .map(|sc| ScoreThresholds {
+                    high: sc.mix_thresholds.high,
+                    medium: sc.mix_thresholds.medium,
+                    low: sc.mix_thresholds.low,
+                });
+        let wg_score_thresholds = self
+            .network_env
+            .system_configuration
+            .map(|sc| ScoreThresholds {
+                high: sc.wg_thresholds.high,
+                medium: sc.wg_thresholds.medium,
+                low: sc.wg_thresholds.low,
+            });
         let directory_config = nym_vpn_lib::gateway_directory::Config {
             nyxd_url: self.network_env.nyxd_url(),
             api_url: self.network_env.api_url(),
             nym_vpn_api_url: Some(self.network_env.vpn_api_url()),
             min_gateway_performance,
+            mix_score_thresholds,
+            wg_score_thresholds,
         };
 
         let countries = CommandInterfaceConnectionHandler::new(self.vpn_command_tx.clone())

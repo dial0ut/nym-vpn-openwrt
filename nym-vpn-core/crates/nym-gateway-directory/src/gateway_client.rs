@@ -5,7 +5,7 @@ use std::{fmt, net::IpAddr};
 
 use nym_sdk::UserAgent;
 use nym_validator_client::{models::NymNodeDescription, nym_nodes::SkimmedNode, NymApiClient};
-use nym_vpn_api_client::types::{GatewayMinPerformance, Percent};
+use nym_vpn_api_client::types::{GatewayMinPerformance, Percent, ScoreThresholds};
 use rand::prelude::SliceRandom;
 use rand::thread_rng;
 use tracing::{debug, error, info, warn};
@@ -27,6 +27,8 @@ pub struct Config {
     pub api_url: Url,
     pub nym_vpn_api_url: Option<Url>,
     pub min_gateway_performance: Option<GatewayMinPerformance>,
+    pub mix_score_thresholds: Option<ScoreThresholds>,
+    pub wg_score_thresholds: Option<ScoreThresholds>,
 }
 
 fn to_string<T: fmt::Display>(value: &Option<T>) -> String {
@@ -89,6 +91,8 @@ pub struct GatewayClient {
     api_client: NymApiClient,
     nym_vpn_api_client: Option<nym_vpn_api_client::VpnApiClient>,
     min_gateway_performance: Option<GatewayMinPerformance>,
+    mix_score_thresholds: Option<ScoreThresholds>,
+    wg_score_thresholds: Option<ScoreThresholds>,
 }
 
 impl GatewayClient {
@@ -103,6 +107,8 @@ impl GatewayClient {
             api_client,
             nym_vpn_api_client,
             min_gateway_performance: config.min_gateway_performance,
+            mix_score_thresholds: config.mix_score_thresholds,
+            wg_score_thresholds: config.wg_score_thresholds,
         })
     }
 
@@ -292,6 +298,13 @@ impl GatewayClient {
                     Gateway::try_from(gw)
                         .inspect_err(|err| error!("Failed to parse gateway: {err}"))
                         .ok()
+                        .map(|mut gw| {
+                            gw.update_to_new_thresholds(
+                                self.mix_score_thresholds,
+                                self.wg_score_thresholds,
+                            );
+                            gw
+                        })
                 })
                 .collect();
             Ok(GatewayList::new(gateways))
@@ -312,6 +325,13 @@ impl GatewayClient {
                     Gateway::try_from(gw)
                         .inspect_err(|err| error!("Failed to parse gateway: {err}"))
                         .ok()
+                        .map(|mut gw| {
+                            gw.update_to_new_thresholds(
+                                self.mix_score_thresholds,
+                                self.wg_score_thresholds,
+                            );
+                            gw
+                        })
                 })
                 .collect();
             Ok(GatewayList::new(gateways))
@@ -416,6 +436,8 @@ mod test {
             api_url: default_api_url,
             nym_vpn_api_url: Some(default_nym_vpn_api_url),
             min_gateway_performance: None,
+            mix_score_thresholds: None,
+            wg_score_thresholds: None,
         }
     }
 

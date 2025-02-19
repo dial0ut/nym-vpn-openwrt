@@ -15,7 +15,9 @@ use nym_vpn_api_client::{
 use nym_api_requests::NymNetworkDetailsResponse;
 use nym_validator_client::nym_api::{Client as NymApiClient, NymApiClientExt};
 
-use crate::{AccountManagement, FeatureFlags, SystemMessages};
+use crate::{
+    system_configuration::SystemConfiguration, AccountManagement, FeatureFlags, SystemMessages,
+};
 
 use super::{nym_network::NymNetwork, MAX_FILE_AGE, NETWORKS_SUBDIR};
 
@@ -33,6 +35,7 @@ pub struct Discovery {
     // Additional context
     pub(super) account_management: Option<AccountManagement>,
     pub(super) feature_flags: Option<FeatureFlags>,
+    pub(super) system_configuration: Option<SystemConfiguration>,
     pub(super) system_messages: SystemMessages,
 }
 
@@ -181,6 +184,10 @@ impl TryFrom<NymWellknownDiscoveryItemResponse> for Discovery {
                 .ok()
         });
 
+        let system_configuration = discovery
+            .system_configuration
+            .map(SystemConfiguration::from);
+
         let system_messages = discovery
             .system_messages
             .map(SystemMessages::from)
@@ -192,6 +199,7 @@ impl TryFrom<NymWellknownDiscoveryItemResponse> for Discovery {
             nym_vpn_api_url: discovery.nym_vpn_api_url.parse()?,
             account_management,
             feature_flags,
+            system_configuration,
             system_messages,
         })
     }
@@ -337,6 +345,7 @@ mod tests {
                     "true".to_owned(),
                 )])),
             }]),
+            system_configuration: None,
         };
         assert_eq!(network, expected_network);
     }
