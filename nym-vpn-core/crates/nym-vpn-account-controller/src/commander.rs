@@ -1,6 +1,8 @@
 // Copyright 2024 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::net::SocketAddr;
+
 use nym_vpn_api_client::response::{NymVpnAccountSummaryResponse, NymVpnDevice, NymVpnUsage};
 use nym_vpn_lib_types::{
     AccountCommandError, RegisterDeviceError, RequestZkNymError, SyncAccountError, SyncDeviceError,
@@ -127,6 +129,17 @@ impl AccountControllerCommander {
             .send(AccountCommand::RequestZkNym(Some(tx)))
             .map_err(RequestZkNymError::internal)?;
         rx.await.map_err(RequestZkNymError::internal)?
+    }
+
+    pub async fn set_static_api_addresses(
+        &self,
+        static_addresses: Option<Vec<SocketAddr>>,
+    ) -> Result<(), AccountCommandError> {
+        let (tx, rx) = ReturnSender::new();
+        self.command_tx
+            .send(AccountCommand::SetStaticApiAddresses(tx, static_addresses))
+            .map_err(AccountCommandError::internal)?;
+        rx.await.map_err(AccountCommandError::internal)?
     }
 }
 
