@@ -556,7 +556,21 @@ impl tunnel::Error {
                 ..
             }) => Some(ErrorStateReason::BadBandwidthIncrease),
             Self::DupFd(_) => Some(ErrorStateReason::DuplicateTunFd),
-            _ => None,
+            Self::AuthenticationNotPossible(_)
+            | Self::AuthenticatorAddressNotFound
+            | Self::ConnectToIpPacketRouter(_)
+            | Self::LookupGatewayIp { .. }
+            | Self::MixnetClient(_)
+            | Self::SetupStoragePaths(_)
+            | Self::StartMixnetClientTimeout
+            | Self::CreateGatewayClient(_)
+            | Self::BandwidthController(_)
+            | Self::Wireguard(_)
+            | Self::Cancelled => None,
+            #[cfg(target_os = "ios")]
+            Self::ResolveDns64(_) => None,
+            #[cfg(windows)]
+            Self::AddDefaultRouteListener(_) => None,
         }
     }
 }
