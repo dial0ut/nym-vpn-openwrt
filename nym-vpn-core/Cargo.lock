@@ -3679,7 +3679,7 @@ dependencies = [
  "libc",
  "thiserror 2.0.11",
  "tracing",
- "windows-sys 0.52.0",
+ "windows 0.59.0",
 ]
 
 [[package]]
@@ -3918,7 +3918,7 @@ dependencies = [
  "tracing",
  "triggered",
  "which",
- "windows-sys 0.52.0",
+ "windows 0.59.0",
  "winreg 0.52.0",
 ]
 
@@ -4002,9 +4002,9 @@ dependencies = [
  "thiserror 2.0.11",
  "tracing",
  "widestring",
- "windows 0.58.0",
- "windows-core 0.58.0",
- "windows-sys 0.52.0",
+ "windows 0.59.0",
+ "windows-core 0.59.0",
+ "windows-sys 0.59.0",
  "wmi",
 ]
 
@@ -4433,7 +4433,7 @@ version = "1.4.0-dev"
 dependencies = [
  "nym-dbus",
  "rs-release",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4456,7 +4456,7 @@ dependencies = [
  "tokio",
  "tracing",
  "widestring",
- "windows-sys 0.52.0",
+ "windows 0.59.0",
 ]
 
 [[package]]
@@ -5058,7 +5058,7 @@ dependencies = [
  "uniffi",
  "url",
  "vergen",
- "windows-sys 0.52.0",
+ "windows 0.59.0",
 ]
 
 [[package]]
@@ -5219,8 +5219,8 @@ dependencies = [
  "url",
  "vergen",
  "winapi",
+ "windows 0.59.0",
  "windows-service",
- "windows-sys 0.52.0",
  "zeroize",
 ]
 
@@ -5268,7 +5268,7 @@ dependencies = [
  "rand 0.8.5",
  "thiserror 2.0.11",
  "tracing",
- "windows-sys 0.52.0",
+ "windows 0.59.0",
  "x25519-dalek",
  "zeroize",
 ]
@@ -5279,11 +5279,10 @@ version = "1.4.0-dev"
 dependencies = [
  "futures",
  "nym-common",
- "socket2",
  "thiserror 2.0.11",
  "tokio",
  "tracing",
- "windows-sys 0.52.0",
+ "windows 0.59.0",
 ]
 
 [[package]]
