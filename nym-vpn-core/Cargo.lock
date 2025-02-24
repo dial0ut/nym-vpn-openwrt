@@ -4003,7 +4003,6 @@ dependencies = [
  "tracing",
  "widestring",
  "windows 0.59.0",
- "windows-core 0.59.0",
  "windows-sys 0.59.0",
  "wmi",
 ]
@@ -4433,7 +4432,7 @@ version = "1.4.0-dev"
 dependencies = [
  "nym-dbus",
  "rs-release",
- "windows-sys 0.59.0",
+ "windows 0.59.0",
 ]
 
 [[package]]
