@@ -51,3 +51,20 @@ Then
 ```sh
 cargo build --target=x86_64-pc-windows-gnu -p nym-vpn-lib
 ```
+
+## Build winfw for Windows
+
+Winfw is a library written in C++ that is a part of `nym-vpn-lib` and provides essential facilities for interacting with firewall on Windows.
+
+The library must be precompiled before building the `nym-vpn-lib` using the following command:
+
+```
+powershell -ExecutionPolicy Bypass -Command .\build-windows-modules.ps1 -BuildConfiguration <CONFIGURATION> -Platform <ARCH> [-CopyToBuildDir <COPY_TO_BUILD_DIR>]
+```
+
+Options:
+- `<CONFIGURATION>` - build configuration, either `Debug` or `Release`.
+- `<ARCH>` - CPU architecture, either `x64` or `ARM64`.
+- `COPY_TO_BUILD_DIR` - Optional flag, that when set to `1` makes sure that compiled files are copied to `build/winfw/<ARCH>-<CONFIGURATION>`.
+
+Note: the policy bypass for powershell scripts is only needed when running in the environment with restricted security policy.
