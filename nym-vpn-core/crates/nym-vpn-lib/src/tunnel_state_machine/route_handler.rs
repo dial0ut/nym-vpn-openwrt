@@ -19,16 +19,19 @@ pub const TUNNEL_FWMARK: u32 = 0x14d;
 pub enum RoutingConfig {
     Mixnet {
         tun_name: String,
+        #[cfg(not(target_os = "linux"))]
         entry_gateway_address: IpAddr,
     },
     Wireguard {
         entry_tun_name: String,
         exit_tun_name: String,
+        #[cfg(not(target_os = "linux"))]
         entry_gateway_address: IpAddr,
         exit_gateway_address: IpAddr,
     },
     WireguardNetstack {
         exit_tun_name: String,
+        #[cfg(not(target_os = "linux"))]
         entry_gateway_address: IpAddr,
     },
 }
@@ -107,6 +110,7 @@ impl RouteHandler {
         match routing_config {
             RoutingConfig::Mixnet {
                 tun_name,
+                #[cfg(not(target_os = "linux"))]
                 entry_gateway_address,
             } => {
                 #[cfg(not(target_os = "linux"))]
@@ -128,6 +132,7 @@ impl RouteHandler {
             RoutingConfig::Wireguard {
                 entry_tun_name,
                 exit_tun_name,
+                #[cfg(not(target_os = "linux"))]
                 entry_gateway_address,
                 exit_gateway_address,
             } => {
@@ -154,6 +159,7 @@ impl RouteHandler {
             }
             RoutingConfig::WireguardNetstack {
                 exit_tun_name,
+                #[cfg(not(target_os = "linux"))]
                 entry_gateway_address,
             } => {
                 #[cfg(not(target_os = "linux"))]
@@ -213,16 +219,3 @@ impl fmt::Display for Error {
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
-
-#[cfg(target_os = "linux")]
-impl DefaultInterface {
-    fn as_node(&self) -> Node {
-        let iface_name = self.interface_name().to_owned();
-        if let Some(gateway) = self.gateway_ip() {
-            Node::new(gateway, iface_name)
-        } else {
-            // based on tests this does not work!
-            Node::device(iface_name)
-        }
-    }
-}
