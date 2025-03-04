@@ -1,7 +1,7 @@
 // Copyright 2024 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{net::IpAddr, path::PathBuf, sync::Arc};
+use std::{net::IpAddr, path::PathBuf, sync::Arc, time::Instant};
 
 use bip39::Mnemonic;
 use nym_vpn_network_config::{
@@ -311,8 +311,8 @@ where
         loop {
             tokio::select! {
                 Some(command) = self.vpn_command_rx.recv() => {
-                    tracing::debug!("VPN: Received command: {command}");
-                    self.handle_service_command(command).await;
+                    tracing::debug!("Received command: {command}");
+                    self.handle_service_command_timed(command).await;
                 }
                 Some(event) = self.event_receiver.recv() => {
                     if let Err(e) = self.tunnel_event_tx.send(event.clone()) {
@@ -345,6 +345,16 @@ where
         tracing::info!("Exiting vpn service run loop");
 
         Ok(())
+    }
+
+    async fn handle_service_command_timed(&mut self, command: VpnServiceCommand) {
+        let start = Instant::now();
+        let command_str = command.to_string();
+        self.handle_service_command(command).await;
+        let elapsed = start.elapsed();
+        if elapsed.as_millis() > 100 {
+            tracing::warn!("{command_str} took {} ms to execute", elapsed.as_millis());
+        }
     }
 
     async fn handle_service_command(&mut self, command: VpnServiceCommand) {
@@ -613,7 +623,7 @@ where
             .send(TunnelCommand::Disconnect)
             .map_err(|e| {
                 tracing::error!("Failed to send command to disconnect: {}", e);
-                VpnServiceDisconnectError::Internal("failed to send dicsonnect command".to_owned())
+                VpnServiceDisconnectError::Internal("failed to send disconnect command".to_owned())
             })
     }
 
@@ -645,7 +655,6 @@ where
                 source: source.into(),
             })?;
 
-        // Manually restrict the set of possible network, until we handle this automatically
         let network_selected = NetworkEnvironments::try_from(network.as_str())
             .map_err(|_err| SetNetworkError::NetworkNotFound(network.to_owned()))?;
         global_config.network_name = network_selected.to_string();
@@ -660,7 +669,6 @@ where
             "Network updated to: {} (SERVICE RESTART REQUIRED!)",
             network_selected
         );
-
         Ok(())
     }
 
@@ -676,7 +684,6 @@ where
         &mut self,
         account: Zeroizing<String>,
     ) -> Result<(), AccountError> {
-        tracing::info!("Storing account");
         let mnemonic = Mnemonic::parse::<&str>(account.as_ref())?;
         self.account_command_tx
             .store_account(mnemonic)
