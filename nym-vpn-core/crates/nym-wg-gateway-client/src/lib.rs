@@ -14,7 +14,7 @@ pub use error::{Error, ErrorMessage};
 use nym_authenticator_client::{
     AuthClient, AuthenticatorResponse, AuthenticatorVersion, ClientMessage, QueryMessageImpl,
 };
-use nym_authenticator_requests::{v2, v3, v4};
+use nym_authenticator_requests::{v2, v3, v4, v5};
 use nym_bandwidth_controller::PreparedCredential;
 use nym_credentials_interface::{CredentialSpendingData, TicketType};
 use nym_crypto::asymmetric::{encryption, x25519::KeyPair};
@@ -87,6 +87,10 @@ impl WgGatewayLightClient {
                 pub_key: PeerPublicKey::new(self.public_key.to_bytes().into()),
                 version: AuthenticatorVersion::V4,
             })),
+            AuthenticatorVersion::V5 => ClientMessage::Query(Box::new(QueryMessageImpl {
+                pub_key: PeerPublicKey::new(self.public_key.to_bytes().into()),
+                version: AuthenticatorVersion::V5,
+            })),
             AuthenticatorVersion::UNKNOWN => return Err(Error::UnsupportedAuthenticatorVersion),
         };
         let response = self
@@ -155,7 +159,13 @@ impl WgGatewayLightClient {
                 pub_key: PeerPublicKey::new(self.public_key.to_bytes().into()),
                 credential,
             })),
+            // NOTE: looks like a bug here using v3. But we're leaving it as is since it's working
+            // and V4 is deprecated in favour of V5
             AuthenticatorVersion::V4 => ClientMessage::TopUp(Box::new(v3::topup::TopUpMessage {
+                pub_key: PeerPublicKey::new(self.public_key.to_bytes().into()),
+                credential,
+            })),
+            AuthenticatorVersion::V5 => ClientMessage::TopUp(Box::new(v5::topup::TopUpMessage {
                 pub_key: PeerPublicKey::new(self.public_key.to_bytes().into()),
                 credential,
             })),
@@ -349,6 +359,11 @@ impl WgGatewayClient {
                     pub_key: PeerPublicKey::new(self.keypair.public_key().to_bytes().into()),
                 }))
             }
+            AuthenticatorVersion::V5 => {
+                ClientMessage::Initial(Box::new(v5::registration::InitMessage {
+                    pub_key: PeerPublicKey::new(self.keypair.public_key().to_bytes().into()),
+                }))
+            }
             AuthenticatorVersion::UNKNOWN => return Err(Error::UnsupportedAuthenticatorVersion),
         };
         let response = self
@@ -401,6 +416,17 @@ impl WgGatewayClient {
                     AuthenticatorVersion::V4 => {
                         ClientMessage::Final(Box::new(v4::registration::FinalMessage {
                             gateway_client: v4::registration::GatewayClient::new(
+                                self.keypair.private_key(),
+                                pending_registration_response.pub_key().inner(),
+                                pending_registration_response.private_ips().into(),
+                                pending_registration_response.nonce(),
+                            ),
+                            credential,
+                        }))
+                    }
+                    AuthenticatorVersion::V5 => {
+                        ClientMessage::Final(Box::new(v5::registration::FinalMessage {
+                            gateway_client: v5::registration::GatewayClient::new(
                                 self.keypair.private_key(),
                                 pending_registration_response.pub_key().inner(),
                                 pending_registration_response.private_ips(),
