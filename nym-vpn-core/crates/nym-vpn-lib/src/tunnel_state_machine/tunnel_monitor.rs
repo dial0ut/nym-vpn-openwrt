@@ -170,6 +170,7 @@ pub struct TunnelMonitorHandle {
 
 impl TunnelMonitorHandle {
     pub fn cancel(&self) {
+        tracing::info!("Cancelling tunnel monitor handle");
         self.cancel_token.cancel();
     }
 
@@ -458,7 +459,7 @@ impl TunnelMonitor {
         }
 
         tracing::debug!("Wait for tunnel to exit");
-        tunnel_handle.cancel();
+        tunnel_handle.cancel().await;
 
         let tun_devices = tunnel_handle
             .wait()
