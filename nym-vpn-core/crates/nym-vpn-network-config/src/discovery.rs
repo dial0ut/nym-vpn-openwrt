@@ -15,6 +15,7 @@ use nym_vpn_api_client::{
 use nym_api_requests::NymNetworkDetailsResponse;
 use nym_validator_client::nym_api::{Client as NymApiClient, NymApiClientExt};
 
+use crate::network_compatibility::NetworkCompatibility;
 use crate::{
     system_configuration::SystemConfiguration, AccountManagement, FeatureFlags, SystemMessages,
 };
@@ -37,6 +38,7 @@ pub struct Discovery {
     pub(super) feature_flags: Option<FeatureFlags>,
     pub(super) system_configuration: Option<SystemConfiguration>,
     pub(super) system_messages: SystemMessages,
+    pub(super) network_compatibility: Option<NetworkCompatibility>,
 }
 
 // Include the generated Default implementation
@@ -193,6 +195,10 @@ impl TryFrom<NymWellknownDiscoveryItemResponse> for Discovery {
             .map(SystemMessages::from)
             .unwrap_or_default();
 
+        let network_compatibility = discovery
+            .network_compatibility
+            .map(NetworkCompatibility::from);
+
         Ok(Self {
             network_name: discovery.network_name,
             nym_api_url: discovery.nym_api_url.parse()?,
@@ -201,6 +207,7 @@ impl TryFrom<NymWellknownDiscoveryItemResponse> for Discovery {
             feature_flags,
             system_configuration,
             system_messages,
+            network_compatibility,
         })
     }
 }
@@ -241,6 +248,7 @@ mod tests {
 
     use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
+    use crate::network_compatibility::NetworkCompatibility;
     use crate::{
         account_management::AccountManagementPaths, feature_flags::FlagValue,
         system_messages::Properties, SystemMessage,
@@ -298,7 +306,14 @@ mod tests {
                         "modal": "true"
                     }
                 }
-            ]
+            ],
+            "network_compatibility": {
+                "core": "1.1.1",
+                "ios": "1.1.1",
+                "macos": "1.1.1",
+                "tauri": "1.1.1",
+                "android": "1.1.1"
+            }
         }"#;
         let discovery: NymWellknownDiscoveryItemResponse = serde_json::from_str(json).unwrap();
         let network: Discovery = discovery.try_into().unwrap();
@@ -346,6 +361,13 @@ mod tests {
                 )])),
             }]),
             system_configuration: None,
+            network_compatibility: Some(NetworkCompatibility {
+                core: "1.1.1".to_string(),
+                ios: "1.1.1".to_string(),
+                macos: "1.1.1".to_string(),
+                tauri: "1.1.1".to_string(),
+                android: "1.1.1".to_string(),
+            }),
         };
         assert_eq!(network, expected_network);
     }

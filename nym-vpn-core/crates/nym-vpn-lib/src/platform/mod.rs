@@ -64,6 +64,7 @@ use tokio::{runtime::Runtime, sync::Mutex};
 
 use self::error::VpnError;
 use crate::gateway_directory::GatewayClient;
+use crate::platform::uniffi_custom_impls::NetworkCompatibility;
 #[cfg(target_os = "android")]
 use crate::tunnel_provider::android::AndroidTunProvider;
 #[cfg(target_os = "ios")]
@@ -149,6 +150,14 @@ pub fn initLogger(path: Option<PathBuf>, debug_level: Option<String>) {
 #[uniffi::export]
 pub fn getSystemMessages() -> Result<Vec<SystemMessage>, VpnError> {
     RUNTIME.block_on(environment::get_system_messages())
+}
+
+/// Returns the oldest client versions that are compatible with the
+/// network environment. (environment must be initialized first)
+#[allow(non_snake_case)]
+#[uniffi::export]
+pub fn getNetworkCompatibilityVersions() -> Result<Option<NetworkCompatibility>, VpnError> {
+    RUNTIME.block_on(environment::get_network_compatibility())
 }
 
 /// Returns the account links for the current network environment
