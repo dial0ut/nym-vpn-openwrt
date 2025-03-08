@@ -242,8 +242,25 @@ where
                 .await
     }
 
+    async fn is_all_ticket_types_above_soft_threshold(&self) -> Result<bool, AccountCommandError> {
+        self.credential_storage
+            .lock()
+            .await
+            .is_all_ticket_types_above_soft_threshold()
+            .await
+            .map_err(AccountCommandError::internal)
+    }
+
     async fn request_zk_nym_if_ready(&self) {
         if !self.is_background_zk_nym_refresh_active().await {
+            return;
+        }
+        if self
+            .is_all_ticket_types_above_soft_threshold()
+            .await
+            .unwrap_or(false)
+        {
+            tracing::debug!("All ticket types are above soft threshold, not requesting zk-nym");
             return;
         }
         match self.shared_state().ready_to_request_zk_nym().await {
@@ -251,7 +268,7 @@ where
                 self.queue_command(AccountCommand::RequestZkNym(None));
             }
             not_ready => {
-                tracing::debug!("Not trying to request zk-nym: {not_ready}");
+                tracing::debug!("Not ready to try to request zk-nym: {not_ready}");
             }
         }
     }
@@ -872,7 +889,7 @@ where
     }
 
     pub async fn run(mut self) {
-        tracing::info!("Account controller initialized successfully");
+        tracing::debug!("Account controller initialized successfully");
         self.print_info().await;
 
         // Timer to check if any command tasks have finished. This just needs to be something small
