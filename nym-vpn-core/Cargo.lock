@@ -4428,6 +4428,7 @@ dependencies = [
 name = "nym-routing"
 version = "1.6.0-beta"
 dependencies = [
+ "async-stream",
  "bitflags 2.9.0",
  "futures",
  "ipnetwork",
