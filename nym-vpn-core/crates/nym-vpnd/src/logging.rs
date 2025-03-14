@@ -21,7 +21,7 @@ pub struct Options {
     pub enable_stdout_log: bool,
 }
 
-static INFO_CRATES: &[&str; 16] = &[
+static INFO_CRATES: &[&str; 12] = &[
     "hyper",
     "netlink_proto",
     "hickory_proto",
@@ -31,12 +31,8 @@ static INFO_CRATES: &[&str; 16] = &[
     "rustls",
     "nym_statistics_common",
     "nym_client_core",
-    "nym_vpn_account_controller",
-    "nym_vpn_store",
-    "nym_vpn_api_client::jwt",
     "nym_sphinx_chunking",
     "nym_sphinx::preparer",
-    "nym_authenticator_client",
     "nym_task::manager",
 ];
 
