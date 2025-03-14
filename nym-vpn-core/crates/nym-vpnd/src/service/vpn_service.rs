@@ -39,7 +39,7 @@ use crate::config::GlobalConfigFile;
 
 use super::{
     config::{NetworkEnvironments, NymVpnServiceConfig, DEFAULT_CONFIG_FILE},
-    error::{AccountError, Error, Result, SetNetworkError},
+    error::{AccountError, Error, Result, SetNetworkError, VpnServiceDeleteLogFileError},
     VpnServiceConnectError, VpnServiceDisconnectError,
 };
 
@@ -89,6 +89,10 @@ pub enum VpnServiceCommand {
     ConfirmZkNymIdDownloaded(oneshot::Sender<Result<(), AccountError>>, String),
     GetAvailableTickets(
         oneshot::Sender<Result<AvailableTicketbooks, AccountError>>,
+        (),
+    ),
+    DeleteLogFile(
+        oneshot::Sender<Result<(), VpnServiceDeleteLogFileError>>,
         (),
     ),
 }
@@ -146,6 +150,9 @@ where
     // Broadcast channel for sending tunnel events to the outside world
     tunnel_event_tx: broadcast::Sender<TunnelEvent>,
 
+    // Send command to delete and recreate logging file
+    file_logging_event_tx: mpsc::Sender<()>,
+
     // Send commands to the account controller
     account_command_tx: AccountControllerCommander,
 
@@ -181,6 +188,7 @@ impl NymVpnService<nym_vpn_lib::storage::VpnClientOnDiskStorage> {
     pub fn spawn(
         vpn_command_rx: mpsc::UnboundedReceiver<VpnServiceCommand>,
         tunnel_event_tx: broadcast::Sender<TunnelEvent>,
+        file_logging_event_tx: mpsc::Sender<()>,
         shutdown_token: CancellationToken,
         network_env: Network,
         user_agent: UserAgent,
@@ -190,6 +198,7 @@ impl NymVpnService<nym_vpn_lib::storage::VpnClientOnDiskStorage> {
             match NymVpnService::new(
                 vpn_command_rx,
                 tunnel_event_tx,
+                file_logging_event_tx,
                 shutdown_token,
                 network_env,
                 user_agent,
@@ -218,6 +227,7 @@ impl NymVpnService<nym_vpn_lib::storage::VpnClientOnDiskStorage> {
     pub async fn new(
         vpn_command_rx: mpsc::UnboundedReceiver<VpnServiceCommand>,
         tunnel_event_tx: broadcast::Sender<TunnelEvent>,
+        file_logging_event_tx: mpsc::Sender<()>,
         shutdown_token: CancellationToken,
         network_env: Network,
         user_agent: UserAgent,
@@ -293,6 +303,7 @@ impl NymVpnService<nym_vpn_lib::storage::VpnClientOnDiskStorage> {
             shared_account_state,
             vpn_command_rx,
             tunnel_event_tx,
+            file_logging_event_tx,
             account_command_tx,
             config_file,
             data_dir,
@@ -473,6 +484,10 @@ where
             }
             VpnServiceCommand::GetAvailableTickets(tx, ()) => {
                 let result = self.handle_get_available_tickets().await;
+                let _ = tx.send(result);
+            }
+            VpnServiceCommand::DeleteLogFile(tx, ()) => {
+                let result = self.handle_delete_log_file().await;
                 let _ = tx.send(result);
             }
         }
@@ -854,5 +869,21 @@ where
             .get_available_tickets()
             .await
             .map_err(|source| AccountError::AccountCommandError { source })
+    }
+
+    async fn handle_delete_log_file(&self) -> Result<(), VpnServiceDeleteLogFileError> {
+        match self.file_logging_event_tx.try_send(()) {
+            Ok(_) => {}
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                tracing::debug!("Already trying to delete file");
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => {
+                tracing::error!("Failed to send command to delete log file: channel is closed");
+                return Err(VpnServiceDeleteLogFileError::Internal(
+                    "failed to send delete log command".to_owned(),
+                ));
+            }
+        }
+        Ok(())
     }
 }

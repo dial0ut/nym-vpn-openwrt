@@ -10,16 +10,16 @@ use nym_vpn_lib_types::TunnelEvent;
 use nym_vpn_proto::{
     conversions::ConversionError, nym_vpnd_server::NymVpnd, AccountError,
     ConfirmZkNymDownloadedRequest, ConfirmZkNymDownloadedResponse, ConnectRequest, ConnectResponse,
-    DisconnectResponse, ForgetAccountResponse, GetAccountIdentityResponse, GetAccountLinksRequest,
-    GetAccountLinksResponse, GetAccountStateResponse, GetAccountUsageResponse,
-    GetAvailableTicketsResponse, GetDeviceIdentityResponse, GetDeviceZkNymsResponse,
-    GetDevicesResponse, GetFeatureFlagsResponse, GetNetworkCompatibilityResponse,
-    GetSystemMessagesResponse, GetZkNymByIdRequest, GetZkNymByIdResponse,
-    GetZkNymsAvailableForDownloadResponse, InfoResponse, IsAccountStoredResponse,
-    ListCountriesRequest, ListCountriesResponse, ListGatewaysRequest, ListGatewaysResponse,
-    RefreshAccountStateResponse, RegisterDeviceResponse, RequestZkNymResponse,
-    ResetDeviceIdentityRequest, ResetDeviceIdentityResponse, SetNetworkRequest, SetNetworkResponse,
-    StoreAccountRequest, StoreAccountResponse, TunnelState,
+    DeleteLogFileResponse, DisconnectResponse, ForgetAccountResponse, GetAccountIdentityResponse,
+    GetAccountLinksRequest, GetAccountLinksResponse, GetAccountStateResponse,
+    GetAccountUsageResponse, GetAvailableTicketsResponse, GetDeviceIdentityResponse,
+    GetDeviceZkNymsResponse, GetDevicesResponse, GetFeatureFlagsResponse,
+    GetNetworkCompatibilityResponse, GetSystemMessagesResponse, GetZkNymByIdRequest,
+    GetZkNymByIdResponse, GetZkNymsAvailableForDownloadResponse, InfoResponse,
+    IsAccountStoredResponse, ListCountriesRequest, ListCountriesResponse, ListGatewaysRequest,
+    ListGatewaysResponse, RefreshAccountStateResponse, RegisterDeviceResponse,
+    RequestZkNymResponse, ResetDeviceIdentityRequest, ResetDeviceIdentityResponse,
+    SetNetworkRequest, SetNetworkResponse, StoreAccountRequest, StoreAccountResponse, TunnelState,
 };
 use zeroize::Zeroizing;
 
@@ -862,6 +862,34 @@ impl NymVpnd for CommandInterface {
                 resp: Some(nym_vpn_proto::get_available_tickets_response::Resp::Error(
                     nym_vpn_proto::AccountError::from(err),
                 )),
+            },
+        };
+
+        Ok(tonic::Response::new(response))
+    }
+
+    async fn delete_log_file(
+        &self,
+        _request: tonic::Request<()>,
+    ) -> Result<tonic::Response<DeleteLogFileResponse>, tonic::Status> {
+        tracing::debug!("Got delete log file request");
+
+        let result = CommandInterfaceConnectionHandler::new(self.vpn_command_tx.clone())
+            .handle_delete_log_file()
+            .await
+            .map_err(|err| {
+                tracing::error!("Failed to get available tickets: {:?}", err);
+                tonic::Status::internal("Failed to get available tickets")
+            })?;
+
+        let response = match result {
+            Ok(_) => DeleteLogFileResponse {
+                success: true,
+                error: None,
+            },
+            Err(err) => DeleteLogFileResponse {
+                success: false,
+                error: Some(nym_vpn_proto::DeleteLogFileError::from(err)),
             },
         };
 
