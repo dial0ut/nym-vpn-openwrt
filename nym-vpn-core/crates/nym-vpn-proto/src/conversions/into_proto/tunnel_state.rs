@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use nym_vpn_lib_types::{
-    ActionAfterDisconnect, ConnectionData, ErrorStateReason, ForgetAccountError, Gateway,
+    ActionAfterDisconnect, ClientErrorReason, ConnectionData, ForgetAccountError, Gateway,
     MixnetConnectionData, RegisterDeviceError, StoreAccountError, SyncAccountError,
     SyncDeviceError, TunnelConnectionData, TunnelState, VpnApiErrorResponse,
     WireguardConnectionData, WireguardNode,
@@ -14,21 +14,18 @@ use crate::{
         Wireguard as ProtoWireguardConnectionDataVariant,
     },
     tunnel_state::{
-        error::ErrorStateReason as ProtoErrorStateReason,
-        ActionAfterDisconnect as ProtoActionAfterDisconnect,
-        BaseErrorStateReason as ProtoBaseErrorStateReason, Connected as ProtoConnected,
+        ActionAfterDisconnect as ProtoActionAfterDisconnect, Connected as ProtoConnected,
         Connecting as ProtoConnecting, Disconnected as ProtoDisconnected,
-        Disconnecting as ProtoDisconnecting, Error as ProtoError, Offline as ProtoOffline,
-        State as ProtoState,
+        Disconnecting as ProtoDisconnecting, Error as ProtoError, ErrorStateReason,
+        Offline as ProtoOffline, State as ProtoState,
     },
     Address as ProtoAddress, ConnectionData as ProtoConnectionData,
     ForgetAccountError as ProtoForgetAccountError, Gateway as ProtoGateway,
     MixnetConnectionData as ProtoMixnetConnectionData,
-    RegisterDeviceError as ProtoRegisterDeviceError, RequestZkNymBundle as ProtoRequestZkNymBundle,
-    RequestZkNymError as ProtoRequestZkNymError, RequestZkNymSuccess as ProtoRequestZkNymSuccess,
-    StoreAccountError as ProtoStoreAccountError, SyncAccountError as ProtoSyncAccountError,
-    SyncDeviceError as ProtoSyncDeviceError, TunnelConnectionData as ProtoTunnelConnectionData,
-    TunnelState as ProtoTunnelState, VpnApiErrorResponse as ProtoVpnApiErrorResponse,
+    RegisterDeviceError as ProtoRegisterDeviceError, StoreAccountError as ProtoStoreAccountError,
+    SyncAccountError as ProtoSyncAccountError, SyncDeviceError as ProtoSyncDeviceError,
+    TunnelConnectionData as ProtoTunnelConnectionData, TunnelState as ProtoTunnelState,
+    VpnApiErrorResponse as ProtoVpnApiErrorResponse,
     WireguardConnectionData as ProtoWireguardConnectionData, WireguardNode as ProtoWireguardNode,
 };
 
@@ -43,71 +40,53 @@ impl From<ActionAfterDisconnect> for ProtoActionAfterDisconnect {
     }
 }
 
-impl From<ErrorStateReason> for ProtoErrorStateReason {
-    fn from(value: ErrorStateReason) -> Self {
+impl From<ClientErrorReason> for ProtoError {
+    fn from(value: ClientErrorReason) -> Self {
         match value {
-            ErrorStateReason::Firewall => {
-                Self::BaseReason(ProtoBaseErrorStateReason::Firewall as i32)
-            }
-            ErrorStateReason::Routing => {
-                Self::BaseReason(ProtoBaseErrorStateReason::Routing as i32)
-            }
-            ErrorStateReason::Dns => Self::BaseReason(ProtoBaseErrorStateReason::Dns as i32),
-            ErrorStateReason::TunDevice => {
-                Self::BaseReason(ProtoBaseErrorStateReason::TunDevice as i32)
-            }
-            ErrorStateReason::TunnelProvider => {
-                Self::BaseReason(ProtoBaseErrorStateReason::TunnelProvider as i32)
-            }
-            ErrorStateReason::StartLocalDnsResolver => {
-                Self::BaseReason(ProtoBaseErrorStateReason::StartLocalDnsResolver as i32)
-            }
-            ErrorStateReason::ResolveGatewayAddrs => {
-                Self::BaseReason(ProtoBaseErrorStateReason::ResolveGatewayAddrs as i32)
-            }
-            ErrorStateReason::SameEntryAndExitGateway => {
-                Self::BaseReason(ProtoBaseErrorStateReason::SameEntryAndExitGateway as i32)
-            }
-            ErrorStateReason::InvalidEntryGatewayCountry => {
-                Self::BaseReason(ProtoBaseErrorStateReason::InvalidEntryGatewayCountry as i32)
-            }
-            ErrorStateReason::InvalidExitGatewayCountry => {
-                Self::BaseReason(ProtoBaseErrorStateReason::InvalidExitGatewayCountry as i32)
-            }
-            ErrorStateReason::BadBandwidthIncrease => {
-                Self::BaseReason(ProtoBaseErrorStateReason::BadBandwidthIncrease as i32)
-            }
-            ErrorStateReason::DuplicateTunFd => {
-                Self::BaseReason(ProtoBaseErrorStateReason::DuplicateTunFd as i32)
-            }
-            ErrorStateReason::Internal(_message) => {
-                // todo: pass error message!
-                Self::BaseReason(ProtoBaseErrorStateReason::Internal as i32)
-            }
-            ErrorStateReason::SyncAccount(sync_account_error) => {
-                Self::SyncAccount(sync_account_error.into())
-            }
-            ErrorStateReason::SyncDevice(sync_device_error) => {
-                Self::SyncDevice(sync_device_error.into())
-            }
-            ErrorStateReason::RegisterDevice(register_device_error) => {
-                Self::RegisterDevice(register_device_error.into())
-            }
-            ErrorStateReason::RequestZkNym(request_zk_nym_error) => {
-                Self::RequestZkNym(request_zk_nym_error.into())
-            }
-            ErrorStateReason::RequestZkNymBundle { successes, failed } => {
-                Self::RequestZkNymBundle(ProtoRequestZkNymBundle {
-                    successes: successes
-                        .into_iter()
-                        .map(ProtoRequestZkNymSuccess::from)
-                        .collect(),
-                    failures: failed
-                        .into_iter()
-                        .map(ProtoRequestZkNymError::from)
-                        .collect(),
-                })
-            }
+            ClientErrorReason::Firewall => ProtoError {
+                reason: ErrorStateReason::Firewall.into(),
+                detail: None,
+            },
+            ClientErrorReason::Routing => ProtoError {
+                reason: ErrorStateReason::Routing.into(),
+                detail: None,
+            },
+            ClientErrorReason::SameEntryAndExitGateway => ProtoError {
+                reason: ErrorStateReason::SameEntryAndExitGateway.into(),
+                detail: None,
+            },
+            ClientErrorReason::InvalidEntryGatewayCountry => ProtoError {
+                reason: ErrorStateReason::InvalidEntryGatewayCountry.into(),
+                detail: None,
+            },
+            ClientErrorReason::InvalidExitGatewayCountry => ProtoError {
+                reason: ErrorStateReason::InvalidExitGatewayCountry.into(),
+                detail: None,
+            },
+            ClientErrorReason::MaxDevicesReached => ProtoError {
+                reason: ErrorStateReason::MaxDevicesReached.into(),
+                detail: None,
+            },
+            ClientErrorReason::BandwidthExceeded => ProtoError {
+                reason: ErrorStateReason::BandwidthExceeded.into(),
+                detail: None,
+            },
+            ClientErrorReason::SubscriptionExpired => ProtoError {
+                reason: ErrorStateReason::SubscriptionExpired.into(),
+                detail: None,
+            },
+            ClientErrorReason::Dns(detail) => ProtoError {
+                reason: ErrorStateReason::Dns.into(),
+                detail,
+            },
+            ClientErrorReason::Api(detail) => ProtoError {
+                reason: ErrorStateReason::Api.into(),
+                detail,
+            },
+            ClientErrorReason::Internal(detail) => ProtoError {
+                reason: ErrorStateReason::Internal.into(),
+                detail,
+            },
         }
     }
 }
@@ -294,9 +273,7 @@ impl From<TunnelState> for ProtoTunnelState {
                 })
             }
             TunnelState::Offline { reconnect } => ProtoState::Offline(ProtoOffline { reconnect }),
-            TunnelState::Error(reason) => ProtoState::Error(ProtoError {
-                error_state_reason: Some(ProtoErrorStateReason::from(reason)),
-            }),
+            TunnelState::Error(reason) => ProtoState::Error(ProtoError::from(reason)),
         };
 
         ProtoTunnelState {

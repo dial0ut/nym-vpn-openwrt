@@ -7,10 +7,11 @@ use std::{
 };
 
 use nym_vpn_lib_types::{
-    ActionAfterDisconnect, ConnectionData, ErrorStateReason, Gateway, MixnetConnectionData,
+    ActionAfterDisconnect, ClientErrorReason, ConnectionData, Gateway, MixnetConnectionData,
     NymAddress, TunnelConnectionData, TunnelState, WireguardConnectionData, WireguardNode,
 };
 
+use crate::tunnel_state::ErrorStateReason;
 use crate::{
     conversions::ConversionError,
     tunnel_connection_data::{
@@ -18,9 +19,7 @@ use crate::{
         Wireguard as ProtoWireguardConnectionDataVariant,
     },
     tunnel_state::{
-        error::ErrorStateReason as ProtoErrorStateReason,
-        ActionAfterDisconnect as ProtoActionAfterDisconnect,
-        BaseErrorStateReason as ProtoBaseErrorStateReason, Connected as ProtoConnected,
+        ActionAfterDisconnect as ProtoActionAfterDisconnect, Connected as ProtoConnected,
         Connecting as ProtoConnecting, Disconnected as ProtoDisconnected,
         Disconnecting as ProtoDisconnecting, Error as ProtoError, Offline as ProtoOffline,
         State as ProtoState,
@@ -42,66 +41,24 @@ impl From<ProtoActionAfterDisconnect> for ActionAfterDisconnect {
     }
 }
 
-impl TryFrom<ProtoErrorStateReason> for ErrorStateReason {
-    type Error = ConversionError;
-
-    fn try_from(value: ProtoErrorStateReason) -> Result<Self, Self::Error> {
-        Ok(match value {
-            ProtoErrorStateReason::BaseReason(reason) => {
-                let proto_base_reason = ProtoBaseErrorStateReason::try_from(reason)
-                    .map_err(|e| ConversionError::Decode("BaseErrorStateReason.base_reason", e))?;
-
-                Self::from(proto_base_reason)
+impl From<ProtoError> for ClientErrorReason {
+    fn from(value: ProtoError) -> Self {
+        match value.reason() {
+            ErrorStateReason::Firewall => ClientErrorReason::Firewall,
+            ErrorStateReason::Routing => ClientErrorReason::Routing,
+            ErrorStateReason::SameEntryAndExitGateway => ClientErrorReason::SameEntryAndExitGateway,
+            ErrorStateReason::InvalidEntryGatewayCountry => {
+                ClientErrorReason::InvalidEntryGatewayCountry
             }
-            ProtoErrorStateReason::SyncAccount(sync_account_error) => {
-                Self::SyncAccount(sync_account_error.try_into()?)
+            ErrorStateReason::InvalidExitGatewayCountry => {
+                ClientErrorReason::InvalidExitGatewayCountry
             }
-            ProtoErrorStateReason::SyncDevice(sync_device_error) => {
-                Self::SyncDevice(sync_device_error.try_into()?)
-            }
-            ProtoErrorStateReason::RegisterDevice(register_device_error) => {
-                Self::RegisterDevice(register_device_error.try_into()?)
-            }
-            ProtoErrorStateReason::RequestZkNym(request_zk_nym_general_error) => {
-                Self::RequestZkNym(request_zk_nym_general_error.try_into()?)
-            }
-            ProtoErrorStateReason::RequestZkNymBundle(request_zk_nym_bundle) => {
-                let failures = request_zk_nym_bundle
-                    .failures
-                    .into_iter()
-                    .map(|outcome| outcome.try_into())
-                    .collect::<Result<Vec<_>, _>>()?;
-                Self::RequestZkNymBundle {
-                    successes: request_zk_nym_bundle
-                        .successes
-                        .into_iter()
-                        .map(Into::into)
-                        .collect(),
-                    failed: failures,
-                }
-            }
-        })
-    }
-}
-
-impl From<ProtoBaseErrorStateReason> for ErrorStateReason {
-    fn from(value: ProtoBaseErrorStateReason) -> Self {
-        match value {
-            ProtoBaseErrorStateReason::Firewall => Self::Firewall,
-            ProtoBaseErrorStateReason::Routing => Self::Routing,
-            ProtoBaseErrorStateReason::Dns => Self::Dns,
-            ProtoBaseErrorStateReason::TunDevice => Self::TunDevice,
-            ProtoBaseErrorStateReason::TunnelProvider => Self::TunnelProvider,
-            ProtoBaseErrorStateReason::ResolveGatewayAddrs => Self::ResolveGatewayAddrs,
-            ProtoBaseErrorStateReason::StartLocalDnsResolver => Self::StartLocalDnsResolver,
-            ProtoBaseErrorStateReason::SameEntryAndExitGateway => Self::SameEntryAndExitGateway,
-            ProtoBaseErrorStateReason::InvalidEntryGatewayCountry => {
-                Self::InvalidEntryGatewayCountry
-            }
-            ProtoBaseErrorStateReason::InvalidExitGatewayCountry => Self::InvalidExitGatewayCountry,
-            ProtoBaseErrorStateReason::BadBandwidthIncrease => Self::BadBandwidthIncrease,
-            ProtoBaseErrorStateReason::DuplicateTunFd => Self::DuplicateTunFd,
-            ProtoBaseErrorStateReason::Internal => Self::Internal("todo: fix me!".to_owned()),
+            ErrorStateReason::MaxDevicesReached => ClientErrorReason::MaxDevicesReached,
+            ErrorStateReason::BandwidthExceeded => ClientErrorReason::BandwidthExceeded,
+            ErrorStateReason::SubscriptionExpired => ClientErrorReason::SubscriptionExpired,
+            ErrorStateReason::Dns => ClientErrorReason::Dns(value.detail),
+            ErrorStateReason::Api => ClientErrorReason::Api(value.detail),
+            ErrorStateReason::Internal => ClientErrorReason::Internal(value.detail),
         }
     }
 }
@@ -136,13 +93,7 @@ impl TryFrom<ProtoTunnelState> for TunnelState {
 
                 Self::Connected { connection_data }
             }
-            ProtoState::Error(ProtoError { error_state_reason }) => {
-                let reason = error_state_reason
-                    .ok_or(ConversionError::NoValueSet("TunnelState.error"))
-                    .and_then(ErrorStateReason::try_from)?;
-
-                Self::Error(reason)
-            }
+            ProtoState::Error(error_state_reason) => Self::Error(error_state_reason.into()),
             ProtoState::Offline(ProtoOffline { reconnect }) => Self::Offline { reconnect },
         })
     }

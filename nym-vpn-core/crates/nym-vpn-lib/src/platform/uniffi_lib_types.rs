@@ -8,12 +8,13 @@ use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use nym_vpn_api_client::response::NymErrorResponse;
 use nym_vpn_lib_types::{
     ActionAfterDisconnect as CoreActionAfterDisconnect, BandwidthEvent as CoreBandwidthEvent,
-    ConnectionData as CoreConnectionData, ConnectionEvent as CoreConnectionEvent,
+    ClientErrorReason, ConnectionData as CoreConnectionData,
+    ConnectionEvent as CoreConnectionEvent,
     ConnectionStatisticsEvent as CoreConnectionStatisticsEvent,
-    ErrorStateReason as CoreErrorStateReason, ForgetAccountError as CoreForgetAccountError,
-    Gateway as CoreGateway, MixnetConnectionData as CoreMixnetConnectionData,
-    MixnetEvent as CoreMixnetEvent, NymAddress as CoreNymAddress,
-    RegisterDeviceError as CoreRegisterDeviceError, RequestZkNymError as CoreRequestZkNymError,
+    ForgetAccountError as CoreForgetAccountError, Gateway as CoreGateway,
+    MixnetConnectionData as CoreMixnetConnectionData, MixnetEvent as CoreMixnetEvent,
+    NymAddress as CoreNymAddress, RegisterDeviceError as CoreRegisterDeviceError,
+    RequestZkNymError as CoreRequestZkNymError,
     RequestZkNymErrorReason as CoreRequestZkNymErrorReason,
     RequestZkNymSuccess as CoreRequestZkNymSuccess, SphinxPacketRates as CoreSphinxPacketRates,
     StoreAccountError as CoreStoreAccountError, SyncAccountError as CoreSyncAccountError,
@@ -223,25 +224,15 @@ impl From<CoreActionAfterDisconnect> for ActionAfterDisconnect {
 pub enum ErrorStateReason {
     Firewall,
     Routing,
-    Dns,
-    TunDevice,
-    TunnelProvider,
-    ResolveGatewayAddrs,
-    StartLocalDnsResolver,
     SameEntryAndExitGateway,
     InvalidEntryGatewayCountry,
     InvalidExitGatewayCountry,
-    BadBandwidthIncrease,
-    DuplicateTunFd,
-    SyncAccount(SyncAccountError),
-    SyncDevice(SyncDeviceError),
-    RegisterDevice(RegisterDeviceError),
-    RequestZkNym(RequestZkNymError),
-    RequestZkNymBundle {
-        successes: Vec<RequestZkNymSuccess>,
-        failed: Vec<RequestZkNymError>,
-    },
-    Internal(String),
+    MaxDevicesReached,
+    BandwidthExceeded,
+    SubscriptionExpired,
+    Dns(Option<String>),
+    Api(Option<String>),
+    Internal(Option<String>),
 }
 
 #[derive(thiserror::Error, uniffi::Error, Debug, Clone, PartialEq, Eq)]
@@ -472,35 +463,20 @@ impl From<NymErrorResponse> for VpnApiErrorResponse {
     }
 }
 
-impl From<CoreErrorStateReason> for ErrorStateReason {
-    fn from(value: CoreErrorStateReason) -> Self {
+impl From<ClientErrorReason> for ErrorStateReason {
+    fn from(value: ClientErrorReason) -> Self {
         match value {
-            CoreErrorStateReason::Firewall => Self::Firewall,
-            CoreErrorStateReason::Routing => Self::Routing,
-            CoreErrorStateReason::Dns => Self::Dns,
-            CoreErrorStateReason::TunDevice => Self::TunDevice,
-            CoreErrorStateReason::TunnelProvider => Self::TunnelProvider,
-            CoreErrorStateReason::ResolveGatewayAddrs => Self::ResolveGatewayAddrs,
-            CoreErrorStateReason::StartLocalDnsResolver => Self::StartLocalDnsResolver,
-            CoreErrorStateReason::SameEntryAndExitGateway => Self::SameEntryAndExitGateway,
-            CoreErrorStateReason::InvalidEntryGatewayCountry => Self::InvalidEntryGatewayCountry,
-            CoreErrorStateReason::InvalidExitGatewayCountry => Self::InvalidExitGatewayCountry,
-            CoreErrorStateReason::BadBandwidthIncrease => Self::BadBandwidthIncrease,
-            CoreErrorStateReason::DuplicateTunFd => Self::DuplicateTunFd,
-            CoreErrorStateReason::SyncAccount(err) => Self::SyncAccount(err.into()),
-            CoreErrorStateReason::SyncDevice(err) => Self::SyncDevice(err.into()),
-            CoreErrorStateReason::RegisterDevice(err) => Self::RegisterDevice(err.into()),
-            CoreErrorStateReason::RequestZkNym(err) => Self::RequestZkNym(err.into()),
-            CoreErrorStateReason::RequestZkNymBundle { successes, failed } => {
-                Self::RequestZkNymBundle {
-                    successes: successes
-                        .into_iter()
-                        .map(RequestZkNymSuccess::from)
-                        .collect(),
-                    failed: failed.into_iter().map(RequestZkNymError::from).collect(),
-                }
-            }
-            CoreErrorStateReason::Internal(message) => Self::Internal(message),
+            ClientErrorReason::Firewall => Self::Firewall,
+            ClientErrorReason::Routing => Self::Routing,
+            ClientErrorReason::SameEntryAndExitGateway => Self::SameEntryAndExitGateway,
+            ClientErrorReason::InvalidEntryGatewayCountry => Self::InvalidEntryGatewayCountry,
+            ClientErrorReason::InvalidExitGatewayCountry => Self::InvalidExitGatewayCountry,
+            ClientErrorReason::MaxDevicesReached => Self::MaxDevicesReached,
+            ClientErrorReason::BandwidthExceeded => Self::BandwidthExceeded,
+            ClientErrorReason::SubscriptionExpired => Self::SubscriptionExpired,
+            ClientErrorReason::Dns(message) => Self::Dns(message),
+            ClientErrorReason::Api(message) => Self::Api(message),
+            ClientErrorReason::Internal(message) => Self::Internal(message),
         }
     }
 }

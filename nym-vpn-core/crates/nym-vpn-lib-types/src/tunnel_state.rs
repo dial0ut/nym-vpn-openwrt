@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use crate::{RequestZkNymError, RequestZkNymErrorReason};
+use crate::{RequestZkNymError, RequestZkNymErrorReason, VpnApiErrorResponse};
 
 use super::{
     account::{
@@ -12,6 +12,13 @@ use super::{
     },
     connection_data::{ConnectionData, TunnelConnectionData},
 };
+
+const MAX_DEVICES_REACHED_MESSAGE_ID: &str =
+    "nym-vpn-website.public-api.register-device.max-devices-exceeded";
+const SUBSCRIPTION_EXPIRED_MESSAGE_ID: &str =
+    "nym-vpn-website.public-api.device.zk-nym.request_failed.no_active_subscription";
+const BANDWIDTH_LIMIT_REACHED_MESSAGE_ID: &str =
+    "nym-vpn-website.public-api.device.zk-nym.request_failed.fair_usage_used_for_month";
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum TunnelType {
@@ -39,7 +46,7 @@ pub enum TunnelState {
     },
 
     /// Tunnel is disconnected due to failure.
-    Error(ErrorStateReason),
+    Error(ClientErrorReason),
 
     /// Tunnel is disconnected, network connectivity is unavailable.
     Offline {
@@ -137,7 +144,7 @@ pub enum ActionAfterDisconnect {
     Error,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, strum_macros::Display)]
 pub enum ErrorStateReason {
     /// Issues related to firewall configuration.
     Firewall,
@@ -196,6 +203,117 @@ pub enum ErrorStateReason {
 
     /// Program errors that must not happen.
     Internal(String),
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum ClientErrorReason {
+    Firewall,
+    Routing,
+    SameEntryAndExitGateway,
+    InvalidEntryGatewayCountry,
+    InvalidExitGatewayCountry,
+    MaxDevicesReached,
+    BandwidthExceeded,
+    SubscriptionExpired,
+    Dns(Option<String>),
+    Api(Option<String>),
+    Internal(Option<String>),
+}
+
+impl From<ErrorStateReason> for ClientErrorReason {
+    fn from(value: ErrorStateReason) -> Self {
+        match value {
+            ErrorStateReason::SameEntryAndExitGateway => Self::SameEntryAndExitGateway,
+            ErrorStateReason::InvalidEntryGatewayCountry => Self::InvalidEntryGatewayCountry,
+            ErrorStateReason::InvalidExitGatewayCountry => Self::InvalidExitGatewayCountry,
+            ErrorStateReason::BadBandwidthIncrease => Self::Api(Some(value.to_string())),
+            ErrorStateReason::SyncAccount(err) => err.into(),
+            ErrorStateReason::SyncDevice(err) => err.into(),
+            ErrorStateReason::RegisterDevice(err) => err.into(),
+            ErrorStateReason::RequestZkNym(err) => err.into(),
+            ErrorStateReason::RequestZkNymBundle {
+                successes: _,
+                failed,
+            } => {
+                // Return the first error if it exists, otherwise return a default error
+                if let Some(first_error) = failed.first() {
+                    ClientErrorReason::from(first_error.clone())
+                } else {
+                    Self::Api(Some("Empty failure list in RequestZkNymBundle".to_string()))
+                }
+            }
+            ErrorStateReason::Firewall => Self::Firewall,
+            ErrorStateReason::TunDevice
+            | ErrorStateReason::TunnelProvider
+            | ErrorStateReason::DuplicateTunFd => Self::Internal(Some(value.to_string())),
+            ErrorStateReason::Internal(message) => Self::Internal(Some(message)),
+            ErrorStateReason::Routing => Self::Routing,
+            ErrorStateReason::ResolveGatewayAddrs => Self::Dns(Some(value.to_string())),
+            ErrorStateReason::StartLocalDnsResolver => Self::Dns(Some(value.to_string())),
+            ErrorStateReason::Dns => Self::Dns(Some(value.to_string())),
+        }
+    }
+}
+
+impl From<RequestZkNymErrorReason> for ClientErrorReason {
+    fn from(error: RequestZkNymErrorReason) -> Self {
+        match error {
+            RequestZkNymErrorReason::VpnApi(e) => e.into(),
+            RequestZkNymErrorReason::UnexpectedVpnApiResponse(message) => Self::Api(Some(message)),
+            reason => Self::Internal(Some(reason.to_string())),
+        }
+    }
+}
+
+impl From<VpnApiErrorResponse> for ClientErrorReason {
+    fn from(error: VpnApiErrorResponse) -> Self {
+        match error.message_id.as_ref() {
+            Some(id) if id.contains(BANDWIDTH_LIMIT_REACHED_MESSAGE_ID) => Self::BandwidthExceeded,
+            Some(id) if id.contains(SUBSCRIPTION_EXPIRED_MESSAGE_ID) => Self::SubscriptionExpired,
+            _ => {
+                let message = match error.message_id {
+                    None => error.message,
+                    Some(id) => format!("{}, ID [{}]", error.message, id),
+                };
+                Self::Api(Some(message))
+            }
+        }
+    }
+}
+
+impl From<RegisterDeviceError> for ClientErrorReason {
+    fn from(value: RegisterDeviceError) -> Self {
+        if value
+            .message_id()
+            .is_some_and(|id| id.contains(MAX_DEVICES_REACHED_MESSAGE_ID))
+        {
+            Self::MaxDevicesReached
+        } else {
+            Self::Api(Some(value.to_string()))
+        }
+    }
+}
+
+impl From<SyncAccountError> for ClientErrorReason {
+    fn from(value: SyncAccountError) -> Self {
+        match value {
+            SyncAccountError::NoAccountStored => Self::Internal(Some(value.to_string())),
+            SyncAccountError::SyncAccountEndpointFailure(response) => response.into(),
+            SyncAccountError::UnexpectedResponse(message) => Self::Internal(Some(message)),
+            SyncAccountError::Internal(message) => Self::Internal(Some(message)),
+        }
+    }
+}
+impl From<SyncDeviceError> for ClientErrorReason {
+    fn from(value: SyncDeviceError) -> Self {
+        match value {
+            SyncDeviceError::NoAccountStored => Self::Internal(Some(value.to_string())),
+            SyncDeviceError::NoDeviceStored => Self::Internal(Some(value.to_string())),
+            SyncDeviceError::SyncDeviceEndpointFailure(response) => response.into(),
+            SyncDeviceError::UnexpectedResponse(message) => Self::Internal(Some(message)),
+            SyncDeviceError::Internal(message) => Self::Internal(Some(message)),
+        }
+    }
 }
 
 impl From<SyncAccountError> for ErrorStateReason {
