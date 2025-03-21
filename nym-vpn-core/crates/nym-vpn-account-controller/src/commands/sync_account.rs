@@ -78,14 +78,12 @@ impl SyncStateCommandHandler {
         err,
         level = Level::DEBUG,
     )]
-    pub(crate) async fn run_inner(
-        mut self,
-    ) -> Result<NymVpnAccountSummaryResponse, SyncAccountError> {
+    pub(crate) async fn run_inner(self) -> Result<NymVpnAccountSummaryResponse, SyncAccountError> {
         tracing::debug!("Running sync account state command handler: {}", self.id);
         let update_result = update_state(
             &self.account,
             &self.account_state,
-            &mut self.vpn_api_client,
+            &self.vpn_api_client,
             &self.previous_account_summary_response,
         )
         .await;
@@ -98,15 +96,10 @@ impl SyncStateCommandHandler {
 async fn update_state(
     account: &VpnApiAccount,
     account_state: &SharedAccountState,
-    vpn_api_client: &mut nym_vpn_api_client::VpnApiClient,
+    vpn_api_client: &nym_vpn_api_client::VpnApiClient,
     previous_account_summary_response: &PreviousAccountSummaryResponse,
 ) -> Result<NymVpnAccountSummaryResponse, SyncAccountError> {
     tracing::debug!("Updating account state");
-    vpn_api_client
-        .sync_with_remote_time()
-        .await
-        .inspect_err(|err| tracing::error!("Failed to get remote time: {err}"))
-        .ok();
 
     let account_summary = match vpn_api_client.get_account_summary(account).await {
         Ok(account_summary) => account_summary,
