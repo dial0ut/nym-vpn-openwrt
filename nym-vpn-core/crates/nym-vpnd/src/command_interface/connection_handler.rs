@@ -13,13 +13,13 @@ use nym_vpn_network_config::{
 };
 use nym_vpnd_types::gateway;
 
+use super::protobuf::error::VpnCommandSendError;
+use crate::logging::LogPath;
 use crate::service::{
     AccountError, ConnectArgs, ConnectOptions, SetNetworkError, VpnServiceCommand,
     VpnServiceConnectError, VpnServiceDeleteLogFileError, VpnServiceDisconnectError,
     VpnServiceInfo,
 };
-
-use super::protobuf::error::VpnCommandSendError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ListGatewayError {
@@ -286,6 +286,10 @@ impl CommandInterfaceConnectionHandler {
     ) -> Result<Result<(), VpnServiceDeleteLogFileError>, VpnCommandSendError> {
         self.send_and_wait(VpnServiceCommand::DeleteLogFile, ())
             .await
+    }
+
+    pub async fn handle_get_log_path(&self) -> Result<Option<LogPath>, VpnCommandSendError> {
+        self.send_and_wait(VpnServiceCommand::GetLogPath, ()).await
     }
 
     async fn send_and_wait<R, F, O>(&self, command: F, opts: O) -> Result<R, VpnCommandSendError>

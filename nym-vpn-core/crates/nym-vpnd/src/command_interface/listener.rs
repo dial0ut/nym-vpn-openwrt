@@ -28,9 +28,9 @@ use super::{
     error::CommandInterfaceError,
     helpers::{parse_entry_point, parse_exit_point, threshold_into_percent},
 };
+use crate::logging::LogPath;
 use crate::{
     command_interface::protobuf::info_response::into_proto_available_tickets,
-    service,
     service::{ConnectOptions, VpnServiceCommand},
 };
 
@@ -901,12 +901,17 @@ impl NymVpnd for CommandInterface {
         &self,
         _: tonic::Request<()>,
     ) -> Result<tonic::Response<GetLogPathResponse>, tonic::Status> {
-        let dir = service::log_dir();
-        tracing::debug!("log file path: {}", dir.display());
-        Ok(tonic::Response::new(GetLogPathResponse {
-            path: dir.to_string_lossy().to_string(),
-            filename: service::DEFAULT_LOG_FILE.to_string(),
-        }))
+        let result = CommandInterfaceConnectionHandler::new(self.vpn_command_tx.clone())
+            .handle_get_log_path()
+            .await?;
+        let log_path = if let Some(path) = result {
+            path
+        } else {
+            tracing::info!("log path not set, fallback to default");
+            LogPath::default()
+        };
+        tracing::debug!("log dir path: {}", log_path.dir.display());
+        Ok(tonic::Response::new(log_path.into()))
     }
 }
 
@@ -960,5 +965,14 @@ impl TryFrom<ConnectRequest> for ConnectOptions {
             min_gateway_vpn_performance,
             user_agent,
         })
+    }
+}
+
+impl From<LogPath> for GetLogPathResponse {
+    fn from(log_path: LogPath) -> Self {
+        GetLogPathResponse {
+            path: log_path.dir.to_string_lossy().to_string(),
+            filename: log_path.filename.clone(),
+        }
     }
 }
