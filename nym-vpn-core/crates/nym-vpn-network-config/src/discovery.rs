@@ -59,7 +59,7 @@ impl Discovery {
         }
     }
 
-    pub fn fetch(network_name: &str) -> anyhow::Result<Self> {
+    pub async fn fetch(network_name: &str) -> anyhow::Result<Self> {
         // allow panic because a broken bootstrap url means everything will fail anyways.
         #[allow(clippy::expect_used)]
         let default_url = Self::DEFAULT_VPN_API_URL
@@ -68,12 +68,7 @@ impl Discovery {
         let client = BootstrapVpnApiClient::new(default_url)?;
 
         tracing::debug!("Fetching nym network discovery");
-        let rt = tokio::runtime::Runtime::new()?;
-
-        // Spawn the root task
-        let discovery: NymWellknownDiscoveryItemResponse = rt
-            .block_on(client.get_wellknown_discovery(network_name))
-            .with_context(|| "Failed to read response text")?;
+        let discovery = client.get_wellknown_discovery(network_name).await?;
 
         tracing::debug!("Discovery response: {:#?}", discovery);
 
@@ -117,17 +112,18 @@ impl Discovery {
         Ok(())
     }
 
-    fn try_update_file(config_dir: &Path, network_name: &str) -> anyhow::Result<()> {
-        if Self::path_is_stale(config_dir, network_name)? {
-            Self::fetch(network_name)?.write_to_file(config_dir)?;
-        }
-        Ok(())
+    async fn update_file(config_dir: &Path, network_name: &str) -> anyhow::Result<()> {
+        Self::fetch(network_name).await?.write_to_file(config_dir)
     }
 
-    pub(super) fn ensure_exists(config_dir: &Path, network_name: &str) -> anyhow::Result<Self> {
+    pub(super) async fn ensure_exists(
+        config_dir: &Path,
+        network_name: &str,
+    ) -> anyhow::Result<Self> {
         if !Self::path(config_dir, network_name).exists() && network_name == "mainnet" {
             tracing::info!("No discovery file found, writing creating a new discovery file");
             Self::fetch(network_name)
+                .await
                 .inspect_err(|err| {
                     tracing::warn!(
                         "Failed to fetch remote discovery file: {err}, creating a default one"
@@ -138,11 +134,12 @@ impl Discovery {
                 .inspect_err(|err| tracing::warn!("Failed to write discovery file: {err}"))
                 .ok();
         } else {
-            // Download the file if it doesn't exists, or if the file is too old, refresh it.
+            // Download the file if it doesn't exists, or refresh it.
             // TODO: in the future, we should only refresh the discovery file when the tunnel is up.
             // Probably in a background task.
 
-            Self::try_update_file(config_dir, network_name)
+            Self::update_file(config_dir, network_name)
+                .await
                 .inspect_err(|err| {
                     tracing::warn!("Failed to refresh discovery file: {err}");
                     tracing::warn!("Attempting to use existing discovery file");
@@ -153,18 +150,14 @@ impl Discovery {
         Self::read_from_file(config_dir, network_name)
     }
 
-    pub fn fetch_nym_network_details(&self) -> anyhow::Result<NymNetwork> {
+    pub async fn fetch_nym_network_details(&self) -> anyhow::Result<NymNetwork> {
         tracing::debug!("Fetching nym network details");
-        let rt = tokio::runtime::Runtime::new()?;
-
         // Spawn the root task
-        let network_details = rt
-            .block_on(
-                NymApiClient::builder::<Url, anyhow::Error>(self.nym_api_url.clone())?
-                    .build::<anyhow::Error>()?
-                    .get_network_details(),
-            )
-            .with_context(|| "Discovery endpoint returned error response".to_owned())?;
+        let network_details =
+            NymApiClient::builder::<Url, anyhow::Error>(self.nym_api_url.clone())?
+                .build::<anyhow::Error>()?
+                .get_network_details()
+                .await?;
 
         if network_details.network.network_name != self.network_name {
             anyhow::bail!("Network name mismatch between requested and fetched network details")
@@ -262,17 +255,17 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn test_discovery_fetch() {
+    #[tokio::test]
+    async fn test_discovery_fetch() {
         let network_name = "mainnet";
-        let discovery = Discovery::fetch(network_name).unwrap();
+        let discovery = Discovery::fetch(network_name).await.unwrap();
         assert_eq!(discovery.network_name, network_name);
     }
 
-    #[test]
-    fn test_discovery_default_same_as_fetched() {
+    #[tokio::test]
+    async fn test_discovery_default_same_as_fetched() {
         let default = Discovery::default();
-        let fetched = Discovery::fetch(&default.network_name).unwrap();
+        let fetched = Discovery::fetch(&default.network_name).await.unwrap();
 
         // Only compare the base fields
         assert_eq!(default.network_name, fetched.network_name);
