@@ -6,7 +6,8 @@ use std::os::fd::RawFd;
 use std::sync::Arc;
 
 use nym_sdk::mixnet::{
-    ed25519, ClientStatsEvents, MixnetClient, MixnetClientSender, MixnetMessageSender, Recipient,
+    ed25519, ClientStatsEvents, ClientStatsSender, MixnetClient, MixnetClientSender,
+    MixnetMessageSender, Recipient,
 };
 
 #[derive(Clone)]
@@ -49,6 +50,10 @@ impl SharedMixnetClient {
         self.lock().await.as_ref().unwrap().split_sender()
     }
 
+    pub async fn stats_sender(&self) -> ClientStatsSender {
+        self.lock().await.as_ref().unwrap().stats_events_reporter()
+    }
+
     pub async fn send_stats_event(&self, event: ClientStatsEvents) {
         self.lock().await.as_ref().unwrap().send_stats_event(event);
     }
@@ -72,6 +77,13 @@ impl SharedMixnetClient {
         self.connection_fd_callback.clone()
     }
 
+    // If the mixnet client does NOT have an external task manager, call this method to disconnect.
+    pub async fn disconnect(&self) {
+        let mixnet_client = self.lock().await.take().unwrap();
+        mixnet_client.disconnect().await;
+    }
+
+    // If the mixnet does have an external task manager, call this method to dispose.
     pub async fn dispose(self) {
         // A mixnet client that has an external task manager is dropped to disconnect.
         self.lock().await.take();

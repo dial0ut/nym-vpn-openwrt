@@ -14,7 +14,9 @@ use base64::{engine::general_purpose, Engine as _};
 use bytes::BytesMut;
 use clap::Args;
 use futures::StreamExt;
-use nym_authenticator_client::{AuthenticatorResponse, AuthenticatorVersion, ClientMessage};
+use nym_authenticator_client::{
+    AuthClientMixnetListener, AuthenticatorResponse, AuthenticatorVersion, ClientMessage,
+};
 use nym_authenticator_requests::{v2, v3, v4, v5};
 use nym_client_core::config::ForgetMe;
 use nym_config::defaults::{
@@ -310,22 +312,29 @@ impl Probe {
         let wg_outcome = if let (Some(authenticator), Some(ip_address)) =
             (node_info.authenticator_address, node_info.ip_address)
         {
-            wg_probe(
+            // Start the mixnet listener that the auth clients use to receive messages.
+            let mixnet_listener_task = AuthClientMixnetListener::new(shared_client.clone()).start();
+            let auth_client = mixnet_listener_task.new_auth_client().await;
+
+            let outcome = wg_probe(
                 authenticator,
-                shared_client.clone(),
+                auth_client,
                 ip_address,
                 node_info.authenticator_version,
                 self.amnezia_args,
                 self.netstack_args,
             )
             .await
-            .unwrap_or_default()
+            .unwrap_or_default();
+
+            let _ = mixnet_listener_task.cancel().await;
+
+            outcome
         } else {
             WgProbeResults::default()
         };
 
-        let mixnet_client = shared_client.lock().await.take().unwrap();
-        mixnet_client.disconnect().await;
+        shared_client.disconnect().await;
 
         // Disconnect the mixnet client gracefully
         outcome.map(|mut outcome| {
@@ -341,13 +350,12 @@ impl Probe {
 
 async fn wg_probe(
     authenticator: AuthAddress,
-    shared_mixnet_client: SharedMixnetClient,
+    mut auth_client: nym_authenticator_client::AuthClient,
     gateway_ip: IpAddr,
     auth_version: AuthenticatorVersion,
     awg_args: String,
     netstack_args: NetstackArgs,
 ) -> anyhow::Result<WgProbeResults> {
-    let mut auth_client = nym_authenticator_client::AuthClient::new(shared_mixnet_client).await;
     info!("attempting to use authenticator version {auth_version:?}");
 
     let mut rng = rand::thread_rng();

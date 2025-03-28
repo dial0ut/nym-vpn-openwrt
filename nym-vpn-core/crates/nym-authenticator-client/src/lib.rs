@@ -11,18 +11,23 @@ use nym_authenticator_requests::{
 
 use nym_credentials_interface::CredentialSpendingData;
 use nym_crypto::asymmetric::x25519::PrivateKey;
-use nym_mixnet_client::SharedMixnetClient;
 use nym_sdk::mixnet::{
-    ClientStatsEvents, ClientStatsSender, IncludedSurbs, MixnetClient, MixnetClientSender,
-    MixnetMessageSender, Recipient, ReconstructedMessage, TransmissionLane,
+    ClientStatsEvents, ClientStatsSender, IncludedSurbs, MixnetClientSender, MixnetMessageSender,
+    Recipient, ReconstructedMessage, TransmissionLane,
 };
 use nym_service_provider_requests_common::ServiceProviderType;
 use nym_wireguard_types::PeerPublicKey;
 use tracing::{debug, error};
 
 mod error;
+mod mixnet_listener;
 
-pub use crate::error::{Error, Result};
+pub use crate::{
+    error::{Error, Result},
+    mixnet_listener::{
+        AuthClientMixnetListener, AuthClientMixnetListenerHandle, MixnetMessageBroadcastReceiver,
+    },
+};
 
 pub trait Versionable {
     fn version(&self) -> AuthenticatorVersion;
@@ -1019,40 +1024,37 @@ impl From<semver::Version> for AuthenticatorVersion {
     }
 }
 
-#[derive(Clone)]
 pub struct AuthClient {
-    mixnet_client: SharedMixnetClient,
+    mixnet_listener: MixnetMessageBroadcastReceiver,
     mixnet_sender: MixnetClientSender,
     stats_sender: ClientStatsSender,
-    nym_address: Recipient,
+    our_nym_address: Recipient,
+}
+
+impl Clone for AuthClient {
+    fn clone(&self) -> Self {
+        Self {
+            mixnet_listener: self.mixnet_listener.resubscribe(),
+            mixnet_sender: self.mixnet_sender.clone(),
+            stats_sender: self.stats_sender.clone(),
+            our_nym_address: self.our_nym_address,
+        }
+    }
 }
 
 impl AuthClient {
-    pub async fn new(mixnet_client: SharedMixnetClient) -> Self {
-        let mixnet_sender = mixnet_client.lock().await.as_ref().unwrap().split_sender();
-        let nym_address = *mixnet_client
-            .inner()
-            .lock()
-            .await
-            .as_ref()
-            .unwrap()
-            .nym_address();
-        let stats_sender = mixnet_client
-            .lock()
-            .await
-            .as_ref()
-            .unwrap()
-            .stats_events_reporter();
+    pub async fn new(
+        mixnet_sender: MixnetClientSender,
+        mixnet_listener: MixnetMessageBroadcastReceiver,
+        stats_sender: ClientStatsSender,
+        our_nym_address: Recipient,
+    ) -> Self {
         Self {
-            mixnet_client,
+            mixnet_listener,
             mixnet_sender,
             stats_sender,
-            nym_address,
+            our_nym_address,
         }
-    }
-
-    pub fn mixnet_client(&self) -> SharedMixnetClient {
-        self.mixnet_client.clone()
     }
 
     pub async fn send(
@@ -1072,21 +1074,12 @@ impl AuthClient {
         message: &ClientMessage,
         authenticator_address: Recipient,
     ) -> Result<AuthenticatorResponse> {
-        // Connecting is basically synchronous from the perspective of the mixnet client, so it's safe
-        // to just grab ahold of the mutex and keep it until we get the response.
-        // This needs to sit here, before sending the request and dropped after getting the response,
-        // so that it doesn't interfere with message to the other gateway (entry/exit).
-        let mut mixnet_client_handle = self.mixnet_client.lock().await;
-        if mixnet_client_handle.is_none() {
-            return Err(Error::UnableToGetMixnetHandle);
-        }
         let request_id = self
             .send_connect_request(message, authenticator_address)
             .await?;
 
         debug!("Waiting for reply...");
-        self.listen_for_connect_response(request_id, mixnet_client_handle.as_mut().unwrap())
-            .await
+        self.listen_for_connect_response(request_id).await
     }
 
     async fn send_connect_request(
@@ -1094,7 +1087,7 @@ impl AuthClient {
         message: &ClientMessage,
         authenticator_address: Recipient,
     ) -> Result<u64> {
-        let (data, request_id) = message.bytes(self.nym_address)?;
+        let (data, request_id) = message.bytes(self.our_nym_address)?;
 
         // We use 20 surbs for the connect request because typically the
         // authenticator mixnet client on the nym-node is configured to have a min
@@ -1116,9 +1109,8 @@ impl AuthClient {
     }
 
     async fn listen_for_connect_response(
-        &self,
+        &mut self,
         request_id: u64,
-        mixnet_client: &mut MixnetClient,
     ) -> Result<AuthenticatorResponse> {
         let timeout = tokio::time::sleep(Duration::from_secs(10));
         tokio::pin!(timeout);
@@ -1129,38 +1121,36 @@ impl AuthClient {
                     error!("Timed out waiting for reply to connect request");
                     return Err(Error::TimeoutWaitingForConnectResponse);
                 }
-                msgs = mixnet_client.wait_for_messages() => match msgs {
-                    None => {
+                msg = self.mixnet_listener.recv() => match msg {
+                    Err(_) => {
                         return Err(Error::NoMixnetMessagesReceived);
                     }
-                    Some(msgs) => {
-                        for msg in msgs {
-                            if !check_if_authenticator_message(&msg) {
-                                debug!("Received non-authenticator message while waiting for connect response");
-                                continue;
-                            }
-                            // Confirm that the version is correct
-                            let version = check_auth_message_version(&msg)?;
+                    Ok(msg) => {
+                        if !check_if_authenticator_message(&msg) {
+                            debug!("Received non-authenticator message while waiting for connect response");
+                            continue;
+                        }
+                        // Confirm that the version is correct
+                        let version = check_auth_message_version(&msg)?;
 
-                            // Then we deserialize the message
-                            debug!("AuthClient: got message while waiting for connect response with version {version:?}");
-                            let ret: Result<AuthenticatorResponse> = match version {
-                                AuthenticatorVersion::V2 => v2::response::AuthenticatorResponse::from_reconstructed_message(&msg).map(Into::into).map_err(Into::into),
-                                AuthenticatorVersion::V3 => v3::response::AuthenticatorResponse::from_reconstructed_message(&msg).map(Into::into).map_err(Into::into),
-                                AuthenticatorVersion::V4 => v4::response::AuthenticatorResponse::from_reconstructed_message(&msg).map(Into::into).map_err(Into::into),
-                                AuthenticatorVersion::V5 => v5::response::AuthenticatorResponse::from_reconstructed_message(&msg).map(Into::into).map_err(Into::into),
-                                AuthenticatorVersion::UNKNOWN => Err(Error::UnknownVersion),
-                            };
-                            let Ok(response) = ret else {
-                                // This is ok, it's likely just one of our self-pings
-                                debug!("Failed to deserialize reconstructed message");
-                                continue;
-                            };
+                        // Then we deserialize the message
+                        debug!("AuthClient: got message while waiting for connect response with version {version:?}");
+                        let ret: Result<AuthenticatorResponse> = match version {
+                            AuthenticatorVersion::V2 => v2::response::AuthenticatorResponse::from_reconstructed_message(&msg).map(Into::into).map_err(Into::into),
+                            AuthenticatorVersion::V3 => v3::response::AuthenticatorResponse::from_reconstructed_message(&msg).map(Into::into).map_err(Into::into),
+                            AuthenticatorVersion::V4 => v4::response::AuthenticatorResponse::from_reconstructed_message(&msg).map(Into::into).map_err(Into::into),
+                            AuthenticatorVersion::V5 => v5::response::AuthenticatorResponse::from_reconstructed_message(&msg).map(Into::into).map_err(Into::into),
+                            AuthenticatorVersion::UNKNOWN => Err(Error::UnknownVersion),
+                        };
+                        let Ok(response) = ret else {
+                            // This is ok, it's likely just one of our self-pings
+                            debug!("Failed to deserialize reconstructed message");
+                            continue;
+                        };
 
-                            if response.id() == request_id {
-                                debug!("Got response with matching id");
-                                return Ok(response);
-                            }
+                        if response.id() == request_id {
+                            debug!("Got response with matching id");
+                            return Ok(response);
                         }
                     }
                 }

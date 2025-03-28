@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use nym_vpn_network_config::Network;
 use tokio::task::JoinHandle;
 
-use nym_authenticator_client::AuthClient;
+use nym_authenticator_client::{AuthClientMixnetListener, AuthClientMixnetListenerHandle};
 use nym_credentials_interface::TicketType;
 use nym_gateway_directory::{AuthAddresses, Gateway, GatewayClient};
 use nym_mixnet_client::SharedMixnetClient;
@@ -73,6 +73,7 @@ impl Connector {
                 connect_result.exit_gateway_client,
                 connect_result.connection_data,
                 connect_result.bandwidth_controller_handle,
+                connect_result.auth_client_mixnet_listener_handle,
             )),
             Err(e) => Err(ConnectorError::new(
                 e,
@@ -107,7 +108,14 @@ impl Connector {
         tracing::debug!("Entry gateway version: {entry_version}");
         let exit_version = selected_gateways.exit.version.clone().into();
         tracing::debug!("Exit gateway version: {exit_version}");
-        let auth_client = AuthClient::new(mixnet_client).await;
+
+        // Start the auth client mixnet listener, which will listen for incoming messages from the
+        // mixnet and rebroadcast them to the auth clients.
+        let mixnet_listener = AuthClientMixnetListener::new(mixnet_client.clone())
+            .with_external_cancel_token(cancel_token.clone())
+            .start();
+
+        let auth_client = mixnet_listener.new_auth_client().await;
 
         let mut wg_entry_gateway_client = if enable_credentials_mode {
             WgGatewayClient::new_free_entry(
@@ -168,12 +176,9 @@ impl Connector {
                 gateway_directory_client,
                 &mut wg_exit_gateway_client,
             );
-            let entry = cancel_token
-                .run_until_cancelled(entry_fut)
-                .await
-                .ok_or(tunnel::Error::Cancelled)??;
-            let exit = cancel_token
-                .run_until_cancelled(exit_fut)
+
+            let (entry, exit) = cancel_token
+                .run_until_cancelled(async { tokio::try_join!(entry_fut, exit_fut) })
                 .await
                 .ok_or(tunnel::Error::Cancelled)??;
 
@@ -222,6 +227,7 @@ impl Connector {
             exit_gateway_client: wg_exit_gateway_client,
             connection_data,
             bandwidth_controller_handle,
+            auth_client_mixnet_listener_handle: mixnet_listener,
         })
     }
 
@@ -250,4 +256,5 @@ struct ConnectResult {
     exit_gateway_client: WgGatewayClient,
     connection_data: ConnectionData,
     bandwidth_controller_handle: JoinHandle<()>,
+    auth_client_mixnet_listener_handle: AuthClientMixnetListenerHandle,
 }
