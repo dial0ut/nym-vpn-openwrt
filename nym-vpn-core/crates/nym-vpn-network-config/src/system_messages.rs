@@ -164,6 +164,8 @@ impl From<SystemConfigurationResponse> for SystemConfiguration {
                 .ok()
         });
 
+        let min_supported_app_versions = value.min_supported_app_versions;
+
         SystemConfiguration {
             mix_thresholds: ScoreThresholds {
                 high: value.mix_thresholds.high,
@@ -176,6 +178,7 @@ impl From<SystemConfigurationResponse> for SystemConfiguration {
                 low: value.wg_thresholds.low,
             },
             statistics_recipient,
+            min_supported_app_versions,
         }
     }
 }
