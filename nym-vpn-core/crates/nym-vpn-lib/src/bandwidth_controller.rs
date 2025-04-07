@@ -26,6 +26,7 @@ const LOWER_BOUND_CHECK_DURATION: Duration = DEFAULT_PEER_TIMEOUT_CHECK;
 const UPPER_BOUND_CHECK_DURATION: Duration =
     Duration::from_secs(6 * DEFAULT_PEER_TIMEOUT_CHECK.as_secs());
 const DEFAULT_BANDWIDTH_DEPLETION_RATE: u64 = 1024 * 1024; // 1 MB/s
+const MINIMUM_RAMAINING_BANDWIDTH: u64 = 500 * 1024 * 1024; // 500 MB, the same as a wireguard ticket size (but it doesn't have to be)
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -138,6 +139,10 @@ impl DepletionRate {
             .unwrap_or_default();
         // try and have at least 10 checks before depletion, to be on the safe side...
         if number_of_checks_before_depletion < 10 {
+            return Ok(None);
+        }
+        // have an above the water minimum, just in case
+        if self.available_bandwidth < MINIMUM_RAMAINING_BANDWIDTH {
             return Ok(None);
         }
         if estimated_depletion_secs > UPPER_BOUND_CHECK_DURATION.as_secs() {
@@ -436,14 +441,14 @@ mod tests {
         }
 
         // spike a 1 MB/s depletion rate
-        for _ in 0..24 {
+        for _ in 0..17 {
             current_bandwidth -= current_period.as_secs() * BW_1MB;
             current_period = depletion_rate
                 .update_dynamic_check_interval(current_period, current_bandwidth)
                 .unwrap()
                 .unwrap();
             assert_eq!(current_period, UPPER_BOUND_CHECK_DURATION);
-            assert!(current_bandwidth > 300 * BW_1MB);
+            assert!(current_bandwidth > 500 * BW_1MB);
         }
 
         current_bandwidth -= current_period.as_secs() * BW_1MB;
@@ -451,7 +456,7 @@ mod tests {
             .update_dynamic_check_interval(current_period, current_bandwidth)
             .unwrap();
         // when we get bellow a convinient dynamic threshold, we start reqwesting more bandwidth (returning None)
-        assert!(current_bandwidth < 300 * BW_1MB);
+        assert!(current_bandwidth < 500 * BW_1MB);
         assert!(ret.is_none());
     }
 }
