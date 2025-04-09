@@ -2,7 +2,10 @@
 // Copyright 2025 Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::sync::{Arc, LazyLock};
+use std::{
+    fmt,
+    sync::{Arc, LazyLock},
+};
 
 use nym_common::ErrorExt;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -41,6 +44,14 @@ pub struct MonitorHandle {
     inner: Arc<Option<imp::MonitorHandle>>,
     rx: watch::Receiver<Connectivity>,
     _shutdown_drop_guard: Arc<DropGuard>,
+}
+
+impl fmt::Debug for MonitorHandle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MonitorHandle")
+            .field("rx", &self.rx)
+            .finish_non_exhaustive()
+    }
 }
 
 impl MonitorHandle {
@@ -140,6 +151,19 @@ pub enum Connectivity {
 }
 
 impl Connectivity {
+    /// Create a new `Connectivity` instance that presumes the host is offline until
+    /// proven otherwise.
+    pub fn new_presume_offline() -> Self {
+        #[cfg(not(target_os = "android"))]
+        return Connectivity::Status {
+            ipv4: false,
+            ipv6: false,
+        };
+
+        #[cfg(target_os = "android")]
+        return Connectivity::Status { connected: false };
+    }
+
     /// Inverse of [`Connectivity::is_offline`].
     pub fn is_online(&self) -> bool {
         !self.is_offline()

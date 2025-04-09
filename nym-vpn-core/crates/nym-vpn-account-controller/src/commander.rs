@@ -3,6 +3,7 @@
 
 use std::net::SocketAddr;
 
+use nym_offline_monitor::MonitorHandle;
 use nym_vpn_api_client::response::{NymVpnAccountSummaryResponse, NymVpnDevice, NymVpnUsage};
 use nym_vpn_lib_types::{
     AccountCommandError, RegisterDeviceError, RequestZkNymError, SyncAccountError, SyncDeviceError,
@@ -137,6 +138,17 @@ impl AccountControllerCommander {
         let (tx, rx) = ReturnSender::new();
         self.command_tx
             .send(AccountCommand::SetStaticApiAddresses(tx, static_addresses))
+            .map_err(AccountCommandError::internal)?;
+        rx.await.map_err(AccountCommandError::internal)?
+    }
+
+    pub async fn register_offline_monitor(
+        &self,
+        offline_monitor: MonitorHandle,
+    ) -> Result<(), AccountCommandError> {
+        let (tx, rx) = ReturnSender::new();
+        self.command_tx
+            .send(AccountCommand::RegisterOfflineMonitor(tx, offline_monitor))
             .map_err(AccountCommandError::internal)?;
         rx.await.map_err(AccountCommandError::internal)?
     }

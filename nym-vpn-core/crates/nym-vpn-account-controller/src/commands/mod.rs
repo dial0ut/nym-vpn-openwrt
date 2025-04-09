@@ -6,6 +6,7 @@ pub(crate) mod request_zknym;
 pub(crate) mod sync_account;
 pub(crate) mod sync_device;
 
+use nym_offline_monitor::MonitorHandle;
 use nym_vpn_lib_types::{
     AccountCommandError, RegisterDeviceError, RequestZkNymError, SyncAccountError, SyncDeviceError,
 };
@@ -102,6 +103,7 @@ pub enum AccountCommand {
         ReturnSender<(), AccountCommandError>,
         Option<Vec<SocketAddr>>,
     ),
+    RegisterOfflineMonitor(ReturnSender<(), AccountCommandError>, MonitorHandle),
 }
 
 impl AccountCommand {
@@ -139,6 +141,25 @@ impl AccountCommand {
             }
             AccountCommand::RequestZkNym(Some(tx)) => {
                 tx.send(Err(RequestZkNymError::NoDeviceStored));
+            }
+            _ => {}
+        }
+    }
+
+    pub fn return_no_connectivity(self) {
+        tracing::debug!("No connectivity");
+        match self {
+            AccountCommand::SyncAccountState(Some(tx)) => {
+                tx.send(Err(SyncAccountError::internal("No connectivity")));
+            }
+            AccountCommand::SyncDeviceState(Some(tx)) => {
+                tx.send(Err(SyncDeviceError::internal("No connectivity")));
+            }
+            AccountCommand::RegisterDevice(Some(tx)) => {
+                tx.send(Err(RegisterDeviceError::internal("No connectivity")));
+            }
+            AccountCommand::RequestZkNym(Some(tx)) => {
+                tx.send(Err(RequestZkNymError::internal("No connectivity")));
             }
             _ => {}
         }

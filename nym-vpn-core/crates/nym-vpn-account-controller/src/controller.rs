@@ -4,6 +4,7 @@
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use nym_http_api_client::UserAgent;
+use nym_offline_monitor::Connectivity;
 use nym_vpn_api_client::{
     response::{NymVpnAccountResponse, NymVpnDevice, NymVpnUsage},
     types::{DeviceStatus, VpnApiAccount},
@@ -27,6 +28,7 @@ use crate::{
         sync_device::WaitingSyncDeviceCommandHandler, AccountCommand, AccountCommandResult,
         Command, RunningCommands,
     },
+    connectivity::OfflineWatch,
     error::Error,
     shared_state::{MnemonicState, ReadyToRegisterDevice, ReadyToRequestZkNym, SharedAccountState},
     storage::{AccountStorage, VpnCredentialStorage},
@@ -89,6 +91,9 @@ where
 
     // User agent used by api client.
     user_agent: UserAgent,
+
+    // Keep track of offline state
+    offline_watch: OfflineWatch,
 }
 
 impl<S> AccountController<S>
@@ -101,6 +106,7 @@ where
         user_agent: UserAgent,
         credentials_mode: Option<bool>,
         network_env: Network,
+        initial_connectivity: Option<Connectivity>,
         cancel_token: CancellationToken,
     ) -> Result<Self, Error> {
         let credentials_mode = credentials_mode.unwrap_or_else(|| {
@@ -151,6 +157,14 @@ where
             vpn_api_client.clone(),
         );
 
+        let offline_watch = OfflineWatch::new(
+            AccountControllerCommander {
+                command_tx: command_tx.clone(),
+                shared_state: account_state.clone(),
+            },
+            initial_connectivity.unwrap_or(Connectivity::new_presume_offline()),
+        );
+
         Ok(AccountController {
             account_storage,
             credential_storage,
@@ -167,6 +181,7 @@ where
             background_zk_nym_refresh: credentials_mode,
             cancel_token,
             user_agent,
+            offline_watch,
         })
     }
 
@@ -252,6 +267,11 @@ where
     }
 
     async fn request_zk_nym_if_ready(&self) {
+        if self.offline_watch.is_offline() {
+            tracing::info!("Not requesting zk-nym as we are offline");
+            return;
+        }
+
         if !self.is_background_zk_nym_refresh_active().await {
             return;
         }
@@ -431,6 +451,12 @@ where
             }
         };
 
+        if self.offline_watch.is_offline() {
+            tracing::info!("Not syncing account state as we are offline");
+            command.return_no_connectivity();
+            return;
+        }
+
         let command_handler = self.waiting_sync_account_command_handler.build(account);
 
         if self.running_commands.add(command).await == Command::IsFirst {
@@ -454,6 +480,12 @@ where
                 return;
             }
         };
+
+        if self.offline_watch.is_offline() {
+            tracing::info!("Not syncing device state as we are offline");
+            command.return_no_connectivity();
+            return;
+        }
 
         let command_handler = self
             .waiting_sync_device_command_handler
@@ -510,6 +542,12 @@ where
                 return;
             }
         };
+
+        if self.offline_watch.is_offline() {
+            tracing::info!("Not registering device as we are offline");
+            command.return_no_connectivity();
+            return;
+        }
 
         let command_handler = RegisterDeviceCommandHandler::new(
             account,
@@ -775,6 +813,12 @@ where
                     }),
                 );
             }
+            AccountCommand::RegisterOfflineMonitor(result_tx, offline_watch) => {
+                self.offline_watch
+                    .register_offline_monitor(offline_watch)
+                    .await;
+                result_tx.send(Ok(()));
+            }
         };
     }
 
@@ -896,8 +940,11 @@ where
         // so that we periodically check the results without interfering with other tasks
         let mut command_finish_timer = tokio::time::interval(Duration::from_millis(500));
 
-        // Timer to periodically sync the remote account state
+        // Timer to periodically sync the remote account state.
+        // Call tick() once to start the timer immediately. We don't want the first sync to happen
+        // immediately, so we wait for the first tick to happen.
         let mut sync_account_state_timer = tokio::time::interval(ACCOUNT_UPDATE_INTERVAL);
+        sync_account_state_timer.tick().await;
 
         // Timer to periodically check if we need to request more zk-nyms
         let mut update_zk_nym_timer = tokio::time::interval(ZK_NYM_AUTOMATIC_REQUEST_INTERVAL);
@@ -916,8 +963,11 @@ where
                 }
                 // On a timer we want to sync the account and device state
                 _ = sync_account_state_timer.tick() => {
-                    self.queue_command(AccountCommand::SyncAccountState(None));
-                    self.queue_command(AccountCommand::SyncDeviceState(None));
+                    if self.offline_watch.is_online() {
+                        tracing::info!("Timed sync of account and device state");
+                        self.queue_command(AccountCommand::SyncAccountState(None));
+                        self.queue_command(AccountCommand::SyncDeviceState(None));
+                    }
                 }
                 // On a timer to check if we need to request more zk-nyms
                 _ = update_zk_nym_timer.tick() => {
@@ -926,6 +976,9 @@ where
                 _ = self.cancel_token.cancelled() => {
                     tracing::trace!("Received cancellation signal");
                     break;
+                }
+                Some(connectivity) = self.offline_watch.next() => {
+                    self.offline_watch.handle_changed_connectivity(connectivity).await;
                 }
                 else => {
                     tracing::debug!("Account controller channel closed");
