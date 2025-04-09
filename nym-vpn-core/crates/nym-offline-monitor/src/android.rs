@@ -12,11 +12,11 @@ use super::Connectivity;
 /// Maximum duration to wait for the initial state from path monitor.
 const INITIAL_STATE_TIMEOUT: Duration = Duration::from_secs(1);
 
-pub struct MonitorHandle {
+pub struct ConnectivityHandle {
     state: Arc<Mutex<Connectivity>>,
 }
 
-impl MonitorHandle {
+impl ConnectivityHandle {
     fn new(state: Arc<Mutex<Connectivity>>) -> Self {
         Self { state }
     }
@@ -50,12 +50,11 @@ impl std::fmt::Display for Error {
     }
 }
 
-#[allow(clippy::unused_async)]
 pub async fn spawn_monitor(
     sender: watch::Sender<Connectivity>,
     mut connectivity_adapter: impl NativeConnectivityAdapter + 'static,
     shutdown_token: CancellationToken,
-) -> Result<MonitorHandle, Error> {
+) -> Result<ConnectivityHandle, Error> {
     // Wait for initial state since path monitor should always send an update on start()
     let initial_connectivity = tokio::time::timeout(INITIAL_STATE_TIMEOUT, connectivity_adapter.next_connectivity())
         .await
@@ -101,5 +100,5 @@ pub async fn spawn_monitor(
         tracing::debug!("Offline monitor exiting");
     });
 
-    Ok(MonitorHandle::new(state))
+    Ok(ConnectivityHandle::new(state))
 }
