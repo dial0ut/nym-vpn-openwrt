@@ -10,9 +10,10 @@ use nym_vpn_api_client::{
 use nym_vpn_lib_types::{SyncDeviceError, VpnApiErrorResponse};
 use tracing::Level;
 
-use crate::shared_state::{DeviceState, SharedAccountState};
-
-use super::AccountCommandResult;
+use crate::{
+    commands::AccountCommandResult,
+    shared_state::{DeviceState, SharedAccountState},
+};
 
 type PreviousDevicesResponse = Arc<tokio::sync::Mutex<Option<NymVpnDevicesResponse>>>;
 
@@ -54,7 +55,7 @@ impl WaitingSyncDeviceCommandHandler {
 
     pub(crate) fn update_vpn_api_client(
         &mut self,
-        vpn_api_client: &nym_vpn_api_client::VpnApiClient,
+        vpn_api_client: nym_vpn_api_client::VpnApiClient,
     ) {
         self.vpn_api_client.swap_inner_client(vpn_api_client);
     }

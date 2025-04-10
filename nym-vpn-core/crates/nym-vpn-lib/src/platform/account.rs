@@ -5,7 +5,7 @@ use std::{path::PathBuf, str::FromStr, sync::Arc, time::Duration};
 
 use nym_offline_monitor::Connectivity;
 use nym_vpn_account_controller::{
-    shared_state::DeviceState, AccountControllerCommander, SharedAccountState,
+    shared_state::DeviceState, AccountCommandSender, SharedAccountState,
 };
 use nym_vpn_api_client::{response::NymVpnAccountSummaryResponse, types::VpnApiAccount};
 use nym_vpn_network_config::Network;
@@ -70,12 +70,16 @@ async fn start_account_controller(
     // TODO: the whole mobile API should be refactored to start the state machine on init.
     let initial_connectivity = Connectivity::PresumeOnline;
 
-    let account_controller = nym_vpn_account_controller::AccountController::new(
-        Arc::clone(&storage),
-        data_dir.clone(),
+    let account_controller_config = nym_vpn_account_controller::AccountControllerConfig {
+        data_dir,
         user_agent,
-        credential_mode,
+        credentials_mode: credential_mode,
         network_env,
+    };
+
+    let account_controller = nym_vpn_account_controller::AccountController::new(
+        account_controller_config,
+        Arc::clone(&storage),
         Some(initial_connectivity),
         shutdown_token.child_token(),
     )
@@ -84,8 +88,8 @@ async fn start_account_controller(
         details: err.to_string(),
     })?;
 
-    let shared_account_state = account_controller.shared_state();
-    let command_sender = account_controller.commander();
+    let shared_account_state = account_controller.get_shared_state();
+    let command_sender = account_controller.get_command_sender();
     let account_controller_handle = tokio::spawn(account_controller.run());
 
     Ok(AccountControllerHandle {
@@ -97,7 +101,7 @@ async fn start_account_controller(
 }
 
 pub(super) struct AccountControllerHandle {
-    command_sender: AccountControllerCommander,
+    command_sender: AccountCommandSender,
     shared_state: nym_vpn_account_controller::SharedAccountState,
     handle: JoinHandle<()>,
     shutdown_token: CancellationToken,
@@ -137,7 +141,7 @@ async fn get_shared_account_state() -> Result<SharedAccountState, VpnError> {
     }
 }
 
-pub(super) async fn get_command_sender() -> Result<AccountControllerCommander, VpnError> {
+pub(super) async fn get_command_sender() -> Result<AccountCommandSender, VpnError> {
     if let Some(guard) = &*ACCOUNT_CONTROLLER_HANDLE.lock().await {
         Ok(guard.command_sender.clone())
     } else {
@@ -404,11 +408,11 @@ pub(crate) mod raw {
         remove_credential_storage_raw(&path_buf).await?;
 
         // Then remove the rest of the files, that we own indirectly
-        nym_vpn_account_controller::storage_cleanup::remove_files_for_account(&path_buf).map_err(
-            |err| VpnError::Storage {
+        nym_vpn_account_controller::remove_files_for_account(&path_buf).map_err(|err| {
+            VpnError::Storage {
                 details: err.to_string(),
-            },
-        )?;
+            }
+        })?;
 
         Ok(())
     }

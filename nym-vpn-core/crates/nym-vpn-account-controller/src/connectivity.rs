@@ -3,7 +3,7 @@
 
 use nym_offline_monitor::{Connectivity, ConnectivityHandle};
 
-use crate::{AccountCommand, AccountControllerCommander};
+use crate::AccountCommandSender;
 
 pub(super) struct OfflineWatch {
     // The handle to the offline monitor, used for receiving connectivity changes.
@@ -11,7 +11,7 @@ pub(super) struct OfflineWatch {
 
     // The account controller commander, used for sending commands to the account controller that
     // are triggered by connectivity changes.
-    commander: AccountControllerCommander,
+    command_sender: AccountCommandSender,
 
     // The last known connectivity state, used to determine any possible actions that should be
     // taken depending on the connectivity change.
@@ -19,10 +19,10 @@ pub(super) struct OfflineWatch {
 }
 
 impl OfflineWatch {
-    pub(super) fn new(commander: AccountControllerCommander, initial_state: Connectivity) -> Self {
+    pub(super) fn new(command_sender: AccountCommandSender, initial_state: Connectivity) -> Self {
         Self {
             handle: None,
-            commander,
+            command_sender,
             last_state: initial_state,
         }
     }
@@ -68,13 +68,7 @@ impl OfflineWatch {
     }
 
     fn signal_went_online_to_controller(&self) {
-        let _ = self
-            .commander
-            .send(AccountCommand::SyncAccountState(None))
-            .inspect_err(|e| tracing::error!("{e}"));
-        let _ = self
-            .commander
-            .send(AccountCommand::SyncDeviceState(None))
-            .inspect_err(|e| tracing::error!("{e}"));
+        self.command_sender.background_sync_account_state();
+        self.command_sender.background_sync_device_state();
     }
 }

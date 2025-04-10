@@ -12,26 +12,28 @@ use nym_vpn_store::mnemonic::Mnemonic;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::{
-    commands::{request_zknym::RequestZkNymSummary, AccountCommand, ReturnSender},
-    error::Error,
+    commands::{tasks::request_zknym::RequestZkNymSummary, AccountCommand, ReturnSender},
     shared_state::{AccountRegistered, DeviceState, SharedAccountState},
     AvailableTicketbooks,
 };
 
 #[derive(Clone)]
-pub struct AccountControllerCommander {
-    pub(super) command_tx: UnboundedSender<AccountCommand>,
-    pub(super) shared_state: SharedAccountState,
+pub struct AccountCommandSender {
+    command_tx: UnboundedSender<AccountCommand>,
+    shared_state: SharedAccountState,
 }
 
 // Basic set of commands that can be sent to the account controller
 
-impl AccountControllerCommander {
-    // Send a basic command without waiting for a response
-    pub fn send(&self, command: AccountCommand) -> Result<(), Error> {
-        self.command_tx
-            .send(command)
-            .map_err(|source| Error::AccountCommandSend { source })
+impl AccountCommandSender {
+    pub fn new(
+        command_tx: UnboundedSender<AccountCommand>,
+        shared_state: SharedAccountState,
+    ) -> Self {
+        Self {
+            command_tx,
+            shared_state,
+        }
     }
 
     pub async fn store_account(&self, mnemonic: Mnemonic) -> Result<(), AccountCommandError> {
@@ -67,12 +69,26 @@ impl AccountControllerCommander {
         rx.await.map_err(SyncAccountError::internal)?
     }
 
+    pub fn background_sync_account_state(&self) {
+        self.command_tx
+            .send(AccountCommand::SyncAccountState(None))
+            .inspect_err(|err| tracing::error!("Failed to send sync account state command: {err}"))
+            .ok();
+    }
+
     pub async fn sync_device_state(&self) -> Result<DeviceState, SyncDeviceError> {
         let (tx, rx) = ReturnSender::new();
         self.command_tx
             .send(AccountCommand::SyncDeviceState(Some(tx)))
             .map_err(SyncDeviceError::internal)?;
         rx.await.map_err(SyncDeviceError::internal)?
+    }
+
+    pub fn background_sync_device_state(&self) {
+        self.command_tx
+            .send(AccountCommand::SyncDeviceState(None))
+            .inspect_err(|err| tracing::error!("Failed to send sync device state command: {err}"))
+            .ok();
     }
 
     pub async fn get_usage(&self) -> Result<Vec<NymVpnUsage>, AccountCommandError> {
@@ -97,6 +113,13 @@ impl AccountControllerCommander {
             .send(AccountCommand::RegisterDevice(Some(tx)))
             .map_err(RegisterDeviceError::internal)?;
         rx.await.map_err(RegisterDeviceError::internal)?
+    }
+
+    pub fn background_register_device(&self) {
+        self.command_tx
+            .send(AccountCommand::RegisterDevice(None))
+            .inspect_err(|err| tracing::error!("Failed to send register device command: {err}"))
+            .ok();
     }
 
     pub async fn get_devices(&self) -> Result<Vec<NymVpnDevice>, AccountCommandError> {
@@ -131,6 +154,42 @@ impl AccountControllerCommander {
         rx.await.map_err(RequestZkNymError::internal)?
     }
 
+    pub fn background_request_zk_nyms(&self) {
+        self.command_tx
+            .send(AccountCommand::RequestZkNym(None))
+            .inspect_err(|err| tracing::error!("Failed to send request zk-nyms command: {err}"))
+            .ok();
+    }
+
+    // TODO: also return the result
+    pub fn get_device_zk_nym(&self) -> Result<(), AccountCommandError> {
+        self.command_tx
+            .send(AccountCommand::GetDeviceZkNym)
+            .map_err(AccountCommandError::internal)
+    }
+
+    // TODO: also return the result
+    pub fn get_zk_nyms_available_for_download(&self) -> Result<(), AccountCommandError> {
+        self.command_tx
+            .send(AccountCommand::GetZkNymsAvailableForDownload)
+            .map_err(AccountCommandError::internal)
+    }
+
+    // TODO: also return the result
+    pub fn get_zk_nym_by_id(&self, id: String) -> Result<(), AccountCommandError> {
+        self.command_tx
+            .send(AccountCommand::GetZkNymById(id))
+            .map_err(AccountCommandError::internal)
+    }
+
+    // TODO: also return the result.
+    // TODO: map the error
+    pub fn confirm_zk_nym_id_downloaded(&self, id: String) -> Result<(), AccountCommandError> {
+        self.command_tx
+            .send(AccountCommand::ConfirmZkNymIdDownloaded(id))
+            .map_err(AccountCommandError::internal)
+    }
+
     pub async fn set_static_api_addresses(
         &self,
         static_addresses: Option<Vec<SocketAddr>>,
@@ -157,7 +216,7 @@ impl AccountControllerCommander {
 // Set of commands used to ensure that the account controller is in the correct state before
 // proceeding with other operations
 
-impl AccountControllerCommander {
+impl AccountCommandSender {
     pub async fn ensure_update_account(
         &self,
     ) -> Result<Option<NymVpnAccountSummaryResponse>, SyncAccountError> {

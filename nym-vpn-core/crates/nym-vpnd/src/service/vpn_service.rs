@@ -13,7 +13,7 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 use nym_vpn_account_controller::{
-    AccountCommand, AccountController, AccountControllerCommander, AccountStateSummary,
+    AccountCommandSender, AccountController, AccountControllerConfig, AccountStateSummary,
     AvailableTicketbooks, SharedAccountState,
 };
 use nym_vpn_api_client::{
@@ -154,7 +154,7 @@ where
     file_logging_event_tx: mpsc::Sender<()>,
 
     // Send commands to the account controller
-    account_command_tx: AccountControllerCommander,
+    account_command_tx: AccountCommandSender,
 
     // Path to the main config file
     config_file: PathBuf,
@@ -256,12 +256,16 @@ impl NymVpnService<nym_vpn_lib::storage::VpnClientOnDiskStorage> {
             .as_ref()
             .and_then(|config| config.statistics_recipient);
 
+        let account_controller_config = AccountControllerConfig {
+            data_dir: data_dir.clone(),
+            user_agent: user_agent.clone(),
+            credentials_mode: None,
+            network_env: network_env.clone(),
+        };
+
         let account_controller = AccountController::new(
+            account_controller_config,
             Arc::clone(&storage),
-            data_dir.clone(),
-            user_agent.clone(),
-            None,
-            network_env.clone(),
             None,
             shutdown_token.child_token(),
         )
@@ -269,8 +273,8 @@ impl NymVpnService<nym_vpn_lib::storage::VpnClientOnDiskStorage> {
         .map_err(|source| Error::Account(AccountError::AccountControllerError { source }))?;
 
         // These are used to interact with the account controller
-        let shared_account_state = account_controller.shared_state();
-        let account_command_tx = account_controller.commander();
+        let shared_account_state = account_controller.get_shared_state();
+        let account_command_tx = account_controller.get_command_sender();
         let _account_controller_handle = tokio::task::spawn(account_controller.run());
 
         // These used to interact with the tunnel state machine
@@ -782,9 +786,8 @@ where
     }
 
     async fn handle_refresh_account_state(&self) -> Result<(), AccountError> {
-        self.account_command_tx
-            .send(AccountCommand::SyncAccountState(None))
-            .map_err(|err| AccountError::AccountControllerError { source: err })
+        self.account_command_tx.background_sync_account_state();
+        Ok(())
     }
 
     async fn handle_get_usage(&self) -> Result<Vec<NymVpnUsage>, AccountError> {
@@ -818,9 +821,9 @@ where
                 source: Box::new(err),
             })?;
 
-        self.account_command_tx
-            .send(AccountCommand::SyncAccountState(None))
-            .map_err(|source| AccountError::AccountControllerError { source })
+        self.account_command_tx.background_sync_account_state();
+
+        Ok(())
     }
 
     async fn handle_get_device_identity(&self) -> Result<String, AccountError> {
@@ -831,9 +834,8 @@ where
     }
 
     async fn handle_register_device(&self) -> Result<(), AccountError> {
-        self.account_command_tx
-            .send(AccountCommand::RegisterDevice(None))
-            .map_err(|source| AccountError::AccountControllerError { source })
+        self.account_command_tx.background_sync_device_state();
+        Ok(())
     }
 
     async fn handle_get_devices(&self) -> Result<Vec<NymVpnDevice>, AccountError> {
@@ -851,40 +853,39 @@ where
     }
 
     async fn handle_request_zk_nym(&self) -> Result<(), AccountError> {
-        self.account_command_tx
-            .send(AccountCommand::RequestZkNym(None))
-            .map_err(|source| AccountError::AccountControllerError { source })
+        self.account_command_tx.background_request_zk_nyms();
+        Ok(())
     }
 
     async fn handle_get_device_zk_nyms(&self) -> Result<(), AccountError> {
         self.account_command_tx
-            .send(AccountCommand::GetDeviceZkNym)
-            .map_err(|source| AccountError::AccountControllerError { source })
+            .get_device_zk_nym()
+            .map_err(AccountError::from)
     }
 
     async fn handle_get_zk_nyms_available_for_download(&self) -> Result<(), AccountError> {
         self.account_command_tx
-            .send(AccountCommand::GetZkNymsAvailableForDownload)
-            .map_err(|source| AccountError::AccountControllerError { source })
+            .get_zk_nyms_available_for_download()
+            .map_err(AccountError::from)
     }
 
     async fn handle_get_zk_nym_by_id(&self, id: String) -> Result<(), AccountError> {
         self.account_command_tx
-            .send(AccountCommand::GetZkNymById(id))
-            .map_err(|source| AccountError::AccountControllerError { source })
+            .get_zk_nym_by_id(id)
+            .map_err(AccountError::from)
     }
 
     async fn handle_confirm_zk_nym_id_downloaded(&self, id: String) -> Result<(), AccountError> {
         self.account_command_tx
-            .send(AccountCommand::ConfirmZkNymIdDownloaded(id))
-            .map_err(|source| AccountError::AccountControllerError { source })
+            .confirm_zk_nym_id_downloaded(id)
+            .map_err(AccountError::from)
     }
 
     async fn handle_get_available_tickets(&self) -> Result<AvailableTicketbooks, AccountError> {
         self.account_command_tx
             .get_available_tickets()
             .await
-            .map_err(|source| AccountError::AccountCommandError { source })
+            .map_err(AccountError::from)
     }
 
     async fn handle_delete_log_file(&self) -> Result<(), VpnServiceDeleteLogFileError> {
