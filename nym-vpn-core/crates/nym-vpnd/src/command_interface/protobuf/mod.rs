@@ -3,6 +3,4 @@
 
 // This module primarily handles conversions to protobuf types
 
-pub mod account;
 pub mod error;
-pub mod info_response;

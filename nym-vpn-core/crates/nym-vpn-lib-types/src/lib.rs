@@ -5,6 +5,7 @@
 
 mod account;
 mod connection_data;
+mod service;
 mod tunnel_event;
 mod tunnel_state;
 
@@ -15,12 +16,14 @@ pub use account::{
     store_account::StoreAccountError,
     sync_account::SyncAccountError,
     sync_device::SyncDeviceError,
+    ticketbooks::AvailableTickets,
     AccountCommandError, VpnApiErrorResponse,
 };
 pub use connection_data::{
     ConnectionData, Gateway, MixnetConnectionData, NymAddress, TunnelConnectionData,
     WireguardConnectionData, WireguardNode,
 };
+pub use service::{VpnServiceConnectError, VpnServiceDisconnectError, VpnServiceInfo};
 pub use tunnel_event::{
     BandwidthEvent, ConnectionEvent, ConnectionStatisticsEvent, MixnetEvent, SphinxPacketRates,
     TunnelEvent,

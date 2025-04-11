@@ -22,6 +22,9 @@ impl TryFrom<ProtoStoreAccountError> for StoreAccountError {
             "StoreAccountError.error_detail",
         ))?;
         Ok(match error_detail {
+            crate::store_account_error::ErrorDetail::InvalidMnemonic(message) => {
+                Self::InvalidMnemonic(message)
+            }
             crate::store_account_error::ErrorDetail::StorageError(err) => Self::Storage(err),
             crate::store_account_error::ErrorDetail::ErrorResponse(vpn_api_endpoint_failure) => {
                 Self::GetAccountEndpointFailure(vpn_api_endpoint_failure.into())
@@ -29,6 +32,7 @@ impl TryFrom<ProtoStoreAccountError> for StoreAccountError {
             crate::store_account_error::ErrorDetail::UnexpectedResponse(err) => {
                 Self::UnexpectedResponse(err)
             }
+            crate::store_account_error::ErrorDetail::Internal(err) => Self::Internal(err),
         })
     }
 }
@@ -48,6 +52,7 @@ impl TryFrom<ProtoSyncAccountError> for SyncAccountError {
             crate::sync_account_error::ErrorDetail::UnexpectedResponse(err) => {
                 Self::UnexpectedResponse(err)
             }
+            crate::sync_account_error::ErrorDetail::Offline(_) => Self::Offline,
             crate::sync_account_error::ErrorDetail::Internal(err) => Self::Internal(err),
         })
     }
@@ -69,6 +74,7 @@ impl TryFrom<ProtoSyncDeviceError> for SyncDeviceError {
             crate::sync_device_error::ErrorDetail::UnexpectedResponse(err) => {
                 Self::UnexpectedResponse(err)
             }
+            crate::sync_device_error::ErrorDetail::Offline(_) => Self::Offline,
             crate::sync_device_error::ErrorDetail::Internal(err) => Self::Internal(err),
         })
     }
@@ -90,6 +96,7 @@ impl TryFrom<ProtoRegisterDeviceError> for RegisterDeviceError {
             crate::register_device_error::ErrorDetail::UnexpectedResponse(err) => {
                 Self::UnexpectedResponse(err)
             }
+            crate::register_device_error::ErrorDetail::Offline(_) => Self::Offline,
             crate::register_device_error::ErrorDetail::Internal(err) => Self::Internal(err),
         })
     }
@@ -119,6 +126,7 @@ impl TryFrom<ProtoRequestZkNymError> for RequestZkNymErrorReason {
                 Self::UnexpectedVpnApiResponse(message)
             }
             crate::request_zk_nym_error::Outcome::Storage(message) => Self::Storage(message),
+            crate::request_zk_nym_error::Outcome::Offline(_) => Self::Offline,
             crate::request_zk_nym_error::Outcome::Internal(message) => Self::Internal(message),
         })
     }
@@ -156,6 +164,7 @@ impl TryFrom<ProtoForgetAccountError> for ForgetAccountError {
             crate::forget_account_error::ErrorDetail::InitDeviceKeys(err) => {
                 Self::InitDeviceKeys(err)
             }
+            crate::forget_account_error::ErrorDetail::Internal(err) => Self::Internal(err),
         })
     }
 }

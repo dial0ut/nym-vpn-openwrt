@@ -248,6 +248,8 @@ pub enum StoreAccountError {
 impl From<CoreStoreAccountError> for StoreAccountError {
     fn from(value: CoreStoreAccountError) -> Self {
         match value {
+            // Map to storage error for compatibility, and to avoid churn on Android in particular
+            CoreStoreAccountError::InvalidMnemonic(message) => Self::Storage(message),
             CoreStoreAccountError::Storage(err) => Self::Storage(err),
             CoreStoreAccountError::GetAccountEndpointFailure(failure) => {
                 Self::GetAccountEndpointFailure(failure.into())
@@ -255,6 +257,8 @@ impl From<CoreStoreAccountError> for StoreAccountError {
             CoreStoreAccountError::UnexpectedResponse(response) => {
                 Self::UnexpectedResponse(response)
             }
+            // Map to storage error for compatibility, and to avoid churn on Android in particular
+            CoreStoreAccountError::Internal(err) => Self::Storage(err),
         }
     }
 }
@@ -267,6 +271,8 @@ pub enum SyncAccountError {
     ErrorResponse(VpnApiErrorResponse),
     #[error("unexpected response: {0}")]
     UnexpectedResponse(String),
+    #[error("no connectivity")]
+    Offline,
     #[error("internal error: {0}")]
     Internal(String),
 }
@@ -281,6 +287,7 @@ impl From<CoreSyncAccountError> for SyncAccountError {
             CoreSyncAccountError::UnexpectedResponse(response) => {
                 Self::UnexpectedResponse(response)
             }
+            CoreSyncAccountError::Offline => Self::Offline,
             CoreSyncAccountError::Internal(err) => Self::Internal(err),
         }
     }
@@ -296,6 +303,8 @@ pub enum SyncDeviceError {
     ErrorResponse(VpnApiErrorResponse),
     #[error("unexpected response: {0}")]
     UnexpectedResponse(String),
+    #[error("no connectivity")]
+    Offline,
     #[error("internal error: {0}")]
     Internal(String),
 }
@@ -309,6 +318,7 @@ impl From<CoreSyncDeviceError> for SyncDeviceError {
                 Self::ErrorResponse(failure.into())
             }
             CoreSyncDeviceError::UnexpectedResponse(response) => Self::UnexpectedResponse(response),
+            CoreSyncDeviceError::Offline => Self::Offline,
             CoreSyncDeviceError::Internal(err) => Self::Internal(err),
         }
     }
@@ -324,6 +334,8 @@ pub enum RegisterDeviceError {
     ErrorResponse(VpnApiErrorResponse),
     #[error("unexpected response: {0}")]
     UnexpectedResponse(String),
+    #[error("no connectivity")]
+    Offline,
     #[error("internal error: {0}")]
     Internal(String),
 }
@@ -339,6 +351,7 @@ impl From<CoreRegisterDeviceError> for RegisterDeviceError {
             CoreRegisterDeviceError::UnexpectedResponse(response) => {
                 Self::UnexpectedResponse(response)
             }
+            CoreRegisterDeviceError::Offline => Self::Offline,
             CoreRegisterDeviceError::Internal(err) => Self::Internal(err),
         }
     }
@@ -367,6 +380,8 @@ pub enum RequestZkNymError {
     UnexpectedVpnApiResponse(String),
     #[error("storage error: {0}")]
     Storage(String),
+    #[error("no connectivity")]
+    Offline,
     #[error("{0}")]
     Internal(String),
 }
@@ -381,6 +396,7 @@ impl From<CoreRequestZkNymErrorReason> for RequestZkNymError {
                 Self::UnexpectedVpnApiResponse(response)
             }
             CoreRequestZkNymErrorReason::Storage(err) => Self::Storage(err),
+            CoreRequestZkNymErrorReason::Offline => Self::Offline,
             CoreRequestZkNymErrorReason::Internal(err) => Self::Internal(err),
         }
     }
@@ -429,6 +445,9 @@ impl From<CoreForgetAccountError> for ForgetAccountError {
             }
             CoreForgetAccountError::RemoveAccountFiles(err) => Self::RemoveAccountFiles(err),
             CoreForgetAccountError::InitDeviceKeys(err) => Self::InitDeviceKeys(err),
+            // Map internal errors to RemoveAccount for compatibility, and to avoid churn on
+            // Android in particular
+            CoreForgetAccountError::Internal(err) => Self::RemoveAccount(err),
         }
     }
 }

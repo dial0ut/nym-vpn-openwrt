@@ -3,7 +3,8 @@
 
 use nym_offline_monitor::ConnectivityHandle;
 use nym_vpn_lib_types::{
-    AccountCommandError, RegisterDeviceError, RequestZkNymError, SyncAccountError, SyncDeviceError,
+    AccountCommandError, ForgetAccountError, RegisterDeviceError, RequestZkNymError,
+    StoreAccountError, SyncAccountError, SyncDeviceError,
 };
 use nym_vpn_store::mnemonic::Mnemonic;
 
@@ -19,8 +20,8 @@ use crate::{
 
 #[derive(Debug, strum::Display)]
 pub enum AccountCommand {
-    StoreAccount(ReturnSender<(), AccountCommandError>, Mnemonic),
-    ForgetAccount(ReturnSender<(), AccountCommandError>),
+    StoreAccount(ReturnSender<(), StoreAccountError>, Mnemonic),
+    ForgetAccount(ReturnSender<(), ForgetAccountError>),
     SyncAccountState(Option<ReturnSender<NymVpnAccountSummaryResponse, SyncAccountError>>),
     SyncDeviceState(Option<ReturnSender<DeviceState, SyncDeviceError>>),
     GetUsage(ReturnSender<Vec<NymVpnUsage>, AccountCommandError>),
@@ -85,16 +86,16 @@ impl AccountCommand {
         tracing::debug!("No connectivity");
         match self {
             AccountCommand::SyncAccountState(Some(tx)) => {
-                tx.send(Err(SyncAccountError::internal("No connectivity")));
+                tx.send(Err(SyncAccountError::Offline));
             }
             AccountCommand::SyncDeviceState(Some(tx)) => {
-                tx.send(Err(SyncDeviceError::internal("No connectivity")));
+                tx.send(Err(SyncDeviceError::Offline));
             }
             AccountCommand::RegisterDevice(Some(tx)) => {
-                tx.send(Err(RegisterDeviceError::internal("No connectivity")));
+                tx.send(Err(RegisterDeviceError::Offline));
             }
             AccountCommand::RequestZkNym(Some(tx)) => {
-                tx.send(Err(RequestZkNymError::internal("No connectivity")));
+                tx.send(Err(RequestZkNymError::Offline));
             }
             _ => {}
         }
