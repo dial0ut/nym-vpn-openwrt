@@ -55,7 +55,6 @@ nym-task.workspace = true
 nym-validator-client.workspace = true
 nym-wireguard-types.workspace = true
 
-nym-apple-dispatch.workspace = true
 nym-apple-network.workspace = true
 nym-authenticator-client.workspace = true
 nym-common.workspace = true
@@ -105,6 +104,7 @@ tracing-oslog.workspace = true
 
 [target.'cfg(target_os = "ios")'.dependencies]
 debounced.workspace = true
+dispatch2.workspace = true
 
 [build-dependencies]
 uniffi = { workspace = true, features = ["build"] }
