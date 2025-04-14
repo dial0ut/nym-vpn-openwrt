@@ -3,6 +3,8 @@
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+#[cfg(windows)]
+use std::path::Path;
 use std::{fmt, fs, path::PathBuf};
 
 use nym_vpn_lib::gateway_directory;
@@ -128,6 +130,13 @@ pub enum ConfigSetupError {
     #[cfg(unix)]
     #[error("failed to set permissions for directory {dir}: {error}")]
     SetPermissions { dir: PathBuf, error: std::io::Error },
+
+    #[cfg(windows)]
+    #[error("failed to set permissions for directory {dir}: {error}")]
+    SetPermissions {
+        dir: PathBuf,
+        error: nym_windows::security::Error,
+    },
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -212,26 +221,76 @@ where
     Ok(config)
 }
 
-pub(super) fn create_data_dir(data_dir: &PathBuf) -> Result<(), ConfigSetupError> {
-    fs::create_dir_all(data_dir).map_err(|error| ConfigSetupError::CreateDirectory {
-        dir: data_dir.clone(),
+pub(super) fn create_data_dir(
+    data_dir: &PathBuf,
+    network_name: &str,
+) -> Result<(), ConfigSetupError> {
+    let network_data_dir = data_dir.join(network_name);
+
+    fs::create_dir_all(&network_data_dir).map_err(|error| ConfigSetupError::CreateDirectory {
+        dir: network_data_dir.clone(),
         error,
     })?;
-    tracing::debug!("Making sure data dir exists at {:?}", data_dir);
 
-    #[cfg(unix)]
-    {
-        // Set directory permissions to 700 (rwx------)
-        let permissions = fs::Permissions::from_mode(0o700);
-        fs::set_permissions(data_dir, permissions).map_err(|error| {
-            ConfigSetupError::SetPermissions {
-                dir: data_dir.clone(),
-                error,
-            }
-        })?;
+    tracing::debug!(
+        "Making sure data dir exists at {}",
+        network_data_dir.display()
+    );
+
+    for dir_path in [&network_data_dir, data_dir] {
+        #[cfg(unix)]
+        {
+            // Set directory permissions to 700 (rwx------)
+            let permissions = fs::Permissions::from_mode(0o700);
+            fs::set_permissions(dir_path, permissions).map_err(|error| {
+                ConfigSetupError::SetPermissions {
+                    dir: dir_path.clone(),
+                    error,
+                }
+            })?;
+        }
+
+        #[cfg(windows)]
+        {
+            set_data_dir_permissions(dir_path).map_err(|error| {
+                ConfigSetupError::SetPermissions {
+                    dir: dir_path.clone(),
+                    error,
+                }
+            })?;
+        }
     }
 
-    // TODO: same for windows?
+    Ok(())
+}
+
+/// Set directory permissions to Administrators with Full Control.
+#[cfg(windows)]
+fn set_data_dir_permissions(data_dir: impl AsRef<Path>) -> nym_windows::security::Result<()> {
+    use nym_windows::security::{
+        set_named_security_info, AccessMode, AceFlags, Acl, ExplicitAccess, FileAccessRights,
+        SecurityInfo, SecurityObjectType, Sid, Trustee, TrusteeType, WellKnownSid,
+    };
+
+    let administrators_sid = Sid::well_known(WellKnownSid::BuiltinAdministrators)?;
+
+    let allow_admin_group_access = ExplicitAccess::new(
+        Trustee::new(administrators_sid.try_clone()?, TrusteeType::WellKnownGroup),
+        AccessMode::SetAccess,
+        FileAccessRights::FILE_ALL_ACCESS.into(),
+        AceFlags::OBJECT_INHERIT_ACE | AceFlags::CONTAINER_INHERIT_ACE,
+    );
+
+    let acl = Acl::new(vec![allow_admin_group_access])?;
+
+    set_named_security_info(
+        data_dir.as_ref(),
+        SecurityObjectType::FileObject,
+        SecurityInfo::DACL | SecurityInfo::PROTECTED_DACL,
+        None,
+        None,
+        Some(&acl),
+    )?;
 
     Ok(())
 }

@@ -37,6 +37,7 @@ nym-bin-common.workspace = true
 nym-credentials-interface.workspace = true
 nym-task.workspace = true
 nym-validator-client.workspace = true
+nym-windows.workspace = true
 
 # Local crates
 nym-ipc.workspace = true
@@ -58,6 +59,7 @@ workspace = true
 features = [
     "Win32_Foundation",
     "Win32_Security",
+    "Win32_Storage_FileSystem",
     "Win32_Security_Authorization",
     "Win32_Security_Authentication_Identity",
     "Win32_System_Diagnostics_Debug",
