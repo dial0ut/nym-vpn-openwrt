@@ -17,8 +17,9 @@ bincode.workspace = true
 bytes.workspace = true
 futures.workspace = true
 hickory-resolver = { workspace = true, features = [
-    "dns-over-tls",
-    "dns-over-https",
+    "tokio",
+    "tls-ring",
+    "https-ring",
 ] }
 ipnetwork.workspace = true
 itertools.workspace = true
@@ -89,7 +90,6 @@ nym-dns.workspace = true
 nym-firewall.workspace = true
 
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
-hickory-proto.workspace = true
 hickory-server = { workspace = true, features = ["resolver"] }
 nym-routing.workspace = true
 nym-dns.workspace = true
