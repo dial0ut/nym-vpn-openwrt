@@ -21,7 +21,7 @@ use futures_util::FutureExt;
 pub use nym_network::NymNetwork;
 use nym_sdk::mixnet::Recipient;
 pub use nym_vpn_network::NymVpnNetwork;
-pub use refresh::start_background_discovery_refresh;
+pub use refresh::start_background_file_refresh;
 use system_configuration::SystemConfiguration;
 pub use system_messages::{SystemMessage, SystemMessages};
 
@@ -82,38 +82,6 @@ impl Network {
     pub fn export_to_env(&self) {
         self.nym_network.export_to_env();
         self.nym_vpn_network.export_to_env();
-    }
-
-    // Fetch network information directly from the endpoint without going through the path of first
-    // persisting to disk etc.
-    // Currently used on mobile only.
-    pub async fn fetch(network_name: &str) -> anyhow::Result<Self> {
-        let discovery = Discovery::fetch(network_name).await?;
-        let feature_flags = discovery.feature_flags.clone();
-        let system_configuration = discovery.system_configuration.clone();
-        let nym_network = discovery.fetch_nym_network_details().await?;
-        let nyxd_url = nym_network
-            .network
-            .endpoints
-            .first()
-            .map(|ep| ep.nyxd_url())
-            .ok_or(anyhow::anyhow!("no nyxd endpoint found in nym network"))?;
-        let api_url = nym_network
-            .network
-            .endpoints
-            .first()
-            .and_then(|ep| ep.api_url())
-            .ok_or(anyhow::anyhow!("no nyxd endpoint found in nym network"))?;
-        let nym_vpn_network = NymVpnNetwork::from(discovery);
-
-        Ok(Network {
-            nym_network,
-            nyxd_url,
-            api_url,
-            nym_vpn_network,
-            feature_flags,
-            system_configuration,
-        })
     }
 
     // Query the network name for both urls and check that it matches
