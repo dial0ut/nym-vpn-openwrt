@@ -1,9 +1,8 @@
 // Copyright 2024 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
-use nym_http_api_client::UserAgent;
 use nym_offline_monitor::{Connectivity, ConnectivityHandle};
 use nym_vpn_api_client::{
     response::{NymVpnDevice, NymVpnUsage},
@@ -12,7 +11,6 @@ use nym_vpn_api_client::{
 use nym_vpn_lib_types::{
     AccountCommandError, ForgetAccountError, StoreAccountError, VpnApiErrorResponse,
 };
-use nym_vpn_network_config::Network;
 use nym_vpn_store::{mnemonic::Mnemonic, VpnStorage};
 use tokio::{
     sync::mpsc::{UnboundedReceiver, UnboundedSender},
@@ -27,41 +25,8 @@ use crate::{
     shared_state::{MnemonicState, ReadyToRegisterDevice, ReadyToRequestZkNym, SharedAccountState},
     storage::{AccountStorage, SharedVpnCredentialStorage, VpnCredentialStorage},
     vpn_api_client::AccountControllerVpnApiClient,
-    AccountCommandSender, AvailableTicketbooks,
+    AccountCommandSender, AccountControllerConfig, AvailableTicketbooks,
 };
-
-// The interval at which we automatically request zk-nyms
-const ZK_NYM_AUTOMATIC_REQUEST_INTERVAL: Duration = Duration::from_secs(60);
-
-// The interval at which we update the account state
-const ACCOUNT_UPDATE_INTERVAL: Duration = Duration::from_secs(5 * 60);
-
-pub struct AccountControllerConfig {
-    // The data directory where we store the account and device keys.
-    pub data_dir: PathBuf,
-
-    // User agent used by api client.
-    pub user_agent: UserAgent,
-
-    // Credentials mode is a feature flag that determines if we should automatically request
-    // zk-nyms.
-    pub credentials_mode: Option<bool>,
-
-    // The network environment that the controller is running in.
-    pub network_env: Network,
-}
-
-impl AccountControllerConfig {
-    // Determine if the credentials mode is enabled. This is determined by the credentials_mode
-    // field in the config, if it is set. Else the network environment feature flag is used.
-    fn background_zk_nym_refresh(&self) -> bool {
-        self.credentials_mode.unwrap_or_else(|| {
-            self.network_env
-                .get_feature_flag_credential_mode()
-                .unwrap_or(false)
-        })
-    }
-}
 
 pub struct AccountController<S>
 where
@@ -102,6 +67,12 @@ impl<S> AccountController<S>
 where
     S: VpnStorage,
 {
+    // The interval at which we automatically request zk-nyms
+    const ZK_NYM_AUTOMATIC_REQUEST_INTERVAL: Duration = Duration::from_secs(60);
+
+    // The interval at which we update the account state
+    const ACCOUNT_UPDATE_INTERVAL: Duration = Duration::from_secs(5 * 60);
+
     pub async fn new(
         config: AccountControllerConfig,
         storage: Arc<tokio::sync::Mutex<S>>,
@@ -126,18 +97,19 @@ where
         // The channels used to communicate with the controller
         let command_channel = tokio::sync::mpsc::unbounded_channel();
 
-        // Keep track of the commands that are currently running
-        let command_handler = AccountCommandHandler::new(
-            account_state.clone(),
-            vpn_api_client.inner().clone(),
-            credential_storage.clone(),
-        );
-
         // The offline watch is used to keep track of the current connectivity state, since we
         // don't want to do certain operations when we are offline
         let offline_watch = OfflineWatch::new(
             AccountCommandSender::new(command_channel.0.clone(), account_state.clone()),
             initial_connectivity.unwrap_or(Connectivity::new_presume_offline()),
+        );
+
+        // Keep track of the commands that are currently running
+        let command_handler = AccountCommandHandler::new(
+            account_state.clone(),
+            vpn_api_client.inner().clone(),
+            credential_storage.clone(),
+            offline_watch.clone(),
         );
 
         Ok(AccountController {
@@ -153,19 +125,25 @@ where
         })
     }
 
+    /// Get the current state of the account. This is a shared object that can be queried without
+    /// having to ask the controller.
     pub fn get_shared_state(&self) -> SharedAccountState {
         self.account_state.clone()
     }
 
+    /// Get the command channel used to send commands to the controller.
     pub fn get_command_sender(&self) -> AccountCommandSender {
         AccountCommandSender::new(self.command_channel.0.clone(), self.account_state.clone())
     }
 
+    // Check if the controller is allowed to request zk-nyms in the background.
     async fn is_background_zk_nym_refresh_active(&self) -> bool {
         self.config.background_zk_nym_refresh()
             && !self.command_handler.max_zknym_request_fails_reached().await
     }
 
+    // Check if all ticket types are above the soft threshold. This is used to determine if we
+    // should request more zk-nyms.
     async fn is_all_ticket_types_above_soft_threshold(&self) -> Result<bool, AccountCommandError> {
         self.credential_storage
             .lock()
@@ -955,11 +933,12 @@ where
         // Timer to periodically sync the remote account state.
         // Call tick() once to start the timer immediately. We don't want the first sync to happen
         // immediately, so we wait for the first tick to happen.
-        let mut sync_account_state_timer = tokio::time::interval(ACCOUNT_UPDATE_INTERVAL);
+        let mut sync_account_state_timer = tokio::time::interval(Self::ACCOUNT_UPDATE_INTERVAL);
         sync_account_state_timer.tick().await;
 
         // Timer to periodically check if we need to request more zk-nyms
-        let mut update_zk_nym_timer = tokio::time::interval(ZK_NYM_AUTOMATIC_REQUEST_INTERVAL);
+        let mut update_zk_nym_timer =
+            tokio::time::interval(Self::ZK_NYM_AUTOMATIC_REQUEST_INTERVAL);
 
         loop {
             tokio::select! {
