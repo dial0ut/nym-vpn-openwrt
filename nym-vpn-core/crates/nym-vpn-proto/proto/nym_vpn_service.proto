@@ -1,0 +1,844 @@
+syntax = "proto3";
+
+package nym_vpn_service;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+
+// Represents the identity of a gateway
+message Gateway {
+  string id = 1;
+}
+
+// Represents a nym-address of the form id.enc@gateway
+message Address {
+  string nym_address = 1;
+  string gateway_id = 2;
+}
+
+message Location {
+  string two_letter_iso_country_code = 1;
+  optional double latitude = 2;
+  optional double longitude = 3;
+}
+
+message EntryNode {
+  oneof entry_node_enum {
+    Gateway gateway = 1;
+    Location location = 2;
+    google.protobuf.Empty random = 4;
+  }
+}
+
+message ExitNode {
+  oneof exit_node_enum {
+    Address address = 1;
+    Gateway gateway = 2;
+    Location location = 3;
+    google.protobuf.Empty random = 4;
+  }
+}
+
+message MixConnectedStateDetails {
+  Address nym_address = 1;
+  Address exit_ipr = 2;
+  string ipv4 = 3;
+  string ipv6 = 4;
+}
+
+message WgConnectedStateDetails {
+  string entry_ipv4 = 1;
+  string exit_ipv4 = 2;
+}
+
+message ConnectedStateDetails {
+  oneof connected_state_details {
+    MixConnectedStateDetails mix = 1;
+    WgConnectedStateDetails wg = 2;
+  }
+}
+
+message Dns {
+  string ip = 1;
+}
+
+message Url {
+  string url = 1;
+}
+
+// Inspired by
+// https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/User-Agent
+// Forward slashes '/' are not valid
+message UserAgent {
+  // Example:
+  //    nym-vpn-app
+  //    nym-vpnd
+  string application = 1;
+  // Format: version[-optional] [(daemon version[-optional])]
+  // Example:
+  //    0.1.8
+  //    0.1.8-debug (0.1.6)
+  //    0.2.1-fdroid
+  string version = 2;
+  // Format: OS; OS version; CPU
+  // Example:
+  //    Windows NT 6.1; Win64; x64
+  //    Macintosh; Intel Mac OS X 14.6.1
+  //    iPad; U; CPU OS 3_2 like Mac OS X; en-us
+  string platform = 3;
+  // Format: git hash [(daemon git hash)]
+  // Commit hash should be at least 7 characters long
+  // Example:
+  //    4h9fk59 (4kdufle)
+  //    4h9fk59
+  string git_commit = 4;
+}
+
+message DenomDetails {
+  string base = 1;
+  string display = 2;
+  uint32 display_exponent = 3;
+}
+
+message ChainDetails {
+  string bech32_account_prefix = 1;
+  DenomDetails mix_denom = 2;
+  DenomDetails stake_denom = 3;
+}
+
+message NymContracts {
+  optional string mixnet_contract_address = 1;
+  optional string vesting_contract_address = 2;
+  optional string ecash_contract_address = 3;
+  optional string group_contract_address = 4;
+  optional string multisig_contract_address = 5;
+  optional string coconut_dkg_contract_address = 6;
+}
+
+message NymNetworkDetails {
+  string network_name = 1;
+  ChainDetails chain_details = 2;
+  repeated ValidatorDetails endpoints = 3;
+  NymContracts contracts = 4;
+}
+
+message NymVpnNetworkDetails {
+  Url nym_vpn_api_url = 1;
+}
+
+message AccountManagement {
+  Url sign_up = 1;
+  Url sign_in = 2;
+  Url account = 3;
+}
+
+message ValidatorDetails {
+  Url nyxd_url = 1;
+  Url websocket_url = 2;
+  Url api_url = 3;
+}
+
+message InfoResponse {
+  string version = 1;
+  google.protobuf.Timestamp build_timestamp = 2;
+  string triple = 3;
+  string platform = 4;
+  string git_commit = 5;
+  NymNetworkDetails nym_network = 6;
+  NymVpnNetworkDetails nym_vpn_network = 7;
+}
+
+message SystemMessage {
+  string name = 1;
+  string message = 2;
+  map<string, string> properties = 3;
+}
+
+message NetworkCompatibility {
+  string core = 1;
+  string ios = 2;
+  string macos = 3;
+  string tauri = 4;
+  string android = 5;
+}
+
+message GetSystemMessagesResponse {
+  repeated SystemMessage messages = 1;
+}
+
+message GetNetworkCompatibilityResponse {
+  optional NetworkCompatibility network_compatibility = 1;
+}
+
+message GetFeatureFlagsResponse {
+  map<string, string> flags = 1;
+  map<string, FeatureFlagGroup> groups = 2;
+}
+
+message FeatureFlagGroup {
+  map<string, string> map = 1;
+}
+
+message Threshold {
+  uint32 min_performance = 1;
+}
+
+message ConnectRequest {
+  EntryNode entry = 1;
+  ExitNode exit = 2;
+  Dns dns = 3;
+  bool enable_two_hop = 5;
+  bool netstack = 13;
+  bool disable_poisson_rate = 6;
+  bool disable_background_cover_traffic = 7;
+  bool enable_credentials_mode = 8;
+  UserAgent user_agent = 12;
+}
+
+message AsEntry {
+  bool can_connect = 1;
+  bool can_route = 2;
+}
+
+message AsExit {
+  bool can_connect = 1;
+  bool can_route_ip_v4 = 2;
+  bool can_route_ip_v6 = 3;
+  bool can_route_ip_external_v4 = 4;
+  bool can_route_ip_external_v6 = 5;
+}
+
+message WgProbeResult {
+  bool can_register = 1;
+  bool can_handshake = 2;
+  bool can_resolve_dns = 3;
+  float ping_hosts_performance = 4;
+  float ping_ips_performance = 5;
+}
+
+message ProbeOutcome {
+  AsEntry as_entry = 1;
+  AsExit as_exit = 2;
+  WgProbeResult wg = 3;
+}
+
+message Probe {
+  google.protobuf.Timestamp last_updated_utc = 1;
+  ProbeOutcome outcome = 2;
+}
+
+message GatewayResponse {
+  Gateway id = 1;
+  Location location = 2;
+  Probe last_probe = 3;
+  optional Score wg_score = 4;
+  optional Score mixnet_score = 5;
+  string moniker = 6;
+}
+
+enum Score {
+  NONE = 0;
+  LOW = 1;
+  MEDIUM = 2;
+  HIGH = 3;
+}
+
+enum GatewayType {
+  MIXNET_ENTRY = 0;
+  MIXNET_EXIT = 1;
+  WG = 2;
+}
+
+message ListGatewaysRequest {
+  GatewayType kind = 1;
+  UserAgent user_agent = 4;
+}
+
+message ListGatewaysResponse {
+  repeated GatewayResponse gateways = 1;
+}
+
+message ListCountriesRequest {
+  GatewayType kind = 1;
+  UserAgent user_agent = 4;
+}
+
+message ListCountriesResponse {
+  repeated Location countries = 1;
+}
+
+message GetAccountLinksRequest {
+  string locale = 1;
+}
+
+message ConnectionData {
+  Gateway entry_gateway = 1;
+  Gateway exit_gateway = 2;
+  google.protobuf.Timestamp connected_at = 3;
+  TunnelConnectionData tunnel = 4;
+}
+
+message MixnetConnectionData {
+  Address nym_address = 1;
+  Address exit_ipr = 2;
+  string ipv4 = 3;
+  string ipv6 = 4;
+  string entry_ip = 5;
+  string exit_ip = 6;
+}
+
+message WireguardConnectionData {
+  WireguardNode entry = 1;
+  WireguardNode exit = 2;
+}
+
+message WireguardNode {
+  string endpoint = 1;
+  string public_key = 2;
+  string private_ipv4 = 3;
+  string private_ipv6 = 4;
+}
+
+message TunnelConnectionData {
+  message Mixnet {
+    MixnetConnectionData data = 1;
+  }
+  message Wireguard {
+    WireguardConnectionData data = 2;
+  }
+
+  oneof state {
+    Mixnet mixnet = 1;
+    Wireguard wireguard = 2;
+  }
+}
+
+message TunnelState {
+  enum ErrorStateReason {
+    FIREWALL = 0;
+    ROUTING = 1;
+    SAME_ENTRY_AND_EXIT_GATEWAY = 2;
+    INVALID_ENTRY_GATEWAY_COUNTRY = 3;
+    INVALID_EXIT_GATEWAY_COUNTRY = 4;
+    MAX_DEVICES_REACHED = 5;
+    BANDWIDTH_EXCEEDED = 6;
+    SUBSCRIPTION_EXPIRED = 7;
+    DNS = 8;
+    API = 9;
+    INTERNAL = 10;
+    DEVICE_TIME_OUT_OF_SYNC = 11;
+    CREATE_MIXNET_STORAGE = 12;
+  }
+
+  enum ActionAfterDisconnect {
+    NOTHING = 0;
+    ERROR = 1;
+    RECONNECT = 2;
+    OFFLINE = 3;
+  }
+
+  message Disconnected {}
+  message Connecting {
+    uint32 retry_attempt = 1;
+    optional ConnectionData connection_data = 2;
+  }
+  message Connected {
+    ConnectionData connection_data = 1;
+  }
+  message Disconnecting {
+    ActionAfterDisconnect after_disconnect = 1;
+  }
+  message Error {
+    ErrorStateReason reason = 1;
+    // for errors with details like Dns, Api, Internal
+    optional string detail = 2;
+  }
+  message Offline {
+    bool reconnect = 1;
+  }
+
+  oneof state {
+    Disconnected disconnected = 1;
+    Connecting connecting = 2;
+    Connected connected = 3;
+    Disconnecting disconnecting = 4;
+    Error error = 5;
+    Offline offline = 6;
+  }
+}
+
+message TunnelEvent {
+  oneof event {
+    TunnelState tunnel_state = 1;
+    MixnetEvent mixnet_event = 2;
+  }
+}
+
+message MixnetEvent {
+  message BandwidthEvent {
+    message NoBandwidth {}
+    message RemainingBandwidth {
+      int64 value = 1;
+    }
+    oneof event {
+      NoBandwidth no_bandwidth = 1;
+      RemainingBandwidth remaining_bandwidth = 2;
+    }
+  }
+
+  enum ConnectionEvent {
+    ENTRY_GATEWAY_DOWN = 0;
+    EXIT_GATEWAY_DOWN_IPV4 = 1;
+    EXIT_GATEWAY_DOWN_IPV6 = 2;
+    EXIT_GATEWAY_ROUTING_ERROR_IPV4 = 3;
+    EXIT_GATEWAY_ROUTING_ERROR_IPV6 = 4;
+    CONNECTED_IPV4 = 5;
+    CONNECTED_IPV6 = 6;
+  }
+
+  message SphinxPacketRates {
+    double real_packets_sent = 1;
+    double real_packets_sent_size = 2;
+    double cover_packets_sent = 3;
+    double cover_packets_sent_size = 4;
+
+    double real_packets_received = 5;
+    double real_packets_received_size = 6;
+    double cover_packets_received = 7;
+    double cover_packets_received_size = 8;
+
+    double total_acks_received = 9;
+    double total_acks_received_size = 10;
+    double real_acks_received = 11;
+    double real_acks_received_size = 12;
+    double cover_acks_received = 13;
+    double cover_acks_received_size = 14;
+
+    double real_packets_queued = 15;
+    double retransmissions_queued = 16;
+    double reply_surbs_queued = 17;
+    double additional_reply_surbs_queued = 18;
+  }
+
+  message ConnectionStatisticsEvent {
+    SphinxPacketRates rates = 1;
+  }
+
+  oneof event {
+    BandwidthEvent bandwidth_event = 1;
+    ConnectionEvent connection_event = 2;
+    ConnectionStatisticsEvent connection_statistics_event = 3;
+  }
+}
+
+message GetLogPathResponse {
+  string dir = 1;
+  string filename = 2;
+}
+
+
+message StoreAccountError {
+  oneof error_detail {
+    string invalid_mnemonic = 5;
+    string storage_error = 1;
+    VpnApiError vpn_api = 2;
+    string unexpected_response = 3;
+    string internal = 4;
+  }
+}
+
+message SyncAccountError {
+  oneof error_detail {
+    bool no_account_stored = 1;
+    VpnApiError vpn_api = 2;
+    string unexpected_response = 3;
+    bool offline = 5;
+    string internal = 4;
+  }
+}
+
+message SyncDeviceError {
+  oneof error_detail {
+    bool no_account_stored = 1;
+    bool no_device_stored = 2;
+    VpnApiError vpn_api = 3;
+    string unexpected_response = 4;
+    bool offline = 6;
+    string internal = 5;
+  }
+}
+
+message RegisterDeviceError {
+  oneof error_detail {
+    bool no_account_stored = 1;
+    bool no_device_stored = 2;
+    VpnApiError vpn_api = 3;
+    string unexpected_response = 4;
+    bool offline = 6;
+    string internal = 5;
+  }
+}
+
+message ForgetAccountError {
+  oneof error_detail {
+    bool registration_in_progress = 1;
+    VpnApiError vpn_api = 2;
+    string unexpected_response = 3;
+    string remove_account = 4;
+    string remove_device_keys = 5;
+    string reset_credential_store = 6;
+    string remove_account_files = 7;
+    string init_device_keys = 8;
+    string internal = 9;
+  }
+}
+
+message DeleteLogFileError {
+  string message = 1;
+}
+
+message VpnApiError {
+  oneof error_detail {
+    bool timeout = 1;
+    uint32 status_code = 2;
+    VpnApiErrorResponse response = 3;
+  }
+}
+
+message VpnApiErrorResponse {
+  string message = 1;
+  optional string message_id = 2;
+  optional string code_reference_id = 3;
+}
+
+message RequestZkNymSuccess {
+  string id = 1;
+}
+
+// Mapped from `nym_vpn_lib_types::RequestZkNymErrorReason`
+message RequestZkNymError {
+  oneof outcome {
+    bool no_account_stored = 1;
+    bool no_device_stored = 2;
+    VpnApiError vpn_api = 3;
+    string unexpected_vpn_api_response = 4;
+    string storage = 5;
+    bool offline = 7;
+    string internal = 6;
+  }
+}
+
+// --- Requests and responses ---
+
+message StoreAccountRequest {
+  string mnemonic = 1;
+}
+
+message StoreAccountResponse {
+  StoreAccountError error = 2;
+}
+
+message ForgetAccountResponse {
+  ForgetAccountError error = 2;
+}
+
+message GetAccountIdentityResponse {
+  optional string account_identity = 1;
+}
+
+message GetAccountStateResponse {
+  message AccountStateSummary {
+    enum MnemonicState {
+      MNEMONIC_STATE_NOT_STORED = 0;
+      MNEMONIC_STATE_STORED = 1;
+    }
+
+    enum AccountRegistered {
+      ACCOUNT_REGISTERED = 0;
+      ACCOUNT_NOT_REGISTERED = 1;
+    }
+
+    message AccountSummary {
+      enum AccountState {
+        ACCOUNT_STATE_INACTIVE = 0;
+        ACCOUNT_STATE_ACTIVE = 1;
+        ACCOUNT_STATE_DELETE_ME = 2;
+      }
+
+      enum SubscriptionState {
+        SUBSCRIPTION_STATE_NOT_REGISTERED = 0;
+        SUBSCRIPTION_STATE_PENDING = 1;
+        SUBSCRIPTION_STATE_ACTIVE = 2;
+        SUBSCRIPTION_STATE_COMPLETE = 3;
+      }
+
+      message DeviceSummary {
+        uint64 active = 1;
+        uint64 max = 2;
+        uint64 remaining = 3;
+      }
+
+      message FairUsageState {
+        uint64 limit_gb = 1;
+        uint64 used_gb = 2;
+        optional string resets_on_utc = 3;
+      }
+
+      AccountState account = 1;
+      SubscriptionState subscription = 2;
+      DeviceSummary device_summary = 3;
+      FairUsageState fair_usage = 4;
+    }
+
+    enum DeviceState {
+      DEVICE_STATE_NOT_REGISTERED = 0;
+      DEVICE_STATE_INACTIVE = 1;
+      DEVICE_STATE_ACTIVE = 2;
+      DEVICE_STATE_DELETE_ME = 3;
+    }
+
+    optional MnemonicState mnemonic = 1;
+    optional AccountRegistered account_registered = 2;
+    optional AccountSummary account_summary = 3;
+    optional DeviceState device = 4;
+    optional RegisterDeviceResult register_device_result = 5;
+    optional RequestZkNymResult request_zk_nym_result = 7;
+  }
+
+  AccountStateSummary account = 1;
+}
+
+message RegisterDeviceResult {
+  enum RegisterDeviceResultType {
+    IN_PROGRESS = 0;
+    SUCCESS = 1;
+    FAILED = 2;
+  }
+
+  RegisterDeviceResultType kind = 1;
+  optional RegisterDeviceError error = 2;
+}
+
+// The status of a zk-nym request. A request can have multiple successes
+// and failures, depending on how many ticket types were requested.
+message RequestZkNymResult {
+  enum RequestZkNymResultType {
+    IN_PROGRESS = 0;
+    DONE = 1;
+    ERROR = 2;
+  }
+
+  RequestZkNymResultType kind = 1;
+  repeated RequestZkNymSuccess successes = 2;
+  repeated RequestZkNymError failures = 3;
+}
+
+message GetAccountUsageResponse {
+  message AccountUsages {
+    repeated AccountUsage account_usages = 1;
+  }
+
+  message AccountUsage {
+    string created_on_utc = 1;
+    string last_updated_utc = 2;
+    string id = 3;
+    string subscription_id = 4;
+    string valid_until_utc = 5;
+    string valid_from_utc = 6;
+    double bandwidth_allowance_gb = 7;
+    double bandwidth_used_gb = 8;
+  }
+
+  AccountUsages account_usages = 1;
+}
+
+message ResetDeviceIdentityRequest {
+  // 32 byte seed, [u8; 32]
+  optional bytes seed = 1;
+}
+
+message GetDeviceIdentityResponse {
+  string device_identity = 1;
+}
+
+message GetDevicesResponse {
+  message Device {
+    enum DeviceStatus {
+      ACTIVE = 0;
+      INACTIVE = 1;
+      DELETE_ME = 2;
+    }
+
+    string created_on_utc = 1;
+    string last_updated_utc = 2;
+    string device_identity_key = 3;
+    DeviceStatus status = 4;
+  }
+
+  message Devices {
+    repeated Device devices = 1;
+  }
+
+  Devices devices = 1;
+}
+
+message GetZkNymByIdRequest {
+  string id = 1;
+}
+
+message ConfirmZkNymDownloadedRequest {
+  string id = 1;
+}
+
+message AvailableTickets {
+  // Remaining number of mixnet entry tickets
+  uint64 mixnet_entry_tickets = 1;
+  // Remaining mixnet entry data in bytes
+  uint64 mixnet_entry_data = 2;
+  // Remaining mixnet entry data formatted to a string using SI units
+  string mixnet_entry_data_si = 3;
+
+  // Remaining number of mixnet exit tickets
+  uint64 mixnet_exit_tickets = 4;
+  // Remaining mixnet exit data in bytes
+  uint64 mixnet_exit_data = 5;
+  // Remaining mixnet exit data formatted to a string using SI units
+  string mixnet_exit_data_si = 6;
+
+  // Remaining number of vpn entry tickets
+  uint64 vpn_entry_tickets = 7;
+  // Remaining vpn entry data in bytes
+  uint64 vpn_entry_data = 8;
+  // Remaining vpn entry data formatted to a string using SI units
+  string vpn_entry_data_si = 9;
+
+  // Remaining number of vpn exit tickets
+  uint64 vpn_exit_tickets = 10;
+  // Remaining vpn exit data in bytes
+  uint64 vpn_exit_data = 11;
+  // Remaining vpn exit data formatted to a string using SI units
+  string vpn_exit_data_si = 12;
+}
+
+message DeleteLogFileResponse {
+  bool success = 1;
+  DeleteLogFileError error = 2;
+}
+
+service NymVpnService {
+  // Get info regarding the nym-vpnd in general, like version etc.
+  rpc Info (google.protobuf.Empty) returns (InfoResponse) {}
+
+  // Set the network. This requires a restart to take effect
+  rpc SetNetwork (google.protobuf.StringValue) returns (google.protobuf.Empty) {}
+
+  // List messages fetched from nym-vpn-api
+  rpc GetSystemMessages (google.protobuf.Empty) returns (GetSystemMessagesResponse) {}
+
+  // List network compatibility client versions from nym-vpn-api
+  rpc GetNetworkCompatibility (google.protobuf.Empty) returns (GetNetworkCompatibilityResponse) {}
+
+  // List the feature flags fetched from the nym-vpn-api
+  rpc GetFeatureFlags (google.protobuf.Empty) returns (GetFeatureFlagsResponse) {}
+
+  // Connect the tunnel
+  rpc ConnectTunnel (ConnectRequest) returns (google.protobuf.Empty) {}
+
+  // Disconnect the tunnel
+  rpc DisconnectTunnel (google.protobuf.Empty) returns (google.protobuf.Empty) {}
+
+  // Get the current tunnel state
+  rpc GetTunnelState (google.protobuf.Empty) returns (TunnelState) {}
+
+  // Listen for current tunnel state and subsequent changes to it. Emits current state as the first value.
+  rpc ListenToTunnelState (google.protobuf.Empty) returns (stream TunnelState) {}
+
+  /// Listen for daemon events.
+  rpc ListenToEvents(google.protobuf.Empty) returns (stream TunnelEvent) {}
+
+  // List the available gateways for the selected mode
+  rpc ListGateways (ListGatewaysRequest) returns (ListGatewaysResponse) {}
+
+  // List the available countries for the selected mode
+  rpc ListCountries (ListCountriesRequest) returns (ListCountriesResponse) {}
+
+  // -- Unstable --
+  // These below are considered unstable, in the sense that their definitions
+  // are still being integrated upon and their meaning might change
+
+  // Store the recovery phrase, which is also the account identity and authentication
+  rpc StoreAccount (StoreAccountRequest) returns (StoreAccountResponse) {}
+
+  // Check if the recovery phrase is stored
+  rpc IsAccountStored (google.protobuf.Empty) returns (google.protobuf.BoolValue) {}
+
+  // Removes everything related to the account, including the device identity,
+  // credential storage, mixnet keys, gateway registrations.
+  rpc ForgetAccount (google.protobuf.Empty) returns (ForgetAccountResponse) {}
+
+  // Get the account identity of the locally stored recovery phrase
+  rpc GetAccountIdentity (google.protobuf.Empty) returns (GetAccountIdentityResponse) {}
+
+  // Get the set of account links for the user
+  rpc GetAccountLinks (GetAccountLinksRequest) returns (AccountManagement) {}
+
+  // Query the account state, which is synced from the nym-vpn-api account, as it
+  // is known and interpreted by nym-vpnd
+  rpc GetAccountState (google.protobuf.Empty) returns (GetAccountStateResponse) {}
+
+  // The vpn client will periodically refresh the account state in the
+  // background. This command triggers a manual refresh.
+  rpc RefreshAccountState (google.protobuf.Empty) returns (google.protobuf.Empty) {}
+
+  // Get the account usage from the nym-vpn-api
+  rpc GetAccountUsage (google.protobuf.Empty) returns (GetAccountUsageResponse) {}
+
+  // Reset the device identity
+  rpc ResetDeviceIdentity (ResetDeviceIdentityRequest) returns (google.protobuf.Empty) {}
+
+  // Get the device identity
+  rpc GetDeviceIdentity (google.protobuf.Empty) returns (GetDeviceIdentityResponse) {}
+
+  // Try to register the local device with the nym-vpn-api
+  rpc RegisterDevice (google.protobuf.Empty) returns (google.protobuf.Empty) {}
+
+  // Get the list of devices associated with this account from the nym-vpn-api
+  rpc GetDevices (google.protobuf.Empty) returns (GetDevicesResponse) {}
+
+  // Get the list of active devices associated with this account from the nym-vpn-api
+  rpc GetActiveDevices (google.protobuf.Empty) returns (GetDevicesResponse) {}
+
+  // Request new zk-nyms (ticketbooks) from the nym-vpn-api
+  rpc RequestZkNym (google.protobuf.Empty) returns (google.protobuf.Empty) {}
+
+  // List the zk-nyms associated with this device from the nym-vpn-api
+  rpc GetDeviceZkNyms (google.protobuf.Empty) returns (google.protobuf.Empty) {}
+
+  // List the zk-nyms available for download from the nym-vpn-api
+  rpc GetZkNymsAvailableForDownload (google.protobuf.Empty) returns (google.protobuf.Empty) {}
+
+  // Get a zk-nym by its id from the nym-vpn-api
+  rpc GetZkNymById (GetZkNymByIdRequest) returns (google.protobuf.Empty) {}
+
+  // Confirm that a zk-nym has been downloaded from the nym-vpn-api
+  rpc ConfirmZkNymDownloaded (ConfirmZkNymDownloadedRequest) returns (google.protobuf.Empty) {}
+
+  // Get the available tickets in the local credential store
+  rpc GetAvailableTickets (google.protobuf.Empty) returns (AvailableTickets) {}
+
+  // Get the log file path
+  rpc GetLogPath (google.protobuf.Empty) returns (GetLogPathResponse) {}
+
+  // Delete the log file
+  rpc DeleteLogFile (google.protobuf.Empty) returns (google.protobuf.Empty) {}
+
+  // Check if Sentry error monitoring is enabled
+  rpc IsSentryEnabled (google.protobuf.Empty) returns (google.protobuf.BoolValue) {}
+
+  // Enable Sentry error monitoring
+  rpc EnableSentry (google.protobuf.Empty) returns (google.protobuf.Empty) {}
+
+  // Disable Sentry error monitoring
+  rpc DisableSentry (google.protobuf.Empty) returns (google.protobuf.Empty) {}
+}
