@@ -64,8 +64,9 @@ pub enum Error {
     #[error("WireGuard error")]
     Wireguard(#[from] nym_wg_go::Error),
 
-    #[error("WireGuard backend error")]
-    WgBackend(#[from] wireguard::wg_backend::WgBackendError),
+    #[cfg(all(target_os = "linux", target_env = "musl"))]
+    #[error("kernel WireGuard error: {0}")]
+    KernelWireguard(String),
 
     #[error("failed to dup tunnel file descriptor")]
     DupFd(#[source] std::io::Error),
@@ -76,9 +77,6 @@ pub enum Error {
 
     #[error("transport error")]
     Transport(#[from] transports::TransportError),
-
-    #[error("unsupported tunnel mode: {0}")]
-    UnsupportedTunnelMode(String),
 
     #[error("connection cancelled")]
     Cancelled,

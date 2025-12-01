@@ -870,10 +870,10 @@ impl tunnel::Error {
             | Self::MixnetClient(_)
             | Self::BandwidthController(_)
             | Self::Wireguard(_)
-            | Self::WgBackend(_)
-            | Self::UnsupportedTunnelMode(_)
             | Self::Cancelled
             | Self::Transport(_) => None,
+            #[cfg(all(target_os = "linux", target_env = "musl"))]
+            Self::KernelWireguard(_) => None,
             #[cfg(target_os = "ios")]
             Self::ResolveDns64(_) => None,
             #[cfg(windows)]

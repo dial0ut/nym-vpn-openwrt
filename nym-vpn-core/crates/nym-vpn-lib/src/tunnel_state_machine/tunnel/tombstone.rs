@@ -4,7 +4,7 @@
 use tun::AsyncDevice;
 
 #[cfg(windows)]
-use crate::tunnel_state_machine::tunnel::wireguard::wg_backend::WgTunnel;
+use nym_wg_go::wireguard_go::Tunnel;
 
 /// Holds the remains of the mixnet or wireguard tunnel.
 #[derive(Default)]
@@ -12,7 +12,7 @@ pub struct Tombstone {
     /// Wireguard tunnels that have not been shutdown yet because they own the tunnel device.
     /// These tunnels are kept around until after the routing table is reset. Windows only.
     #[cfg(windows)]
-    pub wg_instances: Vec<WgTunnel>,
+    pub wg_instances: Vec<Tunnel>,
 
     /// Tunnel devices that are no longer in use by the tunnel.
     pub tun_devices: Vec<tun::AsyncDevice>,
@@ -35,7 +35,7 @@ impl Tombstone {
 
     /// Creates a tombstone with wireguard tunnel instances.
     #[cfg(windows)]
-    pub fn with_wg_instances(wg_instances: Vec<WgTunnel>) -> Self {
+    pub fn with_wg_instances(wg_instances: Vec<Tunnel>) -> Self {
         Self {
             tun_devices: Vec::new(),
             wg_instances,
