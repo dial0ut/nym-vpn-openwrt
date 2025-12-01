@@ -9,6 +9,7 @@ use nym_registration_common::GatewayData;
 use nym_vpn_lib_types::BridgeAddress;
 
 pub mod connected_tunnel;
+pub mod wg_backend;
 
 #[cfg(target_os = "ios")]
 pub mod dns64;

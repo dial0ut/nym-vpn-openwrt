@@ -26,6 +26,7 @@ members = [
     "crates/nym-vpnc",
     "crates/nym-vpnd",
     "crates/nym-wg-go",
+    "crates/nym-wg-kernel",
     "crates/nym-wg-metadata-client",
     "crates/nym-windows",
     "crates/uniffi-bindgen",
@@ -73,7 +74,7 @@ bytes = "1.10"
 chrono = "0.4.42"
 celes = "2.6.0"
 clap = "4.5"
-dbus = "0.9.9"
+dbus = {version = "0.9.9", features = ["vendored"]}
 debounced = "0.2"
 dispatch2 = "0.3.0"
 duct = "1.1"
@@ -200,6 +201,7 @@ nym-vpn-network-config = { path = "crates/nym-vpn-network-config" }
 nym-vpn-proto = { path = "crates/nym-vpn-proto" }
 nym-vpn-store = { path = "crates/nym-vpn-store" }
 nym-wg-go = { path = "crates/nym-wg-go" }
+nym-wg-kernel = { path = "crates/nym-wg-kernel" }
 nym-wg-metadata-client = { path = "crates/nym-wg-metadata-client" }
 nym-windows = { path = "crates/nym-windows" }
 nym-platform-metadata = { path = "crates/nym-platform-metadata" }

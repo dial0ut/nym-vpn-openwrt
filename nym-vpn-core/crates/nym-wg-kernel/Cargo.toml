@@ -1,0 +1,42 @@
+[package]
+name = "nym-wg-kernel"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Async runtime
+tokio = { workspace = true, features = ["rt", "net", "sync", "macros"] }
+futures = { workspace = true }
+
+# Netlink communication - use workspace versions for consistency
+netlink-packet-core = { workspace = true }
+netlink-packet-route = { workspace = true }
+rtnetlink = { workspace = true }
+netlink-proto = "0.12"
+tokio-stream = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Logging
+log = { workspace = true }
+
+# Network types
+ipnetwork = { workspace = true }
+
+# Binary encoding
+byteorder = "1.5"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "net", "sync", "macros", "rt-multi-thread", "signal"] }
+env_logger = "0.11"

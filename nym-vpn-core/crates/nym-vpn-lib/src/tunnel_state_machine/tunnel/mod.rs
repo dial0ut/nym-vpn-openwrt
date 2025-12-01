@@ -74,6 +74,9 @@ pub enum Error {
     #[error("transport error")]
     Transport(#[from] transports::TransportError),
 
+    #[error("unsupported tunnel mode: {0}")]
+    UnsupportedTunnelMode(String),
+
     #[error("connection cancelled")]
     Cancelled,
 }

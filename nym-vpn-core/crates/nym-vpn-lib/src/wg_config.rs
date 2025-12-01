@@ -10,9 +10,11 @@ use ipnetwork::{IpNetwork, Ipv4Network, Ipv6Network};
 use nym_registration_common::GatewayData;
 #[cfg(target_os = "ios")]
 use nym_wg_go::PeerEndpointUpdate;
-use nym_wg_go::{
-    PeerConfig, PrivateKey, PublicKey, amnezia::AmneziaConfig, netstack, wireguard_go,
-};
+use nym_wg_go::{PrivateKey, PublicKey, amnezia::AmneziaConfig};
+#[cfg(not(target_env = "musl"))]
+use nym_wg_go::PeerConfig;
+#[cfg(not(target_env = "musl"))]
+use nym_wg_go::{netstack, wireguard_go};
 
 #[derive(Debug, Clone)]
 pub struct WgNodeConfig {
@@ -96,6 +98,7 @@ impl WgPeer {
 }
 
 impl WgNodeConfig {
+    #[cfg(not(target_env = "musl"))]
     pub fn into_netstack_config(self) -> netstack::Config {
         let allowed_ips = self.allowed_ips();
         netstack::Config {
@@ -123,6 +126,7 @@ impl WgNodeConfig {
         }
     }
 
+    #[cfg(not(target_env = "musl"))]
     pub fn into_wireguard_config(self) -> wireguard_go::Config {
         let allowed_ips = self.allowed_ips();
         wireguard_go::Config {
@@ -143,7 +147,7 @@ impl WgNodeConfig {
         }
     }
 
-    fn allowed_ips(&self) -> Vec<IpNetwork> {
+    pub fn allowed_ips(&self) -> Vec<IpNetwork> {
         let mut allowed_ips = vec![];
         match self.allowed_ips {
             AllowedIps::All => {

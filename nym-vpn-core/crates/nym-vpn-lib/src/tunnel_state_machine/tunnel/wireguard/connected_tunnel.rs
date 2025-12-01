@@ -18,7 +18,9 @@ use nym_crypto::asymmetric::x25519;
 use nym_routing::{Callback, CallbackHandle, EventType};
 #[cfg(windows)]
 use nym_wg_go::wireguard_go::WintunInterface;
-use nym_wg_go::{amnezia::AmneziaConfig, netstack, wireguard_go};
+#[cfg(not(target_env = "musl"))]
+use nym_wg_go::{netstack, wireguard_go};
+use nym_wg_go::amnezia::AmneziaConfig;
 #[cfg(windows)]
 use nym_windows::net::{self as winnet, AddressFamily};
 #[cfg(any(windows, target_os = "ios"))]
@@ -28,7 +30,7 @@ use tokio::task::{JoinError, JoinHandle};
 use tokio_stream::{StreamExt, wrappers::UnboundedReceiverStream};
 use tokio_util::sync::CancellationToken;
 #[cfg(unix)]
-use tun::AsyncDevice;
+use tun::{AsyncDevice, Device};
 
 #[cfg(target_os = "android")]
 use crate::tunnel_provider::AndroidTunProvider;
@@ -45,12 +47,16 @@ use crate::{
             Error, Result, Tombstone,
             wireguard::{
                 ConnectionData,
-                two_hop_config::{ENTRY_MTU, EXIT_MTU, TwoHopConfig},
+                two_hop_config::ENTRY_MTU,
+                two_hop_config::EXIT_MTU,
+                wg_backend::WgTunnel,
             },
         },
     },
     wg_config::{AllowedIps, WgNodeConfig},
 };
+#[cfg(not(target_env = "musl"))]
+use crate::tunnel_state_machine::tunnel::wireguard::two_hop_config::TwoHopConfig;
 
 /// Delay before acting on default route changes.
 #[cfg(target_os = "ios")]
@@ -111,6 +117,7 @@ impl ConnectedTunnel {
                 )
                 .await
             }
+            #[cfg(not(target_env = "musl"))]
             TunnelOptions::Netstack(netstack_options) => self.run_using_netstack(
                 #[cfg(windows)]
                 route_handler,
@@ -120,6 +127,12 @@ impl ConnectedTunnel {
                 tunnel_constants,
                 entry_amnezia,
             ),
+            #[cfg(target_env = "musl")]
+            TunnelOptions::Netstack(_) => {
+                Err(Error::UnsupportedTunnelMode(
+                    "Netstack mode is not supported on musl targets. Use TunTun mode with kernel WireGuard.".to_string()
+                ))
+            }
         }
     }
 
@@ -157,40 +170,102 @@ impl ConnectedTunnel {
             None,
         );
 
+        // Start entry tunnel (uses kernel WireGuard on Linux, wireguard-go elsewhere)
         #[allow(unused_mut)]
-        let mut entry_tunnel = wireguard_go::Tunnel::start(
-            wg_entry_config.into_wireguard_config(),
+        let mut entry_tunnel = {
             #[cfg(unix)]
-            options.entry_tun.get_ref().dup_fd().map_err(Error::DupFd)?,
-            #[cfg(windows)]
-            &options.entry_tun_name,
-            #[cfg(windows)]
-            &options.entry_tun_guid,
-            #[cfg(windows)]
-            &options.wintun_tunnel_type,
-        )
-        .map_err(Error::Wireguard)?;
+            {
+                // Use provided interface name if available (kernel WireGuard), otherwise get from tun device
+                let entry_tun_name = if let Some(ref name) = options.entry_tun_name {
+                    name.clone()
+                } else {
+                    options.entry_tun.as_ref()
+                        .ok_or_else(|| Error::Wireguard(nym_wg_go::Error::StartTunnel(-1)))?
+                        .get_ref()
+                        .name()
+                        .map_err(|e| Error::DupFd(std::io::Error::new(std::io::ErrorKind::Other, format!("Failed to get entry tun name: {}", e))))?
+                };
 
-        let exit_tunnel = wireguard_go::Tunnel::start(
-            wg_exit_config.into_wireguard_config(),
+                // For kernel WireGuard (no tun device), pass a dummy fd
+                let tun_fd = if let Some(ref tun) = options.entry_tun {
+                    Some(tun.get_ref().dup_fd().map_err(Error::DupFd)?)
+                } else {
+                    None
+                };
+
+                WgTunnel::start_tun_mode(
+                    entry_tun_name,
+                    wg_entry_config,
+                    tun_fd,
+                )
+                .await
+                .map_err(|_e| Error::Wireguard(nym_wg_go::Error::StartTunnel(-1)))?
+            }
+            #[cfg(windows)]
+            {
+                WgTunnel::Userspace(
+                    wireguard_go::Tunnel::start(
+                        wg_entry_config.into_wireguard_config(),
+                        &options.entry_tun_name,
+                        &options.entry_tun_guid,
+                        &options.wintun_tunnel_type,
+                    )
+                    .map_err(Error::Wireguard)?,
+                )
+            }
+        };
+
+        // Start exit tunnel
+        let exit_tunnel = {
             #[cfg(unix)]
-            options.exit_tun.get_ref().dup_fd().map_err(Error::DupFd)?,
+            {
+                // Use provided interface name if available (kernel WireGuard), otherwise get from tun device
+                let exit_tun_name = if let Some(ref name) = options.exit_tun_name {
+                    name.clone()
+                } else {
+                    options.exit_tun.as_ref()
+                        .ok_or_else(|| Error::Wireguard(nym_wg_go::Error::StartTunnel(-1)))?
+                        .get_ref()
+                        .name()
+                        .map_err(|e| Error::DupFd(std::io::Error::new(std::io::ErrorKind::Other, format!("Failed to get exit tun name: {}", e))))?
+                };
+
+                // For kernel WireGuard (no tun device), pass None for fd
+                let tun_fd = if let Some(ref tun) = options.exit_tun {
+                    Some(tun.get_ref().dup_fd().map_err(Error::DupFd)?)
+                } else {
+                    None
+                };
+
+                WgTunnel::start_tun_mode(
+                    exit_tun_name,
+                    wg_exit_config,
+                    tun_fd,
+                )
+                .await
+                .map_err(|_e| Error::Wireguard(nym_wg_go::Error::StartTunnel(-1)))?
+            }
             #[cfg(windows)]
-            &options.exit_tun_name,
-            #[cfg(windows)]
-            &options.exit_tun_guid,
-            #[cfg(windows)]
-            &options.wintun_tunnel_type,
-        )
-        .map_err(Error::Wireguard)?;
+            {
+                WgTunnel::Userspace(
+                    wireguard_go::Tunnel::start(
+                        wg_exit_config.into_wireguard_config(),
+                        &options.exit_tun_name,
+                        &options.exit_tun_guid,
+                        &options.wintun_tunnel_type,
+                    )
+                    .map_err(Error::Wireguard)?,
+                )
+            }
+        };
 
         let shutdown_token = CancellationToken::new();
         let child_shutdown_token = shutdown_token.child_token();
 
         #[cfg(windows)]
-        let wintun_entry_interface = entry_tunnel.wintun_interface().clone();
+        let wintun_entry_interface = entry_tunnel.wintun_interface().map(|i| i.clone());
         #[cfg(windows)]
-        let wintun_exit_interface = exit_tunnel.wintun_interface().clone();
+        let wintun_exit_interface = exit_tunnel.wintun_interface().map(|i| i.clone());
 
         let event_handler_task = tokio::spawn(async move {
             #[cfg(windows)]
@@ -223,10 +298,19 @@ impl ConnectedTunnel {
                 child_shutdown_token.cancelled().await;
                 tracing::debug!("Received tunnel shutdown event. Exiting event loop.");
 
-                entry_tunnel.stop();
-                exit_tunnel.stop();
+                entry_tunnel.stop().await;
+                exit_tunnel.stop().await;
 
-                Tombstone::with_tun_devices(vec![options.exit_tun, options.entry_tun])
+                // Only include tun devices if they exist (userspace WireGuard)
+                // Kernel WireGuard doesn't use tun devices
+                let mut tun_devices = Vec::new();
+                if let Some(exit_tun) = options.exit_tun {
+                    tun_devices.push(exit_tun);
+                }
+                if let Some(entry_tun) = options.entry_tun {
+                    tun_devices.push(entry_tun);
+                }
+                Tombstone::with_tun_devices(tun_devices)
             }
 
             // On windows return tunnels as part of tombstone since they own tunnel adapters and should be
@@ -247,6 +331,7 @@ impl ConnectedTunnel {
         })
     }
 
+    #[cfg(not(target_env = "musl"))]
     fn run_using_netstack(
         self,
         #[cfg(windows)] route_handler: RouteHandler,
@@ -520,13 +605,21 @@ pub enum TunnelOptions {
 /// Multihop configuration using two tun adapters.
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub struct TunTunTunnelOptions {
-    /// Entry tunnel device.
+    /// Entry tunnel device (None for kernel WireGuard which creates its own interface).
     #[cfg(unix)]
-    pub entry_tun: AsyncDevice,
+    pub entry_tun: Option<AsyncDevice>,
 
-    /// Exit tunnel device.
+    /// Exit tunnel device (None for kernel WireGuard which creates its own interface).
     #[cfg(unix)]
-    pub exit_tun: AsyncDevice,
+    pub exit_tun: Option<AsyncDevice>,
+
+    /// Entry tunnel interface name (used when entry_tun is None for kernel WireGuard).
+    #[cfg(unix)]
+    pub entry_tun_name: Option<String>,
+
+    /// Exit tunnel interface name (used when exit_tun is None for kernel WireGuard).
+    #[cfg(unix)]
+    pub exit_tun_name: Option<String>,
 
     /// Entry tunnel device name.
     #[cfg(windows)]

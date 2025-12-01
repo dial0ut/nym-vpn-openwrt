@@ -1,11 +1,59 @@
 [build]
 pre-build = [
   "dpkg --add-architecture $CROSS_DEB_ARCH",
-  "apt-get update && apt-get install --assume-yes libssl-dev:$CROSS_DEB_ARCH",
-  "apt-get install -y protobuf-compiler libssl-dev libgit2-dev libdbus-1-dev libmnl-dev libnftnl-dev"
+  "apt-get update && apt-get install --assume-yes libssl-dev:$CROSS_DEB_ARCH libdbus-1-dev:$CROSS_DEB_ARCH",
+  "apt-get install -y protobuf-compiler libssl-dev libgit2-dev libdbus-1-dev libmnl-dev libnftnl-dev pkg-config",
+  "mkdir -p /project/build/lib",
+  "if [ -d ./build/lib ]; then cp -r ./build/lib/* /project/build/lib/ 2>/dev/null || true; fi"
 ]
 
 [build.env]
 passthrough = [
   "RUSTFLAGS",
+  "PKG_CONFIG_ALLOW_CROSS",
 ]
+
+[target.x86_64-unknown-linux-musl]
+volumes = ["../build:/project/build:ro"]
+
+[target.x86_64-unknown-linux-musl.env]
+passthrough = [
+  "PKG_CONFIG_ALLOW_CROSS",
+]
+
+# Router cross-compilation targets
+
+# ARM targets (most common for routers)
+[target.armv7-unknown-linux-musleabihf]
+image = "ghcr.io/cross-rs/armv7-unknown-linux-musleabihf:latest"
+volumes = ["../build:/project/build:ro"]
+
+[target.aarch64-unknown-linux-musl]
+image = "ghcr.io/cross-rs/aarch64-unknown-linux-musl:latest"
+volumes = ["../build:/project/build:ro"]
+
+[target.arm-unknown-linux-musleabi]
+image = "ghcr.io/cross-rs/arm-unknown-linux-musleabi:latest"
+volumes = ["../build:/project/build:ro"]
+
+[target.armv5te-unknown-linux-musleabi]
+image = "ghcr.io/cross-rs/armv5te-unknown-linux-musleabi:latest"
+volumes = ["../build:/project/build:ro"]
+
+[target.armv7-unknown-linux-gnueabihf]
+image = "ghcr.io/cross-rs/armv7-unknown-linux-gnueabihf:latest"
+volumes = ["../build:/project/build:ro"]
+
+# MIPS targets (common for routers - Tier 3 support)
+[target.mips-unknown-linux-musl]
+image = "ghcr.io/cross-rs/mips-unknown-linux-musl:latest"
+volumes = ["../build:/project/build:ro"]
+
+[target.mipsel-unknown-linux-musl]
+image = "ghcr.io/cross-rs/mipsel-unknown-linux-musl:latest"
+volumes = ["../build:/project/build:ro"]
+
+# x86 targets (surprisingly common for routers)
+[target.i686-unknown-linux-musl]
+image = "ghcr.io/cross-rs/i686-unknown-linux-musl:latest"
+volumes = ["../build:/project/build:ro"]

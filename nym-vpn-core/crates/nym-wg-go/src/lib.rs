@@ -1,10 +1,11 @@
 // Copyright 2024 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
-#[cfg(feature = "amnezia")]
 pub mod amnezia;
+#[cfg(not(target_env = "musl"))]
 pub mod netstack;
 pub mod uapi;
+#[cfg(not(target_env = "musl"))]
 pub mod wireguard_go;
 
 use std::{fmt, net::SocketAddr};

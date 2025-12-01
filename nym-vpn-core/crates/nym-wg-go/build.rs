@@ -7,6 +7,14 @@ fn main() {
     let manifest_path = env::var_os("CARGO_MANIFEST_DIR").expect("manifest dir is not set");
     let target = env::var("TARGET").expect("target is not set");
     let target_os = env::var("CARGO_CFG_TARGET_OS").expect("target os is not set");
+    let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+
+    // Skip linking wireguard-go on musl (golang/go#13492 - Go c-archive segfaults on musl)
+    // Types and configurations are still available, but no userspace WireGuard backend
+    if target_env == "musl" {
+        println!("cargo:warning=Skipping wireguard-go library linking on musl target (using kernel WireGuard only)");
+        return;
+    }
 
     let build_dir = PathBuf::from(manifest_path).join("../../../build/lib");
 

@@ -108,6 +108,9 @@ nym-routing.workspace = true
 nym-dns.workspace = true
 nym-firewall.workspace = true
 
+[target.'cfg(target_os = "linux")'.dependencies]
+nym-wg-kernel.workspace = true
+
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 hickory-server = { workspace = true, features = ["resolver"] }
 nym-routing.workspace = true

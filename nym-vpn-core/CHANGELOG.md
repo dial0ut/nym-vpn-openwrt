@@ -7,10 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- [Linux] Add `nym-wg-kernel` crate implementing kernel WireGuard via netlink
+
+### Changed
+
+- [Linux] Auto-detect and prefer kernel WireGuard over userspace wireguard-go when available
+- [musl] Conditionally compile out wireguard-go FFI modules on musl targets using kernel WireGuard exclusively
+
 ### Fixed
 
 - Increase the number of Windows firewall slots (https://github.com/nymtech/nym-vpn-client/pull/4072)
 - Enable two-hop by default (https://github.com/nymtech/nym-vpn-client/pull/4090)
+- [musl] Fix wireguard-go segfaults on musl libc (golang/go#13492) by using kernel WireGuard exclusively
+- [Linux] Replace magic numbers with named constants for WireGuard netlink peer flags
+
+### Removed
+
+- [musl] Remove Go toolchain and wireguard-go library linking from musl cross-compilation
 
 ## [1.20.0] - 2025-12-01
 

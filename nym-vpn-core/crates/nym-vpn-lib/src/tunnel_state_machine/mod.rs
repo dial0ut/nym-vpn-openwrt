@@ -870,6 +870,7 @@ impl tunnel::Error {
             | Self::MixnetClient(_)
             | Self::BandwidthController(_)
             | Self::Wireguard(_)
+            | Self::UnsupportedTunnelMode(_)
             | Self::Cancelled
             | Self::Transport(_) => None,
             #[cfg(target_os = "ios")]
