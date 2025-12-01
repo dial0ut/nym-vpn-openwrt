@@ -115,6 +115,7 @@ compile_libmnl() {
 
     log_info "Configuring libmnl..."
     CC="${TARGET}-gcc" \
+    CFLAGS="-fPIC" \
     ./configure \
         --host="${TARGET}" \
         --prefix="${MUSL_PREFIX}" \
@@ -156,6 +157,7 @@ compile_libnftnl() {
     log_info "Configuring libnftnl..."
     PKG_CONFIG_PATH="${MUSL_PREFIX}/lib/pkgconfig" \
     CC="${TARGET}-gcc" \
+    CFLAGS="-fPIC" \
     ./configure \
         --host="${TARGET}" \
         --prefix="${MUSL_PREFIX}" \
