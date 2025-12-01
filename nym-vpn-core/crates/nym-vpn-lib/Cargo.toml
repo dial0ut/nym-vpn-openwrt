@@ -70,7 +70,7 @@ nym-vpn-account-controller.workspace = true
 nym-vpn-lib-types = { workspace = true, features = ["nym-type-conversions"] }
 nym-vpn-network-config.workspace = true
 nym-vpn-store.workspace = true
-nym-wg-go = { workspace = true, features = ["amnezia"] }
+nym-wg-go = { workspace = true, features = ["amnezia"], optional = true }
 nym-wg-metadata-client.workspace = true
 
 ed25519-dalek = { workspace = true, features = [
@@ -136,7 +136,8 @@ vergen-gitcl = { workspace = true, default-features = false, features = [
 ] }
 
 [features]
-default = []
+default = ["wireguard-go"]
+wireguard-go = ["dep:nym-wg-go"]
 metrics-server = ["nym-client-core/metrics-server"]
 
 [package.metadata.cargo-machete]

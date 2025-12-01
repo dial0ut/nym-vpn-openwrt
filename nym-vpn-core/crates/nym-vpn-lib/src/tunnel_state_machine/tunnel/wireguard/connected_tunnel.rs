@@ -198,8 +198,7 @@ impl ConnectedTunnel {
                     wg_entry_config,
                     tun_fd,
                 )
-                .await
-                .map_err(|_e| Error::Wireguard(nym_wg_go::Error::StartTunnel(-1)))?
+                .await?
             }
             #[cfg(windows)]
             {
@@ -242,8 +241,7 @@ impl ConnectedTunnel {
                     wg_exit_config,
                     tun_fd,
                 )
-                .await
-                .map_err(|_e| Error::Wireguard(nym_wg_go::Error::StartTunnel(-1)))?
+                .await?
             }
             #[cfg(windows)]
             {

@@ -64,6 +64,9 @@ pub enum Error {
     #[error("WireGuard error")]
     Wireguard(#[from] nym_wg_go::Error),
 
+    #[error("WireGuard backend error")]
+    WgBackend(#[from] wireguard::wg_backend::WgBackendError),
+
     #[error("failed to dup tunnel file descriptor")]
     DupFd(#[source] std::io::Error),
 
