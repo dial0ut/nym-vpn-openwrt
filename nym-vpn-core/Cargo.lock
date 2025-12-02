@@ -5814,7 +5814,7 @@ dependencies = [
 
 [[package]]
 name = "nym-wg-kernel"
-version = "1.19.0-beta"
+version = "1.21.0-beta"
 dependencies = [
  "anyhow",
  "byteorder",

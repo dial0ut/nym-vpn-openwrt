@@ -9,10 +9,9 @@ use std::os::fd::BorrowedFd;
 use std::os::fd::{AsRawFd, IntoRawFd};
 #[cfg(target_os = "android")]
 use std::os::fd::{FromRawFd, OwnedFd};
-use std::{
-    net::{IpAddr, SocketAddr},
-    time::Duration,
-};
+use std::{net::IpAddr, time::Duration};
+#[cfg(not(target_env = "musl"))]
+use std::net::SocketAddr;
 #[cfg(unix)]
 use std::{os::fd::RawFd, sync::Arc};
 
@@ -70,9 +69,11 @@ use super::{
     Error, NymConfig, Result, TunnelInterface, TunnelMetadata, TunnelSettings,
     tunnel::{
         self, AnyTunnelHandle, SelectedGateways, Tombstone,
-        wireguard::connected_tunnel::{NetstackTunnelOptions, TunnelOptions},
+        wireguard::connected_tunnel::TunnelOptions,
     },
 };
+#[cfg(not(target_env = "musl"))]
+use super::tunnel::wireguard::connected_tunnel::NetstackTunnelOptions;
 #[cfg(target_os = "android")]
 use crate::tunnel_provider::AndroidTunProvider;
 #[cfg(target_os = "ios")]
@@ -82,7 +83,7 @@ use crate::{
     VpnTopologyProvider,
     bandwidth_controller::BandwidthController,
     tunnel_state_machine::{
-        TunnelConstants, WireguardMultihopMode, account, ipv6_availability,
+        TunnelConstants, account, ipv6_availability,
         tunnel::{
             mixnet,
             transports::{self, TransportError},
@@ -93,6 +94,8 @@ use crate::{
         },
     },
 };
+#[cfg(not(target_env = "musl"))]
+use crate::tunnel_state_machine::WireguardMultihopMode;
 
 /// Default MTU for mixnet tun device.
 const DEFAULT_TUN_MTU: u16 = if cfg!(any(target_os = "ios", target_os = "android")) {
@@ -600,6 +603,8 @@ impl TunnelMonitor {
         let (exit_metadata_tx, exit_metadata_rx) = tokio::sync::oneshot::channel::<MetadataEvent>();
 
         let (entry_metadata_addr_tx, entry_metadata_addr_rx) = tokio::sync::oneshot::channel();
+        #[cfg(target_env = "musl")]
+        let _ = entry_metadata_addr_tx; // Unused on musl - kernel WG doesn't need metadata addr
         let (bridge_close_tx, mut bridge_close_rx) = tokio::sync::mpsc::unbounded_channel();
 
         // todo: refactor
@@ -660,10 +665,16 @@ impl TunnelMonitor {
                     .wireguard_tunnel_options
                     .multihop_mode
                 {
-                    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+                    #[cfg(all(not(any(target_os = "android", target_os = "ios")), not(target_env = "musl")))]
                     WireguardMultihopMode::TunTun => {
                         self.start_wireguard_tunnel(connected_tunnel).await?
                     }
+                    #[cfg(all(target_os = "linux", target_env = "musl"))]
+                    _ => {
+                        // On musl, always use kernel WireGuard
+                        self.start_wireguard_tunnel(connected_tunnel).await?
+                    }
+                    #[cfg(not(target_env = "musl"))]
                     WireguardMultihopMode::Netstack => {
                         self.start_wireguard_netstack_tunnel(
                             connected_tunnel,
@@ -1151,7 +1162,7 @@ impl TunnelMonitor {
         Ok((bridge_addr, join_handle))
     }
 
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[cfg(any(all(target_os = "linux", not(target_env = "musl")), target_os = "macos"))]
     async fn start_wireguard_netstack_tunnel(
         &mut self,
         connected_tunnel: wireguard::connected_tunnel::ConnectedTunnel,
@@ -1835,7 +1846,7 @@ impl TunnelMonitor {
         Ok(tun_device)
     }
 
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[cfg(any(all(target_os = "linux", not(target_env = "musl")), target_os = "macos"))]
     fn create_wireguard_device(
         interface_ipv4: Ipv4Addr,
         interface_ipv6: Option<Ipv6Addr>,

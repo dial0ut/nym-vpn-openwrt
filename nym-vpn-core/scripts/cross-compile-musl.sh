@@ -89,6 +89,17 @@ install_system_deps() {
     else
         log_info "All system dependencies already installed"
     fi
+
+    # Install protoc from pre-compiled binary (apt version too old for proto3 optional)
+    if ! command -v protoc &> /dev/null; then
+        log_info "Installing protoc 30.2..."
+        PB_REL="https://github.com/protocolbuffers/protobuf/releases"
+        curl -LO "$PB_REL/download/v30.2/protoc-30.2-linux-x86_64.zip"
+        unzip -q protoc-30.2-linux-x86_64.zip -d "$HOME/.local"
+        rm protoc-30.2-linux-x86_64.zip
+        export PATH="$PATH:$HOME/.local/bin"
+        log_info "protoc version: $(protoc --version)"
+    fi
 }
 
 compile_libmnl() {

@@ -1,3 +1,6 @@
+// Copyright 2025 - Nym Technologies SA <contact@nymtech.net>
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! Kernel WireGuard implementation using netlink
 //!
 //! This crate provides a native Linux kernel WireGuard interface using netlink protocol,

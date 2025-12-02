@@ -1,7 +1,7 @@
+// Copyright 2025 - Nym Technologies SA <contact@nymtech.net>
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! High-level kernel WireGuard tunnel interface
-//!
-//! This module provides a simple async API matching the wireguard-go interface,
-//! making it a drop-in replacement for Linux systems.
 
 use std::net::SocketAddr;
 
@@ -9,19 +9,12 @@ use ipnetwork::IpNetwork;
 
 use crate::{DeviceMessage, DeviceNla, Handle, PeerMessage, PeerNla, AllowedIpMessage, Result};
 
-/// WireGuard private key (32 bytes)
 pub type PrivateKey = [u8; 32];
-
-/// WireGuard public key (32 bytes)
 pub type PublicKey = [u8; 32];
 
-/// WireGuard device flag: Replace all peers
 const WGDEVICE_F_REPLACE_PEERS: u32 = 0x01;
-
-/// WireGuard peer flag: Replace allowed IPs for this peer
 const WGPEER_F_REPLACE_ALLOWEDIPS: u32 = 1 << 1;
 
-/// WireGuard peer configuration
 #[derive(Debug, Clone)]
 pub struct PeerConfig {
     pub public_key: PublicKey,
@@ -30,7 +23,6 @@ pub struct PeerConfig {
     pub persistent_keepalive: Option<u16>,
 }
 
-/// WireGuard interface configuration
 #[derive(Debug, Clone)]
 pub struct InterfaceConfig {
     pub private_key: PrivateKey,
@@ -40,17 +32,12 @@ pub struct InterfaceConfig {
     pub fwmark: Option<u32>,
 }
 
-/// Complete WireGuard tunnel configuration
 #[derive(Debug, Clone)]
 pub struct Config {
     pub interface: InterfaceConfig,
     pub peers: Vec<PeerConfig>,
 }
 
-/// Kernel WireGuard tunnel
-///
-/// This struct manages the lifecycle of a kernel WireGuard interface,
-/// providing a simple async API matching wireguard-go for easy integration.
 pub struct Tunnel {
     handle: Handle,
     interface_name: String,
@@ -58,42 +45,6 @@ pub struct Tunnel {
 }
 
 impl Tunnel {
-    /// Start a new kernel WireGuard tunnel
-    ///
-    /// # Arguments
-    /// * `interface_name` - Name for the WireGuard interface (e.g., "wg0", "wg1")
-    /// * `config` - Complete WireGuard configuration
-    ///
-    /// # Returns
-    /// A running `Tunnel` instance, or an error if setup fails
-    ///
-    /// # Example
-    /// ```no_run
-    /// use nym_wg_kernel::tunnel::{Tunnel, Config, InterfaceConfig, PeerConfig};
-    /// use std::net::{IpAddr, SocketAddr};
-    /// use ipnetwork::IpNetwork;
-    ///
-    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let config = Config {
-    ///     interface: InterfaceConfig {
-    ///         private_key: [0u8; 32], // Use real key
-    ///         addresses: vec!["10.0.0.2/32".parse()?],
-    ///         listen_port: None,
-    ///         mtu: 1420,
-    ///         fwmark: None,
-    ///     },
-    ///     peers: vec![PeerConfig {
-    ///         public_key: [0u8; 32], // Use real key
-    ///         endpoint: "192.168.1.1:51820".parse()?,
-    ///         allowed_ips: vec!["0.0.0.0/0".parse()?],
-    ///         persistent_keepalive: Some(25),
-    ///     }],
-    /// };
-    ///
-    /// let tunnel = Tunnel::start("wg0", config).await?;
-    /// # Ok(())
-    /// # }
-    /// ```
     pub async fn start(interface_name: impl Into<String>, config: Config) -> Result<Self> {
         let interface_name = interface_name.into();
         let mut handle = Handle::connect().await?;
@@ -136,7 +87,6 @@ impl Tunnel {
         })
     }
 
-    /// Build WireGuard device configuration message
     fn build_device_config(
         message_type: u16,
         interface_name: String,

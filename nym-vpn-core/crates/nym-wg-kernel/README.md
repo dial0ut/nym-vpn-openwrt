@@ -48,7 +48,10 @@ tunnel.stop().await?;
 - No amnezia obfuscation support (kernel WireGuard is standard protocol)
 - Requires kernel module, not embedded
 
+## Acknowledgments
+
+This implementation is derived from [Mullvad VPN's wireguard_kernel](https://github.com/mullvad/mullvadvpn-app/tree/main/talpid-wireguard/src/wireguard_kernel), licensed under GPL-3.0. The netlink message structures and connection handling patterns are based on their work. Modified to function as a standalone crate for nym-vpn-client's musl target requirements.
+
 ## References
 
-- [Mullvad's implementation](https://github.com/mullvad/mullvadvpn-app/tree/main/talpid-wireguard/src/wireguard_kernel)
 - [golang/go#13492](https://github.com/golang/go/issues/13492) - Go musl bug

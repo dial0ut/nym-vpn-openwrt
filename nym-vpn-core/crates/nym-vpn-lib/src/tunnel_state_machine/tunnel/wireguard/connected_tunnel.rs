@@ -3,10 +3,9 @@
 
 #[cfg(target_os = "ios")]
 use std::time::Duration;
-use std::{
-    net::{IpAddr, SocketAddr},
-    sync::Arc,
-};
+use std::{net::IpAddr, sync::Arc};
+#[cfg(not(target_env = "musl"))]
+use std::net::SocketAddr;
 
 #[cfg(target_os = "ios")]
 use dispatch2::{DispatchQueue, DispatchQueueAttr};
@@ -18,7 +17,9 @@ use nym_crypto::asymmetric::x25519;
 use nym_routing::{Callback, CallbackHandle, EventType};
 #[cfg(windows)]
 use nym_wg_go::wireguard_go::WintunInterface;
-use nym_wg_go::{amnezia::AmneziaConfig, netstack, wireguard_go};
+use nym_wg_go::amnezia::AmneziaConfig;
+#[cfg(not(target_env = "musl"))]
+use nym_wg_go::{netstack, wireguard_go};
 #[cfg(windows)]
 use nym_windows::net::{self as winnet, AddressFamily};
 #[cfg(any(windows, target_os = "ios"))]
@@ -27,7 +28,7 @@ use tokio::task::{JoinError, JoinHandle};
 #[cfg(target_os = "ios")]
 use tokio_stream::{StreamExt, wrappers::UnboundedReceiverStream};
 use tokio_util::sync::CancellationToken;
-#[cfg(unix)]
+#[cfg(all(unix, not(target_env = "musl")))]
 use tun::AsyncDevice;
 
 #[cfg(target_os = "android")]
@@ -36,21 +37,25 @@ use crate::tunnel_provider::AndroidTunProvider;
 use crate::tunnel_state_machine::route_handler::RouteHandler;
 #[cfg(target_os = "ios")]
 use crate::tunnel_state_machine::tunnel::wireguard::dns64::Dns64Resolution;
-#[cfg(unix)]
+#[cfg(all(unix, not(target_env = "musl")))]
 use crate::tunnel_state_machine::tunnel::wireguard::fd::DupFd;
 use crate::{
     tunnel_state_machine::{
         TunnelConstants,
         tunnel::{
-            Error, Result, Tombstone,
+            Result, Tombstone,
             wireguard::{
                 ConnectionData,
-                two_hop_config::{ENTRY_MTU, EXIT_MTU, TwoHopConfig},
+                two_hop_config::{ENTRY_MTU, EXIT_MTU},
             },
         },
     },
     wg_config::{AllowedIps, WgNodeConfig},
 };
+#[cfg(not(target_env = "musl"))]
+use crate::tunnel_state_machine::tunnel::Error;
+#[cfg(not(target_env = "musl"))]
+use crate::tunnel_state_machine::tunnel::wireguard::two_hop_config::TwoHopConfig;
 
 /// Delay before acting on default route changes.
 #[cfg(target_os = "ios")]
@@ -100,7 +105,7 @@ impl ConnectedTunnel {
         entry_amnezia: bool,
     ) -> Result<TunnelHandle> {
         match options {
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            #[cfg(all(not(any(target_os = "ios", target_os = "android")), not(target_env = "musl")))]
             TunnelOptions::TunTun(tuntun_options) => {
                 self.run_using_tun_tun(
                     #[cfg(windows)]
@@ -120,6 +125,7 @@ impl ConnectedTunnel {
                 )
                 .await
             }
+            #[cfg(not(target_env = "musl"))]
             TunnelOptions::Netstack(netstack_options) => self.run_using_netstack(
                 #[cfg(windows)]
                 route_handler,
@@ -132,7 +138,7 @@ impl ConnectedTunnel {
         }
     }
 
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    #[cfg(all(not(any(target_os = "ios", target_os = "android")), not(target_env = "musl")))]
     async fn run_using_tun_tun(
         self,
         #[cfg(windows)] route_handler: RouteHandler,
@@ -324,6 +330,7 @@ impl ConnectedTunnel {
         })
     }
 
+    #[cfg(not(target_env = "musl"))]
     fn run_using_netstack(
         self,
         #[cfg(windows)] route_handler: RouteHandler,
@@ -587,7 +594,7 @@ impl ConnectedTunnel {
 
 pub enum TunnelOptions {
     /// Multihop configured using two tun adapters (userspace wireguard-go).
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    #[cfg(all(not(any(target_os = "ios", target_os = "android")), not(target_env = "musl")))]
     TunTun(TunTunTunnelOptions),
 
     /// Multihop using kernel WireGuard via netlink (musl only).
@@ -595,11 +602,12 @@ pub enum TunnelOptions {
     KernelWg(KernelWgTunnelOptions),
 
     /// Multihop using single tun adapter and netstack with local UDP forwarder to wrap tunnels.
+    #[cfg(not(target_env = "musl"))]
     Netstack(NetstackTunnelOptions),
 }
 
 /// Multihop configuration using two tun adapters (userspace wireguard-go).
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[cfg(all(not(any(target_os = "ios", target_os = "android")), not(target_env = "musl")))]
 pub struct TunTunTunnelOptions {
     /// Entry tunnel device.
     #[cfg(unix)]
@@ -648,6 +656,7 @@ pub struct KernelWgTunnelOptions {
 }
 
 /// Multihop configuration based on WireGuard/netstack.
+#[cfg(not(target_env = "musl"))]
 pub struct NetstackTunnelOptions {
     /// Sender that receives an endpoint of metadata proxy for entry interface
     pub metadata_proxy_tx: tokio::sync::oneshot::Sender<SocketAddr>,
