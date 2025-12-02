@@ -13,11 +13,11 @@
 # Usage from host:
 #   docker run --rm -it -v "$(pwd)":/home/rust/src \
 #     messense/rust-musl-cross:aarch64-musl \
-#     bash /home/rust/src/nym-vpn-core/scripts/cross-compile-musl.sh
+#     bash /home/rust/src/scripts/cross-compile-musl.sh
 #
 # Or using alias:
 #   nymwrt='docker run --rm -it -v "$(pwd)":/home/rust/src messense/rust-musl-cross:aarch64-musl'
-#   nymwrt bash /home/rust/src/nym-vpn-core/scripts/cross-compile-musl.sh
+#   nymwrt bash /home/rust/src/scripts/cross-compile-musl.sh
 #
 # For other targets, change the container:
 #   messense/rust-musl-cross:armv7-musleabihf  # ARM v7 32-bit (OpenWRT armv7l)
@@ -248,12 +248,6 @@ build_nym_vpnd() {
 
     log_warn "This will take 10-15 minutes and requires at least 5GB free space..."
 
-    # Temporarily enable dbus vendored feature for musl cross-compilation
-    log_info "Enabling dbus vendored feature for musl build..."
-    cp Cargo.toml Cargo.toml.backup
-    sed -i 's/^dbus = "0.9.9"/dbus = {version = "0.9.9", features = ["vendored"]}/' Cargo.toml
-
-
     # Set environment for cargo
     export PKG_CONFIG_PATH="${MUSL_PREFIX}/lib/pkgconfig"
     export PKG_CONFIG_ALLOW_CROSS=1
@@ -279,10 +273,6 @@ build_nym_vpnd() {
         --target="${TARGET}" \
         --bins \
         --release
-
-    # Restore original Cargo.toml
-    log_info "Restoring original Cargo.toml..."
-    mv Cargo.toml.backup Cargo.toml
 
     local binary_dir="/home/rust/src/nym-vpn-core/target/${TARGET}/release"
 
