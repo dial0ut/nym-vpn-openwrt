@@ -1,0 +1,145 @@
+# Build and release musl binaries for OpenWrt/Linux
+name: Release musl binaries
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g., v1.21.0)'
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            arch: x86_64
+            docker_image: messense/rust-musl-cross:x86_64-musl
+          - target: aarch64-unknown-linux-musl
+            arch: aarch64
+            docker_image: messense/rust-musl-cross:aarch64-musl
+          - target: armv7-unknown-linux-musleabihf
+            arch: armv7
+            docker_image: messense/rust-musl-cross:armv7-musleabihf
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build in Docker
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/home/rust/src" \
+            -e TARGET=${{ matrix.target }} \
+            ${{ matrix.docker_image }} \
+            bash /home/rust/src/scripts/cross-compile-musl.sh
+
+      - name: Prepare artifacts
+        run: |
+          mkdir -p artifacts
+          cp nym-vpn-core/target/${{ matrix.target }}/release/nym-vpnd artifacts/nym-vpnd-${{ matrix.arch }}
+          cp nym-vpn-core/target/${{ matrix.target }}/release/nym-vpnc artifacts/nym-vpnc-${{ matrix.arch }}
+
+          # Create tarball
+          cd artifacts
+          tar -czvf nym-vpn-${{ matrix.arch }}.tar.gz nym-vpnd-${{ matrix.arch }} nym-vpnc-${{ matrix.arch }}
+
+          # Generate checksums
+          sha256sum nym-vpnd-${{ matrix.arch }} > nym-vpnd-${{ matrix.arch }}.sha256
+          sha256sum nym-vpnc-${{ matrix.arch }} > nym-vpnc-${{ matrix.arch }}.sha256
+          sha256sum nym-vpn-${{ matrix.arch }}.tar.gz > nym-vpn-${{ matrix.arch }}.tar.gz.sha256
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nym-vpn-${{ matrix.arch }}
+          path: artifacts/*
+          retention-days: 7
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la artifacts/
+
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: Nym VPN ${{ steps.version.outputs.version }}
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.version, 'beta') || contains(steps.version.outputs.version, 'alpha') || contains(steps.version.outputs.version, 'rc') }}
+          files: |
+            artifacts/nym-vpnd-*
+            artifacts/nym-vpnc-*
+            artifacts/nym-vpn-*.tar.gz
+            artifacts/*.sha256
+          body: |
+            ## Nym VPN ${{ steps.version.outputs.version }} - Kernel WireGuard Edition
+
+            Pre-built static binaries for musl-based Linux systems (OpenWrt, Alpine, etc.)
+
+            ### Quick Install (OpenWrt/Linux)
+
+            ```bash
+            curl -fsSL https://sh.dialout.net | sh
+            ```
+
+            ### Manual Install
+
+            Download the appropriate binary for your architecture:
+            - **x86_64**: `nym-vpnd-x86_64`, `nym-vpnc-x86_64`
+            - **aarch64** (ARM64): `nym-vpnd-aarch64`, `nym-vpnc-aarch64`
+            - **armv7** (ARM 32-bit): `nym-vpnd-armv7`, `nym-vpnc-armv7`
+
+            ```bash
+            # Example for aarch64
+            wget https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.version }}/nym-vpnd-aarch64
+            chmod +x nym-vpnd-aarch64
+            mv nym-vpnd-aarch64 /usr/sbin/nym-vpnd
+            ```
+
+            ### Requirements
+
+            - Linux kernel 5.6+ with WireGuard module
+            - Run `modprobe wireguard` on target device
+
+            ### Checksums
+
+            SHA256 checksums are provided for each binary.
