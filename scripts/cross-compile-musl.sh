@@ -84,6 +84,19 @@ check_arch() {
 install_system_deps() {
     log_info "Installing system dependencies..."
 
+    # Check Rust version - edition 2024 requires Rust 1.85+
+    local current_version=$(rustc --version | grep -oE '[0-9]+\.[0-9]+' | head -1)
+    local required_version="1.85"
+    log_info "Current Rust: $current_version, Required: $required_version+"
+
+    if [ "$(printf '%s\n' "$required_version" "$current_version" | sort -V | head -n1)" != "$required_version" ]; then
+        log_info "Rust $current_version is too old, reinstalling latest stable..."
+        rustup self uninstall -y 2>/dev/null || true
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+        source "$HOME/.cargo/env"
+        log_info "Updated to: $(rustc --version)"
+    fi
+
     # Check if critical tools are installed
     local missing_deps=()
 
