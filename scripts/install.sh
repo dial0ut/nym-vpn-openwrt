@@ -69,23 +69,11 @@ detect_arch() {
         armv7l|armv7)
             echo "armv7"
             ;;
-        mips)
-            # Detect endianness for MIPS
-            if [ "$(echo -n I | od -to2 | head -n1 | cut -f2 -d' ' | cut -c6)" = "1" ]; then
-                echo "mipsel"
-            else
-                echo "mips"
-            fi
-            ;;
-        mipsel)
-            echo "mipsel"
-            ;;
-        riscv64)
-            echo "riscv64"
-            ;;
+        # NOTE: mips, mipsel, riscv64 are Rust Tier 3 targets and currently unsupported
+        # due to build-std dependency conflicts. See cross-compile-musl.sh for details.
         *)
             log_error "Unsupported architecture: $arch"
-            log_error "Supported: x86_64, i686, aarch64, armv7, mips, mipsel, riscv64"
+            log_error "Supported: x86_64, i686, aarch64, armv7"
             log_error "Override with NYM_ARCH environment variable if needed"
             exit 1
             ;;

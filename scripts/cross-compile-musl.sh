@@ -20,13 +20,14 @@
 #   nymwrt bash /home/rust/src/scripts/cross-compile-musl.sh
 #
 # Supported targets (Docker image tags):
-#   messense/rust-musl-cross:aarch64-musl      # ARM 64-bit (Raspberry Pi 4, rockchip, mediatek)
-#   messense/rust-musl-cross:armv7-musleabihf  # ARM v7 32-bit hard-float (bcm53xx, mvebu)
 #   messense/rust-musl-cross:x86_64-musl       # x86 64-bit
 #   messense/rust-musl-cross:i686-musl         # x86 32-bit (x86/generic)
-#   messense/rust-musl-cross:mips-musl         # MIPS big-endian (ath79, lantiq, bcm47xx)
-#   messense/rust-musl-cross:mipsel-musl       # MIPS little-endian (ramips, realtek)
-#   messense/rust-musl-cross:riscv64gc-musl    # RISC-V 64-bit (d1, sifiveu, starfive)
+#   messense/rust-musl-cross:aarch64-musl      # ARM 64-bit (Raspberry Pi 4, rockchip, mediatek)
+#   messense/rust-musl-cross:armv7-musleabihf  # ARM v7 32-bit hard-float (bcm53xx, mvebu)
+#
+# NOTE: mips, mipsel, riscv64 are Rust Tier 3 targets requiring nightly + build-std
+# which causes dependency conflicts (schemars/indexmap). Not supported until Rust
+# promotes these to Tier 2 or the ecosystem fixes build-std compatibility.
 
 set -euo pipefail
 
@@ -37,23 +38,19 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Configuration - auto-detect target from available compiler
+# NOTE: mips, mipsel, riscv64 are Rust Tier 3 targets requiring nightly + build-std
+# which causes dependency conflicts (schemars/indexmap). Only Tier 2 targets supported.
 if [ -z "${TARGET:-}" ]; then
     if command -v arm-unknown-linux-musleabi-gcc &> /dev/null; then
         TARGET="arm-unknown-linux-musleabi"
     elif command -v armv7-unknown-linux-musleabihf-gcc &> /dev/null; then
         TARGET="armv7-unknown-linux-musleabihf"
+    elif command -v i686-unknown-linux-musl-gcc &> /dev/null; then
+        TARGET="i686-unknown-linux-musl"
     elif command -v aarch64-unknown-linux-musl-gcc &> /dev/null; then
         TARGET="aarch64-unknown-linux-musl"
     elif command -v x86_64-unknown-linux-musl-gcc &> /dev/null; then
         TARGET="x86_64-unknown-linux-musl"
-    elif command -v i686-unknown-linux-musl-gcc &> /dev/null; then
-        TARGET="i686-unknown-linux-musl"
-    elif command -v mips-unknown-linux-musl-gcc &> /dev/null; then
-        TARGET="mips-unknown-linux-musl"
-    elif command -v mipsel-unknown-linux-musl-gcc &> /dev/null; then
-        TARGET="mipsel-unknown-linux-musl"
-    elif command -v riscv64gc-unknown-linux-musl-gcc &> /dev/null; then
-        TARGET="riscv64gc-unknown-linux-musl"
     else
         TARGET="aarch64-unknown-linux-musl"  # Default fallback
     fi
@@ -299,20 +296,6 @@ build_nym_vpnd() {
         else
             log_info "Using hard-float ABI for armv7-musleabihf target"
         fi
-    fi
-
-    # MIPS targets may need specific flags
-    if [[ "$TARGET" == "mips-unknown-linux-musl" ]] || [[ "$TARGET" == "mipsel-unknown-linux-musl" ]]; then
-        log_info "Configuring for MIPS target..."
-        export CC_${TARGET_UNDERSCORE}="${TARGET}-gcc"
-        export AR_${TARGET_UNDERSCORE}="${TARGET}-ar"
-    fi
-
-    # RISC-V targets
-    if [[ "$TARGET" == "riscv64gc-unknown-linux-musl" ]]; then
-        log_info "Configuring for RISC-V 64-bit target..."
-        export CC_${TARGET_UNDERSCORE}="${TARGET}-gcc"
-        export AR_${TARGET_UNDERSCORE}="${TARGET}-ar"
     fi
 
     # i686 (32-bit x86) targets
