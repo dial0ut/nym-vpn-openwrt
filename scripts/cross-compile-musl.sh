@@ -97,6 +97,10 @@ install_system_deps() {
         log_info "Updated to: $(rustc --version)"
     fi
 
+    # Ensure the cross-compilation target is installed
+    log_info "Adding Rust target: ${TARGET}..."
+    rustup target add "${TARGET}" || true
+
     # Check if critical tools are installed
     local missing_deps=()
 
