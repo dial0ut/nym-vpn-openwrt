@@ -19,10 +19,14 @@
 #   nymwrt='docker run --rm -it -v "$(pwd)":/home/rust/src messense/rust-musl-cross:aarch64-musl'
 #   nymwrt bash /home/rust/src/scripts/cross-compile-musl.sh
 #
-# For other targets, change the container:
-#   messense/rust-musl-cross:armv7-musleabihf  # ARM v7 32-bit (OpenWRT armv7l)
+# Supported targets (Docker image tags):
+#   messense/rust-musl-cross:aarch64-musl      # ARM 64-bit (Raspberry Pi 4, rockchip, mediatek)
+#   messense/rust-musl-cross:armv7-musleabihf  # ARM v7 32-bit hard-float (bcm53xx, mvebu)
 #   messense/rust-musl-cross:x86_64-musl       # x86 64-bit
-#   messense/rust-musl-cross:mips-musl         # MIPS routers
+#   messense/rust-musl-cross:i686-musl         # x86 32-bit (x86/generic)
+#   messense/rust-musl-cross:mips-musl         # MIPS big-endian (ath79, lantiq, bcm47xx)
+#   messense/rust-musl-cross:mipsel-musl       # MIPS little-endian (ramips, realtek)
+#   messense/rust-musl-cross:riscv64gc-musl    # RISC-V 64-bit (d1, sifiveu, starfive)
 
 set -euo pipefail
 
@@ -42,8 +46,14 @@ if [ -z "${TARGET:-}" ]; then
         TARGET="aarch64-unknown-linux-musl"
     elif command -v x86_64-unknown-linux-musl-gcc &> /dev/null; then
         TARGET="x86_64-unknown-linux-musl"
+    elif command -v i686-unknown-linux-musl-gcc &> /dev/null; then
+        TARGET="i686-unknown-linux-musl"
     elif command -v mips-unknown-linux-musl-gcc &> /dev/null; then
         TARGET="mips-unknown-linux-musl"
+    elif command -v mipsel-unknown-linux-musl-gcc &> /dev/null; then
+        TARGET="mipsel-unknown-linux-musl"
+    elif command -v riscv64gc-unknown-linux-musl-gcc &> /dev/null; then
+        TARGET="riscv64gc-unknown-linux-musl"
     else
         TARGET="aarch64-unknown-linux-musl"  # Default fallback
     fi
@@ -252,13 +262,15 @@ build_nym_vpnd() {
     export PKG_CONFIG_PATH="${MUSL_PREFIX}/lib/pkgconfig"
     export PKG_CONFIG_ALLOW_CROSS=1
 
-    # Add target-specific linker flags for ARM targets
+    # Add target-specific flags
+    TARGET_UNDERSCORE="${TARGET//-/_}"
+
+    # ARM targets need special handling for atomic operations
     if [[ "$TARGET" == "armv7-unknown-linux-musleabihf" ]] || [[ "$TARGET" == "arm-unknown-linux-musleabi" ]] || [[ "$TARGET" == "armv7-unknown-linux-musleabi" ]] || [[ "$TARGET" == "armv5te-unknown-linux-musleabi" ]]; then
         log_info "Adding ARM-specific linker flags for atomic operations..."
         export RUSTFLAGS="-C link-arg=-lgcc"
         log_info "RUSTFLAGS=${RUSTFLAGS}"
 
-        TARGET_UNDERSCORE="${TARGET//-/_}"
         export CC_${TARGET_UNDERSCORE}="${TARGET}-gcc"
         export AR_${TARGET_UNDERSCORE}="${TARGET}-ar"
 
@@ -270,6 +282,27 @@ build_nym_vpnd() {
         else
             log_info "Using hard-float ABI for armv7-musleabihf target"
         fi
+    fi
+
+    # MIPS targets may need specific flags
+    if [[ "$TARGET" == "mips-unknown-linux-musl" ]] || [[ "$TARGET" == "mipsel-unknown-linux-musl" ]]; then
+        log_info "Configuring for MIPS target..."
+        export CC_${TARGET_UNDERSCORE}="${TARGET}-gcc"
+        export AR_${TARGET_UNDERSCORE}="${TARGET}-ar"
+    fi
+
+    # RISC-V targets
+    if [[ "$TARGET" == "riscv64gc-unknown-linux-musl" ]]; then
+        log_info "Configuring for RISC-V 64-bit target..."
+        export CC_${TARGET_UNDERSCORE}="${TARGET}-gcc"
+        export AR_${TARGET_UNDERSCORE}="${TARGET}-ar"
+    fi
+
+    # i686 (32-bit x86) targets
+    if [[ "$TARGET" == "i686-unknown-linux-musl" ]]; then
+        log_info "Configuring for i686 (32-bit x86) target..."
+        export CC_${TARGET_UNDERSCORE}="${TARGET}-gcc"
+        export AR_${TARGET_UNDERSCORE}="${TARGET}-ar"
     fi
 
     # Build with release profile

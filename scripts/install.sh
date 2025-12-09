@@ -60,15 +60,33 @@ detect_arch() {
         x86_64|amd64)
             echo "x86_64"
             ;;
+        i686|i586|i486|i386)
+            echo "i686"
+            ;;
         aarch64|arm64)
             echo "aarch64"
             ;;
         armv7l|armv7)
             echo "armv7"
             ;;
+        mips)
+            # Detect endianness for MIPS
+            if [ "$(echo -n I | od -to2 | head -n1 | cut -f2 -d' ' | cut -c6)" = "1" ]; then
+                echo "mipsel"
+            else
+                echo "mips"
+            fi
+            ;;
+        mipsel)
+            echo "mipsel"
+            ;;
+        riscv64)
+            echo "riscv64"
+            ;;
         *)
             log_error "Unsupported architecture: $arch"
-            log_error "Supported: x86_64, aarch64, armv7"
+            log_error "Supported: x86_64, i686, aarch64, armv7, mips, mipsel, riscv64"
+            log_error "Override with NYM_ARCH environment variable if needed"
             exit 1
             ;;
     esac

@@ -26,12 +26,24 @@ jobs:
           - target: x86_64-unknown-linux-musl
             arch: x86_64
             docker_image: messense/rust-musl-cross:x86_64-musl
+          - target: i686-unknown-linux-musl
+            arch: i686
+            docker_image: messense/rust-musl-cross:i686-musl
           - target: aarch64-unknown-linux-musl
             arch: aarch64
             docker_image: messense/rust-musl-cross:aarch64-musl
           - target: armv7-unknown-linux-musleabihf
             arch: armv7
             docker_image: messense/rust-musl-cross:armv7-musleabihf
+          - target: mips-unknown-linux-musl
+            arch: mips
+            docker_image: messense/rust-musl-cross:mips-musl
+          - target: mipsel-unknown-linux-musl
+            arch: mipsel
+            docker_image: messense/rust-musl-cross:mipsel-musl
+          - target: riscv64gc-unknown-linux-musl
+            arch: riscv64
+            docker_image: messense/rust-musl-cross:riscv64gc-musl
 
     steps:
       - name: Checkout
@@ -107,23 +119,47 @@ jobs:
           prerelease: ${{ contains(steps.version.outputs.version, 'beta') || contains(steps.version.outputs.version, 'alpha') || contains(steps.version.outputs.version, 'rc') }}
           files: |
             artifacts/nym-vpnd-x86_64
+            artifacts/nym-vpnd-i686
             artifacts/nym-vpnd-aarch64
             artifacts/nym-vpnd-armv7
+            artifacts/nym-vpnd-mips
+            artifacts/nym-vpnd-mipsel
+            artifacts/nym-vpnd-riscv64
             artifacts/nym-vpnc-x86_64
+            artifacts/nym-vpnc-i686
             artifacts/nym-vpnc-aarch64
             artifacts/nym-vpnc-armv7
+            artifacts/nym-vpnc-mips
+            artifacts/nym-vpnc-mipsel
+            artifacts/nym-vpnc-riscv64
             artifacts/nym-vpn-x86_64.tar.gz
+            artifacts/nym-vpn-i686.tar.gz
             artifacts/nym-vpn-aarch64.tar.gz
             artifacts/nym-vpn-armv7.tar.gz
+            artifacts/nym-vpn-mips.tar.gz
+            artifacts/nym-vpn-mipsel.tar.gz
+            artifacts/nym-vpn-riscv64.tar.gz
             artifacts/nym-vpnd-x86_64.sha256
+            artifacts/nym-vpnd-i686.sha256
             artifacts/nym-vpnd-aarch64.sha256
             artifacts/nym-vpnd-armv7.sha256
+            artifacts/nym-vpnd-mips.sha256
+            artifacts/nym-vpnd-mipsel.sha256
+            artifacts/nym-vpnd-riscv64.sha256
             artifacts/nym-vpnc-x86_64.sha256
+            artifacts/nym-vpnc-i686.sha256
             artifacts/nym-vpnc-aarch64.sha256
             artifacts/nym-vpnc-armv7.sha256
+            artifacts/nym-vpnc-mips.sha256
+            artifacts/nym-vpnc-mipsel.sha256
+            artifacts/nym-vpnc-riscv64.sha256
             artifacts/nym-vpn-x86_64.tar.gz.sha256
+            artifacts/nym-vpn-i686.tar.gz.sha256
             artifacts/nym-vpn-aarch64.tar.gz.sha256
             artifacts/nym-vpn-armv7.tar.gz.sha256
+            artifacts/nym-vpn-mips.tar.gz.sha256
+            artifacts/nym-vpn-mipsel.tar.gz.sha256
+            artifacts/nym-vpn-riscv64.tar.gz.sha256
           body: |
             ## Nym VPN ${{ steps.version.outputs.version }} - Kernel WireGuard Edition
 
@@ -138,9 +174,13 @@ jobs:
             ### Manual Install
 
             Download the appropriate binary for your architecture:
-            - **x86_64**: `nym-vpnd-x86_64`, `nym-vpnc-x86_64`
-            - **aarch64** (ARM64): `nym-vpnd-aarch64`, `nym-vpnc-aarch64`
-            - **armv7** (ARM 32-bit): `nym-vpnd-armv7`, `nym-vpnc-armv7`
+            - **x86_64**: 64-bit x86 (most PCs, VMs)
+            - **i686**: 32-bit x86 (older PCs, some embedded)
+            - **aarch64**: ARM 64-bit (Raspberry Pi 4+, rockchip, mediatek)
+            - **armv7**: ARM 32-bit hard-float (bcm53xx, mvebu)
+            - **mips**: MIPS big-endian (ath79, lantiq, bcm47xx - TP-Link, etc.)
+            - **mipsel**: MIPS little-endian (ramips, realtek - MediaTek MT76xx)
+            - **riscv64**: RISC-V 64-bit (d1, sifiveu, starfive)
 
             ```bash
             # Example for aarch64
