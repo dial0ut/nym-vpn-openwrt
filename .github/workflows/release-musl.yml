@@ -106,10 +106,24 @@ jobs:
           draft: false
           prerelease: ${{ contains(steps.version.outputs.version, 'beta') || contains(steps.version.outputs.version, 'alpha') || contains(steps.version.outputs.version, 'rc') }}
           files: |
-            artifacts/nym-vpnd-*
-            artifacts/nym-vpnc-*
-            artifacts/nym-vpn-*.tar.gz
-            artifacts/*.sha256
+            artifacts/nym-vpnd-x86_64
+            artifacts/nym-vpnd-aarch64
+            artifacts/nym-vpnd-armv7
+            artifacts/nym-vpnc-x86_64
+            artifacts/nym-vpnc-aarch64
+            artifacts/nym-vpnc-armv7
+            artifacts/nym-vpn-x86_64.tar.gz
+            artifacts/nym-vpn-aarch64.tar.gz
+            artifacts/nym-vpn-armv7.tar.gz
+            artifacts/nym-vpnd-x86_64.sha256
+            artifacts/nym-vpnd-aarch64.sha256
+            artifacts/nym-vpnd-armv7.sha256
+            artifacts/nym-vpnc-x86_64.sha256
+            artifacts/nym-vpnc-aarch64.sha256
+            artifacts/nym-vpnc-armv7.sha256
+            artifacts/nym-vpn-x86_64.tar.gz.sha256
+            artifacts/nym-vpn-aarch64.tar.gz.sha256
+            artifacts/nym-vpn-armv7.tar.gz.sha256
           body: |
             ## Nym VPN ${{ steps.version.outputs.version }} - Kernel WireGuard Edition
 
