@@ -252,19 +252,24 @@ build_nym_vpnd() {
     export PKG_CONFIG_PATH="${MUSL_PREFIX}/lib/pkgconfig"
     export PKG_CONFIG_ALLOW_CROSS=1
 
-    # Add target-specific linker flags
+    # Add target-specific linker flags for ARM targets
     if [[ "$TARGET" == "armv7-unknown-linux-musleabihf" ]] || [[ "$TARGET" == "arm-unknown-linux-musleabi" ]] || [[ "$TARGET" == "armv7-unknown-linux-musleabi" ]] || [[ "$TARGET" == "armv5te-unknown-linux-musleabi" ]]; then
         log_info "Adding ARM-specific linker flags for atomic operations..."
         export RUSTFLAGS="-C link-arg=-lgcc"
         log_info "RUSTFLAGS=${RUSTFLAGS}"
 
-        # Force ring to use portable C code instead of ARM assembly (no NEON/VFP)
-        log_info "Disabling ring ARM assembly optimizations for BCM5301X compatibility..."
-        # Use target-specific CFLAGS to avoid affecting host builds
         TARGET_UNDERSCORE="${TARGET//-/_}"
-        export CFLAGS_${TARGET_UNDERSCORE}="-msoft-float -mfloat-abi=soft"
         export CC_${TARGET_UNDERSCORE}="${TARGET}-gcc"
         export AR_${TARGET_UNDERSCORE}="${TARGET}-ar"
+
+        # Only set soft-float for soft-float targets (NOT for musleabihf which is hard-float)
+        if [[ "$TARGET" != "armv7-unknown-linux-musleabihf" ]]; then
+            # Force ring to use portable C code instead of ARM assembly (no NEON/VFP)
+            log_info "Setting soft-float flags for BCM5301X compatibility..."
+            export CFLAGS_${TARGET_UNDERSCORE}="-msoft-float -mfloat-abi=soft"
+        else
+            log_info "Using hard-float ABI for armv7-musleabihf target"
+        fi
     fi
 
     # Build with release profile
