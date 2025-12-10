@@ -38,6 +38,9 @@ if [ -z "${TARGET:-}" ]; then
     elif command -v riscv64-unknown-linux-musl-gcc &> /dev/null; then
         TARGET="riscv64gc-unknown-linux-musl"
         COMPILER_TRIPLET="riscv64-unknown-linux-musl"
+    elif command -v armv5te-unknown-linux-musleabi-gcc &> /dev/null; then
+        TARGET="armv5te-unknown-linux-musleabi"
+        COMPILER_TRIPLET="armv5te-unknown-linux-musleabi"
     else
         log_error "No Tier 3 target compiler found"
         exit 1
@@ -136,8 +139,8 @@ log_info "Using pre-patched crates from $PATCH_SRC"
 if ! grep -q '\[patch.crates-io\]' Cargo.toml; then
     log_info "Adding [patch.crates-io] section..."
 
-    if [[ "$TARGET" == mips* ]]; then
-        # 32-bit MIPS needs portable-atomic patches for AtomicU64/AtomicI64
+    if [[ "$TARGET" == mips* ]] || [[ "$TARGET" == armv5te* ]]; then
+        # 32-bit targets (MIPS, ARMv5TE) need portable-atomic patches for AtomicU64/AtomicI64
         # Replace all nym git dependencies to use the tier3 fork
         log_info "Replacing nym git URLs with tier3-portable-atomic fork..."
         sed -i 's|git = "https://github.com/nymtech/nym"|git = "https://github.com/dial0ut/nym"|g' Cargo.toml
@@ -174,7 +177,11 @@ export PKG_CONFIG_ALLOW_CROSS=1
 TARGET_UNDERSCORE="${TARGET//-/_}"
 export CC_${TARGET_UNDERSCORE}="${COMPILER_TRIPLET}-gcc"
 export AR_${TARGET_UNDERSCORE}="${COMPILER_TRIPLET}-ar"
-export CARGO_TARGET_${TARGET_UNDERSCORE^^}_LINKER="${COMPILER_TRIPLET}-gcc"
+
+# Set linker - will be overridden for targets that need rust-lld (RISC-V, ARMv5TE)
+if [[ "$TARGET" != riscv64* ]] && [[ "$TARGET" != armv5te* ]]; then
+    export CARGO_TARGET_${TARGET_UNDERSCORE^^}_LINKER="${COMPILER_TRIPLET}-gcc"
+fi
 
 # Find the musl lib directory containing crt1.o
 MUSL_LIB_DIR="${MUSL_PREFIX}/${COMPILER_TRIPLET}/lib"
@@ -184,8 +191,15 @@ if [ ! -f "${MUSL_LIB_DIR}/crt1.o" ]; then
 fi
 log_info "Using musl lib dir: ${MUSL_LIB_DIR}"
 
+# GCC lib directory (contains crtbegin.o, crtend.o, libgcc.a)
+GCC_LIB_DIR="${MUSL_PREFIX}/lib/gcc/${COMPILER_TRIPLET}/11.2.0"
+log_info "Using GCC lib dir: ${GCC_LIB_DIR}"
+
 # Set linker flags to find C runtime files
-export RUSTFLAGS="-C link-arg=-L${MUSL_LIB_DIR} -C link-arg=-L${MUSL_PREFIX}/lib/gcc/${COMPILER_TRIPLET}/11.2.0"
+# The linker needs to find:
+#   - crt1.o, crti.o, crtn.o from musl (MUSL_LIB_DIR)
+#   - crtbegin.o, crtend.o from gcc (GCC_LIB_DIR)
+export RUSTFLAGS="-C link-arg=-L${MUSL_LIB_DIR} -C link-arg=-L${GCC_LIB_DIR}"
 
 # RISC-V specific: Use rust-lld to avoid GCC 11.2 not understanding newer RISC-V extensions
 # (zaamo, zalrsc, zca, zcd, etc. are not recognized by older binutils/GCC)
@@ -208,6 +222,17 @@ if [[ "$TARGET" == mips* ]]; then
     export CFLAGS_${TARGET_UNDERSCORE}="-msoft-float"
     # Add soft-float to linker flags for MIPS
     export RUSTFLAGS="${RUSTFLAGS} -C link-arg=-msoft-float"
+fi
+
+# ARMv5TE-specific flags (soft-float, no VFP/NEON)
+if [[ "$TARGET" == armv5te* ]]; then
+    log_info "Setting ARMv5TE-specific compiler flags (soft-float, no unwinding)..."
+    # -msoft-float: use software floating point
+    # -fno-exceptions -fno-unwind-tables: disable C++ exceptions and ARM unwinding (we use panic=abort)
+    export CFLAGS_${TARGET_UNDERSCORE}="-msoft-float -mfloat-abi=soft -fno-exceptions -fno-unwind-tables"
+    # Link against libgcc_eh for any remaining unwind symbols from pre-compiled code
+    export RUSTFLAGS="${RUSTFLAGS} -C link-arg=-lgcc_eh"
+    # Linker is set via Dockerfile to use armv5te-gcc-wrapper which fixes CRT paths
 fi
 
 log_info "Building with -Z build-std..."

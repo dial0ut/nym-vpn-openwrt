@@ -16,80 +16,47 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Tier 2 targets - use pre-built Docker images
-  build-tier2:
-    name: Build ${{ matrix.arch }} (Tier 2)
+  build:
+    name: Build ${{ matrix.arch }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
+          # Standard targets - use stock messense/rust-musl-cross images
           - target: x86_64-unknown-linux-musl
             arch: x86_64
             docker_image: messense/rust-musl-cross:x86_64-musl
+            custom: false
           - target: i686-unknown-linux-musl
             arch: i686
             docker_image: messense/rust-musl-cross:i686-musl
+            custom: false
           - target: aarch64-unknown-linux-musl
             arch: aarch64
             docker_image: messense/rust-musl-cross:aarch64-musl
+            custom: false
           - target: armv7-unknown-linux-musleabihf
             arch: armv7
             docker_image: messense/rust-musl-cross:armv7-musleabihf
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Build in Docker
-        run: |
-          docker run --rm \
-            -v "${{ github.workspace }}:/home/rust/src" \
-            -e TARGET=${{ matrix.target }} \
-            ${{ matrix.docker_image }} \
-            bash /home/rust/src/scripts/cross-compile-musl.sh
-
-      - name: Prepare artifacts
-        run: |
-          mkdir -p artifacts
-          cp nym-vpn-core/target/${{ matrix.target }}/release/nym-vpnd artifacts/nym-vpnd-${{ matrix.arch }}
-          cp nym-vpn-core/target/${{ matrix.target }}/release/nym-vpnc artifacts/nym-vpnc-${{ matrix.arch }}
-
-          # Create tarball
-          cd artifacts
-          tar -czvf nym-vpn-${{ matrix.arch }}.tar.gz nym-vpnd-${{ matrix.arch }} nym-vpnc-${{ matrix.arch }}
-
-          # Generate checksums
-          sha256sum nym-vpnd-${{ matrix.arch }} > nym-vpnd-${{ matrix.arch }}.sha256
-          sha256sum nym-vpnc-${{ matrix.arch }} > nym-vpnc-${{ matrix.arch }}.sha256
-          sha256sum nym-vpn-${{ matrix.arch }}.tar.gz > nym-vpn-${{ matrix.arch }}.tar.gz.sha256
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: nym-vpn-${{ matrix.arch }}
-          path: artifacts/*
-          retention-days: 7
-
-  # Tier 3 targets - require custom Docker images with nightly + build-std
-  build-tier3:
-    name: Build ${{ matrix.arch }} (Tier 3)
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
+            custom: false
+          # Extended targets - require custom Docker images (portable-atomic patches, linker fixes)
           - target: mips-unknown-linux-musl
             arch: mips
             dockerfile: Dockerfile.mips
+            custom: true
           - target: mipsel-unknown-linux-musl
             arch: mipsel
             dockerfile: Dockerfile.mipsel
+            custom: true
           - target: riscv64gc-unknown-linux-musl
             arch: riscv64
             dockerfile: Dockerfile.riscv64
+            custom: true
+          - target: armv5te-unknown-linux-musleabi
+            arch: armv5te
+            dockerfile: Dockerfile.armv5te
+            custom: true
 
     steps:
       - name: Checkout
@@ -98,14 +65,26 @@ jobs:
           submodules: recursive
 
       - name: Set up Docker Buildx
+        if: matrix.custom
         uses: docker/setup-buildx-action@v3
 
       - name: Build custom Docker image
+        if: matrix.custom
         run: |
           cd docker/tier3-musl
           docker build -f ${{ matrix.dockerfile }} -t nym-musl-cross:${{ matrix.arch }}-musl .
 
-      - name: Build in Docker
+      - name: Build (standard)
+        if: ${{ !matrix.custom }}
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/home/rust/src" \
+            -e TARGET=${{ matrix.target }} \
+            ${{ matrix.docker_image }} \
+            bash /home/rust/src/scripts/cross-compile-musl.sh
+
+      - name: Build (custom)
+        if: matrix.custom
         run: |
           docker run --rm \
             -v "${{ github.workspace }}:/home/rust/src" \
@@ -136,7 +115,7 @@ jobs:
 
   release:
     name: Create Release
-    needs: [build-tier2, build-tier3]
+    needs: [build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -178,6 +157,7 @@ jobs:
             artifacts/nym-vpnd-mips
             artifacts/nym-vpnd-mipsel
             artifacts/nym-vpnd-riscv64
+            artifacts/nym-vpnd-armv5te
             artifacts/nym-vpnc-x86_64
             artifacts/nym-vpnc-i686
             artifacts/nym-vpnc-aarch64
@@ -185,6 +165,7 @@ jobs:
             artifacts/nym-vpnc-mips
             artifacts/nym-vpnc-mipsel
             artifacts/nym-vpnc-riscv64
+            artifacts/nym-vpnc-armv5te
             artifacts/nym-vpn-x86_64.tar.gz
             artifacts/nym-vpn-i686.tar.gz
             artifacts/nym-vpn-aarch64.tar.gz
@@ -192,6 +173,7 @@ jobs:
             artifacts/nym-vpn-mips.tar.gz
             artifacts/nym-vpn-mipsel.tar.gz
             artifacts/nym-vpn-riscv64.tar.gz
+            artifacts/nym-vpn-armv5te.tar.gz
             artifacts/nym-vpnd-x86_64.sha256
             artifacts/nym-vpnd-i686.sha256
             artifacts/nym-vpnd-aarch64.sha256
@@ -199,6 +181,7 @@ jobs:
             artifacts/nym-vpnd-mips.sha256
             artifacts/nym-vpnd-mipsel.sha256
             artifacts/nym-vpnd-riscv64.sha256
+            artifacts/nym-vpnd-armv5te.sha256
             artifacts/nym-vpnc-x86_64.sha256
             artifacts/nym-vpnc-i686.sha256
             artifacts/nym-vpnc-aarch64.sha256
@@ -206,6 +189,7 @@ jobs:
             artifacts/nym-vpnc-mips.sha256
             artifacts/nym-vpnc-mipsel.sha256
             artifacts/nym-vpnc-riscv64.sha256
+            artifacts/nym-vpnc-armv5te.sha256
             artifacts/nym-vpn-x86_64.tar.gz.sha256
             artifacts/nym-vpn-i686.tar.gz.sha256
             artifacts/nym-vpn-aarch64.tar.gz.sha256
@@ -213,6 +197,7 @@ jobs:
             artifacts/nym-vpn-mips.tar.gz.sha256
             artifacts/nym-vpn-mipsel.tar.gz.sha256
             artifacts/nym-vpn-riscv64.tar.gz.sha256
+            artifacts/nym-vpn-armv5te.tar.gz.sha256
           body: |
             ## Nym VPN ${{ steps.version.outputs.version }} - Kernel WireGuard Edition
 
@@ -228,16 +213,17 @@ jobs:
 
             Download the appropriate binary for your architecture:
 
-            **Tier 2 Targets (stable):**
+            **Standard Targets:**
             - **x86_64**: 64-bit x86 (most PCs, VMs)
             - **i686**: 32-bit x86 (older PCs, some embedded)
             - **aarch64**: ARM 64-bit (Raspberry Pi 4+, rockchip, mediatek)
             - **armv7**: ARM 32-bit hard-float (bcm53xx, mvebu)
 
-            **Tier 3 Targets (experimental):**
+            **Extended Targets (experimental):**
             - **mips**: MIPS big-endian (ath79, ar71xx legacy routers)
             - **mipsel**: MIPS little-endian (ramips/mt76x8, lantiq)
             - **riscv64**: RISC-V 64-bit (StarFive, SiFive, Milk-V)
+            - **armv5te**: ARM v5TE soft-float (legacy ARM9 devices, ancient routers)
 
             ```bash
             # Example for aarch64
@@ -255,7 +241,7 @@ jobs:
 
             SHA256 checksums are provided for each binary.
 
-            ### Notes on Tier 3 Targets
+            ### Notes on Extended Targets
 
-            Tier 3 targets (mips, mipsel, riscv64) are built using Rust nightly with `-Z build-std`.
-            These are experimental and may have less testing than Tier 2 targets.
+            Extended targets (mips, mipsel, riscv64, armv5te) require custom build configurations
+            with patched dependencies. These are experimental and may have less testing.
