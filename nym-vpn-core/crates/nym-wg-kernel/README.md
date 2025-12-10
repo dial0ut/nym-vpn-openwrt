@@ -40,7 +40,21 @@ tunnel.stop().await?;
 
 - Linux kernel 5.6+ (WireGuard mainlined)
 - WireGuard kernel module loaded: `modprobe wireguard`
+- TUN kernel module loaded: `modprobe tun`
+- `/dev/net/tun` device node (see below)
 - Root or `CAP_NET_ADMIN`
+
+### TUN Device Setup
+
+Some minimal Linux systems (Alpine, OpenWRT, custom embedded) may not have `/dev/net/tun` created automatically. If you get "No such file or directory" errors when connecting, create it manually:
+
+```bash
+mkdir -p /dev/net
+mknod /dev/net/tun c 10 200
+chmod 600 /dev/net/tun
+```
+
+To make this persistent across reboots, add to an init script or configure your device manager (mdev/udev).
 
 ## Limitations
 

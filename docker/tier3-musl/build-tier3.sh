@@ -178,8 +178,9 @@ TARGET_UNDERSCORE="${TARGET//-/_}"
 export CC_${TARGET_UNDERSCORE}="${COMPILER_TRIPLET}-gcc"
 export AR_${TARGET_UNDERSCORE}="${COMPILER_TRIPLET}-ar"
 
-# Set linker - will be overridden for targets that need rust-lld (RISC-V, ARMv5TE)
-if [[ "$TARGET" != riscv64* ]] && [[ "$TARGET" != armv5te* ]]; then
+# Set linker - will be overridden for targets that need GCC wrapper (RISC-V, ARMv5TE, MIPS)
+# These targets use +crt-static which requires wrapper to fix CRT paths
+if [[ "$TARGET" != riscv64* ]] && [[ "$TARGET" != armv5te* ]] && [[ "$TARGET" != mips* ]]; then
     export CARGO_TARGET_${TARGET_UNDERSCORE^^}_LINKER="${COMPILER_TRIPLET}-gcc"
 fi
 
@@ -201,13 +202,21 @@ log_info "Using GCC lib dir: ${GCC_LIB_DIR}"
 #   - crtbegin.o, crtend.o from gcc (GCC_LIB_DIR)
 export RUSTFLAGS="-C link-arg=-L${MUSL_LIB_DIR} -C link-arg=-L${GCC_LIB_DIR}"
 
-# RISC-V specific: Use rust-lld to avoid GCC 11.2 not understanding newer RISC-V extensions
-# (zaamo, zalrsc, zca, zcd, etc. are not recognized by older binutils/GCC)
+# RISC-V specific: Use GCC wrapper with lld backend
+# GCC 11.2's binutils doesn't understand newer RISC-V extensions (zaamo, zalrsc, etc.)
+# The Dockerfile:
+#   1. Replaces all ld binaries with lld symlinks (so GCC uses lld)
+#   2. Installs riscv64-gcc-wrapper that fixes CRT paths for lld
+#   3. Creates empty libunwind.a stub
+# The wrapper is needed because lld doesn't search -L paths for bare crt*.o files
 if [[ "$TARGET" == riscv64* ]]; then
-    log_info "Using rust-lld linker for RISC-V (GCC 11.2 doesn't support newer Z extensions)..."
-    # Use Rust's bundled LLD linker instead of the system GCC/ld
-    export CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_LINKER="rust-lld"
-    export RUSTFLAGS="${RUSTFLAGS} -C linker-flavor=ld.lld"
+    log_info "Using GCC wrapper with lld backend for RISC-V..."
+    export CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_LINKER="/usr/local/bin/riscv64-gcc-wrapper"
+    # +crt-static: statically link C runtime
+    # -static: tell linker to produce static binary
+    # -static-libgcc: link libgcc statically
+    # -lgcc_eh: link exception handling (provides _Unwind_* symbols for backtrace)
+    export RUSTFLAGS="${RUSTFLAGS} -C target-feature=+crt-static -C link-arg=-static -C link-arg=-static-libgcc -C link-arg=-lgcc_eh"
 fi
 
 # Disable LTO for tier3 targets - full LTO with rust-lld is extremely memory intensive
@@ -216,12 +225,30 @@ log_info "Disabling full LTO (too memory intensive for cross-compilation)..."
 export CARGO_PROFILE_RELEASE_LTO="thin"
 export CARGO_PROFILE_RELEASE_CODEGEN_UNITS="16"
 
+# Critical: Set panic=abort to eliminate unwinding code which pulls in libgcc_s
+# Without this, even with -Z build-std=std,panic_abort, cargo still links unwinding code
+# See: https://users.rust-lang.org/t/remove-unwind-routines-from-a-musl-linked-build/91634
+export CARGO_PROFILE_RELEASE_PANIC="abort"
+
 # MIPS-specific flags
 if [[ "$TARGET" == mips* ]]; then
     log_info "Setting MIPS-specific compiler flags..."
     export CFLAGS_${TARGET_UNDERSCORE}="-msoft-float"
-    # Add soft-float to linker flags for MIPS
-    export RUSTFLAGS="${RUSTFLAGS} -C link-arg=-msoft-float"
+    # Use GCC wrapper to fix CRT paths for +crt-static
+    if [[ "$TARGET" == "mipsel-unknown-linux-musl" ]]; then
+        export CARGO_TARGET_MIPSEL_UNKNOWN_LINUX_MUSL_LINKER="/usr/local/bin/mipsel-gcc-wrapper"
+    else
+        export CARGO_TARGET_MIPS_UNKNOWN_LINUX_MUSL_LINKER="/usr/local/bin/mips-gcc-wrapper"
+    fi
+    # +crt-static: statically link C runtime
+    # -msoft-float: use software floating point
+    # -static: produce static binary
+    # -static-libgcc: link libgcc statically
+    # libgcc_eh needs pthread symbols which are in musl's libc.a
+    # Use --start-group to resolve circular dependency: libgcc_eh -> libc (pthread)
+    # Note: GNU ld ignores floating point ABI mismatch (just warns), unlike lld which errors
+    export RUSTFLAGS="${RUSTFLAGS} -C target-feature=+crt-static -C link-arg=-msoft-float -C link-arg=-static -C link-arg=-static-libgcc"
+    export RUSTFLAGS="${RUSTFLAGS} -C link-arg=-Wl,--start-group -C link-arg=-lgcc_eh -C link-arg=-lc -C link-arg=-Wl,--end-group"
 fi
 
 # ARMv5TE-specific flags (soft-float, no VFP/NEON)
@@ -244,9 +271,19 @@ cargo build \
     --release \
     -Z build-std=std,panic_abort
 
-# Step 4: Copy binaries back to mounted volume
-log_info "Copying binaries back to mounted volume..."
+# Step 4: Strip binaries for size optimization
+log_info "Stripping binaries..."
 BINARY_DIR="$BUILD_DIR/nym-vpn-core/target/${TARGET}/release"
+
+if [ -f "$BINARY_DIR/nym-vpnd" ]; then
+    ${COMPILER_TRIPLET}-strip "$BINARY_DIR/nym-vpnd"
+fi
+if [ -f "$BINARY_DIR/nym-vpnc" ]; then
+    ${COMPILER_TRIPLET}-strip "$BINARY_DIR/nym-vpnc"
+fi
+
+# Step 5: Copy binaries back to mounted volume
+log_info "Copying binaries back to mounted volume..."
 OUTPUT_DIR="$MOUNT_DIR/nym-vpn-core/target/${TARGET}/release"
 
 mkdir -p "$OUTPUT_DIR"

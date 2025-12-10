@@ -12,8 +12,14 @@ RUN rustup self uninstall -y 2>/dev/null || true && \
     . "$HOME/.cargo/env" && \
     rustup component add rust-src llvm-tools
 
-# Install rsync and linux-libc-dev for kernel headers
-RUN apt-get update -qq && apt-get install -y -qq unzip pkg-config curl wget rsync linux-libc-dev
+# Install rsync, linux-libc-dev for kernel headers, and lld for linking
+# Replace ALL instances of the cross-compiler's ld with lld to avoid binutils RISC-V extension issues
+# GCC's collect2 uses the ld from its internal toolchain path, not the system ld
+RUN apt-get update -qq && apt-get install -y -qq unzip pkg-config curl wget rsync linux-libc-dev lld && \
+    find /usr/local/musl -name 'ld' -type f | while read ld_path; do \
+        mv "$ld_path" "${ld_path}.bak"; \
+        ln -sf /usr/bin/ld.lld "$ld_path"; \
+    done
 
 # Install newer protoc (apt version is too old, doesn't support proto3 optional fields)
 # protoc 3.12+ supports --experimental_allow_proto3_optional, 3.15+ has it enabled by default
@@ -37,10 +43,18 @@ RUN cd /tmp && \
     make ARCH=riscv INSTALL_HDR_PATH=/usr/local/musl/riscv64-unknown-linux-musl headers_install && \
     cd /tmp && rm -rf linux-${KERNEL_VERSION} linux.tar.xz
 
+# Create empty libunwind.a stub (satisfies -lunwind when using panic=abort)
+RUN riscv64-unknown-linux-musl-ar rcs /usr/local/musl/riscv64-unknown-linux-musl/lib/libunwind.a
+
+# Copy and install the GCC wrapper script (fixes CRT paths for lld)
+COPY riscv64-gcc-wrapper.sh /usr/local/bin/riscv64-gcc-wrapper
+RUN chmod +x /usr/local/bin/riscv64-gcc-wrapper
+
 # Set environment
 # Note: The Rust target is riscv64gc-unknown-linux-musl but the compiler triplet is riscv64-unknown-linux-musl
+# Use the wrapper as linker to fix CRT paths when +crt-static is used
 ENV TARGET=riscv64gc-unknown-linux-musl
-ENV CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_LINKER=riscv64-unknown-linux-musl-gcc
+ENV CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_LINKER=/usr/local/bin/riscv64-gcc-wrapper
 ENV CC_riscv64gc_unknown_linux_musl=riscv64-unknown-linux-musl-gcc
 ENV AR_riscv64gc_unknown_linux_musl=riscv64-unknown-linux-musl-ar
 

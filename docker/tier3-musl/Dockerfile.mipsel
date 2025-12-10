@@ -17,9 +17,16 @@ RUN apt-get update -qq && apt-get install -y -qq unzip pkg-config curl wget rsyn
     unzip -q protoc-30.2-linux-x86_64.zip -d /usr/local && \
     rm protoc-30.2-linux-x86_64.zip
 
-# Set environment
+# Create empty libunwind.a stub (satisfies -lunwind when using panic=abort)
+RUN mipsel-unknown-linux-musl-ar rcs /usr/local/musl/mipsel-unknown-linux-musl/lib/libunwind.a
+
+# Copy and install the GCC wrapper script (fixes CRT paths for +crt-static)
+COPY mipsel-gcc-wrapper.sh /usr/local/bin/mipsel-gcc-wrapper
+RUN chmod +x /usr/local/bin/mipsel-gcc-wrapper
+
+# Set environment - use wrapper as linker
 ENV TARGET=mipsel-unknown-linux-musl
-ENV CARGO_TARGET_MIPSEL_UNKNOWN_LINUX_MUSL_LINKER=mipsel-unknown-linux-musl-gcc
+ENV CARGO_TARGET_MIPSEL_UNKNOWN_LINUX_MUSL_LINKER=/usr/local/bin/mipsel-gcc-wrapper
 ENV CC_mipsel_unknown_linux_musl=mipsel-unknown-linux-musl-gcc
 ENV AR_mipsel_unknown_linux_musl=mipsel-unknown-linux-musl-ar
 
