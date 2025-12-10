@@ -1,0 +1,29 @@
+# Custom Docker image for MIPS Little-Endian musl cross-compilation
+# See Dockerfile.mips for detailed documentation on the problem and solution
+
+FROM messense/rust-musl-cross:mipsel-musl
+
+ARG TARGET=mipsel-unknown-linux-musl
+
+# Install latest Rust (nightly required for build-std)
+RUN rustup self uninstall -y 2>/dev/null || true && \
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain nightly && \
+    . "$HOME/.cargo/env" && \
+    rustup component add rust-src
+
+# Install protoc and rsync
+RUN apt-get update -qq && apt-get install -y -qq unzip pkg-config curl wget rsync && \
+    curl -LO "https://github.com/protocolbuffers/protobuf/releases/download/v30.2/protoc-30.2-linux-x86_64.zip" && \
+    unzip -q protoc-30.2-linux-x86_64.zip -d /usr/local && \
+    rm protoc-30.2-linux-x86_64.zip
+
+# Set environment
+ENV TARGET=mipsel-unknown-linux-musl
+ENV CARGO_TARGET_MIPSEL_UNKNOWN_LINUX_MUSL_LINKER=mipsel-unknown-linux-musl-gcc
+ENV CC_mipsel_unknown_linux_musl=mipsel-unknown-linux-musl-gcc
+ENV AR_mipsel_unknown_linux_musl=mipsel-unknown-linux-musl-ar
+
+COPY build-tier3.sh /opt/build-tier3.sh
+RUN chmod +x /opt/build-tier3.sh
+
+WORKDIR /home/rust/src

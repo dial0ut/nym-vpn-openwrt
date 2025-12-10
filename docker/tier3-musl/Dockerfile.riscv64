@@ -1,0 +1,50 @@
+# Custom Docker image for RISC-V 64-bit musl cross-compilation
+# See Dockerfile.mips for detailed documentation on the problem and solution
+
+FROM messense/rust-musl-cross:riscv64gc-musl
+
+ARG TARGET=riscv64gc-unknown-linux-musl
+
+# Install latest Rust (nightly required for build-std)
+# Also install llvm-tools for rust-lld (avoids GCC 11.2 linker issues with newer RISC-V extensions)
+RUN rustup self uninstall -y 2>/dev/null || true && \
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain nightly && \
+    . "$HOME/.cargo/env" && \
+    rustup component add rust-src llvm-tools
+
+# Install rsync and linux-libc-dev for kernel headers
+RUN apt-get update -qq && apt-get install -y -qq unzip pkg-config curl wget rsync linux-libc-dev
+
+# Install newer protoc (apt version is too old, doesn't support proto3 optional fields)
+# protoc 3.12+ supports --experimental_allow_proto3_optional, 3.15+ has it enabled by default
+ARG PROTOC_VERSION=25.1
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "x86_64" ]; then PROTOC_ARCH="linux-x86_64"; \
+    elif [ "$ARCH" = "aarch64" ]; then PROTOC_ARCH="linux-aarch_64"; \
+    else echo "Unsupported arch: $ARCH" && exit 1; fi && \
+    curl -fsSL "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-${PROTOC_ARCH}.zip" -o /tmp/protoc.zip && \
+    unzip -q /tmp/protoc.zip -d /usr/local && \
+    rm /tmp/protoc.zip && \
+    protoc --version
+
+# Install Linux kernel headers for RISC-V cross-compilation
+# The riscv64gc-musl toolchain is missing linux/ headers, so we need to install them
+ARG KERNEL_VERSION=6.1.119
+RUN cd /tmp && \
+    curl -fsSL "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${KERNEL_VERSION}.tar.xz" -o linux.tar.xz && \
+    tar xJf linux.tar.xz && \
+    cd linux-${KERNEL_VERSION} && \
+    make ARCH=riscv INSTALL_HDR_PATH=/usr/local/musl/riscv64-unknown-linux-musl headers_install && \
+    cd /tmp && rm -rf linux-${KERNEL_VERSION} linux.tar.xz
+
+# Set environment
+# Note: The Rust target is riscv64gc-unknown-linux-musl but the compiler triplet is riscv64-unknown-linux-musl
+ENV TARGET=riscv64gc-unknown-linux-musl
+ENV CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_LINKER=riscv64-unknown-linux-musl-gcc
+ENV CC_riscv64gc_unknown_linux_musl=riscv64-unknown-linux-musl-gcc
+ENV AR_riscv64gc_unknown_linux_musl=riscv64-unknown-linux-musl-ar
+
+COPY build-tier3.sh /opt/build-tier3.sh
+RUN chmod +x /opt/build-tier3.sh
+
+WORKDIR /home/rust/src

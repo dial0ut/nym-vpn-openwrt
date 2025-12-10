@@ -1,0 +1,46 @@
+# Custom Docker image for MIPS musl cross-compilation
+# Solves the autocfg/indexmap probe failure on Docker volume mounts
+#
+# The Problem:
+#   - MIPS is a Rust Tier 3 target (no pre-built rust-std)
+#   - Building requires -Z build-std (nightly only)
+#   - autocfg probes fail on Docker volume mounts (no extended file attributes)
+#   - This causes indexmap to compile in no_std mode (IndexMap<K,V,S> requires 3 args)
+#   - schemars expects std mode (IndexMap<K,V> with default S=RandomState)
+#   - Error: "struct takes 3 generic arguments but 2 generic arguments were supplied"
+#
+# The Solution:
+#   - Copy source to local filesystem inside container (supports xattrs)
+#   - Build from local copy
+#   - Copy binaries back to mounted volume
+#
+# Build: docker build -t nym-musl-cross:mips-musl -f Dockerfile.mips .
+# Usage: docker run --rm -v "$(pwd)":/home/rust/src nym-musl-cross:mips-musl /opt/build-tier3.sh
+
+FROM messense/rust-musl-cross:mips-musl
+
+ARG TARGET=mips-unknown-linux-musl
+
+# Install latest Rust (nightly required for build-std)
+RUN rustup self uninstall -y 2>/dev/null || true && \
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain nightly && \
+    . "$HOME/.cargo/env" && \
+    rustup component add rust-src
+
+# Install protoc (required for nym build)
+RUN apt-get update -qq && apt-get install -y -qq unzip pkg-config curl wget rsync && \
+    curl -LO "https://github.com/protocolbuffers/protobuf/releases/download/v30.2/protoc-30.2-linux-x86_64.zip" && \
+    unzip -q protoc-30.2-linux-x86_64.zip -d /usr/local && \
+    rm protoc-30.2-linux-x86_64.zip
+
+# Set environment
+ENV TARGET=mips-unknown-linux-musl
+ENV CARGO_TARGET_MIPS_UNKNOWN_LINUX_MUSL_LINKER=mips-unknown-linux-musl-gcc
+ENV CC_mips_unknown_linux_musl=mips-unknown-linux-musl-gcc
+ENV AR_mips_unknown_linux_musl=mips-unknown-linux-musl-ar
+
+# Create build script that copies to local FS
+COPY build-tier3.sh /opt/build-tier3.sh
+RUN chmod +x /opt/build-tier3.sh
+
+WORKDIR /home/rust/src

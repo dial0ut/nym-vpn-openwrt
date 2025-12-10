@@ -16,8 +16,9 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-    name: Build ${{ matrix.target }}
+  # Tier 2 targets - use pre-built Docker images
+  build-tier2:
+    name: Build ${{ matrix.arch }} (Tier 2)
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -35,9 +36,6 @@ jobs:
           - target: armv7-unknown-linux-musleabihf
             arch: armv7
             docker_image: messense/rust-musl-cross:armv7-musleabihf
-          # NOTE: mips, mipsel, riscv64 are Rust Tier 3 targets requiring nightly + build-std
-          # which causes dependency conflicts (schemars/indexmap). Disabled until Rust promotes
-          # these to Tier 2 or the ecosystem fixes build-std compatibility.
 
     steps:
       - name: Checkout
@@ -75,9 +73,70 @@ jobs:
           path: artifacts/*
           retention-days: 7
 
+  # Tier 3 targets - require custom Docker images with nightly + build-std
+  build-tier3:
+    name: Build ${{ matrix.arch }} (Tier 3)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: mips-unknown-linux-musl
+            arch: mips
+            dockerfile: Dockerfile.mips
+          - target: mipsel-unknown-linux-musl
+            arch: mipsel
+            dockerfile: Dockerfile.mipsel
+          - target: riscv64gc-unknown-linux-musl
+            arch: riscv64
+            dockerfile: Dockerfile.riscv64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build custom Docker image
+        run: |
+          cd docker/tier3-musl
+          docker build -f ${{ matrix.dockerfile }} -t nym-musl-cross:${{ matrix.arch }}-musl .
+
+      - name: Build in Docker
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/home/rust/src" \
+            nym-musl-cross:${{ matrix.arch }}-musl \
+            /opt/build-tier3.sh
+
+      - name: Prepare artifacts
+        run: |
+          mkdir -p artifacts
+          cp nym-vpn-core/target/${{ matrix.target }}/release/nym-vpnd artifacts/nym-vpnd-${{ matrix.arch }}
+          cp nym-vpn-core/target/${{ matrix.target }}/release/nym-vpnc artifacts/nym-vpnc-${{ matrix.arch }}
+
+          # Create tarball
+          cd artifacts
+          tar -czvf nym-vpn-${{ matrix.arch }}.tar.gz nym-vpnd-${{ matrix.arch }} nym-vpnc-${{ matrix.arch }}
+
+          # Generate checksums
+          sha256sum nym-vpnd-${{ matrix.arch }} > nym-vpnd-${{ matrix.arch }}.sha256
+          sha256sum nym-vpnc-${{ matrix.arch }} > nym-vpnc-${{ matrix.arch }}.sha256
+          sha256sum nym-vpn-${{ matrix.arch }}.tar.gz > nym-vpn-${{ matrix.arch }}.tar.gz.sha256
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nym-vpn-${{ matrix.arch }}
+          path: artifacts/*
+          retention-days: 7
+
   release:
     name: Create Release
-    needs: build
+    needs: [build-tier2, build-tier3]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -116,26 +175,44 @@ jobs:
             artifacts/nym-vpnd-i686
             artifacts/nym-vpnd-aarch64
             artifacts/nym-vpnd-armv7
+            artifacts/nym-vpnd-mips
+            artifacts/nym-vpnd-mipsel
+            artifacts/nym-vpnd-riscv64
             artifacts/nym-vpnc-x86_64
             artifacts/nym-vpnc-i686
             artifacts/nym-vpnc-aarch64
             artifacts/nym-vpnc-armv7
+            artifacts/nym-vpnc-mips
+            artifacts/nym-vpnc-mipsel
+            artifacts/nym-vpnc-riscv64
             artifacts/nym-vpn-x86_64.tar.gz
             artifacts/nym-vpn-i686.tar.gz
             artifacts/nym-vpn-aarch64.tar.gz
             artifacts/nym-vpn-armv7.tar.gz
+            artifacts/nym-vpn-mips.tar.gz
+            artifacts/nym-vpn-mipsel.tar.gz
+            artifacts/nym-vpn-riscv64.tar.gz
             artifacts/nym-vpnd-x86_64.sha256
             artifacts/nym-vpnd-i686.sha256
             artifacts/nym-vpnd-aarch64.sha256
             artifacts/nym-vpnd-armv7.sha256
+            artifacts/nym-vpnd-mips.sha256
+            artifacts/nym-vpnd-mipsel.sha256
+            artifacts/nym-vpnd-riscv64.sha256
             artifacts/nym-vpnc-x86_64.sha256
             artifacts/nym-vpnc-i686.sha256
             artifacts/nym-vpnc-aarch64.sha256
             artifacts/nym-vpnc-armv7.sha256
+            artifacts/nym-vpnc-mips.sha256
+            artifacts/nym-vpnc-mipsel.sha256
+            artifacts/nym-vpnc-riscv64.sha256
             artifacts/nym-vpn-x86_64.tar.gz.sha256
             artifacts/nym-vpn-i686.tar.gz.sha256
             artifacts/nym-vpn-aarch64.tar.gz.sha256
             artifacts/nym-vpn-armv7.tar.gz.sha256
+            artifacts/nym-vpn-mips.tar.gz.sha256
+            artifacts/nym-vpn-mipsel.tar.gz.sha256
+            artifacts/nym-vpn-riscv64.tar.gz.sha256
           body: |
             ## Nym VPN ${{ steps.version.outputs.version }} - Kernel WireGuard Edition
 
@@ -150,10 +227,17 @@ jobs:
             ### Manual Install
 
             Download the appropriate binary for your architecture:
+
+            **Tier 2 Targets (stable):**
             - **x86_64**: 64-bit x86 (most PCs, VMs)
             - **i686**: 32-bit x86 (older PCs, some embedded)
             - **aarch64**: ARM 64-bit (Raspberry Pi 4+, rockchip, mediatek)
             - **armv7**: ARM 32-bit hard-float (bcm53xx, mvebu)
+
+            **Tier 3 Targets (experimental):**
+            - **mips**: MIPS big-endian (ath79, ar71xx legacy routers)
+            - **mipsel**: MIPS little-endian (ramips/mt76x8, lantiq)
+            - **riscv64**: RISC-V 64-bit (StarFive, SiFive, Milk-V)
 
             ```bash
             # Example for aarch64
@@ -170,3 +254,8 @@ jobs:
             ### Checksums
 
             SHA256 checksums are provided for each binary.
+
+            ### Notes on Tier 3 Targets
+
+            Tier 3 targets (mips, mipsel, riscv64) are built using Rust nightly with `-Z build-std`.
+            These are experimental and may have less testing than Tier 2 targets.
