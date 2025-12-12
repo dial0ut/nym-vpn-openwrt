@@ -298,9 +298,23 @@ jobs:
           draft: false
           prerelease: ${{ contains(steps.version.outputs.version, 'beta') || contains(steps.version.outputs.version, 'alpha') || contains(steps.version.outputs.version, 'rc') }}
           files: |
-            artifacts/nym-vpnd-*
-            artifacts/nym-vpnc-*
-            artifacts/nym-vpn-*.tar.gz
+            artifacts/nym-vpnd-x86_64
+            artifacts/nym-vpnd-i686
+            artifacts/nym-vpnd-aarch64
+            artifacts/nym-vpnd-armv7
+            artifacts/nym-vpnd-mips
+            artifacts/nym-vpnd-mipsel
+            artifacts/nym-vpnd-riscv64
+            artifacts/nym-vpnd-armv5te
+            artifacts/nym-vpnc-x86_64
+            artifacts/nym-vpnc-i686
+            artifacts/nym-vpnc-aarch64
+            artifacts/nym-vpnc-armv7
+            artifacts/nym-vpnc-mips
+            artifacts/nym-vpnc-mipsel
+            artifacts/nym-vpnc-riscv64
+            artifacts/nym-vpnc-armv5te
+            artifacts/*.tar.gz
             artifacts/*.sha256
             artifacts/*.ipk
           body: |
