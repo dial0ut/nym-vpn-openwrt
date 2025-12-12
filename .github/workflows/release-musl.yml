@@ -113,10 +113,162 @@ jobs:
           path: artifacts/*
           retention-days: 7
 
-  release:
-    name: Create Release
+  package-ipk:
+    name: Create IPK packages
     needs: [build]
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: aarch64
+            openwrt_arch: aarch64_generic
+          - arch: x86_64
+            openwrt_arch: x86_64
+          - arch: i686
+            openwrt_arch: i386_pentium4
+          - arch: armv7
+            openwrt_arch: arm_cortex-a7_neon-vfpv4
+          - arch: armv5te
+            openwrt_arch: arm_arm926ej-s
+          - arch: mips
+            openwrt_arch: mips_24kc
+          - arch: mipsel
+            openwrt_arch: mipsel_24kc
+          - arch: riscv64
+            openwrt_arch: riscv64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: nym-vpn-${{ matrix.arch }}
+          path: artifacts
+
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.tag }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
+          # Strip 'v' prefix for package version
+          echo "version=${VERSION#v}" >> $GITHUB_OUTPUT
+
+      - name: Clone LuCI package
+        run: |
+          git clone --depth 1 https://github.com/dial0ut/nym-vpn-luci.git luci
+
+      - name: Create IPK package
+        run: |
+          PKG_VERSION="${{ steps.version.outputs.version }}"
+          PKG_ARCH="${{ matrix.openwrt_arch }}"
+          mkdir -p ipk/{control,data}
+
+          # === Binaries ===
+          mkdir -p ipk/data/usr/sbin ipk/data/usr/bin
+          cp artifacts/nym-vpnd-${{ matrix.arch }} ipk/data/usr/sbin/nym-vpnd
+          cp artifacts/nym-vpnc-${{ matrix.arch }} ipk/data/usr/bin/nym-vpnc
+          chmod 755 ipk/data/usr/sbin/nym-vpnd ipk/data/usr/bin/nym-vpnc
+
+          # === LuCI web interface ===
+          # Frontend JS
+          mkdir -p ipk/data/www/luci-static/resources/view/nym-vpn
+          cp luci/htdocs/luci-static/resources/view/nym-vpn/config.js \
+             ipk/data/www/luci-static/resources/view/nym-vpn/
+
+          # RPC backend
+          mkdir -p ipk/data/usr/libexec/rpcd
+          cp luci/root/usr/libexec/rpcd/nym-vpn ipk/data/usr/libexec/rpcd/
+          chmod 755 ipk/data/usr/libexec/rpcd/nym-vpn
+
+          # Menu and ACL config
+          mkdir -p ipk/data/usr/share/luci/menu.d ipk/data/usr/share/rpcd/acl.d
+          cp luci/root/usr/share/luci/menu.d/luci-app-nym-vpn.json ipk/data/usr/share/luci/menu.d/
+          cp luci/root/usr/share/rpcd/acl.d/luci-app-nym-vpn.json ipk/data/usr/share/rpcd/acl.d/
+
+          # === Service config ===
+          mkdir -p ipk/data/etc/init.d ipk/data/etc/config ipk/data/etc/uci-defaults
+          mkdir -p ipk/data/var/lib/nym-vpn
+
+          # Init script from LuCI repo (or create if not present)
+          if [ -f luci/root/etc/init.d/nym-vpnd ]; then
+            cp luci/root/etc/init.d/nym-vpnd ipk/data/etc/init.d/
+          else
+            cat > ipk/data/etc/init.d/nym-vpnd << 'INITEOF'
+          #!/bin/sh /etc/rc.common
+          START=90
+          STOP=10
+          USE_PROCD=1
+
+          start_service() {
+              mkdir -p /var/lib/nym-vpn
+              procd_open_instance
+              procd_set_param command /usr/sbin/nym-vpnd --config-dir /var/lib/nym-vpn
+              procd_set_param respawn 3600 5 5
+              procd_set_param stdout 1
+              procd_set_param stderr 1
+              procd_set_param pidfile /var/run/nym-vpnd.pid
+              procd_close_instance
+          }
+
+          stop_service() {
+              /usr/bin/nym-vpnc disconnect 2>/dev/null || true
+          }
+          INITEOF
+          fi
+          chmod 755 ipk/data/etc/init.d/nym-vpnd
+
+          # UCI defaults (post-install setup)
+          if [ -f luci/root/etc/uci-defaults/luci-app-nym-vpn ]; then
+            cp luci/root/etc/uci-defaults/luci-app-nym-vpn ipk/data/etc/uci-defaults/
+            chmod 755 ipk/data/etc/uci-defaults/luci-app-nym-vpn
+          fi
+
+          # UCI config
+          cat > ipk/data/etc/config/nym-vpn << 'CONFIGEOF'
+          config nym-vpn 'settings'
+              option enabled '0'
+              option network 'mainnet'
+          CONFIGEOF
+
+          # === Control file ===
+          INSTALLED_SIZE=$(du -sk ipk/data | cut -f1)
+          cat > ipk/control/control << EOF
+          Package: nym-vpn
+          Version: ${PKG_VERSION}
+          Architecture: ${PKG_ARCH}
+          Maintainer: Nym Technologies <support@nymtech.net>
+          Installed-Size: ${INSTALLED_SIZE}
+          Section: net
+          Priority: optional
+          Depends: libc, wireguard-tools, kmod-wireguard, luci-base, rpcd
+          Description: NymVPN for OpenWrt
+           Privacy-focused VPN using the Nym mixnet. Includes daemon, CLI, and LuCI web interface.
+          EOF
+
+          # === Build IPK ===
+          (cd ipk/control && tar -czf ../control.tar.gz .)
+          (cd ipk/data && tar -czf ../data.tar.gz .)
+          echo "2.0" > ipk/debian-binary
+          (cd ipk && tar -czf ../nym-vpn_${PKG_VERSION}_${PKG_ARCH}.ipk ./debian-binary ./control.tar.gz ./data.tar.gz)
+          ls -la *.ipk
+
+      - name: Upload IPK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ipk-${{ matrix.arch }}
+          path: "*.ipk"
+          retention-days: 7
+
+  release:
+    name: Create Release
+    needs: [build, package-ipk]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: write
 
@@ -136,11 +288,7 @@ jobs:
       - name: Get version
         id: version
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "version=${{ inputs.tag }}" >> $GITHUB_OUTPUT
-          else
-            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-          fi
+          echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -150,98 +298,27 @@ jobs:
           draft: false
           prerelease: ${{ contains(steps.version.outputs.version, 'beta') || contains(steps.version.outputs.version, 'alpha') || contains(steps.version.outputs.version, 'rc') }}
           files: |
-            artifacts/nym-vpnd-x86_64
-            artifacts/nym-vpnd-i686
-            artifacts/nym-vpnd-aarch64
-            artifacts/nym-vpnd-armv7
-            artifacts/nym-vpnd-mips
-            artifacts/nym-vpnd-mipsel
-            artifacts/nym-vpnd-riscv64
-            artifacts/nym-vpnd-armv5te
-            artifacts/nym-vpnc-x86_64
-            artifacts/nym-vpnc-i686
-            artifacts/nym-vpnc-aarch64
-            artifacts/nym-vpnc-armv7
-            artifacts/nym-vpnc-mips
-            artifacts/nym-vpnc-mipsel
-            artifacts/nym-vpnc-riscv64
-            artifacts/nym-vpnc-armv5te
-            artifacts/nym-vpn-x86_64.tar.gz
-            artifacts/nym-vpn-i686.tar.gz
-            artifacts/nym-vpn-aarch64.tar.gz
-            artifacts/nym-vpn-armv7.tar.gz
-            artifacts/nym-vpn-mips.tar.gz
-            artifacts/nym-vpn-mipsel.tar.gz
-            artifacts/nym-vpn-riscv64.tar.gz
-            artifacts/nym-vpn-armv5te.tar.gz
-            artifacts/nym-vpnd-x86_64.sha256
-            artifacts/nym-vpnd-i686.sha256
-            artifacts/nym-vpnd-aarch64.sha256
-            artifacts/nym-vpnd-armv7.sha256
-            artifacts/nym-vpnd-mips.sha256
-            artifacts/nym-vpnd-mipsel.sha256
-            artifacts/nym-vpnd-riscv64.sha256
-            artifacts/nym-vpnd-armv5te.sha256
-            artifacts/nym-vpnc-x86_64.sha256
-            artifacts/nym-vpnc-i686.sha256
-            artifacts/nym-vpnc-aarch64.sha256
-            artifacts/nym-vpnc-armv7.sha256
-            artifacts/nym-vpnc-mips.sha256
-            artifacts/nym-vpnc-mipsel.sha256
-            artifacts/nym-vpnc-riscv64.sha256
-            artifacts/nym-vpnc-armv5te.sha256
-            artifacts/nym-vpn-x86_64.tar.gz.sha256
-            artifacts/nym-vpn-i686.tar.gz.sha256
-            artifacts/nym-vpn-aarch64.tar.gz.sha256
-            artifacts/nym-vpn-armv7.tar.gz.sha256
-            artifacts/nym-vpn-mips.tar.gz.sha256
-            artifacts/nym-vpn-mipsel.tar.gz.sha256
-            artifacts/nym-vpn-riscv64.tar.gz.sha256
-            artifacts/nym-vpn-armv5te.tar.gz.sha256
+            artifacts/nym-vpnd-*
+            artifacts/nym-vpnc-*
+            artifacts/nym-vpn-*.tar.gz
+            artifacts/*.sha256
+            artifacts/*.ipk
           body: |
             ## Nym VPN ${{ steps.version.outputs.version }} - Kernel WireGuard Edition
 
             Pre-built static binaries for musl-based Linux systems (OpenWrt, Alpine, etc.)
 
-            ### Quick Install (OpenWrt/Linux)
+            ### OpenWrt Installation (Recommended)
+
+            Download the `.ipk` file for your architecture and install:
 
             ```bash
-            curl -fsSL https://sh.dialout.net | sh
+            opkg install nym-vpn_*.ipk
             ```
 
-            ### Manual Install
-
-            Download the appropriate binary for your architecture:
-
-            **Standard Targets:**
-            - **x86_64**: 64-bit x86 (most PCs, VMs)
-            - **i686**: 32-bit x86 (older PCs, some embedded)
-            - **aarch64**: ARM 64-bit (Raspberry Pi 4+, rockchip, mediatek)
-            - **armv7**: ARM 32-bit hard-float (bcm53xx, mvebu)
-
-            **Extended Targets (experimental):**
-            - **mips**: MIPS big-endian (ath79, ar71xx legacy routers)
-            - **mipsel**: MIPS little-endian (ramips/mt76x8, lantiq)
-            - **riscv64**: RISC-V 64-bit (StarFive, SiFive, Milk-V)
-            - **armv5te**: ARM v5TE soft-float (legacy ARM9 devices, ancient routers)
-
-            ```bash
-            # Example for aarch64
-            wget https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.version }}/nym-vpnd-aarch64
-            chmod +x nym-vpnd-aarch64
-            mv nym-vpnd-aarch64 /usr/sbin/nym-vpnd
-            ```
+            Then access the web interface at: **LuCI → VPN → Nym VPN**
 
             ### Requirements
 
             - Linux kernel 5.6+ with WireGuard module
             - Run `modprobe wireguard` on target device
-
-            ### Checksums
-
-            SHA256 checksums are provided for each binary.
-
-            ### Notes on Extended Targets
-
-            Extended targets (mips, mipsel, riscv64, armv5te) require custom build configurations
-            with patched dependencies. These are experimental and may have less testing.
