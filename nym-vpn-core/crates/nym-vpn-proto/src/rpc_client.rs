@@ -3,12 +3,12 @@
 
 use nym_vpn_lib_types::{
     AccountBalanceResponse, AccountCommandResponse, AccountControllerState, AvailableTickets,
-    ConnectArgs, EntryPoint, ExitPoint, FeatureFlags, Gateway, GatewayFilters, HttpRpcSettings,
-    ListGatewaysOptions, LogPath, NetworkCompatibility, NymVpnDevice, NymVpnUsage,
-    ParsedAccountLinks, Socks5Settings, Socks5Status, StoreAccountRequest, SystemMessage,
-    TunnelEvent, TunnelState, VpnServiceConfig, VpnServiceInfo,
+    EntryPoint, ExitPoint, FeatureFlags, Gateway, HttpRpcSettings, ListGatewaysOptions, LogPath,
+    LookupGatewayFilters, NetworkCompatibility, NetworkStatisticsIdentity, NymVpnDevice,
+    NymVpnUsage, ParsedAccountLinks, PrivyDerivationMessage, Socks5Settings, Socks5Status,
+    StoreAccountRequest, SystemMessage, TunnelEvent, TunnelState, VpnServiceConfig, VpnServiceInfo,
 };
-use std::path::PathBuf;
+use std::{net::IpAddr, path::PathBuf};
 use tokio_stream::{Stream, StreamExt};
 use tonic::transport::{Endpoint, Uri};
 use tower::service_fn;
@@ -130,9 +130,18 @@ impl RpcClient {
         Ok(())
     }
 
-    pub async fn set_custom_dns(&mut self, ips: Option<Vec<String>>) -> Result<()> {
+    pub async fn set_enable_custom_dns(&mut self, enable: bool) -> Result<()> {
+        self.0
+            .set_enable_custom_dns(enable)
+            .await
+            .map_err(Error::Rpc)?
+            .into_inner();
+        Ok(())
+    }
+
+    pub async fn set_custom_dns(&mut self, ips: Vec<IpAddr>) -> Result<()> {
         let request = proto::IpAddrList {
-            ips: ips.unwrap_or_default(),
+            ips: ips.into_iter().map(proto::IpAddr::from).collect(),
         };
 
         self.0
@@ -193,29 +202,20 @@ impl RpcClient {
         Ok(FeatureFlags::from(response))
     }
 
-    pub async fn get_default_dns(&mut self) -> Result<Vec<String>> {
+    pub async fn get_default_dns(&mut self) -> Result<Vec<IpAddr>> {
         let response = self
             .0
             .get_default_dns(())
             .await
             .map_err(Error::Rpc)?
             .into_inner();
-        Ok(response.ips)
+        let ip_vec = response.try_into().map_err(Error::InvalidResponse)?;
+        Ok(ip_vec)
     }
 
-    pub async fn connect_tunnel(&mut self, request: ConnectArgs) -> Result<()> {
-        let request = proto::ConnectRequest::try_from(request).map_err(Error::InvalidRequest)?;
-
+    pub async fn connect_tunnel(&mut self) -> Result<bool> {
         self.0
-            .connect_tunnel(request)
-            .await
-            .map(|v| v.into_inner())
-            .map_err(Error::Rpc)
-    }
-
-    pub async fn connect_tunnel_v2(&mut self) -> Result<bool> {
-        self.0
-            .connect_tunnel_v2(())
+            .connect_tunnel(())
             .await
             .map(|v| v.into_inner())
             .map_err(Error::Rpc)
@@ -284,9 +284,9 @@ impl RpcClient {
 
     pub async fn list_filtered_gateways(
         &mut self,
-        filters: GatewayFilters,
+        filters: LookupGatewayFilters,
     ) -> Result<Vec<Gateway>> {
-        let request = proto::GatewayFilters::from(filters);
+        let request = proto::LookupGatewayFilters::from(filters);
 
         let gateways = self
             .0
@@ -537,25 +537,29 @@ impl RpcClient {
             .map_err(Error::Rpc)
     }
 
-    pub async fn is_collect_network_stats_enabled(&mut self) -> Result<bool> {
+    pub async fn network_stats_set_enabled(&mut self, enabled: bool) -> Result<()> {
         self.0
-            .is_collect_network_stats_enabled(())
+            .network_stats_set_enabled(enabled)
             .await
             .map(|v| v.into_inner())
             .map_err(Error::Rpc)
     }
 
-    pub async fn enable_collect_network_stats(&mut self) -> Result<()> {
+    pub async fn network_stats_allow_disconnected(
+        &mut self,
+        allow_disconnected: bool,
+    ) -> Result<()> {
         self.0
-            .enable_collect_network_stats(())
+            .network_stats_allow_disconnected(allow_disconnected)
             .await
             .map(|v| v.into_inner())
             .map_err(Error::Rpc)
     }
 
-    pub async fn disable_collect_network_stats(&mut self) -> Result<()> {
+    pub async fn network_stats_reset_seed(&mut self, seed: Option<String>) -> Result<()> {
+        let request = proto::NetworkStatsResetSeedRequest { seed };
         self.0
-            .disable_collect_network_stats(())
+            .network_stats_reset_seed(request)
             .await
             .map(|v| v.into_inner())
             .map_err(Error::Rpc)
@@ -569,10 +573,16 @@ impl RpcClient {
     ) -> Result<()> {
         let request = proto::EnableSocks5Request {
             socks5_settings: Some(proto::Socks5Settings {
-                listen_address: socks5_settings.listen_address,
+                listen_address: match socks5_settings.listen_address {
+                    Some(addr) => addr.to_string(),
+                    None => String::new(),
+                },
             }),
             http_rpc_settings: Some(proto::HttpRpcSettings {
-                listen_address: http_rpc_settings.listen_address,
+                listen_address: match http_rpc_settings.listen_address {
+                    Some(addr) => addr.to_string(),
+                    None => String::new(),
+                },
             }),
             exit: Some(proto::ExitNode::from(exit_point)),
         };
@@ -601,6 +611,27 @@ impl RpcClient {
             .into_inner();
 
         Socks5Status::try_from(response).map_err(Error::InvalidResponse)
+    }
+
+    pub async fn network_stats_get_seed(&mut self) -> Result<NetworkStatisticsIdentity> {
+        let response = self
+            .0
+            .network_stats_get_seed(())
+            .await
+            .map(|v| v.into_inner())
+            .map_err(Error::Rpc)?;
+        Ok(NetworkStatisticsIdentity::from(response))
+    }
+
+    pub async fn get_privy_derivation_message(&mut self) -> Result<PrivyDerivationMessage> {
+        let response = self
+            .0
+            .get_privy_derivation_message(())
+            .await
+            .map(|v| v.into_inner())
+            .map_err(Error::Rpc)?;
+
+        Ok(PrivyDerivationMessage::from(response))
     }
 }
 

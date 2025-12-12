@@ -9,7 +9,7 @@ use time::OffsetDateTime;
 #[cfg(feature = "typescript-bindings")]
 use ts_rs::TS;
 
-use crate::{EntryPoint, ExitPoint, NymNetworkDetails, NymVpnNetwork};
+use crate::{EntryPoint, ExitPoint, NetworkStatisticsConfig, NymNetworkDetails, NymVpnNetwork};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
@@ -35,7 +35,9 @@ pub struct VpnServiceConfig {
     pub min_gateway_mixnet_performance: Option<u8>,
     pub min_gateway_vpn_performance: Option<u8>,
     pub residential_exit: bool,
-    pub custom_dns: Option<Vec<IpAddr>>,
+    pub enable_custom_dns: bool,
+    pub custom_dns: Vec<IpAddr>,
+    pub network_stats: NetworkStatisticsConfig,
 }
 
 impl fmt::Display for VpnServiceConfig {
@@ -71,16 +73,15 @@ impl fmt::Display for VpnServiceConfig {
         writeln!(f, "residential_exit: {}", self.residential_exit)?;
         writeln!(
             f,
-            "custom_dns: {}",
+            "enable_custom_dns: {}, custom_dns: {}",
+            self.enable_custom_dns,
             self.custom_dns
-                .as_ref()
-                .map(|dns| dns
-                    .iter()
-                    .map(|ip| ip.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", "))
-                .unwrap_or_else(|| "none".to_string())
+                .iter()
+                .map(|ip| ip.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
         )?;
+        writeln!(f, "networks stats config: {}", self.network_stats)?;
         Ok(())
     }
 }
@@ -101,7 +102,9 @@ impl Default for VpnServiceConfig {
             min_gateway_mixnet_performance: None,
             min_gateway_vpn_performance: None,
             residential_exit: false,
-            custom_dns: None,
+            enable_custom_dns: false,
+            custom_dns: vec![],
+            network_stats: Default::default(),
         }
     }
 }

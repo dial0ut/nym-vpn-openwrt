@@ -5,7 +5,7 @@
 
 uniffi::setup_scaffolding!();
 
-use std::sync::Arc;
+use std::{net::IpAddr, sync::Arc};
 
 use futures::StreamExt;
 use nym_vpn_proto::rpc_client::{Error as DaemonRpcError, RpcClient as DaemonRpcClient};
@@ -13,9 +13,12 @@ use tokio_util::sync::CancellationToken;
 
 use nym_vpn_lib_types::{
     AccountCommandError, AccountControllerState, EntryPoint, ExitPoint, FeatureFlags, Gateway,
-    GatewayType, LogPath, NetworkCompatibility, NymVpnDevice, NymVpnUsage, ParsedAccountLinks,
+    GatewayType, HttpRpcSettings, LogPath, NetworkCompatibility, NymVpnDevice, NymVpnUsage,
+    ParsedAccountLinks, PrivyDerivationMessage, Socks5Settings, Socks5Status, StoreAccountRequest,
     SystemMessage, TunnelEvent, TunnelState, VpnServiceConfig, VpnServiceInfo,
 };
+
+uniffi::use_remote_type!(nym_vpn_lib_types::IpAddr);
 
 #[derive(Clone, uniffi::Object)]
 struct RpcClient {
@@ -80,6 +83,16 @@ impl RpcClient {
         Ok(())
     }
 
+    pub async fn set_enable_custom_dns(&self, enable: bool) -> Result<()> {
+        self.inner.clone().set_enable_custom_dns(enable).await?;
+        Ok(())
+    }
+
+    pub async fn set_custom_dns(&self, dns_servers: Vec<IpAddr>) -> Result<()> {
+        self.inner.clone().set_custom_dns(dns_servers).await?;
+        Ok(())
+    }
+
     pub async fn set_network(&self, network: String) -> Result<()> {
         self.inner.clone().set_network(network).await?;
         Ok(())
@@ -99,12 +112,13 @@ impl RpcClient {
         Ok(self.inner.clone().get_feature_flags().await?)
     }
 
-    pub async fn get_default_dns(&self) -> Result<Vec<String>> {
-        Ok(self.inner.clone().get_default_dns().await?)
+    pub async fn get_default_dns(&self) -> Result<Vec<IpAddr>> {
+        let ips = self.inner.clone().get_default_dns().await?;
+        Ok(ips)
     }
 
     pub async fn connect_tunnel(&self) -> Result<()> {
-        self.inner.clone().connect_tunnel_v2().await?;
+        self.inner.clone().connect_tunnel().await?;
         Ok(())
     }
 
@@ -163,12 +177,8 @@ impl RpcClient {
         Ok(gateways)
     }
 
-    pub async fn store_account(&self, mnemonic: String) -> Result<()> {
-        let response = self
-            .inner
-            .clone()
-            .store_account(nym_vpn_lib_types::StoreAccountRequest::Vpn { mnemonic })
-            .await?;
+    pub async fn store_account(&self, request: StoreAccountRequest) -> Result<()> {
+        let response = self.inner.clone().store_account(request).await?;
 
         if let Some(err) = response.error {
             Err(RpcError::new(InnerRpcError::AccountCommand(Arc::new(err))))
@@ -271,22 +281,48 @@ impl RpcClient {
         Ok(())
     }
 
-    pub async fn is_collect_network_stats_enabled(&self) -> Result<bool> {
-        Ok(self
-            .inner
+    pub async fn network_stats_set_enabled(&self, enabled: bool) -> Result<()> {
+        self.inner
             .clone()
-            .is_collect_network_stats_enabled()
-            .await?)
-    }
-
-    pub async fn enable_collect_network_stats(&self) -> Result<()> {
-        self.inner.clone().enable_collect_network_stats().await?;
+            .network_stats_set_enabled(enabled)
+            .await?;
         Ok(())
     }
 
-    pub async fn disable_collect_network_stats(&self) -> Result<()> {
-        self.inner.clone().disable_collect_network_stats().await?;
+    pub async fn network_stats_allow_disconnected(&self, allow_disconnected: bool) -> Result<()> {
+        self.inner
+            .clone()
+            .network_stats_allow_disconnected(allow_disconnected)
+            .await?;
         Ok(())
+    }
+
+    pub async fn enable_socks5(
+        &self,
+        socks5_settings: Socks5Settings,
+        http_rpc_settings: HttpRpcSettings,
+        exit_point: ExitPoint,
+    ) -> Result<()> {
+        self.inner
+            .clone()
+            .enable_socks5(socks5_settings, http_rpc_settings, exit_point)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn disable_socks5(&self) -> Result<()> {
+        self.inner.clone().disable_socks5().await?;
+        Ok(())
+    }
+
+    pub async fn get_socks5_status(&self) -> Result<Socks5Status> {
+        let status = self.inner.clone().get_socks5_status().await?;
+        Ok(status)
+    }
+
+    pub async fn get_privy_derivation_message(&self) -> Result<PrivyDerivationMessage> {
+        let message = self.inner.clone().get_privy_derivation_message().await?;
+        Ok(message)
     }
 }
 

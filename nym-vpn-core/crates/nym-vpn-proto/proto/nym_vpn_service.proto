@@ -57,6 +57,11 @@ message Location {
   optional Asn asn = 6;
 }
 
+message GatewayLightInfo {
+  string id = 1;
+  optional string country_code = 2;
+}
+
 message EntryNode {
   oneof entry_node_enum {
     GatewayId gateway = 1;
@@ -100,7 +105,7 @@ message Dns {
 }
 
 message IpAddrList {
-  repeated string ips = 1;
+  repeated IpAddr ips = 1;
 }
 
 message ApiUrl {
@@ -240,20 +245,6 @@ message Threshold {
   uint32 min_performance = 1;
 }
 
-message ConnectRequest {
-  EntryNode entry = 1;
-  ExitNode exit = 2;
-  Dns dns = 3;
-  bool disable_ipv6 = 14;
-  bool enable_two_hop = 5;
-  bool enable_bridges = 21;
-  bool netstack = 13;
-  bool disable_poisson_rate = 6;
-  bool disable_background_cover_traffic = 7;
-  bool enable_credentials_mode = 8;
-  UserAgent user_agent = 12;
-}
-
 message VpnServiceConfig {
   EntryNode entry_point = 1;
   ExitNode exit_point = 2;
@@ -268,7 +259,14 @@ message VpnServiceConfig {
   optional uint32 min_mixnode_performance = 8;
   optional uint32 min_gateway_mixnet_performance = 9;
   optional uint32 min_gateway_vpn_performance = 10;
+  bool enable_custom_dns = 17;
   IpAddrList custom_dns = 16;
+  NetworkStatsConfig network_stats = 18;
+}
+
+message NetworkStatsConfig {
+  bool enabled = 1;
+  bool allow_disconnected = 2;
 }
 
 message AsEntry {
@@ -383,14 +381,14 @@ enum EstablishConnectionState {
 }
 
 message EstablishConnectionData {
-  GatewayId entry_gateway = 1;
-  GatewayId exit_gateway = 2;
+  GatewayLightInfo entry_gateway = 1;
+  GatewayLightInfo exit_gateway = 2;
   optional TunnelConnectionData tunnel = 3;
 }
 
 message ConnectionData {
-  GatewayId entry_gateway = 1;
-  GatewayId exit_gateway = 2;
+  GatewayLightInfo entry_gateway = 1;
+  GatewayLightInfo exit_gateway = 2;
   google.protobuf.Timestamp connected_at = 3;
   TunnelConnectionData tunnel = 4;
 }
@@ -585,6 +583,7 @@ message AccountCommandError {
     bool no_device_stored = 6;
     bool existing_account = 7;
     bool offline = 8;
+    string invalid_secret = 9;
     string invalid_mnemonic = 10;
     string nyxd_connection_failure = 11;
     string nyxd_query_failure = 12;
@@ -673,7 +672,7 @@ message GatewayFilter {
   }
 }
 
-message GatewayFilters {
+message LookupGatewayFilters {
   GatewayType kind = 1;
   repeated GatewayFilter filters = 2;
 }
@@ -684,16 +683,20 @@ message StoreAccountRequest {
   oneof request {
     VpnAccountStoreRequest vpn_account_store = 1;
     DecentralisedAccountStoreRequest decentralised_account_store = 2;
+    PrivyAccountStoreRequest privy_account_store = 3;
   }
 }
 
-// VPN variant with mnemonic
 message VpnAccountStoreRequest {
   string mnemonic = 1;
 }
 
 message DecentralisedAccountStoreRequest {
   string mnemonic = 1;
+}
+
+message PrivyAccountStoreRequest {
+  string hex_signature = 1;
 }
 
 message DecentralisedObtainTicketbooksRequest {
@@ -804,6 +807,7 @@ message DeleteLogFileResponse {
 }
 
 // Enable SOCKS5 proxy request
+// TODO: Change arguments to EnableSocks5Request (at the time of writing I didn't want to disturb the client code)
 message EnableSocks5Request {
   Socks5Settings socks5_settings = 1;
   HttpRpcSettings http_rpc_settings = 2;
@@ -835,6 +839,20 @@ message HttpRpcSettings {
   string listen_address = 1;  // e.g., "127.0.0.1:8545"
 }
 
+message NetworkStatsResetSeedRequest {
+  // this doesn't need to be cryptographically secure, so anything will do
+  optional string seed = 1;
+}
+
+message NetworkStatisticsIdentity {
+  string seed = 1;
+  string id = 2;
+}
+
+message PrivyDerivationMessage {
+  string message = 1;
+}
+
 service NymVpnService {
   // Get info regarding the nym-vpnd in general, like version etc.
   rpc Info (google.protobuf.Empty) returns (InfoResponse) {}
@@ -851,6 +869,7 @@ service NymVpnService {
   rpc SetNetstack (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
   rpc SetAllowLan (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
   rpc SetResidentialExit (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
+  rpc SetEnableCustomDns (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
   rpc SetCustomDns (IpAddrList) returns (google.protobuf.Empty) {}
 
   // Set the network. This requires a restart to take effect
@@ -868,11 +887,8 @@ service NymVpnService {
   // Get the default DNS used by the daemon
   rpc GetDefaultDns (google.protobuf.Empty) returns (IpAddrList) {}
 
-  // Connect the tunnel (deprecated; use ConnectTunnelV2 instead).
-  rpc ConnectTunnel (ConnectRequest) returns (google.protobuf.Empty) {}
-
-  // Connect the tunnel (Configuration is owned by daemon)
-  rpc ConnectTunnelV2 (google.protobuf.Empty) returns (google.protobuf.BoolValue) {}
+  // Connect the tunnel
+  rpc ConnectTunnel (google.protobuf.Empty) returns (google.protobuf.BoolValue) {}
 
   // Reconnect the tunnel if it had been established.
   rpc ReconnectTunnel (google.protobuf.Empty) returns (google.protobuf.BoolValue) {}
@@ -890,7 +906,7 @@ service NymVpnService {
   rpc ListGateways (ListGatewaysRequest) returns (ListGatewaysResponse) {}
 
   // Get a filtered list of gateways for the selected mode and filters
-  rpc ListFilteredGateways (GatewayFilters) returns (ListGatewaysResponse) {}
+  rpc ListFilteredGateways (LookupGatewayFilters) returns (ListGatewaysResponse) {}
 
   // Store the recovery phrase, which is also the account identity and authentication
   rpc StoreAccount (StoreAccountRequest) returns (AccountCommandResponse) {}
@@ -957,14 +973,17 @@ service NymVpnService {
   // Disable Sentry error monitoring (requires daemon restart)
   rpc DisableSentry (google.protobuf.Empty) returns (google.protobuf.Empty) {}
 
-  // Check if network statistics collection is enabled
-  rpc IsCollectNetworkStatsEnabled (google.protobuf.Empty) returns (google.protobuf.BoolValue) {}
+  // Enable/disable network statistics collection
+  rpc NetworkStatsSetEnabled (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
 
-  // Enable network statistics collection (requires daemon restart)
-  rpc EnableCollectNetworkStats (google.protobuf.Empty) returns (google.protobuf.Empty) {}
+  // Allow/disallow disconnected network statistics collection sending
+  rpc NetworkStatsAllowDisconnected (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
 
-  // Disable network statistics collection (requires daemon restart)
-  rpc DisableCollectNetworkStats (google.protobuf.Empty) returns (google.protobuf.Empty) {}
+  // Reset seed used for network statistics id
+  rpc NetworkStatsResetSeed (NetworkStatsResetSeedRequest) returns (google.protobuf.Empty) {}
+
+  // Get seed and Id used for network statistics
+  rpc NetworkStatsGetSeed (google.protobuf.Empty) returns (NetworkStatisticsIdentity) {}
 
   // Enable socks5 proxy
   rpc EnableSocks5 (EnableSocks5Request) returns (google.protobuf.Empty) {}
@@ -974,4 +993,7 @@ service NymVpnService {
 
   // Get socks5 proxy status
   rpc GetSocks5Status (google.protobuf.Empty) returns (Socks5Status) {}
+
+  // Get Privy derivation message to be signed
+  rpc GetPrivyDerivationMessage (google.protobuf.Empty) returns (PrivyDerivationMessage) {}
 }

@@ -46,10 +46,11 @@ uniffi::setup_scaffolding!();
 
 #[cfg(target_os = "android")]
 pub mod android;
+#[cfg(target_os = "ios")]
+pub mod ios;
+
 pub(crate) mod error;
 pub mod helpers;
-#[cfg(any(target_os = "ios", target_os = "macos"))]
-pub mod swift;
 
 mod account;
 mod environment;
@@ -75,14 +76,15 @@ use nym_vpn_store::keys::wireguard::WireguardKeysDb;
 use sentry::ClientInitGuard;
 use tokio::{runtime::Runtime, sync::Mutex};
 
-use self::error::VpnError;
-use crate::gateway_cache::UniffiGatewayCacheHandle;
-use account::AccountControllerHandle;
 use nym_vpn_lib_types::{
     AccountControllerState, EntryPoint, ExitPoint, Gateway, GatewayType, Network,
-    NetworkCompatibility, ParsedAccountLinks, RegisterAccountResponse, SystemMessage, TunnelEvent,
-    UserAgent,
+    NetworkCompatibility, ParsedAccountLinks, PrivyDerivationMessage, RegisterAccountResponse,
+    StoreAccountRequest, SystemMessage, TunnelEvent, UserAgent,
 };
+
+use account::AccountControllerHandle;
+use error::VpnError;
+use gateway_cache::UniffiGatewayCacheHandle;
 use offline_monitor::OfflineMonitorHandle;
 use state_machine::StateMachineHandle;
 use stats::StatisticsControllerHandle;
@@ -203,7 +205,11 @@ async fn configure_lib_for_main_process(user_agent: UserAgent) -> Result<(), Vpn
     Ok(())
 }
 
-async fn init_logger(path: Option<PathBuf>, debug_level: Option<String>, sentry_monitoring: bool) {
+async fn init_logger(
+    path: Option<PathBuf>,
+    debug_level: Option<String>,
+    sentry_monitoring: bool,
+) -> Result<(), VpnError> {
     let default_log_level = env::var("RUST_LOG").unwrap_or("info".to_string());
     let log_level = debug_level.unwrap_or(default_log_level);
     tracing::info!("Setting log level: {log_level}, path?: {path:?}");
@@ -213,10 +219,19 @@ async fn init_logger(path: Option<PathBuf>, debug_level: Option<String>, sentry_
         let mut guard = SENTRY_CLIENT.lock().await;
         *guard = sentry_monitoring::init();
     }
+
     #[cfg(target_os = "ios")]
-    swift::init_logs(log_level, path, sentry_monitoring);
+    {
+        ios::init_logs(log_level, path, sentry_monitoring)
+    }
     #[cfg(target_os = "android")]
-    android::init_logs(log_level);
+    {
+        android::init_logs(log_level)
+    }
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    {
+        Ok(())
+    }
 }
 
 /// Additional extra function for when only want to set the logger without initializing the
@@ -227,8 +242,8 @@ pub async fn initLogger(
     path: Option<PathBuf>,
     debug_level: Option<String>,
     sentry_monitoring: bool,
-) {
-    init_logger(path, debug_level, sentry_monitoring).await;
+) -> Result<(), VpnError> {
+    init_logger(path, debug_level, sentry_monitoring).await
 }
 
 /// Returns the system messages for the current network environment
@@ -270,8 +285,8 @@ pub fn getAccountLinksRaw(
 /// Import the account mnemonic
 #[allow(non_snake_case)]
 #[uniffi::export]
-pub fn login(mnemonic: String) -> Result<(), VpnError> {
-    RUNTIME.block_on(account::login(&mnemonic))
+pub fn login(request: StoreAccountRequest) -> Result<(), VpnError> {
+    RUNTIME.block_on(account::login(&request))
 }
 
 /// Generate the account mnemonic locally and store it.
@@ -292,8 +307,8 @@ pub fn registerAccount(args: AccountRegistrationArgs) -> Result<RegisterAccountR
 /// This is a version that can be called when the account controller is not running.
 #[allow(non_snake_case)]
 #[uniffi::export]
-pub fn loginRaw(mnemonic: String, path: String) -> Result<(), VpnError> {
-    RUNTIME.block_on(account::raw::login_raw(&mnemonic, &path))
+pub fn loginRaw(request: StoreAccountRequest, path: String) -> Result<(), VpnError> {
+    RUNTIME.block_on(account::raw::login_raw(&request, &path))
 }
 
 /// Generate the account mnemonic locally and store it.
@@ -429,6 +444,15 @@ pub fn getGateways(gw_type: GatewayType) -> Result<Vec<Gateway>, VpnError> {
     RUNTIME.block_on(get_gateways(gw_type))
 }
 
+/// Get the message to be signed using the Privy signing API.
+#[allow(non_snake_case)]
+#[uniffi::export]
+pub fn getPrivyDerivationMessage() -> PrivyDerivationMessage {
+    PrivyDerivationMessage {
+        message: nym_vpn_lib::login::privy::message_to_sign(),
+    }
+}
+
 async fn get_gateways(gw_type: GatewayType) -> Result<Vec<Gateway>, VpnError> {
     gateway_cache::get_gateway_cache_handle()
         .await?
@@ -531,6 +555,9 @@ pub struct VPNConfig {
     pub enable_two_hop: bool,
     pub enable_bridges: bool,
     pub residential_exit: bool,
+    /// Custom DNS used when set.
+    /// Leave empty to use default DNS servers.
+    pub custom_dns: Vec<IpAddr>,
     #[cfg(target_os = "android")]
     pub tun_provider: Arc<dyn AndroidTunProvider>,
     #[cfg(target_os = "ios")]

@@ -82,6 +82,7 @@ impl VpnServiceConfigManager {
         &self.config
     }
 
+    #[cfg(test)]
     pub async fn set_config(&mut self, config: nym_vpn_lib_types::VpnServiceConfig) {
         if self.config != config {
             self.config = config;
@@ -145,10 +146,29 @@ impl VpnServiceConfigManager {
         }
     }
 
-    pub async fn set_custom_dns(&mut self, custom_dns: Option<Vec<IpAddr>>) {
-        if self.config.custom_dns != custom_dns {
+    /// Enable or disable custom DNS servers
+    ///
+    /// Returns true if the setting has changed, otherwise false if it's the same
+    pub async fn set_enable_custom_dns(&mut self, enable_custom_dns: bool) -> bool {
+        if self.config.enable_custom_dns == enable_custom_dns {
+            false
+        } else {
+            self.config.enable_custom_dns = enable_custom_dns;
+            self.save_config_and_send_event().await;
+            true
+        }
+    }
+
+    /// Update custom DNS servers
+    ///
+    /// Returns true if custom DNS servers have changed, otherwise false if they're the same
+    pub async fn set_custom_dns(&mut self, custom_dns: Vec<IpAddr>) -> bool {
+        if self.config.custom_dns == custom_dns {
+            false
+        } else {
             self.config.custom_dns = custom_dns;
             self.save_config_and_send_event().await;
+            true
         }
     }
 
@@ -196,6 +216,20 @@ impl VpnServiceConfigManager {
         if self.config.min_gateway_vpn_performance != min_gateway_vpn_performance {
             self.config.min_gateway_vpn_performance =
                 min_gateway_vpn_performance.map(|u| u.min(100));
+            self.save_config_and_send_event().await;
+        }
+    }
+
+    pub async fn set_netstats_allow_disconnected(&mut self, allow_disconnected: bool) {
+        if self.config.network_stats.allow_disconnected != allow_disconnected {
+            self.config.network_stats.allow_disconnected = allow_disconnected;
+            self.save_config_and_send_event().await;
+        }
+    }
+
+    pub async fn set_netstats_enabled(&mut self, enabled: bool) {
+        if self.config.network_stats.enabled != enabled {
+            self.config.network_stats.enabled = enabled;
             self.save_config_and_send_event().await;
         }
     }
@@ -324,12 +358,11 @@ impl VpnServiceConfigManager {
             nym_vpn_lib_types::TunnelType::Mixnet
         };
 
-        let dns = self
-            .config
-            .custom_dns
-            .as_ref()
-            .map(|addrs| DnsOptions::Custom(addrs.clone()))
-            .unwrap_or_default();
+        let dns = if self.config.enable_custom_dns && !self.config.custom_dns.is_empty() {
+            DnsOptions::Custom(self.config.custom_dns.clone())
+        } else {
+            DnsOptions::default()
+        };
 
         TunnelSettings {
             enable_ipv6: !self.config.disable_ipv6,

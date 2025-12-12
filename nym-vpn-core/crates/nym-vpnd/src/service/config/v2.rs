@@ -13,20 +13,20 @@ use std::{net::IpAddr, str::FromStr};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct VpnServiceConfig {
-    entry_point: EntryPoint,
-    exit_point: ExitPoint,
-    dns: Option<String>,
-    allow_lan: bool,
-    disable_ipv6: bool,
-    enable_two_hop: bool,
-    enable_bridges: bool,
-    netstack: bool,
-    disable_poisson_rate: bool,
-    disable_background_cover_traffic: bool,
-    min_mixnode_performance: Option<u8>,
-    min_gateway_mixnet_performance: Option<u8>,
-    min_gateway_vpn_performance: Option<u8>,
-    residential_exit: bool,
+    pub entry_point: EntryPoint,
+    pub exit_point: ExitPoint,
+    pub dns: Option<String>,
+    pub allow_lan: bool,
+    pub disable_ipv6: bool,
+    pub enable_two_hop: bool,
+    pub enable_bridges: bool,
+    pub netstack: bool,
+    pub disable_poisson_rate: bool,
+    pub disable_background_cover_traffic: bool,
+    pub min_mixnode_performance: Option<u8>,
+    pub min_gateway_mixnet_performance: Option<u8>,
+    pub min_gateway_vpn_performance: Option<u8>,
+    pub residential_exit: bool,
 }
 
 impl From<VpnServiceConfig> for VpnServiceConfigExt {
@@ -39,14 +39,14 @@ impl TryFrom<VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
     type Error = ConfigSetupError;
 
     fn try_from(value: VpnServiceConfig) -> Result<Self, Self::Error> {
-        let custom_dns = value
-            .dns
-            .map(|addr| {
-                IpAddr::from_str(&addr)
-                    .map(|ip| vec![ip])
-                    .map_err(|e| ConfigSetupError::IpAddress { error: Box::new(e) })
-            })
-            .transpose()?;
+        let custom_dns = match value.dns {
+            Some(str) => {
+                let ip = IpAddr::from_str(&str)
+                    .map_err(|e| ConfigSetupError::IpAddress { error: Box::new(e) })?;
+                vec![ip]
+            }
+            None => vec![],
+        };
 
         let config = nym_vpn_lib_types::VpnServiceConfig {
             entry_point: nym_vpn_lib_types::EntryPoint::try_from(value.entry_point)?,
@@ -62,7 +62,9 @@ impl TryFrom<VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
             min_gateway_mixnet_performance: value.min_gateway_mixnet_performance,
             min_gateway_vpn_performance: value.min_gateway_vpn_performance,
             residential_exit: value.residential_exit,
+            enable_custom_dns: !custom_dns.is_empty(),
             custom_dns,
+            network_stats: Default::default(),
         };
         Ok(config)
     }

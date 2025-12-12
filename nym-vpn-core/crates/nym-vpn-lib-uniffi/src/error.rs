@@ -13,6 +13,9 @@ pub enum VpnError {
     #[error("initialization error: {details}")]
     Initialization { details: String },
 
+    #[error("failed to create log file: {details}")]
+    CreateLogFile { details: String },
+
     #[error("storage error: {details}")]
     Storage { details: String },
 
@@ -48,6 +51,9 @@ pub enum VpnError {
 
     #[error("failed to parse mnemonic with error: {details}")]
     InvalidMnemonic { details: String },
+
+    #[error("failed to parse secret with error: {details}")]
+    InvalidSecret { details: String },
 
     #[error("invalid account storage path: {details}")]
     InvalidAccountStoragePath { details: String },
@@ -120,6 +126,7 @@ impl From<AccountCommandError> for VpnError {
             },
             AccountCommandError::ExistingAccount => Self::ExistingAccount,
             AccountCommandError::InvalidMnemonic(details) => Self::InvalidMnemonic { details },
+            AccountCommandError::InvalidSecret(details) => Self::InvalidSecret { details },
             AccountCommandError::NyxdConnectionFailure(details) => {
                 Self::NyxdConnectionFailure { details }
             }

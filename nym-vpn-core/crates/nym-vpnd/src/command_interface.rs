@@ -16,8 +16,8 @@ use tokio_util::sync::CancellationToken;
 use tonic::transport::Server;
 
 use nym_vpn_lib_types::{
-    ConnectArgs, EntryPoint, ExitPoint, GatewayFilters, ListGatewaysOptions, TargetState,
-    TunnelEvent,
+    EnableSocks5Request, EntryPoint, ExitPoint, ListGatewaysOptions, LookupGatewayFilters,
+    TargetState, TunnelEvent,
 };
 
 use nym_vpn_proto::proto::{
@@ -25,9 +25,7 @@ use nym_vpn_proto::proto::{
     nym_vpn_service_server::{NymVpnService, NymVpnServiceServer},
 };
 
-use crate::service::{
-    HttpRpcSettings, SetNetworkError, Socks5Error, Socks5Settings, VpnServiceCommand,
-};
+use crate::service::{SetNetworkError, Socks5Error, VpnServiceCommand};
 
 pub type Result<T> = std::result::Result<T, tonic::Status>;
 
@@ -197,11 +195,27 @@ impl NymVpnService for CommandInterface {
         Ok(tonic::Response::new(()))
     }
 
+    async fn set_enable_custom_dns(
+        &self,
+        request: tonic::Request<bool>,
+    ) -> Result<tonic::Response<()>> {
+        let enable_custom_dns = request.into_inner();
+
+        let _ = self
+            .send_and_wait(VpnServiceCommand::SetEnableCustomDns, enable_custom_dns)
+            .await
+            .map_err(|e| {
+                tonic::Status::internal(format!("Failed to set enable custom DNS: {e}"))
+            })?;
+
+        Ok(tonic::Response::new(()))
+    }
+
     async fn set_custom_dns(
         &self,
         request: tonic::Request<proto::IpAddrList>,
     ) -> Result<tonic::Response<()>> {
-        let custom_dns: Option<Vec<IpAddr>> = request
+        let custom_dns: Vec<IpAddr> = request
             .into_inner()
             .try_into()
             .map_err(|e| tonic::Status::invalid_argument(format!("Invalid Custom DNS: {e}")))?;
@@ -282,27 +296,11 @@ impl NymVpnService for CommandInterface {
         let dns_ips = self
             .send_and_wait(VpnServiceCommand::GetDefaultDns, ())
             .await?;
-        let ipaddr_list = proto::IpAddrList::from(Some(dns_ips));
+        let ipaddr_list = proto::IpAddrList::from(dns_ips);
         Ok(tonic::Response::new(ipaddr_list))
     }
 
-    async fn connect_tunnel(
-        &self,
-        request: tonic::Request<proto::ConnectRequest>,
-    ) -> Result<tonic::Response<()>> {
-        let connect_args = ConnectArgs::try_from(request.into_inner())
-            .map_err(|err| tonic::Status::invalid_argument(err.to_string()))?;
-
-        self.send_and_wait(VpnServiceCommand::Connect, connect_args)
-            .await?;
-
-        Ok(tonic::Response::new(()))
-    }
-
-    async fn connect_tunnel_v2(
-        &self,
-        _request: tonic::Request<()>,
-    ) -> Result<tonic::Response<bool>> {
+    async fn connect_tunnel(&self, _request: tonic::Request<()>) -> Result<tonic::Response<bool>> {
         let accepted = self
             .send_and_wait(VpnServiceCommand::SetTargetState, TargetState::Secured)
             .await?;
@@ -381,9 +379,9 @@ impl NymVpnService for CommandInterface {
 
     async fn list_filtered_gateways(
         &self,
-        request: tonic::Request<proto::GatewayFilters>,
+        request: tonic::Request<proto::LookupGatewayFilters>,
     ) -> Result<tonic::Response<proto::ListGatewaysResponse>> {
-        let filters = GatewayFilters::try_from(request.into_inner())
+        let filters = LookupGatewayFilters::try_from(request.into_inner())
             .map_err(|err| tonic::Status::invalid_argument(err.to_string()))?;
 
         let gateways = self
@@ -702,40 +700,71 @@ impl NymVpnService for CommandInterface {
         Ok(tonic::Response::new(()))
     }
 
-    async fn is_collect_network_stats_enabled(
+    async fn network_stats_set_enabled(
         &self,
-        _: tonic::Request<()>,
-    ) -> std::result::Result<tonic::Response<bool>, tonic::Status> {
-        let result = self
-            .send_and_wait(VpnServiceCommand::IsCollectNetStatsEnabled, ())
-            .await?;
-        Ok(tonic::Response::new(result))
-    }
+        request: tonic::Request<bool>,
+    ) -> Result<tonic::Response<()>> {
+        let enabled = request.into_inner();
 
-    async fn enable_collect_network_stats(
-        &self,
-        _: tonic::Request<()>,
-    ) -> std::result::Result<tonic::Response<()>, tonic::Status> {
-        self.send_and_wait(VpnServiceCommand::ToggleCollectNetStats, true)
-            .await?
-            .map_err(|err| {
-                tracing::error!("Failed to enable collect network stats: {err}");
-                tonic::Status::internal("failed to enable collect network stats")
+        let _ = self
+            .send_and_wait(VpnServiceCommand::EnableNetStats, enabled)
+            .await
+            .map_err(|e| {
+                tonic::Status::internal(format!("Failed to enable/disable network statistics: {e}"))
             })?;
+
         Ok(tonic::Response::new(()))
     }
 
-    async fn disable_collect_network_stats(
+    async fn network_stats_allow_disconnected(
+        &self,
+        request: tonic::Request<bool>,
+    ) -> std::result::Result<tonic::Response<()>, tonic::Status> {
+        let allow_disconnected = request.into_inner();
+
+        let _ = self
+            .send_and_wait(
+                VpnServiceCommand::AllowDisconnectedNetStats,
+                allow_disconnected,
+            )
+            .await
+            .map_err(|e| {
+                tonic::Status::internal(format!(
+                    "Failed to set network statistics allow_disconnected: {e}"
+                ))
+            })?;
+
+        Ok(tonic::Response::new(()))
+    }
+
+    async fn network_stats_reset_seed(
+        &self,
+        request: tonic::Request<proto::NetworkStatsResetSeedRequest>,
+    ) -> Result<tonic::Response<()>> {
+        let seed = request.into_inner().seed;
+
+        let _ = self
+            .send_and_wait(VpnServiceCommand::ResetNetStatsSeed, seed)
+            .await
+            .map_err(|e| {
+                tonic::Status::internal(format!("Failed to reset network statistics seed: {e}"))
+            })?;
+
+        Ok(tonic::Response::new(()))
+    }
+
+    async fn network_stats_get_seed(
         &self,
         _: tonic::Request<()>,
-    ) -> std::result::Result<tonic::Response<()>, tonic::Status> {
-        self.send_and_wait(VpnServiceCommand::ToggleCollectNetStats, false)
+    ) -> Result<tonic::Response<proto::NetworkStatisticsIdentity>> {
+        let identity = self
+            .send_and_wait(VpnServiceCommand::GetNetStatsSeed, ())
             .await?
-            .map_err(|err| {
-                tracing::error!("Failed to disable collect network stats: {err}");
-                tonic::Status::internal("failed to disable collect network stats")
+            .map_err(|e| {
+                tonic::Status::internal(format!("Failed to get network statistics identity: {e}"))
             })?;
-        Ok(tonic::Response::new(()))
+
+        Ok(tonic::Response::new(identity.into()))
     }
 
     async fn enable_socks5(
@@ -744,44 +773,24 @@ impl NymVpnService for CommandInterface {
     ) -> Result<tonic::Response<()>> {
         let req = request.into_inner();
 
-        // Get exit node from proto request
-        let exit_node = req
-            .exit
-            .ok_or_else(|| tonic::Status::invalid_argument("Exit point is required"))?;
-
-        // Convert exit node to exit point
-        let exit_point = ExitPoint::try_from(exit_node)
-            .map_err(|e| tonic::Status::invalid_argument(format!("Invalid exit point: {e}")))?;
-
-        // Extract other SOCKS5 settings from proto request
-        let socks5_settings = req
-            .socks5_settings
-            .map(Socks5Settings::from)
-            .ok_or_else(|| tonic::Status::invalid_argument("SOCKS5 settings are required"))?;
-
-        // Extract HTTP RPC settings from proto request
-        let http_rpc_settings = req
-            .http_rpc_settings
-            .map(HttpRpcSettings::from)
-            .ok_or_else(|| tonic::Status::invalid_argument("HTTP RPC settings are required"))?;
-
-        self.send_and_wait(
-            VpnServiceCommand::EnableSocks5,
-            (socks5_settings, http_rpc_settings, exit_point),
-        )
-        .await?
-        .map_err(|err| {
-            tracing::error!("Failed to enable SOCKS5 proxy: {err}");
-            match err {
-                Socks5Error::GatewayNotSupported => tonic::Status::failed_precondition(
-                    "Gateway does not support SOCKS5 network requester",
-                ),
-                Socks5Error::InvalidConfig(msg) => tonic::Status::failed_precondition(msg),
-                Socks5Error::LazySocks5Error(_) => {
-                    tonic::Status::internal(format!("Failed to enable SOCKS5 proxy: {err}"))
-                }
-            }
+        let enable_socks5_request: EnableSocks5Request = req.try_into().map_err(|e| {
+            tonic::Status::invalid_argument(format!("Invalid Enable SOCKS5 Request: {e}"))
         })?;
+
+        self.send_and_wait(VpnServiceCommand::EnableSocks5, enable_socks5_request)
+            .await?
+            .map_err(|err| {
+                tracing::error!("Failed to enable SOCKS5 proxy: {err}");
+                match err {
+                    Socks5Error::GatewayNotSupported => tonic::Status::failed_precondition(
+                        "Gateway does not support SOCKS5 network requester",
+                    ),
+                    Socks5Error::InvalidConfig(msg) => tonic::Status::failed_precondition(msg),
+                    Socks5Error::LazySocks5Error(_) => {
+                        tonic::Status::internal(format!("Failed to enable SOCKS5 proxy: {err}"))
+                    }
+                }
+            })?;
 
         Ok(tonic::Response::new(()))
     }
@@ -813,6 +822,15 @@ impl NymVpnService for CommandInterface {
         let proto_status = proto::Socks5Status::from(status);
 
         Ok(tonic::Response::new(proto_status))
+    }
+
+    async fn get_privy_derivation_message(
+        &self,
+        _: tonic::Request<()>,
+    ) -> Result<tonic::Response<proto::PrivyDerivationMessage>> {
+        Ok(tonic::Response::new(proto::PrivyDerivationMessage {
+            message: nym_vpn_lib::login::privy::message_to_sign(),
+        }))
     }
 }
 
