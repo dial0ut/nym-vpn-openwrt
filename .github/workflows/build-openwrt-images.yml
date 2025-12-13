@@ -158,11 +158,13 @@ jobs:
           echo "Using IPK: $IPK"
           cp "$IPK" imagebuilder/packages/
 
-          # Regenerate package index to include our IPK
+          # Write signing key and regenerate package index
           cd imagebuilder
+          echo "$OPENWRT_SIGNING_KEY" > key-build
           make package_index
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENWRT_SIGNING_KEY: ${{ secrets.OPENWRT_SIGNING_KEY }}
 
       - name: Build image
         run: |
