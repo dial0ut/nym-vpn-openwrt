@@ -80,6 +80,7 @@ jobs:
           docker run --rm \
             -v "${{ github.workspace }}:/home/rust/src" \
             -e TARGET=${{ matrix.target }} \
+            -e RUSTFLAGS_EXTRA="${{ matrix.rustflags_extra }}" \
             ${{ matrix.docker_image }} \
             bash /home/rust/src/scripts/cross-compile-musl.sh
 
@@ -128,6 +129,8 @@ jobs:
             openwrt_arch: i386_pentium4
           - arch: armv7
             openwrt_arch: arm_cortex-a7_neon-vfpv4
+          - arch: armv5te
+            openwrt_arch: arm_cortex-a9
           - arch: armv5te
             openwrt_arch: arm_arm926ej-s
           - arch: mips
@@ -245,10 +248,39 @@ jobs:
           Installed-Size: ${INSTALLED_SIZE}
           Section: net
           Priority: optional
-          Depends: libc, wireguard-tools, kmod-wireguard, luci-base, rpcd
+          Depends: libc, wireguard-tools, kmod-wireguard, kmod-tun, luci-base, rpcd
           Description: NymVPN for OpenWrt
            Privacy-focused VPN using the Nym mixnet. Includes daemon, CLI, and LuCI web interface.
           EOF
+
+          # === Post-install script ===
+          cat > ipk/control/postinst << 'POSTINST'
+          #!/bin/sh
+          # Create TUN device if it doesn't exist
+          mkdir -p /dev/net
+          [ ! -c /dev/net/tun ] && mknod /dev/net/tun c 10 200
+          chmod 600 /dev/net/tun
+
+          # Enable and start the service
+          /etc/init.d/nym-vpnd enable
+          /etc/init.d/nym-vpnd start
+
+          # Restart rpcd to pick up new ACLs
+          /etc/init.d/rpcd restart
+
+          exit 0
+          POSTINST
+          chmod 755 ipk/control/postinst
+
+          # === Pre-remove script ===
+          cat > ipk/control/prerm << 'PRERM'
+          #!/bin/sh
+          # Stop and disable the service before removal
+          /etc/init.d/nym-vpnd stop 2>/dev/null
+          /etc/init.d/nym-vpnd disable 2>/dev/null
+          exit 0
+          PRERM
+          chmod 755 ipk/control/prerm
 
           # === Build IPK ===
           (cd ipk/control && tar -czf ../control.tar.gz .)

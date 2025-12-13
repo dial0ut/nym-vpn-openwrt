@@ -305,6 +305,13 @@ build_nym_vpnd() {
         export AR_${TARGET_UNDERSCORE}="${TARGET}-ar"
     fi
 
+    # Append extra RUSTFLAGS if provided (e.g., for CPU-specific builds like cortex-a9)
+    if [ -n "${RUSTFLAGS_EXTRA:-}" ]; then
+        log_info "Adding extra RUSTFLAGS: ${RUSTFLAGS_EXTRA}"
+        export RUSTFLAGS="${RUSTFLAGS:-} ${RUSTFLAGS_EXTRA}"
+        log_info "Final RUSTFLAGS=${RUSTFLAGS}"
+    fi
+
     # Build with release profile
     log_info "Running: cargo build --target=${TARGET} --bins --release"
     cargo build \
