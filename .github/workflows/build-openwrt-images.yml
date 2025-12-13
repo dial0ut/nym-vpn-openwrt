@@ -79,22 +79,16 @@ jobs:
             profile: asus_rt-ac68u
 
           # ===== mips_24kc - Atheros devices =====
-          - target: ath79/generic
-            ipk_arch: mips_24kc
-            profile: tplink_archer-c7-v5
-
+          # NOTE: tplink_archer-c7-v5 removed - 16MB flash too small for nym-vpn (~22MB)
           - target: ath79/nand
             ipk_arch: mips_24kc
             profile: glinet_gl-ar750s-nor-nand
 
           # ===== mipsel_24kc - MediaTek MIPS devices =====
+          # NOTE: xiaomi_mi-router-3g-v2 removed - 16MB flash too small for nym-vpn (~22MB)
           - target: ramips/mt7621
             ipk_arch: mipsel_24kc
             profile: glinet_gl-mt1300
-
-          - target: ramips/mt7621
-            ipk_arch: mipsel_24kc
-            profile: xiaomi_mi-router-3g-v2
 
     steps:
       - name: Checkout
@@ -210,16 +204,14 @@ jobs:
 
           mkdir -p artifacts
 
-          # Find output in bin/targets
+          # Copy firmware files from bin/targets
           OUTPUT_DIR="imagebuilder/bin/targets"
-          echo "Output directory: $OUTPUT_DIR"
-          find "$OUTPUT_DIR" -type f \( -name "*.img.gz" -o -name "*.bin" -o -name "*.itb" \) | head -20
-
-          # Copy all firmware files (images, bins, itb)
           find "$OUTPUT_DIR" -type f \( \
             -name "*.img.gz" -o \
             -name "*.bin" -o \
-            -name "*.itb" \
+            -name "*.itb" -o \
+            -name "*.trx" -o \
+            -name "*.chk" \
           \) -exec cp {} artifacts/ \;
 
           cd artifacts
