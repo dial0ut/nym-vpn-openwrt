@@ -161,10 +161,17 @@ jobs:
           # Write signing key and regenerate package index
           cd imagebuilder
           echo "$OPENWRT_SIGNING_KEY" > key-build
+
+          # Add our public key to trusted keys
+          echo "$OPENWRT_PUBLIC_KEY" > keys/nymvpn
+
           make package_index
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENWRT_SIGNING_KEY: ${{ secrets.OPENWRT_SIGNING_KEY }}
+          OPENWRT_PUBLIC_KEY: |
+            untrusted comment: zm@dialout.net
+            RWRaA3HWC86PC2oh5H1lp30ZRXT2SbliZjZUtLF5qaz7kEijvsXMbkQ1
 
       - name: Build image
         run: |
