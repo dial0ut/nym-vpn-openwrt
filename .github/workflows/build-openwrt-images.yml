@@ -210,13 +210,13 @@ jobs:
 
           mkdir -p artifacts
 
-          # Find the output directory (varies by target)
-          OUTPUT_DIR=$(find imagebuilder -type d -name "output" -path "*/image/*" | head -1)
+          # Find output in bin/targets
+          OUTPUT_DIR="imagebuilder/bin/targets"
           echo "Output directory: $OUTPUT_DIR"
-          ls -la "$OUTPUT_DIR/"
+          find "$OUTPUT_DIR" -type f \( -name "*.img.gz" -o -name "*.bin" -o -name "*.itb" \) | head -20
 
           # Copy all firmware files (images, bins, itb)
-          find "$OUTPUT_DIR" -maxdepth 1 -type f \( \
+          find "$OUTPUT_DIR" -type f \( \
             -name "*.img.gz" -o \
             -name "*.bin" -o \
             -name "*.itb" \
