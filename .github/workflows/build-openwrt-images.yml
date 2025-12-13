@@ -20,80 +20,81 @@ env:
 
 jobs:
   build-image:
-    name: Build ${{ matrix.target }}
+    name: Build ${{ matrix.profile }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          # ===== x86_64 =====
+          # ===== x86_64 - VMs and PC routers =====
           - target: x86/64
             ipk_arch: x86_64
             profile: generic
 
-          # ===== i386_pentium4 =====
-          - target: x86/generic
-            ipk_arch: i386_pentium4
-            profile: generic
-
-          # ===== aarch64_generic =====
+          # ===== aarch64 - Popular ARM64 devices =====
           - target: rockchip/armv8
             ipk_arch: aarch64_generic
             profile: friendlyarm_nanopi-r4s
 
+          - target: rockchip/armv8
+            ipk_arch: aarch64_generic
+            profile: friendlyarm_nanopi-r5s
+
           - target: mediatek/filogic
             ipk_arch: aarch64_generic
-            profile: generic
+            profile: glinet_gl-mt6000
+
+          - target: mediatek/filogic
+            ipk_arch: aarch64_generic
+            profile: bananapi_bpi-r3
 
           - target: qualcommax/ipq807x
             ipk_arch: aarch64_generic
-            profile: generic
+            profile: linksys_mx4200v2
 
-          # ===== arm_cortex-a7_neon-vfpv4 =====
-          - target: sunxi/cortexa7
+          # ===== arm_cortex-a7 - ARMv7 devices =====
+          - target: ipq40xx/generic
             ipk_arch: arm_cortex-a7_neon-vfpv4
-            profile: generic
+            profile: glinet_gl-b1300
 
           - target: ipq40xx/generic
             ipk_arch: arm_cortex-a7_neon-vfpv4
-            profile: generic
+            profile: asus_rt-ac58u
 
           - target: mvebu/cortexa9
             ipk_arch: arm_cortex-a7_neon-vfpv4
-            profile: generic
+            profile: linksys_wrt1900acs
 
-          # ===== arm_cortex-a9 =====
+          - target: mvebu/cortexa9
+            ipk_arch: arm_cortex-a7_neon-vfpv4
+            profile: cznic_turris-omnia
+
+          # ===== arm_cortex-a9 - BCM53xx devices =====
           - target: bcm53xx/generic
             ipk_arch: arm_cortex-a9
-            profile: generic
+            profile: netgear_r7000
 
-          # ===== arm_arm926ej-s =====
-          - target: at91/sam9x
-            ipk_arch: arm_arm926ej-s
-            profile: generic
+          - target: bcm53xx/generic
+            ipk_arch: arm_cortex-a9
+            profile: asus_rt-ac68u
 
-          # ===== mips_24kc =====
+          # ===== mips_24kc - Atheros devices =====
           - target: ath79/generic
             ipk_arch: mips_24kc
-            profile: generic
+            profile: tplink_archer-c7-v5
 
           - target: ath79/nand
             ipk_arch: mips_24kc
-            profile: generic
+            profile: glinet_gl-ar750s-nor-nand
 
-          # ===== mipsel_24kc =====
-          - target: ramips/mt7620
+          # ===== mipsel_24kc - MediaTek MIPS devices =====
+          - target: ramips/mt7621
             ipk_arch: mipsel_24kc
-            profile: generic
+            profile: glinet_gl-mt1300
 
           - target: ramips/mt7621
             ipk_arch: mipsel_24kc
-            profile: generic
-
-          # ===== riscv64 =====
-          - target: sifive/generic
-            ipk_arch: riscv64
-            profile: generic
+            profile: xiaomi_mi-router-3g-v2
 
     steps:
       - name: Checkout
@@ -186,10 +187,7 @@ jobs:
           make image \
             PROFILE="${{ matrix.profile }}" \
             PACKAGES="$PACKAGES" \
-            BIN_DIR="output" \
             || { echo "Build failed"; cat logs/*; exit 1; }
-
-          ls -la output/
 
       - name: Prepare artifacts
         run: |
@@ -198,14 +196,19 @@ jobs:
 
           mkdir -p artifacts
 
-          # Copy only firmware images (not packages)
-          for f in imagebuilder/output/*-squashfs-*.img* imagebuilder/output/*-squashfs-*.bin* \
-                   imagebuilder/output/*-ext4-*.img* imagebuilder/output/*-combined-*.img*; do
+          # Find the output directory (varies by target)
+          OUTPUT_DIR=$(find imagebuilder -type d -name "output" -path "*/image/*" | head -1)
+          echo "Output directory: $OUTPUT_DIR"
+          ls -la "$OUTPUT_DIR/"
+
+          # Copy firmware images
+          for f in "$OUTPUT_DIR"/*-squashfs-*.img* "$OUTPUT_DIR"/*-squashfs-*.bin* \
+                   "$OUTPUT_DIR"/*-ext4-*.img* "$OUTPUT_DIR"/*-combined-*.img*; do
             [ -f "$f" ] && cp "$f" artifacts/
           done
 
           # Also copy any .itb files (for some ARM targets)
-          for f in imagebuilder/output/*.itb; do
+          for f in "$OUTPUT_DIR"/*.itb; do
             [ -f "$f" ] && cp "$f" artifacts/
           done
 
@@ -222,7 +225,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: openwrt-${{ matrix.target == 'x86/64' && 'x86-64' || matrix.target == 'x86/generic' && 'x86-generic' || matrix.target }}
+          name: openwrt-${{ matrix.profile }}
           path: artifacts/*
           retention-days: 30
           if-no-files-found: warn
@@ -265,25 +268,28 @@ jobs:
             3. Access LuCI at http://192.168.1.1
             4. Go to **VPN → NymVPN** to configure
 
-            ### Supported Targets
+            ### Supported Devices
 
-            | Target | IPK Arch | Example Devices |
-            |--------|----------|-----------------|
-            | x86/64 | x86_64 | VMs, PC routers, Protectli |
-            | x86/generic | i386_pentium4 | Older x86 devices |
-            | rockchip/armv8 | aarch64_generic | NanoPi R4S/R5S, ROCKPro64 |
-            | mediatek/filogic | aarch64_generic | MT7981/7986 devices (BananaPi BPI-R3) |
-            | qualcommax/ipq807x | aarch64_generic | Xiaomi AX9000, Dynalink DL-WRX36 |
-            | sunxi/cortexa7 | arm_cortex-a7 | Orange Pi, Banana Pi |
-            | ipq40xx/generic | arm_cortex-a7 | GL.iNet GL-B1300, Fritz!Box 4040 |
-            | mvebu/cortexa9 | arm_cortex-a7 | Linksys WRT1900/3200, Turris Omnia |
-            | bcm53xx/generic | arm_cortex-a9 | Netgear R7000/R8000, Asus RT-AC68U/88U |
-            | at91/sam9x | arm_arm926ej-s | Atmel/Microchip SAM9X boards |
-            | ath79/generic | mips_24kc | TP-Link Archer C7, Ubiquiti |
-            | ath79/nand | mips_24kc | TP-Link (NAND flash variants) |
-            | ramips/mt7620 | mipsel_24kc | Budget MT7620 routers |
-            | ramips/mt7621 | mipsel_24kc | Xiaomi Mi Router 3G, Netgear R6220 |
-            | sifive/generic | riscv64 | SiFive HiFive, VisionFive |
+            | Device | Target | Architecture |
+            |--------|--------|--------------|
+            | Generic x86_64 | x86/64 | x86_64 |
+            | FriendlyARM NanoPi R4S | rockchip/armv8 | aarch64 |
+            | FriendlyARM NanoPi R5S | rockchip/armv8 | aarch64 |
+            | GL.iNet GL-MT6000 | mediatek/filogic | aarch64 |
+            | Banana Pi BPI-R3 | mediatek/filogic | aarch64 |
+            | Linksys MX4200 v2 | qualcommax/ipq807x | aarch64 |
+            | GL.iNet GL-B1300 | ipq40xx/generic | arm_cortex-a7 |
+            | ASUS RT-AC58U | ipq40xx/generic | arm_cortex-a7 |
+            | Linksys WRT1900ACS | mvebu/cortexa9 | arm_cortex-a7 |
+            | Turris Omnia | mvebu/cortexa9 | arm_cortex-a7 |
+            | Netgear R7000 | bcm53xx/generic | arm_cortex-a9 |
+            | ASUS RT-AC68U | bcm53xx/generic | arm_cortex-a9 |
+            | TP-Link Archer C7 v5 | ath79/generic | mips_24kc |
+            | GL.iNet GL-AR750S | ath79/generic | mips_24kc |
+            | GL.iNet GL-MT1300 | ramips/mt7621 | mipsel_24kc |
+            | Xiaomi Mi Router 3G v2 | ramips/mt7621 | mipsel_24kc |
+
+            **Don't see your device?** Install from IPK package instead - see the main release.
 
             ### What's Included
 
