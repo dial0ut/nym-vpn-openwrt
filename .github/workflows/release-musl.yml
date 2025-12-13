@@ -129,6 +129,8 @@ jobs:
             openwrt_arch: i386_pentium4
           - arch: armv7
             openwrt_arch: arm_cortex-a7_neon-vfpv4
+          - arch: armv7
+            openwrt_arch: arm_cortex-a9_vfpv3-d16
           - arch: armv5te
             openwrt_arch: arm_cortex-a9
           - arch: armv5te

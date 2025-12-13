@@ -62,11 +62,11 @@ jobs:
             profile: asus_rt-ac58u
 
           - target: mvebu/cortexa9
-            ipk_arch: arm_cortex-a7_neon-vfpv4
+            ipk_arch: arm_cortex-a9_vfpv3-d16
             profile: linksys_wrt1900acs
 
           - target: mvebu/cortexa9
-            ipk_arch: arm_cortex-a7_neon-vfpv4
+            ipk_arch: arm_cortex-a9_vfpv3-d16
             profile: cznic_turris-omnia
 
           # ===== arm_cortex-a9 - BCM53xx devices =====
@@ -157,6 +157,10 @@ jobs:
 
           echo "Using IPK: $IPK"
           cp "$IPK" imagebuilder/packages/
+
+          # Regenerate package index to include our IPK
+          cd imagebuilder
+          make package_index
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
