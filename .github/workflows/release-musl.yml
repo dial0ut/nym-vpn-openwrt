@@ -123,6 +123,8 @@ jobs:
         include:
           - arch: aarch64
             openwrt_arch: aarch64_generic
+          - arch: aarch64
+            openwrt_arch: aarch64_cortex-a53
           - arch: x86_64
             openwrt_arch: x86_64
           - arch: i686

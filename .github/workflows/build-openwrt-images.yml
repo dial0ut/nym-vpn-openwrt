@@ -41,15 +41,15 @@ jobs:
             profile: friendlyarm_nanopi-r5s
 
           - target: mediatek/filogic
-            ipk_arch: aarch64_generic
+            ipk_arch: aarch64_cortex-a53
             profile: glinet_gl-mt6000
 
           - target: mediatek/filogic
-            ipk_arch: aarch64_generic
+            ipk_arch: aarch64_cortex-a53
             profile: bananapi_bpi-r3
 
           - target: qualcommax/ipq807x
-            ipk_arch: aarch64_generic
+            ipk_arch: aarch64_cortex-a53
             profile: linksys_mx4200v2
 
           # ===== arm_cortex-a7 - ARMv7 devices =====
