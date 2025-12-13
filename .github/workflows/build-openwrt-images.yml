@@ -206,6 +206,7 @@ jobs:
         run: |
           TARGET="${{ matrix.target }}"
           TARGET_SAFE="${TARGET//\//-}"
+          PROFILE="${{ matrix.profile }}"
 
           mkdir -p artifacts
 
@@ -214,25 +215,23 @@ jobs:
           echo "Output directory: $OUTPUT_DIR"
           ls -la "$OUTPUT_DIR/"
 
-          # Copy firmware images
-          for f in "$OUTPUT_DIR"/*-squashfs-*.img* "$OUTPUT_DIR"/*-squashfs-*.bin* \
-                   "$OUTPUT_DIR"/*-ext4-*.img* "$OUTPUT_DIR"/*-combined-*.img*; do
-            [ -f "$f" ] && cp "$f" artifacts/
-          done
-
-          # Also copy any .itb files (for some ARM targets)
-          for f in "$OUTPUT_DIR"/*.itb; do
-            [ -f "$f" ] && cp "$f" artifacts/
-          done
+          # Copy all firmware files (images, bins, itb)
+          find "$OUTPUT_DIR" -maxdepth 1 -type f \( \
+            -name "*.img.gz" -o \
+            -name "*.bin" -o \
+            -name "*.itb" \
+          \) -exec cp {} artifacts/ \;
 
           cd artifacts
+          echo "Files copied:"
           ls -la
 
-          # Add target prefix to filenames
+          # Rename with profile prefix
           for f in *; do
-            [ -f "$f" ] && mv "$f" "nymvpn-${TARGET_SAFE}-${f}"
+            [ -f "$f" ] && mv "$f" "nymvpn-${PROFILE}-${f}"
           done
 
+          echo "Final artifacts:"
           ls -la
 
       - name: Upload artifacts
