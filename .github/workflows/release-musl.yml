@@ -292,7 +292,7 @@ jobs:
       - name: Upload IPK artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ipk-${{ matrix.arch }}
+          name: ipk-${{ matrix.openwrt_arch }}
           path: "*.ipk"
           retention-days: 7
 
