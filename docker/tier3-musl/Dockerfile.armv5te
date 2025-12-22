@@ -8,7 +8,7 @@
 #
 # See Dockerfile.mips for detailed documentation on the problem and solution
 
-FROM messense/rust-musl-cross:armv5te-musleabi
+FROM messense/rust-musl-cross:armv5te-musleabi@sha256:7405f08bc670a579a150d9c91d09d256e24c6cc7f26c05122222291b2f7dc971
 
 ARG TARGET=armv5te-unknown-linux-musleabi
 

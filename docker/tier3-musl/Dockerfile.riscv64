@@ -1,7 +1,7 @@
 # Custom Docker image for RISC-V 64-bit musl cross-compilation
 # See Dockerfile.mips for detailed documentation on the problem and solution
 
-FROM messense/rust-musl-cross:riscv64gc-musl
+FROM messense/rust-musl-cross:riscv64gc-musl@sha256:9102e9fa3128e6a817c68fb2b7ef80184bd699b12f0cf2222091b6d7f12e4f8f
 
 ARG TARGET=riscv64gc-unknown-linux-musl
 
