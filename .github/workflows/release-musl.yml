@@ -182,10 +182,15 @@ jobs:
           chmod 755 ipk/data/usr/sbin/nym-vpnd ipk/data/usr/bin/nym-vpnc
 
           # === LuCI web interface ===
-          # Frontend JS
+          # Frontend JS - view file
           mkdir -p ipk/data/www/luci-static/resources/view/nym-vpn
           cp luci/htdocs/luci-static/resources/view/nym-vpn/config.js \
              ipk/data/www/luci-static/resources/view/nym-vpn/
+
+          # Frontend JS - module files (rpc, ui, countries, assets, theme)
+          mkdir -p ipk/data/www/luci-static/resources/nym-vpn
+          cp luci/htdocs/luci-static/resources/nym-vpn/*.js \
+             ipk/data/www/luci-static/resources/nym-vpn/
 
           # RPC backend
           mkdir -p ipk/data/usr/libexec/rpcd
