@@ -359,21 +359,56 @@ jobs:
             artifacts/*.sha256
             artifacts/*.ipk
           body: |
-            ## Nym VPN ${{ steps.version.outputs.version }} - Kernel WireGuard Edition
+            ## Nym VPN ${{ steps.version.outputs.version }} - OpenWRT Edition
 
-            Pre-built static binaries for musl-based Linux systems (OpenWrt, Alpine, etc.)
-
-            ### OpenWrt Installation (Recommended)
-
-            Download the `.ipk` file for your architecture and install:
-
-            ```bash
-            opkg install nym-vpn_*.ipk
-            ```
-
-            Then access the web interface at: **LuCI → VPN → Nym VPN**
+            Pre-built static binaries and IPK packages for OpenWRT routers.
 
             ### Requirements
 
-            - Linux kernel 5.6+ with WireGuard module
-            - Run `modprobe wireguard` on target device
+            - **Free space:** ~60MB minimum (see table below for exact sizes)
+            - **WireGuard:** Must be installed first
+
+            ```bash
+            opkg update
+            opkg install wireguard-tools kmod-wireguard
+            ```
+
+            ### Installation
+
+            **Option 1: Via SSH**
+
+            ```bash
+            cd /tmp
+            wget <IPK_URL>
+            opkg install nym-vpn_*.ipk
+            ```
+
+            **Option 2: Via LuCI Web Interface**
+
+            1. Download the `.ipk` file for your architecture to your computer
+            2. Open LuCI (your router's web interface)
+            3. Go to **System → Software**
+            4. Click **Upload Package** and select the downloaded `.ipk` file
+            5. Click **Install**
+
+            ### After Installation
+
+            Access the Nym VPN interface at: **LuCI → VPN → Nym VPN**
+
+            ### Supported Architectures
+
+            | Architecture | Installed Size | Example Devices |
+            |--------------|----------------|-----------------|
+            | `x86_64` | ~58MB | x86 VMs, PC Engines APU |
+            | `i386_pentium4` | ~53MB | Older x86 devices |
+            | `aarch64_generic` | ~54MB | Raspberry Pi 3/4, modern ARM64 routers |
+            | `aarch64_cortex-a53` | ~54MB | MediaTek, Qualcomm ARM64 routers |
+            | `arm_cortex-a7_neon-vfpv4` | ~55MB | Many MediaTek/Qualcomm routers |
+            | `arm_cortex-a9_vfpv3-d16` | ~55MB | Linksys WRT, Netgear R7800 |
+            | `arm_cortex-a9` | ~44MB | Older Cortex-A9 devices |
+            | `arm_arm926ej-s` | ~44MB | Legacy ARM devices |
+            | `mips_24kc` | ~59MB | Atheros/Qualcomm MIPS routers |
+            | `mipsel_24kc` | ~59MB | MediaTek MIPS routers |
+            | `riscv64` | ~40MB | RISC-V devices |
+
+            Check your architecture: `opkg print-architecture | grep -v all`
