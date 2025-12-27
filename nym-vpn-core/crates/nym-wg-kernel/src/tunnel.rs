@@ -52,6 +52,9 @@ impl Tunnel {
         // Create the WireGuard interface
         let interface_index = handle.create_device(interface_name.clone(), config.interface.mtu.into()).await?;
 
+        // Flush any existing addresses (in case interface was reused from a previous attempt)
+        handle.flush_addresses(interface_index).await?;
+
         // Assign IP addresses to the interface
         for addr in &config.interface.addresses {
             handle.set_ip_address(interface_index, addr.ip()).await?;

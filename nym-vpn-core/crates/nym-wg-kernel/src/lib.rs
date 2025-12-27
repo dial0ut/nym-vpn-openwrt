@@ -232,7 +232,51 @@ impl Handle {
 
         while let Some(response_message) = response.next().await {
             if let NetlinkPayload::Error(err) = response_message.payload {
+                log::error!(
+                    "Netlink error adding IP {} to interface index {}: code={:?} ({:?})",
+                    addr,
+                    index,
+                    err.code,
+                    err
+                );
                 return Err(Error::NetlinkSetIp(rtnetlink::Error::NetlinkError(err)));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Remove all IP addresses from an interface
+    ///
+    /// This is used to clean up stale addresses when reusing an existing interface,
+    /// preventing IP address accumulation across reconnection attempts.
+    pub async fn flush_addresses(&mut self, index: u32) -> Result<()> {
+        use futures::TryStreamExt;
+
+        // Get all addresses on this interface
+        let addresses: Vec<_> = self
+            .route_handle
+            .address()
+            .get()
+            .set_link_index_filter(index)
+            .execute()
+            .try_collect()
+            .await
+            .map_err(Error::NetlinkSetIp)?;
+
+        log::debug!("Flushing {} addresses from interface index {}", addresses.len(), index);
+
+        // Delete each address
+        for addr_msg in addresses {
+            if let Err(e) = self
+                .route_handle
+                .address()
+                .del(addr_msg)
+                .execute()
+                .await
+            {
+                log::warn!("Failed to delete address during flush: {}", e);
+                // Continue flushing other addresses
             }
         }
 
