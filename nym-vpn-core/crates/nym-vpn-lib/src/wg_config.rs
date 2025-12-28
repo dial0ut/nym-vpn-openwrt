@@ -173,16 +173,22 @@ impl WgNodeConfig {
         allowed_ips: AllowedIps,
         dns: Vec<IpAddr>,
         mtu: u16,
+        enable_ipv6: bool,
         #[cfg(target_os = "linux")] fwmark: Option<u32>,
     ) -> Self {
+        // Build address list based on IPv6 setting
+        // Some systems (e.g., GL.iNet routers) have IPv6 disabled at kernel level
+        // and will reject IPv6 address assignment via netlink
+        let mut addresses = vec![IpNetwork::V4(Ipv4Network::from(gateway_data.private_ipv4))];
+        if enable_ipv6 {
+            addresses.push(IpNetwork::V6(Ipv6Network::from(gateway_data.private_ipv6)));
+        }
+
         Self {
             interface: WgInterface {
                 listen_port: None,
                 private_key: PrivateKey::from(private_key.to_bytes()),
-                addresses: vec![
-                    IpNetwork::V4(Ipv4Network::from(gateway_data.private_ipv4)),
-                    IpNetwork::V6(Ipv6Network::from(gateway_data.private_ipv6)),
-                ],
+                addresses,
                 dns,
                 mtu,
                 #[cfg(target_os = "linux")]

@@ -155,6 +155,7 @@ impl ConnectedTunnel {
             ]),
             options.dns.clone(),
             self.entry_mtu(),
+            true, // wireguard-go handles IPv6 fine
             #[cfg(target_os = "linux")]
             Some(tunnel_constants.fwmark),
         );
@@ -168,6 +169,7 @@ impl ConnectedTunnel {
             AllowedIps::All,
             options.dns,
             self.exit_mtu(),
+            true, // wireguard-go handles IPv6 fine
             #[cfg(target_os = "linux")]
             None,
         );
@@ -282,6 +284,7 @@ impl ConnectedTunnel {
             ]),
             options.dns.clone(),
             self.entry_mtu(),
+            options.enable_ipv6,
             Some(tunnel_constants.fwmark),
         );
         if entry_amnezia {
@@ -294,6 +297,7 @@ impl ConnectedTunnel {
             AllowedIps::All,
             options.dns,
             self.exit_mtu(),
+            options.enable_ipv6,
             None,
         );
 
@@ -348,6 +352,7 @@ impl ConnectedTunnel {
             ]),
             options.dns.clone(),
             self.entry_mtu(),
+            true, // wireguard-go handles IPv6 fine
             #[cfg(target_os = "linux")]
             Some(tunnel_constants.fwmark),
         );
@@ -362,6 +367,7 @@ impl ConnectedTunnel {
             AllowedIps::All,
             options.dns,
             self.exit_mtu(),
+            true, // wireguard-go handles IPv6 fine
             #[cfg(target_os = "linux")]
             None,
         );
@@ -653,6 +659,10 @@ pub struct KernelWgTunnelOptions {
 
     /// In-tunnel DNS addresses
     pub dns: Vec<IpAddr>,
+
+    /// Whether to enable IPv6 on tunnel interfaces.
+    /// Some systems (e.g., GL.iNet routers) have IPv6 disabled at kernel level.
+    pub enable_ipv6: bool,
 }
 
 /// Multihop configuration based on WireGuard/netstack.

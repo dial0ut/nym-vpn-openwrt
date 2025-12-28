@@ -1510,6 +1510,7 @@ impl TunnelMonitor {
             entry_tun_name: entry_tun_name.clone(),
             exit_tun_name: exit_tun_name.clone(),
             dns: dns_config.tunnel_config().to_vec(),
+            enable_ipv6: self.enable_ipv6(),
         });
 
         let tunnel_handle = connected_tunnel
