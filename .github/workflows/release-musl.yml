@@ -141,6 +141,8 @@ jobs:
             openwrt_arch: mips_24kc
           - arch: mipsel
             openwrt_arch: mipsel_24kc
+          - arch: mipsel
+            openwrt_arch: mips_siflower
           - arch: riscv64
             openwrt_arch: riscv64
 
@@ -409,6 +411,7 @@ jobs:
             | `arm_arm926ej-s` | ~44MB | Legacy ARM devices |
             | `mips_24kc` | ~59MB | Atheros/Qualcomm MIPS routers |
             | `mipsel_24kc` | ~59MB | MediaTek MIPS routers |
+            | `mips_siflower` | ~59MB | GL.iNet SFT1200, SiFlower SF19A28 |
             | `riscv64` | ~40MB | RISC-V devices |
 
             Check your architecture: `opkg print-architecture | grep -v all`
