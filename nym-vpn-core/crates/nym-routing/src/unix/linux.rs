@@ -39,6 +39,16 @@ use rtnetlink::{
 use std::sync::LazyLock;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
+/// Priority for the suppress_prefixlength rule.
+/// This rule checks if the main table has a non-default route for the destination.
+/// It must be evaluated BEFORE the tunnel routing table rule to preserve LAN connectivity.
+const SUPPRESS_RULE_PRIORITY: u32 = 100;
+
+/// Priority for the tunnel routing table rule.
+/// This rule routes traffic without the fwmark through the VPN tunnel.
+/// It must be evaluated AFTER the suppress rule to allow LAN routes to take precedence.
+const TUNNEL_RULE_PRIORITY: u32 = 200;
+
 static SUPPRESS_RULE_V4: LazyLock<RuleMessage> = LazyLock::new(|| {
     let mut rule = RuleMessage::default();
     rule.header = RuleHeader {
@@ -47,6 +57,7 @@ static SUPPRESS_RULE_V4: LazyLock<RuleMessage> = LazyLock::new(|| {
         ..RuleHeader::default()
     };
     rule.attributes = vec![
+        RuleAttribute::Priority(SUPPRESS_RULE_PRIORITY),
         RuleAttribute::SuppressPrefixLen(0),
         RuleAttribute::Table(RouteHeader::RT_TABLE_MAIN as u32),
     ];
@@ -75,7 +86,11 @@ fn no_fwmark_rule_v4(fwmark: u32, table: u32) -> RuleMessage {
         flags: RuleFlags::Invert,
         ..RuleHeader::default()
     };
-    rule.attributes = vec![RuleAttribute::FwMark(fwmark), RuleAttribute::Table(table)];
+    rule.attributes = vec![
+        RuleAttribute::Priority(TUNNEL_RULE_PRIORITY),
+        RuleAttribute::FwMark(fwmark),
+        RuleAttribute::Table(table),
+    ];
     rule
 }
 
