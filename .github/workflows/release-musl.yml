@@ -249,6 +249,12 @@ jobs:
               option network 'mainnet'
           CONFIGEOF
 
+          # === Firewall include scripts ===
+          mkdir -p ipk/data/usr/share/nym-vpn
+          cp nym-vpn-core/crates/nym-firewall/scripts/fw3-include.sh ipk/data/usr/share/nym-vpn/
+          cp nym-vpn-core/crates/nym-firewall/scripts/fw4-include.sh ipk/data/usr/share/nym-vpn/
+          chmod 755 ipk/data/usr/share/nym-vpn/*.sh
+
           # === Control file ===
           INSTALLED_SIZE=$(du -sk ipk/data | cut -f1)
           cat > ipk/control/control << EOF
