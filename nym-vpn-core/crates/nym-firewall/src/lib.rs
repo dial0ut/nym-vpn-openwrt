@@ -17,8 +17,41 @@ use nym_dns::ResolvedDnsConfig;
 mod imp;
 
 #[cfg(target_os = "linux")]
-#[path = "linux.rs"]
-mod imp;
+mod openwrt;
+
+#[cfg(target_os = "linux")]
+mod imp {
+    use super::{FirewallArguments, FirewallPolicy};
+
+    pub use super::openwrt::Error;
+
+    /// Firewall implementation for OpenWrt (fw3/fw4).
+    pub struct Firewall {
+        inner: super::openwrt::Firewall,
+    }
+
+    impl Firewall {
+        pub fn from_args(args: FirewallArguments) -> Result<Self, Error> {
+            Ok(Firewall {
+                inner: super::openwrt::Firewall::from_args(args)?,
+            })
+        }
+
+        pub fn new(fwmark: u32) -> Result<Self, Error> {
+            Ok(Firewall {
+                inner: super::openwrt::Firewall::new(fwmark)?,
+            })
+        }
+
+        pub fn apply_policy(&mut self, policy: FirewallPolicy) -> Result<(), Error> {
+            self.inner.apply_policy(policy)
+        }
+
+        pub fn reset_policy(&mut self) -> Result<(), Error> {
+            self.inner.reset_policy()
+        }
+    }
+}
 
 #[cfg(windows)]
 #[path = "windows/mod.rs"]

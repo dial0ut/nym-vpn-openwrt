@@ -3003,7 +3003,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.58.0",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -3230,6 +3230,17 @@ name = "ipnetwork"
 version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf370abdafd54d13e54a620e8c3e1145f28e46cc9d704bc6d94414559df41763"
+
+[[package]]
+name = "iptables"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "587f29670d67df4c7af1631928dcc592e24e897e961f89b06b142b95702ce21f"
+dependencies = [
+ "lazy_static",
+ "nix 0.29.0",
+ "regex",
+]
 
 [[package]]
 name = "iri-string"
@@ -4375,6 +4386,7 @@ name = "nym-firewall"
 version = "1.21.0-beta"
 dependencies = [
  "ipnetwork",
+ "iptables",
  "libc",
  "log",
  "mnl",
