@@ -228,13 +228,17 @@ impl Fw4Firewall {
                 for dns in dns_config.non_tunnel_config() {
                     self.add_dns_output_rules(rules, *dns);
                 }
-                self.add_block_dns_rules(rules);
 
+                // Add tunnel rules BEFORE blocking DNS
+                // This ensures DNS traffic routed via tunnel interfaces is allowed
                 if let Some(tunnel) = tunnel {
                     for m in tunnel.inner_metadatas() {
                         writeln!(rules, "        oifname \"{}\" accept", m.interface).unwrap();
                     }
                 }
+
+                // Block other DNS (only affects non-tunnel traffic now)
+                self.add_block_dns_rules(rules);
 
                 if *allow_lan {
                     self.add_lan_output_rules(rules);
@@ -256,11 +260,15 @@ impl Fw4Firewall {
                 for dns in dns_config.non_tunnel_config() {
                     self.add_dns_output_rules(rules, *dns);
                 }
-                self.add_block_dns_rules(rules);
 
+                // Add tunnel rules BEFORE blocking DNS
+                // This ensures DNS traffic routed via tunnel interfaces is allowed
                 for m in tunnel.inner_metadatas() {
                     writeln!(rules, "        oifname \"{}\" accept", m.interface).unwrap();
                 }
+
+                // Block other DNS (only affects non-tunnel traffic now)
+                self.add_block_dns_rules(rules);
 
                 if *allow_lan {
                     self.add_lan_output_rules(rules);
@@ -282,9 +290,12 @@ impl Fw4Firewall {
     fn add_forward_policy_rules(&self, rules: &mut String, policy: &FirewallPolicy) -> Result<()> {
         match policy {
             FirewallPolicy::Connecting { tunnel, allow_lan, dns_config, .. } => {
+                // Allow DNS to specific servers
                 for dns in dns_config.non_tunnel_config() {
                     self.add_dns_forward_rules(rules, *dns);
                 }
+
+                // Allow traffic to/from tunnel interfaces BEFORE blocking DNS
                 if let Some(tunnel) = tunnel {
                     for m in tunnel.inner_metadatas() {
                         // Allow traffic TO tunnel
@@ -293,27 +304,41 @@ impl Fw4Firewall {
                         writeln!(rules, "        iifname \"{}\" accept", m.interface).unwrap();
                     }
                 }
+
+                // Explicitly block other DNS (kill-switch for DNS leaks)
+                self.add_block_dns_rules(rules);
+
                 if *allow_lan {
                     self.add_lan_forward_rules(rules);
                 }
             }
 
             FirewallPolicy::Connected { tunnel, allow_lan, dns_config, .. } => {
+                // Allow DNS to specific servers
                 for dns in dns_config.tunnel_config() {
                     self.add_dns_forward_rules(rules, *dns);
                 }
+
+                // Allow traffic to/from tunnel interfaces BEFORE blocking DNS
                 for m in tunnel.inner_metadatas() {
                     // Allow traffic TO tunnel (LAN -> Internet via VPN)
                     writeln!(rules, "        oifname \"{}\" accept", m.interface).unwrap();
                     // Allow traffic FROM tunnel (Internet -> LAN return traffic)
                     writeln!(rules, "        iifname \"{}\" accept", m.interface).unwrap();
                 }
+
+                // Explicitly block other DNS (kill-switch for DNS leaks)
+                self.add_block_dns_rules(rules);
+
                 if *allow_lan {
                     self.add_lan_forward_rules(rules);
                 }
             }
 
             FirewallPolicy::Blocked { allow_lan, .. } => {
+                // Block all DNS when in blocked state
+                self.add_block_dns_rules(rules);
+
                 if *allow_lan {
                     self.add_lan_forward_rules(rules);
                 }

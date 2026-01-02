@@ -342,15 +342,16 @@ impl Fw3Firewall {
                     self.add_dns_rules(rules, *dns, None, is_ipv6);
                 }
 
-                // Block other DNS
-                self.add_block_dns_rules(rules, is_ipv6);
-
-                // Add tunnel rules if available
+                // Add tunnel rules BEFORE blocking DNS
+                // This ensures DNS traffic routed via tunnel interfaces is allowed
                 if let Some(tunnel) = tunnel {
                     for metadata in tunnel.inner_metadatas() {
                         self.add_tunnel_rules(rules, &metadata.interface, is_ipv6);
                     }
                 }
+
+                // Block other DNS (only affects non-tunnel traffic now)
+                self.add_block_dns_rules(rules, is_ipv6);
 
                 *allow_lan
             }
@@ -379,10 +380,9 @@ impl Fw3Firewall {
                     self.add_dns_rules(rules, *dns, None, is_ipv6);
                 }
 
-                // Block other DNS
-                self.add_block_dns_rules(rules, is_ipv6);
-
-                // Add tunnel rules
+                // Add tunnel rules BEFORE blocking DNS
+                // This ensures DNS traffic routed via tunnel interfaces is allowed
+                // (critical for LAN clients whose DNS gets forwarded through the tunnel)
                 for metadata in tunnel.inner_metadatas() {
                     self.add_tunnel_rules(rules, &metadata.interface, is_ipv6);
 
@@ -391,6 +391,9 @@ impl Fw3Firewall {
                         self.add_tunnel_ip_protection(rules, metadata, is_ipv6);
                     }
                 }
+
+                // Block other DNS (only affects non-tunnel traffic now)
+                self.add_block_dns_rules(rules, is_ipv6);
 
                 *allow_lan
             }
