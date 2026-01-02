@@ -295,6 +295,51 @@ jobs:
           # Stop and disable the service before removal
           /etc/init.d/nym-vpnd stop 2>/dev/null
           /etc/init.d/nym-vpnd disable 2>/dev/null
+
+          # Clean up firewall rules
+          if [ -x /sbin/fw4 ]; then
+            # fw4/nftables cleanup
+            nft delete table inet nym 2>/dev/null
+            # Remove rules from fw4 chains (srcnat, forward_lan)
+            for chain in srcnat forward_lan; do
+              handles=$(nft -a list chain inet fw4 "$chain" 2>/dev/null | grep "nym-vpn:" | sed 's/.*handle //')
+              for h in $handles; do
+                nft delete rule inet fw4 "$chain" handle "$h" 2>/dev/null
+              done
+            done
+          else
+            # fw3/iptables cleanup
+            for ipt in iptables ip6tables; do
+              # Remove jump rules from fw3 hook chains
+              for hook in input_rule output_rule forwarding_rule; do
+                $ipt -D "$hook" -j NYM_INPUT 2>/dev/null
+                $ipt -D "$hook" -j NYM_OUTPUT 2>/dev/null
+                $ipt -D "$hook" -j NYM_FORWARD 2>/dev/null
+              done
+              # Flush and delete our chains
+              for chain in NYM_INPUT NYM_OUTPUT NYM_FORWARD; do
+                $ipt -F "$chain" 2>/dev/null
+                $ipt -X "$chain" 2>/dev/null
+              done
+            done
+            # Remove masquerade rules from NAT table
+            for num in $(iptables -t nat -L POSTROUTING -n --line-numbers -v 2>/dev/null | grep "nym-vpn" | awk '{print $1}' | sort -rn); do
+              iptables -t nat -D POSTROUTING "$num" 2>/dev/null
+            done
+          fi
+
+          # Remove UCI firewall include config
+          uci delete firewall.nym_vpn 2>/dev/null
+          uci commit firewall 2>/dev/null
+
+          # Remove UCI app config
+          uci delete nym-vpn 2>/dev/null
+          uci commit nym-vpn 2>/dev/null
+          rm -f /etc/config/nym-vpn 2>/dev/null
+
+          # Clean up all nym-vpn data and config files
+          rm -rf /var/lib/nym-vpn 2>/dev/null
+
           exit 0
           PRERM
           chmod 755 ipk/control/prerm

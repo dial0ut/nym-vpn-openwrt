@@ -95,7 +95,7 @@ impl Default for VpnServiceConfig {
             exit_point: ExitPoint::Country {
                 two_letter_iso_country_code: "CH".to_owned(),
             },
-            allow_lan: false,
+            allow_lan: true,
             disable_ipv6: false,
             enable_two_hop: true,
             enable_bridges: false,
