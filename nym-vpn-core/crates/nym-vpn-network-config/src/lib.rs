@@ -48,8 +48,6 @@ use std::{
     time::Duration,
 };
 
-const NETWORKS_SUBDIR: &str = "networks";
-
 // Refresh the discovery and network details files periodically
 const MAX_FILE_AGE: Duration = Duration::from_secs(60 * 60);
 
@@ -168,12 +166,6 @@ impl Network {
             })
     }
 
-    pub fn credential_mode(&self) -> Option<bool> {
-        self.feature_flags
-            .as_ref()
-            .and_then(|ff| ff.credential_mode())
-    }
-
     pub fn stats_recipient(&self) -> Option<Recipient> {
         self.feature_flags
             .as_ref()
@@ -195,6 +187,12 @@ impl Network {
 
     pub fn quic_enabled(&self) -> Option<bool> {
         self.feature_flags.as_ref().and_then(|ff| ff.quic_enabled())
+    }
+
+    pub fn privy_enabled(&self) -> Option<bool> {
+        self.feature_flags
+            .as_ref()
+            .and_then(|ff| ff.privy_enabled())
     }
 
     pub async fn vpn_api_addresses(&self) -> Vec<SocketAddr> {

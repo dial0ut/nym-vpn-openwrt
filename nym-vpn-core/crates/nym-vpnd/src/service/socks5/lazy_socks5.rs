@@ -12,7 +12,7 @@ use std::{
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, copy_bidirectional},
     net::{TcpListener, TcpStream},
-    sync::RwLock,
+    sync::{Mutex, RwLock},
     time::{Instant, sleep},
 };
 use tokio_util::sync::CancellationToken;
@@ -64,6 +64,8 @@ pub struct LazySocks5 {
     is_mixnet_running: Arc<RwLock<bool>>,
     /// Mixnet client
     mixnet_client: Arc<RwLock<Option<Socks5MixnetClient>>>,
+    /// Mutex to prevent concurrent initialization
+    init_mutex: Arc<Mutex<()>>,
 }
 
 impl LazySocks5 {
@@ -87,6 +89,7 @@ impl LazySocks5 {
             last_connection_closed: Arc::new(RwLock::new(None)),
             is_mixnet_running: Arc::new(RwLock::new(false)),
             mixnet_client: Arc::new(RwLock::new(None)),
+            init_mutex: Arc::new(Mutex::new(())),
         })
     }
 
@@ -128,30 +131,44 @@ impl LazySocks5 {
                             let wrapper = self.clone();
 
                             // Check tunnel state to determine routing method
+                            // 1. If the tunnel is mixnet and connected -> use existing tunnel
+                            // 2. If the tunnel is wireguard and connected -> create new tunnel
+                            // 3. If the tunnel is disconnected or error'd -> create new tunnel
+                            // 4. If the tunnel is connecting, disconnecting or offline -> reject connection
                             let tunnel_state = self.tunnel_state_shared.read().await.clone();
-                            let use_dvpn = matches!(
-                                tunnel_state,
-                                TunnelState::Connected { ref connection_data }
-                                if matches!(connection_data.tunnel, TunnelConnectionData::Mixnet(_))
-                            );
+                            let use_existing_tunnel =  match &tunnel_state {
+                                TunnelState::Connected { connection_data } => {
+                                    match &connection_data.tunnel {
+                                        TunnelConnectionData::Mixnet(_) => true, // 1
+                                        TunnelConnectionData::Wireguard(_) => false, // 2
+                                    }
+                                }
+                                TunnelState::Disconnected | TunnelState::Error(_) => {
+                                    false // 3
+                                }
+                                _ => {
+                                    warn!("Rejecting SOCKS5 connection from {addr} due to tunnel state: {tunnel_state:?}");
+                                    let mut stream = stream;
+                                    let _ = Self::send_socks5_error(&mut stream).await; // 4
+                                    continue;
+                                }
+                            };
 
                             // Spawn task to handle this connection
                             tokio::spawn(async move {
-                                let result = if use_dvpn {
-                                    info!("Routing connection from {} through dVPN tunnel", addr);
-                                    wrapper.handle_connection_with_dvpn(stream, addr).await
+                                let result = if use_existing_tunnel {
+                                    wrapper.route_via_existing_tunnel(stream, addr).await
                                 } else {
-                                    debug!("Routing connection from {} through mixnet", addr);
-                                    Box::pin(wrapper.handle_connection_with_mixnet(stream, addr)).await
+                                    Box::pin(wrapper.route_via_new_tunnel(stream, addr)).await
                                 };
 
                                 if let Err(e) = result {
-                                    error!("Connection handler error for {}: {}", addr, e);
+                                    error!("Connection handler error for {addr}: {e}");
                                 }
                             });
                         }
                         Err(e) => {
-                            error!("Failed to accept connection: {}", e);
+                            error!("Failed to accept connection: {e}");
                         }
                     }
                 }
@@ -171,12 +188,14 @@ impl LazySocks5 {
         Ok(())
     }
 
-    /// Handle a single connection with dVPN tunnel (direct connection)
-    async fn handle_connection_with_dvpn(
+    /// Handle the SOCKS5 connection via the existing mixnet tunnel
+    async fn route_via_existing_tunnel(
         &self,
         mut client_stream: TcpStream,
         client_addr: SocketAddr,
     ) -> Result<(), LazySocks5Error> {
+        info!("Routing connection from {client_addr} via existing Mixnet tunnel");
+
         // Create connection guard - will automatically decrement on drop
         let _guard = ConnectionGuard::new(self.active_connections.clone()).await;
 
@@ -403,12 +422,14 @@ impl LazySocks5 {
         Ok(())
     }
 
-    /// Handle a single connection with mixnet
-    async fn handle_connection_with_mixnet(
+    /// Handle the SOCKS5 connection via a new mixnet tunnel
+    async fn route_via_new_tunnel(
         &self,
         mut client_stream: TcpStream,
         client_addr: SocketAddr,
     ) -> Result<(), LazySocks5Error> {
+        info!("Routing connection from {client_addr} via new Mixnet tunnel");
+
         // Create connection guard - will automatically decrement on drop
         let _guard = ConnectionGuard::new(self.active_connections.clone()).await;
 
@@ -459,7 +480,15 @@ impl LazySocks5 {
 
     /// Ensure the backend is started (lazy initialization)
     async fn ensure_backend_started(&self) -> Result<(), LazySocks5Error> {
-        // Client already initialized
+        // Client already initialized - quick check without mutex
+        if self.mixnet_client.read().await.is_some() {
+            return Ok(());
+        }
+
+        // Acquire init mutex to prevent concurrent initialization
+        let _init_guard = self.init_mutex.lock().await;
+
+        // Double-check after acquiring mutex (another task might have initialized it)
         if self.mixnet_client.read().await.is_some() {
             return Ok(());
         }
@@ -486,6 +515,20 @@ impl LazySocks5 {
             .parent()
             .unwrap_or_else(|| std::path::Path::new("."))
             .join(format!("{}_socks5", mixnet_folder_name));
+
+        // Ensure parent directory exists (permissions will be checked when we try to write)
+        if let Some(parent) = socks5_data_path.parent() {
+            tokio::fs::create_dir_all(parent).await.map_err(|e| {
+                error!(
+                    "Failed to create parent directory {}: {e}",
+                    parent.display()
+                );
+                LazySocks5Error::Internal(format!(
+                    "Failed to create parent directory {}: {e}. Check directory permissions.",
+                    parent.display()
+                ))
+            })?;
+        }
 
         // Remove old socks5 directory if it exists
         // - to get fresh identity each time
@@ -555,20 +598,33 @@ impl LazySocks5 {
         );
 
         // Build the mixnet client with shared credentials but different identity
-        let mixnet_client: nym_sdk::mixnet::DisconnectedMixnetClient<
-            nym_sdk::mixnet::OnDiskPersistent,
-        > = MixnetClientBuilder::new_with_default_storage(socks5_storage_paths)
+        // When dVPN is connected (WireGuard mode), use entry gateway to ensure firewall compatibility.
+        // The firewall rules include the entry gateway endpoints, so using the same gateway
+        // prevents connection failures.
+        let tunnel_state = self.tunnel_state_shared.read().await.clone();
+        let mut builder = MixnetClientBuilder::new_with_default_storage(socks5_storage_paths)
             .await
             .map_err(|e| {
                 error!("Failed to create mixnet client builder: {}", e);
                 LazySocks5Error::Internal(e.to_string())
-            })?
-            .socks5_config(socks5_config)
-            .build()
-            .map_err(|e| {
-                error!("Failed to build mixnet client: {}", e);
-                LazySocks5Error::Internal(e.to_string())
             })?;
+
+        // Configure entry gateway if VPN is connected
+        if let TunnelState::Connected { connection_data } = tunnel_state {
+            let entry_gateway_id = &connection_data.entry_gateway.id;
+            info!(
+                "VPN is connected to entry gateway {}, configuring mixnet client to use same gateway for firewall compatibility",
+                entry_gateway_id
+            );
+            builder = builder.request_gateway(entry_gateway_id.clone());
+        }
+
+        let mixnet_client: nym_sdk::mixnet::DisconnectedMixnetClient<
+            nym_sdk::mixnet::OnDiskPersistent,
+        > = builder.socks5_config(socks5_config).build().map_err(|e| {
+            error!("Failed to build mixnet client: {}", e);
+            LazySocks5Error::Internal(e.to_string())
+        })?;
 
         // Connect to the mixnet via SOCKS5
         info!("Connecting to mixnet via SOCKS5...");
@@ -738,39 +794,81 @@ impl LazySocks5 {
         }
     }
 
-    /// Monitor tunnel state and shut down mixnet backend when dVPN is available
+    /// Monitor tunnel state and manage mixnet backend lifecycle
     async fn monitor_tunnel_state(&self) {
-        let mut last_dvpn_available = false;
+        let mut last_vpn_state: Option<TunnelState> = None;
+        let mut interval = tokio::time::interval(Duration::from_secs(2));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         loop {
-            // Wait a bit before checking
-            sleep(Duration::from_secs(2)).await;
+            interval.tick().await;
 
-            // Check if dVPN is currently available
-            let dvpn_available = {
-                let tunnel_state = self.tunnel_state_shared.read().await;
-                matches!(
-                    *tunnel_state,
-                    TunnelState::Connected { ref connection_data }
-                    if matches!(connection_data.tunnel, TunnelConnectionData::Mixnet(_))
-                )
-            };
+            let current_state = self.tunnel_state_shared.read().await.clone();
+
+            // Check if dVPN is currently available (Mixnet mode)
+            let dvpn_available = matches!(
+                current_state,
+                TunnelState::Connected { ref connection_data }
+                if matches!(connection_data.tunnel, TunnelConnectionData::Mixnet(_))
+            );
+
+            // Check if VPN is connected in WireGuard mode
+            let vpn_connected_wireguard = matches!(
+                current_state,
+                TunnelState::Connected { ref connection_data }
+                if matches!(connection_data.tunnel, TunnelConnectionData::Wireguard(_))
+            );
 
             // React to state transitions
+            let last_dvpn_available = last_vpn_state
+                .as_ref()
+                .map(|s| {
+                    matches!(
+                        s,
+                        TunnelState::Connected { connection_data }
+                        if matches!(connection_data.tunnel, TunnelConnectionData::Mixnet(_))
+                    )
+                })
+                .unwrap_or(false);
+
+            let last_vpn_connected_wireguard = last_vpn_state
+                .as_ref()
+                .map(|s| {
+                    matches!(
+                        s,
+                        TunnelState::Connected { connection_data }
+                        if matches!(connection_data.tunnel, TunnelConnectionData::Wireguard(_))
+                    )
+                })
+                .unwrap_or(false);
+
             if dvpn_available && !last_dvpn_available {
-                // dVPN just became available - shut down mixnet backend
+                // dVPN just became available (Mixnet mode) - shut down mixnet backend
                 info!(
-                    "dVPN tunnel is now available, shutting down mixnet SOCKS5 backend to save bandwidth"
+                    "dVPN tunnel is now available (Mixnet mode), shutting down mixnet SOCKS5 backend to save bandwidth"
                 );
                 self.shutdown_backend().await;
-            } else if !dvpn_available && last_dvpn_available {
-                // dVPN just became unavailable
+            } else if vpn_connected_wireguard && !last_vpn_connected_wireguard {
+                // VPN just connected in WireGuard mode - if mixnet client is running, shut it down
+                // so it will be recreated with VPN's entry gateway on next connection
+                let is_running = self.is_mixnet_running().await;
+                if is_running {
+                    info!(
+                        "VPN connected in WireGuard mode while mixnet client is running, shutting down mixnet client to ensure it uses VPN's entry gateway (firewall compatibility)"
+                    );
+                    self.shutdown_backend().await;
+                }
+            } else if !dvpn_available
+                && !vpn_connected_wireguard
+                && (last_dvpn_available || last_vpn_connected_wireguard)
+            {
+                // VPN just disconnected
                 info!(
-                    "dVPN tunnel is no longer available, mixnet SOCKS5 backend will be lazily initialized on next connection"
+                    "VPN disconnected, mixnet SOCKS5 backend will be lazily initialized on next connection"
                 );
             }
 
-            last_dvpn_available = dvpn_available;
+            last_vpn_state = Some(current_state);
 
             // Check for cancellation
             if self.cancel_token.is_cancelled() {

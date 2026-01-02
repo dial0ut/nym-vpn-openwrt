@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Added privy UI feature flag (https://github.com/nymtech/nym-vpn-client/pull/4223)
+
+### Fixed
+
+- Fix discovery propagation bug (https://github.com/nymtech/nym-vpn-client/pull/4226)
+- Ensure that vpn topology is refreshed periodically when connecting (https://github.com/nymtech/nym-vpn-client/pull/4228)
+
+### Removed
+- Removed credentials mode feature flag from code base (https://github.com/nymtech/nym-vpn-client/pull/4223)
+
+## [1.21.0] - 2025-12-15
+
+### Added
 
 - Add custom DNS setting for mobile platforms (https://github.com/nymtech/nym-vpn-client/pull/4106)
 - Login with signature string in addition to mnemonic (https://github.com/nymtech/nym-vpn-client/pull/4117)
@@ -17,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Increase the number of Windows firewall slots (https://github.com/nymtech/nym-vpn-client/pull/4072)
 - Enable two-hop by default (https://github.com/nymtech/nym-vpn-client/pull/4090)
+
+### Changed
+
+- Update default entry and exit points to Switzerland (https://github.com/nymtech/nym-vpn-client/pull/XXX)
 
 ### Removed
 
