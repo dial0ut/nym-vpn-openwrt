@@ -8,8 +8,8 @@
 #    We strip -Bdynamic and add -Bstatic at the end to force static linking
 # 2. Fix CRT file paths
 
-MUSL_LIB=/usr/local/musl/mips-unknown-linux-musl/lib
-GCC_LIB=/usr/local/musl/lib/gcc/mips-unknown-linux-musl/11.2.0
+MUSL_LIB=/opt/cross/mips-linux-muslsf/lib
+GCC_LIB=/opt/cross/lib/gcc/mips-linux-muslsf/11.2.1
 
 # Check if -static is in arguments
 is_static=0

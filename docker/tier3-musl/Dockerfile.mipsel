@@ -7,7 +7,7 @@
 FROM debian:bookworm-slim
 
 ARG TARGET=mipsel-unknown-linux-musl
-ARG TOOLCHAIN_URL=https://musl.cc/mipsel-linux-muslsf-cross.tgz
+ARG TOOLCHAIN_URL=https://github.com/dial0ut/nym-vpn-client/releases/download/toolchains-v1/mipsel-linux-muslsf-cross.tgz
 
 # Install base dependencies
 RUN apt-get update -qq && apt-get install -y -qq \

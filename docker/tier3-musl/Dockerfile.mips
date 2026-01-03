@@ -1,35 +1,56 @@
-# Custom Docker image for MIPS musl cross-compilation
-# Solves the autocfg/indexmap probe failure on Docker volume mounts
+# Custom Docker image for MIPS Big-Endian musl cross-compilation
+# Uses soft-float toolchain from musl.cc (the messense image has hard-float musl)
 #
-# The Problem:
-#   - MIPS is a Rust Tier 3 target (no pre-built rust-std)
-#   - Building requires -Z build-std (nightly only)
-#   - autocfg probes fail on Docker volume mounts (no extended file attributes)
-#   - This causes indexmap to compile in no_std mode (IndexMap<K,V,S> requires 3 args)
-#   - schemars expects std mode (IndexMap<K,V> with default S=RandomState)
-#   - Error: "struct takes 3 generic arguments but 2 generic arguments were supplied"
-#
-# The Solution:
-#   - Copy source to local filesystem inside container (supports xattrs)
-#   - Build from local copy
-#   - Copy binaries back to mounted volume
-#
-# Build: docker build -t nym-musl-cross:mips-musl -f Dockerfile.mips .
-# Usage: docker run --rm -v "$(pwd)":/home/rust/src nym-musl-cross:mips-musl /opt/build-tier3.sh
+# The MIPS 24Kc cores (used in mips_24kc OpenWrt devices) have NO FPU,
+# so we MUST use soft-float for everything: toolchain, musl libc, and Rust code.
 
-FROM messense/rust-musl-cross:mips-musl
+FROM debian:bookworm-slim
 
 ARG TARGET=mips-unknown-linux-musl
+ARG TOOLCHAIN_URL=https://github.com/dial0ut/nym-vpn-client/releases/download/toolchains-v1/mips-linux-muslsf-cross.tgz
 
-# Install latest Rust (nightly required for build-std)
-RUN rustup self uninstall -y 2>/dev/null || true && \
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain nightly && \
+# Install base dependencies
+RUN apt-get update -qq && apt-get install -y -qq \
+    build-essential \
+    curl \
+    wget \
+    unzip \
+    pkg-config \
+    rsync \
+    ca-certificates \
+    xz-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Download and install soft-float mips toolchain
+RUN mkdir -p /opt/cross && \
+    curl -fsSL "${TOOLCHAIN_URL}" | tar -xzf - -C /opt/cross --strip-components=1
+
+# Add toolchain to PATH
+ENV PATH="/opt/cross/bin:${PATH}"
+
+# Create compatibility symlinks (Rust expects mips-unknown-linux-musl-* names)
+RUN ln -sf /opt/cross/bin/mips-linux-muslsf-gcc /opt/cross/bin/mips-unknown-linux-musl-gcc && \
+    ln -sf /opt/cross/bin/mips-linux-muslsf-g++ /opt/cross/bin/mips-unknown-linux-musl-g++ && \
+    ln -sf /opt/cross/bin/mips-linux-muslsf-ar /opt/cross/bin/mips-unknown-linux-musl-ar && \
+    ln -sf /opt/cross/bin/mips-linux-muslsf-strip /opt/cross/bin/mips-unknown-linux-musl-strip && \
+    ln -sf /opt/cross/bin/mips-linux-muslsf-ranlib /opt/cross/bin/mips-unknown-linux-musl-ranlib && \
+    ln -sf /opt/cross/bin/mips-linux-muslsf-ld /opt/cross/bin/mips-unknown-linux-musl-ld && \
+    ln -sf /opt/cross/bin/mips-linux-muslsf-objcopy /opt/cross/bin/mips-unknown-linux-musl-objcopy && \
+    ln -sf /opt/cross/bin/mips-linux-muslsf-objdump /opt/cross/bin/mips-unknown-linux-musl-objdump && \
+    ln -sf /opt/cross/bin/mips-linux-muslsf-readelf /opt/cross/bin/mips-unknown-linux-musl-readelf
+
+# Create musl directory structure that matches messense layout (for compatibility)
+RUN mkdir -p /usr/local/musl/mips-unknown-linux-musl && \
+    ln -sf /opt/cross/mips-linux-muslsf/lib /usr/local/musl/mips-unknown-linux-musl/lib && \
+    ln -sf /opt/cross/mips-linux-muslsf/include /usr/local/musl/mips-unknown-linux-musl/include
+
+# Install Rust (nightly required for build-std)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain nightly && \
     . "$HOME/.cargo/env" && \
     rustup component add rust-src
 
-# Install protoc (required for nym build)
-RUN apt-get update -qq && apt-get install -y -qq unzip pkg-config curl wget rsync && \
-    curl -LO "https://github.com/protocolbuffers/protobuf/releases/download/v30.2/protoc-30.2-linux-x86_64.zip" && \
+# Install protoc
+RUN curl -LO "https://github.com/protocolbuffers/protobuf/releases/download/v30.2/protoc-30.2-linux-x86_64.zip" && \
     unzip -q protoc-30.2-linux-x86_64.zip -d /usr/local && \
     rm protoc-30.2-linux-x86_64.zip
 
@@ -40,13 +61,16 @@ RUN mips-unknown-linux-musl-ar rcs /usr/local/musl/mips-unknown-linux-musl/lib/l
 COPY mips-gcc-wrapper.sh /usr/local/bin/mips-gcc-wrapper
 RUN chmod +x /usr/local/bin/mips-gcc-wrapper
 
-# Set environment - use wrapper as linker
+# Set environment
 ENV TARGET=mips-unknown-linux-musl
 ENV CARGO_TARGET_MIPS_UNKNOWN_LINUX_MUSL_LINKER=/usr/local/bin/mips-gcc-wrapper
 ENV CC_mips_unknown_linux_musl=mips-unknown-linux-musl-gcc
 ENV AR_mips_unknown_linux_musl=mips-unknown-linux-musl-ar
 
-# Create build script that copies to local FS
+# Set pkg-config for cross-compilation
+ENV PKG_CONFIG_PATH=/usr/local/musl/mips-unknown-linux-musl/lib/pkgconfig
+ENV PKG_CONFIG_ALLOW_CROSS=1
+
 COPY build-tier3.sh /opt/build-tier3.sh
 RUN chmod +x /opt/build-tier3.sh
 
