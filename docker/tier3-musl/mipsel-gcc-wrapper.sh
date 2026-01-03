@@ -8,8 +8,37 @@
 #    We strip -Bdynamic and add -Bstatic at the end to force static linking
 # 2. Fix CRT file paths
 
-MUSL_LIB=/usr/local/musl/mipsel-unknown-linux-musl/lib
-GCC_LIB=/usr/local/musl/lib/gcc/mipsel-unknown-linux-musl/11.2.0
+# Dynamically find musl.cc soft-float toolchain paths
+MUSL_LIB=""
+GCC_LIB=""
+
+# Try musl.cc soft-float toolchain first
+if [ -d "/opt/cross/mipsel-linux-muslsf/lib" ]; then
+    MUSL_LIB="/opt/cross/mipsel-linux-muslsf/lib"
+    # Find GCC lib dir (version varies)
+    for gcc_dir in /opt/cross/lib/gcc/mipsel-linux-muslsf/*/; do
+        if [ -f "${gcc_dir}crtbegin.o" ]; then
+            GCC_LIB="${gcc_dir%/}"
+            break
+        fi
+    done
+fi
+
+# Fallback to messense-style paths
+if [ -z "$MUSL_LIB" ] || [ -z "$GCC_LIB" ]; then
+    MUSL_LIB="/usr/local/musl/mipsel-unknown-linux-musl/lib"
+    for gcc_dir in /usr/local/musl/lib/gcc/mipsel-unknown-linux-musl/*/; do
+        if [ -f "${gcc_dir}crtbegin.o" ]; then
+            GCC_LIB="${gcc_dir%/}"
+            break
+        fi
+    done
+fi
+
+# Final fallback
+if [ -z "$GCC_LIB" ]; then
+    GCC_LIB="/usr/local/musl/lib/gcc/mipsel-unknown-linux-musl/11.2.0"
+fi
 
 # Check if -static is in arguments
 is_static=0

@@ -27,9 +27,22 @@ BUILD_DIR="/tmp/nym-build"
 MUSL_PREFIX="/usr/local/musl"
 
 # Detect target from environment or compiler
-# Note: riscv64 compiler triplet is "riscv64-unknown-linux-musl" but Rust target is "riscv64gc-unknown-linux-musl"
+# Note: Different toolchains use different triplet naming conventions:
+#   - musl.cc soft-float: mipsel-linux-muslsf
+#   - messense/musl-cross: mipsel-unknown-linux-musl
+#   - Rust target: mipsel-unknown-linux-musl
 if [ -z "${TARGET:-}" ]; then
-    if command -v mipsel-unknown-linux-musl-gcc &> /dev/null; then
+    # Check for musl.cc soft-float toolchain first (preferred for MIPS)
+    if command -v mipsel-linux-muslsf-gcc &> /dev/null; then
+        TARGET="mipsel-unknown-linux-musl"
+        COMPILER_TRIPLET="mipsel-linux-muslsf"
+        MUSL_PREFIX="/opt/cross"
+    elif command -v mips-linux-muslsf-gcc &> /dev/null; then
+        TARGET="mips-unknown-linux-musl"
+        COMPILER_TRIPLET="mips-linux-muslsf"
+        MUSL_PREFIX="/opt/cross"
+    # Fall back to messense-style triplets
+    elif command -v mipsel-unknown-linux-musl-gcc &> /dev/null; then
         TARGET="mipsel-unknown-linux-musl"
         COMPILER_TRIPLET="mipsel-unknown-linux-musl"
     elif command -v mips-unknown-linux-musl-gcc &> /dev/null; then
@@ -49,6 +62,12 @@ else
     # If TARGET is set via env, derive COMPILER_TRIPLET
     if [[ "$TARGET" == "riscv64gc-unknown-linux-musl" ]]; then
         COMPILER_TRIPLET="riscv64-unknown-linux-musl"
+    elif [[ "$TARGET" == "mipsel-unknown-linux-musl" ]] && command -v mipsel-linux-muslsf-gcc &> /dev/null; then
+        COMPILER_TRIPLET="mipsel-linux-muslsf"
+        MUSL_PREFIX="/opt/cross"
+    elif [[ "$TARGET" == "mips-unknown-linux-musl" ]] && command -v mips-linux-muslsf-gcc &> /dev/null; then
+        COMPILER_TRIPLET="mips-linux-muslsf"
+        MUSL_PREFIX="/opt/cross"
     else
         COMPILER_TRIPLET="$TARGET"
     fi
@@ -83,6 +102,13 @@ DEPS_DIR="/tmp/deps-build"
 
 mkdir -p "$DEPS_DIR"
 
+# Set target-specific CFLAGS for native dependencies
+NATIVE_CFLAGS="-fPIC"
+if [[ "$TARGET" == mips* ]]; then
+    # MIPS 24Kc cores require mips32r2 ISA and have no FPU (soft-float)
+    NATIVE_CFLAGS="-fPIC -mips32r2 -msoft-float"
+fi
+
 # Build libmnl if not present
 if [ ! -f "${MUSL_PREFIX}/${COMPILER_TRIPLET}/lib/libmnl.a" ]; then
     log_info "Building libmnl ${LIBMNL_VERSION}..."
@@ -90,7 +116,7 @@ if [ ! -f "${MUSL_PREFIX}/${COMPILER_TRIPLET}/lib/libmnl.a" ]; then
     curl -fsSL "https://www.netfilter.org/projects/libmnl/files/libmnl-${LIBMNL_VERSION}.tar.bz2" -o libmnl.tar.bz2
     tar xjf libmnl.tar.bz2
     cd "libmnl-${LIBMNL_VERSION}"
-    CC="${COMPILER_TRIPLET}-gcc" CFLAGS="-fPIC" ./configure \
+    CC="${COMPILER_TRIPLET}-gcc" CFLAGS="${NATIVE_CFLAGS}" ./configure \
         --host="${COMPILER_TRIPLET}" \
         --prefix="${MUSL_PREFIX}/${COMPILER_TRIPLET}" \
         --enable-static --disable-shared --quiet
@@ -109,7 +135,7 @@ if [ ! -f "${MUSL_PREFIX}/${COMPILER_TRIPLET}/lib/libnftnl.a" ]; then
     tar xjf libnftnl.tar.bz2
     cd "libnftnl-${LIBNFTNL_VERSION}"
     PKG_CONFIG_PATH="${MUSL_PREFIX}/${COMPILER_TRIPLET}/lib/pkgconfig" \
-    CC="${COMPILER_TRIPLET}-gcc" CFLAGS="-fPIC" ./configure \
+    CC="${COMPILER_TRIPLET}-gcc" CFLAGS="${NATIVE_CFLAGS}" ./configure \
         --host="${COMPILER_TRIPLET}" \
         --prefix="${MUSL_PREFIX}/${COMPILER_TRIPLET}" \
         --enable-static --disable-shared --quiet
@@ -193,7 +219,17 @@ fi
 log_info "Using musl lib dir: ${MUSL_LIB_DIR}"
 
 # GCC lib directory (contains crtbegin.o, crtend.o, libgcc.a)
-GCC_LIB_DIR="${MUSL_PREFIX}/lib/gcc/${COMPILER_TRIPLET}/11.2.0"
+# Try multiple GCC versions - musl.cc uses 14.x, messense uses 11.x
+GCC_LIB_DIR=""
+for gcc_ver in 14.2.0 14.1.0 13.2.0 11.2.0; do
+    if [ -d "${MUSL_PREFIX}/lib/gcc/${COMPILER_TRIPLET}/${gcc_ver}" ]; then
+        GCC_LIB_DIR="${MUSL_PREFIX}/lib/gcc/${COMPILER_TRIPLET}/${gcc_ver}"
+        break
+    fi
+done
+if [ -z "$GCC_LIB_DIR" ]; then
+    GCC_LIB_DIR="${MUSL_PREFIX}/lib/gcc/${COMPILER_TRIPLET}/11.2.0"
+fi
 log_info "Using GCC lib dir: ${GCC_LIB_DIR}"
 
 # Set linker flags to find C runtime files
@@ -233,7 +269,7 @@ export CARGO_PROFILE_RELEASE_PANIC="abort"
 # MIPS-specific flags
 if [[ "$TARGET" == mips* ]]; then
     log_info "Setting MIPS-specific compiler flags..."
-    export CFLAGS_${TARGET_UNDERSCORE}="-msoft-float"
+    export CFLAGS_${TARGET_UNDERSCORE}="-mips32r2 -msoft-float"
     # Use GCC wrapper to fix CRT paths for +crt-static
     if [[ "$TARGET" == "mipsel-unknown-linux-musl" ]]; then
         export CARGO_TARGET_MIPSEL_UNKNOWN_LINUX_MUSL_LINKER="/usr/local/bin/mipsel-gcc-wrapper"
@@ -241,13 +277,14 @@ if [[ "$TARGET" == mips* ]]; then
         export CARGO_TARGET_MIPS_UNKNOWN_LINUX_MUSL_LINKER="/usr/local/bin/mips-gcc-wrapper"
     fi
     # +crt-static: statically link C runtime
-    # -msoft-float: use software floating point
+    # +mips32r2: target MIPS32 Release 2 ISA (required for 24Kc cores)
+    # +soft-float: use software floating point (24Kc cores have no FPU)
     # -static: produce static binary
     # -static-libgcc: link libgcc statically
     # libgcc_eh needs pthread symbols which are in musl's libc.a
     # Use --start-group to resolve circular dependency: libgcc_eh -> libc (pthread)
     # Note: GNU ld ignores floating point ABI mismatch (just warns), unlike lld which errors
-    export RUSTFLAGS="${RUSTFLAGS} -C target-feature=+crt-static -C link-arg=-msoft-float -C link-arg=-static -C link-arg=-static-libgcc"
+    export RUSTFLAGS="${RUSTFLAGS} -C target-feature=+crt-static,+mips32r2,+soft-float -C link-arg=-msoft-float -C link-arg=-static -C link-arg=-static-libgcc"
     export RUSTFLAGS="${RUSTFLAGS} -C link-arg=-Wl,--start-group -C link-arg=-lgcc_eh -C link-arg=-lc -C link-arg=-Wl,--end-group"
 fi
 

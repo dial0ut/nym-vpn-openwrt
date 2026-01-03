@@ -1,19 +1,56 @@
 # Custom Docker image for MIPS Little-Endian musl cross-compilation
-# See Dockerfile.mips for detailed documentation on the problem and solution
+# Uses soft-float toolchain from musl.cc (the messense image has hard-float musl)
+#
+# The MIPS 24Kc cores (used in mipsel_24kc OpenWrt devices) have NO FPU,
+# so we MUST use soft-float for everything: toolchain, musl libc, and Rust code.
 
-FROM messense/rust-musl-cross:mipsel-musl
+FROM debian:bookworm-slim
 
 ARG TARGET=mipsel-unknown-linux-musl
+ARG TOOLCHAIN_URL=https://musl.cc/mipsel-linux-muslsf-cross.tgz
 
-# Install latest Rust (nightly required for build-std)
-RUN rustup self uninstall -y 2>/dev/null || true && \
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain nightly && \
+# Install base dependencies
+RUN apt-get update -qq && apt-get install -y -qq \
+    build-essential \
+    curl \
+    wget \
+    unzip \
+    pkg-config \
+    rsync \
+    ca-certificates \
+    xz-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Download and install soft-float mipsel toolchain from musl.cc
+RUN mkdir -p /opt/cross && \
+    curl -fsSL "${TOOLCHAIN_URL}" | tar -xzf - -C /opt/cross --strip-components=1
+
+# Add toolchain to PATH
+ENV PATH="/opt/cross/bin:${PATH}"
+
+# Create compatibility symlinks (Rust expects mipsel-unknown-linux-musl-* names)
+RUN ln -sf /opt/cross/bin/mipsel-linux-muslsf-gcc /opt/cross/bin/mipsel-unknown-linux-musl-gcc && \
+    ln -sf /opt/cross/bin/mipsel-linux-muslsf-g++ /opt/cross/bin/mipsel-unknown-linux-musl-g++ && \
+    ln -sf /opt/cross/bin/mipsel-linux-muslsf-ar /opt/cross/bin/mipsel-unknown-linux-musl-ar && \
+    ln -sf /opt/cross/bin/mipsel-linux-muslsf-strip /opt/cross/bin/mipsel-unknown-linux-musl-strip && \
+    ln -sf /opt/cross/bin/mipsel-linux-muslsf-ranlib /opt/cross/bin/mipsel-unknown-linux-musl-ranlib && \
+    ln -sf /opt/cross/bin/mipsel-linux-muslsf-ld /opt/cross/bin/mipsel-unknown-linux-musl-ld && \
+    ln -sf /opt/cross/bin/mipsel-linux-muslsf-objcopy /opt/cross/bin/mipsel-unknown-linux-musl-objcopy && \
+    ln -sf /opt/cross/bin/mipsel-linux-muslsf-objdump /opt/cross/bin/mipsel-unknown-linux-musl-objdump && \
+    ln -sf /opt/cross/bin/mipsel-linux-muslsf-readelf /opt/cross/bin/mipsel-unknown-linux-musl-readelf
+
+# Create musl directory structure that matches messense layout (for compatibility)
+RUN mkdir -p /usr/local/musl/mipsel-unknown-linux-musl && \
+    ln -sf /opt/cross/mipsel-linux-muslsf/lib /usr/local/musl/mipsel-unknown-linux-musl/lib && \
+    ln -sf /opt/cross/mipsel-linux-muslsf/include /usr/local/musl/mipsel-unknown-linux-musl/include
+
+# Install Rust (nightly required for build-std)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain nightly && \
     . "$HOME/.cargo/env" && \
     rustup component add rust-src
 
-# Install protoc and rsync
-RUN apt-get update -qq && apt-get install -y -qq unzip pkg-config curl wget rsync && \
-    curl -LO "https://github.com/protocolbuffers/protobuf/releases/download/v30.2/protoc-30.2-linux-x86_64.zip" && \
+# Install protoc
+RUN curl -LO "https://github.com/protocolbuffers/protobuf/releases/download/v30.2/protoc-30.2-linux-x86_64.zip" && \
     unzip -q protoc-30.2-linux-x86_64.zip -d /usr/local && \
     rm protoc-30.2-linux-x86_64.zip
 
@@ -24,11 +61,15 @@ RUN mipsel-unknown-linux-musl-ar rcs /usr/local/musl/mipsel-unknown-linux-musl/l
 COPY mipsel-gcc-wrapper.sh /usr/local/bin/mipsel-gcc-wrapper
 RUN chmod +x /usr/local/bin/mipsel-gcc-wrapper
 
-# Set environment - use wrapper as linker
+# Set environment
 ENV TARGET=mipsel-unknown-linux-musl
 ENV CARGO_TARGET_MIPSEL_UNKNOWN_LINUX_MUSL_LINKER=/usr/local/bin/mipsel-gcc-wrapper
 ENV CC_mipsel_unknown_linux_musl=mipsel-unknown-linux-musl-gcc
 ENV AR_mipsel_unknown_linux_musl=mipsel-unknown-linux-musl-ar
+
+# Set pkg-config for cross-compilation
+ENV PKG_CONFIG_PATH=/usr/local/musl/mipsel-unknown-linux-musl/lib/pkgconfig
+ENV PKG_CONFIG_ALLOW_CROSS=1
 
 COPY build-tier3.sh /opt/build-tier3.sh
 RUN chmod +x /opt/build-tier3.sh
