@@ -228,7 +228,7 @@ impl Fw3Firewall {
 
     fn add_dhcp_rules(&self, rules: &mut String, is_ipv6: bool) {
         if is_ipv6 {
-            // DHCPv6 client (port 546) -> server (port 547)
+            // DHCPv6: router as client (getting WAN IPv6)
             writeln!(
                 rules,
                 "-A {} -p udp -s fe80::/10 --sport 546 --dport 547 -j ACCEPT",
@@ -237,6 +237,17 @@ impl Fw3Firewall {
             writeln!(
                 rules,
                 "-A {} -p udp -s fe80::/10 --sport 547 --dport 546 -j ACCEPT",
+                NYM_INPUT
+            ).unwrap();
+            // DHCPv6: router as server (serving LAN clients)
+            writeln!(
+                rules,
+                "-A {} -p udp --sport 547 --dport 546 -j ACCEPT",
+                NYM_OUTPUT
+            ).unwrap();
+            writeln!(
+                rules,
+                "-A {} -p udp --dport 547 -j ACCEPT",
                 NYM_INPUT
             ).unwrap();
         } else {

@@ -88,8 +88,15 @@ impl Fw4Firewall {
         // Base rules
         writeln!(rules, "        iifname \"lo\" accept").unwrap();
         writeln!(rules, "        ct state established,related accept").unwrap();
+        // DHCP: router as client (receiving WAN IP)
         writeln!(rules, "        udp sport 67 udp dport 68 accept").unwrap();
+        // DHCP: router as server (serving LAN clients)
+        // Must allow from any source since DHCP DISCOVER comes from 0.0.0.0
+        writeln!(rules, "        udp dport 67 accept").unwrap();
+        // DHCPv6: router as client
         writeln!(rules, "        udp sport 547 udp dport 546 accept").unwrap();
+        // DHCPv6: router as server
+        writeln!(rules, "        udp dport 547 accept").unwrap();
         writeln!(rules, "        icmpv6 type {{ nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert, nd-redirect }} accept").unwrap();
         writeln!(rules).unwrap();
 
@@ -111,8 +118,14 @@ impl Fw4Firewall {
         // Base rules
         writeln!(rules, "        oifname \"lo\" accept").unwrap();
         writeln!(rules, "        ct state established,related accept").unwrap();
+        // DHCP: router as client (requesting WAN IP)
         writeln!(rules, "        udp sport 68 udp dport 67 accept").unwrap();
+        // DHCP: router as server (responding to LAN clients)
+        writeln!(rules, "        udp sport 67 udp dport 68 accept").unwrap();
+        // DHCPv6: router as client
         writeln!(rules, "        udp sport 546 udp dport 547 accept").unwrap();
+        // DHCPv6: router as server
+        writeln!(rules, "        udp sport 547 udp dport 546 accept").unwrap();
         writeln!(rules, "        icmpv6 type {{ nd-router-solicit, nd-neighbor-solicit, nd-neighbor-advert }} accept").unwrap();
         writeln!(rules).unwrap();
 
