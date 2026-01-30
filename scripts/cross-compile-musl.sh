@@ -121,9 +121,10 @@ install_system_deps() {
         curl -LO "$PB_REL/download/v30.2/protoc-30.2-linux-x86_64.zip"
         unzip -q protoc-30.2-linux-x86_64.zip -d "$HOME/.local"
         rm protoc-30.2-linux-x86_64.zip
-        export PATH="$PATH:$HOME/.local/bin"
-        log_info "protoc version: $(protoc --version)"
     fi
+    # Always ensure protoc is in PATH (may have been installed in previous run)
+    export PATH="$PATH:$HOME/.local/bin"
+    log_info "protoc version: $(protoc --version)"
 }
 
 compile_libmnl() {
@@ -301,6 +302,17 @@ build_nym_vpnd() {
     # i686 (32-bit x86) targets
     if [[ "$TARGET" == "i686-unknown-linux-musl" ]]; then
         log_info "Configuring for i686 (32-bit x86) target..."
+        export CC_${TARGET_UNDERSCORE}="${TARGET}-gcc"
+        export AR_${TARGET_UNDERSCORE}="${TARGET}-ar"
+    fi
+
+    # aarch64 targets need outline atomics disabled for static linking
+    # GCC 10+ enables outline atomics by default, which calls external __aarch64_ldadd4_sync etc.
+    # These are in libgcc but not linked for static musl builds (affects dbus-sys)
+    if [[ "$TARGET" == "aarch64-unknown-linux-musl" ]]; then
+        log_info "Disabling outline atomics for aarch64 static linking..."
+        export CFLAGS="-mno-outline-atomics"
+        export CFLAGS_${TARGET_UNDERSCORE}="-mno-outline-atomics"
         export CC_${TARGET_UNDERSCORE}="${TARGET}-gcc"
         export AR_${TARGET_UNDERSCORE}="${TARGET}-ar"
     fi

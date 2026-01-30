@@ -64,6 +64,15 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Setup swap for LTO linking
+        run: |
+          sudo fallocate -l 8G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          echo "Swap enabled:"
+          free -h
+
       - name: Set up Docker Buildx
         if: matrix.custom
         uses: docker/setup-buildx-action@v3
