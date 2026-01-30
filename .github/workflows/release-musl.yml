@@ -66,10 +66,12 @@ jobs:
 
       - name: Setup swap for LTO linking
         run: |
-          sudo fallocate -l 8G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
+          # Use a unique swapfile name to avoid conflicts
+          SWAPFILE="/swapfile-nym-$$"
+          sudo fallocate -l 8G "$SWAPFILE"
+          sudo chmod 600 "$SWAPFILE"
+          sudo mkswap "$SWAPFILE"
+          sudo swapon "$SWAPFILE"
           echo "Swap enabled:"
           free -h
 
