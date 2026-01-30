@@ -30,6 +30,8 @@ pub struct InterfaceConfig {
     pub listen_port: Option<u16>,
     pub mtu: u16,
     pub fwmark: Option<u32>,
+    /// Amnezia-WireGuard obfuscation config (only applied if backend supports it)
+    pub amnezia_config: Option<crate::amnezia::AmneziaConfig>,
 }
 
 #[derive(Debug, Clone)]
@@ -42,12 +44,30 @@ pub struct Tunnel {
     handle: Handle,
     interface_name: String,
     interface_index: u32,
+    /// The detected WireGuard backend type
+    backend: crate::WgBackend,
 }
 
 impl Tunnel {
     pub async fn start(interface_name: impl Into<String>, config: Config) -> Result<Self> {
         let interface_name = interface_name.into();
         let mut handle = Handle::connect().await?;
+        let backend = handle.backend();
+
+        // Log Amnezia status
+        if let Some(ref azwg) = config.interface.amnezia_config {
+            if !azwg.is_off() {
+                if backend.supports_amnezia() {
+                    log::info!("Amnezia-WireGuard obfuscation enabled for {}", interface_name);
+                } else {
+                    log::warn!(
+                        "Amnezia obfuscation requested but only standard WireGuard available. \
+                         Continuing without obfuscation for {}.",
+                        interface_name
+                    );
+                }
+            }
+        }
 
         // Create the WireGuard interface
         let interface_index = handle.create_device(interface_name.clone(), config.interface.mtu.into()).await?;
@@ -65,6 +85,7 @@ impl Tunnel {
             handle.wg_handle.message_type,
             interface_name.clone(),
             &config,
+            backend,
         )?;
 
         log::debug!("Setting WireGuard config for {}: {} peers, {} allowed IPs on first peer",
@@ -87,13 +108,25 @@ impl Tunnel {
             handle,
             interface_name,
             interface_index,
+            backend,
         })
+    }
+
+    /// Returns the detected WireGuard backend type
+    pub fn backend(&self) -> crate::WgBackend {
+        self.backend
+    }
+
+    /// Returns true if Amnezia obfuscation is supported by this tunnel's backend
+    pub fn supports_amnezia(&self) -> bool {
+        self.backend.supports_amnezia()
     }
 
     fn build_device_config(
         message_type: u16,
         interface_name: String,
         config: &Config,
+        backend: crate::WgBackend,
     ) -> Result<DeviceMessage> {
         let mut nlas = vec![
             DeviceNla::IfName(
@@ -112,6 +145,16 @@ impl Tunnel {
         // Add fwmark if specified
         if let Some(fwmark) = config.interface.fwmark {
             nlas.push(DeviceNla::Fwmark(fwmark));
+        }
+
+        // Add Amnezia attributes if backend supports it and config is provided
+        if backend.supports_amnezia() {
+            if let Some(ref azwg) = config.interface.amnezia_config {
+                if !azwg.is_off() {
+                    log::debug!("Adding Amnezia netlink attributes: {:?}", azwg);
+                    nlas.extend(azwg.to_device_nlas());
+                }
+            }
         }
 
         // Add peers
@@ -288,6 +331,7 @@ mod tests {
                 listen_port: Some(51820),
                 mtu: 1420,
                 fwmark: None,
+                amnezia_config: None,
             },
             peers: vec![PeerConfig {
                 public_key: [2u8; 32], // Dummy key for testing
@@ -301,11 +345,46 @@ mod tests {
         match tunnel {
             Ok(tunnel) => {
                 eprintln!("Created tunnel: {}", tunnel.interface_name());
+                eprintln!("Backend: {:?}, supports_amnezia: {}", tunnel.backend(), tunnel.supports_amnezia());
                 tunnel.stop().await.expect("Failed to stop tunnel");
                 eprintln!("Stopped tunnel successfully");
             }
             Err(e) => {
                 eprintln!("Failed to create tunnel (expected if not root): {}", e);
+            }
+        }
+    }
+
+    #[tokio::test]
+    #[ignore] // Only runs on systems with kmod-amneziawg and root privileges
+    async fn test_tunnel_with_amnezia() {
+        let config = Config {
+            interface: InterfaceConfig {
+                private_key: [1u8; 32],
+                addresses: vec!["10.100.0.2/32".parse().unwrap()],
+                listen_port: Some(51821),
+                mtu: 1420,
+                fwmark: None,
+                amnezia_config: Some(crate::amnezia::AmneziaConfig::BASE),
+            },
+            peers: vec![PeerConfig {
+                public_key: [2u8; 32],
+                endpoint: "192.0.2.1:51820".parse().unwrap(),
+                allowed_ips: vec!["0.0.0.0/0".parse().unwrap()],
+                persistent_keepalive: Some(25),
+            }],
+        };
+
+        let tunnel = Tunnel::start("wg-test-az", config).await;
+        match tunnel {
+            Ok(tunnel) => {
+                eprintln!("Created Amnezia tunnel: {}", tunnel.interface_name());
+                eprintln!("Backend: {:?}, supports_amnezia: {}", tunnel.backend(), tunnel.supports_amnezia());
+                tunnel.stop().await.expect("Failed to stop tunnel");
+                eprintln!("Stopped Amnezia tunnel successfully");
+            }
+            Err(e) => {
+                eprintln!("Failed to create Amnezia tunnel (expected if not root or no amneziawg): {}", e);
             }
         }
     }

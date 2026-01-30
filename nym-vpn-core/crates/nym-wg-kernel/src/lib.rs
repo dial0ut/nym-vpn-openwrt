@@ -12,10 +12,12 @@
 use netlink_packet_core::DecodeError;
 use thiserror::Error;
 
+pub mod amnezia;
 mod nl_message;
 mod wg_message;
 pub mod tunnel;
 
+pub use amnezia::AmneziaConfig;
 pub use nl_message::{ControlNla, NetlinkControlMessage};
 pub use wg_message::{AllowedIpMessage, DeviceMessage, DeviceNla, PeerMessage, PeerNla};
 
@@ -72,6 +74,22 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Detected WireGuard kernel backend
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WgBackend {
+    /// Standard WireGuard kernel module (kmod-wireguard)
+    Standard,
+    /// Amnezia-WireGuard kernel module with obfuscation support (kmod-amneziawg)
+    Amnezia,
+}
+
+impl WgBackend {
+    /// Returns true if this backend supports Amnezia obfuscation
+    pub fn supports_amnezia(&self) -> bool {
+        matches!(self, WgBackend::Amnezia)
+    }
+}
+
 /// Check if kernel WireGuard is available on this system
 pub async fn is_available() -> bool {
     Handle::connect().await.is_ok()
@@ -86,18 +104,28 @@ pub struct Handle {
     route_abort_handle: futures::future::AbortHandle,
 }
 
+/// Result of WireGuard family detection
+struct WgFamilyDetection {
+    message_type: u16,
+    backend: WgBackend,
+}
+
 impl Handle {
     /// Connect to netlink and detect WireGuard kernel module
+    ///
+    /// Automatically detects whether Amnezia-WireGuard or standard WireGuard
+    /// kernel module is available, preferring Amnezia when present.
     pub async fn connect() -> Result<Self> {
         use futures::future::abortable;
         use netlink_proto::sys::protocols::NETLINK_GENERIC;
 
-        let message_type = Self::get_wireguard_message_type().await?;
+        let detection = Self::detect_wireguard_family().await?;
         let (conn, wireguard_connection, _messages) =
             netlink_proto::new_connection(NETLINK_GENERIC).map_err(Error::NetlinkSocket)?;
         let wg_handle = WireguardConnection {
-            message_type,
+            message_type: detection.message_type,
             connection: wireguard_connection,
+            backend: detection.backend,
         };
         let (abortable_connection, wg_abort_handle) = abortable(conn);
         tokio::spawn(abortable_connection);
@@ -115,7 +143,16 @@ impl Handle {
         })
     }
 
-    async fn get_wireguard_message_type() -> Result<u16> {
+    /// Returns the detected WireGuard backend type
+    pub fn backend(&self) -> WgBackend {
+        self.wg_handle.backend
+    }
+
+    /// Detect available WireGuard kernel module
+    ///
+    /// Tries Amnezia-WireGuard first (available on OpenWrt 23.05+), falls back to
+    /// standard WireGuard if not available.
+    async fn detect_wireguard_family() -> Result<WgFamilyDetection> {
         use futures::future::abortable;
         use futures::StreamExt;
         use netlink_packet_core::{NetlinkMessage, NetlinkPayload, NLM_F_ACK, NLM_F_REQUEST};
@@ -126,27 +163,47 @@ impl Handle {
         let (conn, abort_handle) = abortable(conn);
         tokio::spawn(conn);
 
-        let result = async move {
-            let family_name = Box::from(c"wireguard");
-            let mut message: NetlinkMessage<NetlinkControlMessage> =
-                NetlinkControlMessage::get_netlink_family_id(family_name)
-                    .map_err(Error::NetlinkControlMessage)?
-                    .into();
+        let result = async {
+            // Helper to try resolving a family ID
+            async fn try_get_family_id(
+                handle: &netlink_proto::ConnectionHandle<NetlinkControlMessage>,
+                family_name: &std::ffi::CStr,
+            ) -> Option<u16> {
+                let mut message: NetlinkMessage<NetlinkControlMessage> =
+                    NetlinkControlMessage::get_netlink_family_id(Box::from(family_name))
+                        .ok()?
+                        .into();
+                message.header.flags = NLM_F_REQUEST | NLM_F_ACK;
 
-            message.header.flags = NLM_F_REQUEST | NLM_F_ACK;
+                let mut req = handle.request(message, SocketAddr::new(0, 0)).ok()?;
+                let response = req.next().await?;
 
-            let mut req = handle
-                .request(message, SocketAddr::new(0, 0))
-                .map_err(Error::NetlinkRequest)?;
-            let response = req.next().await;
-            if let Some(response) = response
-                && let NetlinkPayload::InnerMessage(msg) = response.payload
-            {
-                for nla in msg.nlas.into_iter() {
-                    if let ControlNla::FamilyId(id) = nla {
-                        return Ok(id);
+                if let NetlinkPayload::InnerMessage(msg) = response.payload {
+                    for nla in msg.nlas.into_iter() {
+                        if let ControlNla::FamilyId(id) = nla {
+                            return Some(id);
+                        }
                     }
                 }
+                None
+            }
+
+            // Try Amnezia-WireGuard first (available on OpenWrt 23.05+)
+            if let Some(id) = try_get_family_id(&handle, c"amneziawg").await {
+                log::info!("Detected Amnezia-WireGuard kernel module (family_id={})", id);
+                return Ok(WgFamilyDetection {
+                    message_type: id,
+                    backend: WgBackend::Amnezia,
+                });
+            }
+
+            // Fall back to standard WireGuard
+            if let Some(id) = try_get_family_id(&handle, c"wireguard").await {
+                log::info!("Detected standard WireGuard kernel module (family_id={})", id);
+                return Ok(WgFamilyDetection {
+                    message_type: id,
+                    backend: WgBackend::Standard,
+                });
             }
 
             Err(Error::WireguardNetlinkInterfaceUnavailable)
@@ -163,10 +220,24 @@ impl Handle {
             NLM_F_ACK, NLM_F_CREATE, NLM_F_MATCH, NLM_F_REPLACE,
             NLM_F_REQUEST,
         };
-        use rtnetlink::LinkMessageBuilder;
+        use netlink_packet_route::link::InfoKind;
+        use rtnetlink::{LinkMessageBuilder, LinkUnspec};
 
-        // Create the WireGuard link using rtnetlink
-        let message = LinkMessageBuilder::<rtnetlink::LinkWireguard>::new(&name)
+        // Choose the correct link kind based on detected backend
+        let info_kind = match self.wg_handle.backend {
+            WgBackend::Amnezia => {
+                log::debug!("Creating device '{}' with link kind 'amneziawg'", name);
+                InfoKind::Other("amneziawg".to_string())
+            }
+            WgBackend::Standard => {
+                log::debug!("Creating device '{}' with link kind 'wireguard'", name);
+                InfoKind::Wireguard
+            }
+        };
+
+        // Create the WireGuard link using rtnetlink with the appropriate kind
+        let message = LinkMessageBuilder::<LinkUnspec>::new_with_info_kind(info_kind)
+            .name(name.clone())
             .up() // Set link to UP (IFF_UP)
             .mtu(mtu)
             .build();
@@ -322,6 +393,8 @@ impl Drop for Handle {
 pub struct WireguardConnection {
     connection: netlink_proto::ConnectionHandle<DeviceMessage>,
     message_type: u16,
+    /// The detected backend type (standard WireGuard or Amnezia)
+    pub backend: WgBackend,
 }
 
 impl WireguardConnection {

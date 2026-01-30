@@ -265,7 +265,7 @@ jobs:
           Installed-Size: ${INSTALLED_SIZE}
           Section: net
           Priority: optional
-          Depends: libc, wireguard-tools, kmod-wireguard, kmod-tun, luci-base, rpcd
+          Depends: libc, kmod-tun, luci-base, rpcd
           Description: NymVPN for OpenWrt
            Privacy-focused VPN using the Nym mixnet. Includes daemon, CLI, and LuCI web interface.
           EOF
@@ -273,12 +273,91 @@ jobs:
           # === Post-install script ===
           cat > ipk/control/postinst << 'POSTINST'
           #!/bin/sh
-          # Create TUN device if it doesn't exist
-          mkdir -p /dev/net
-          [ ! -c /dev/net/tun ] && mknod /dev/net/tun c 10 200
-          chmod 600 /dev/net/tun
+          # Source OpenWrt release info
+          if [ -f /etc/openwrt_release ]; then
+              . /etc/openwrt_release
+              MAJOR_VERSION="${DISTRIB_RELEASE%%.*}"
+          else
+              MAJOR_VERSION="0"
+          fi
 
-          # Enable and start the service
+          # Install Amnezia-WireGuard from community repo (OpenWrt 23.05+)
+          # Based on: https://github.com/Slava-Shchipunov/awg-openwrt
+          install_amneziawg() {
+              echo "Installing Amnezia-WireGuard for OpenWrt $DISTRIB_RELEASE..."
+
+              # Get system info for package selection
+              TARGET=$(ubus call system board | jsonfilter -e '@.release.target' | cut -d '/' -f 1)
+              SUBTARGET=$(ubus call system board | jsonfilter -e '@.release.target' | cut -d '/' -f 2)
+              PKGARCH=$(opkg print-architecture | awk 'NR==3 {print $2}')
+
+              if [ -z "$TARGET" ] || [ -z "$SUBTARGET" ] || [ -z "$PKGARCH" ]; then
+                  echo "Failed to detect system architecture"
+                  return 1
+              fi
+
+              # Update package lists and install kernel dependencies
+              echo "Installing kernel dependencies..."
+              opkg update
+              opkg install kmod-udptunnel4 kmod-udptunnel6 \
+                  kmod-crypto-lib-chacha20poly1305 kmod-crypto-lib-curve25519 || {
+                  echo "Failed to install kernel dependencies"
+                  return 1
+              }
+
+              BASE_URL="https://github.com/Slava-Shchipunov/awg-openwrt/releases/download"
+              AWG_DIR="/tmp/amneziawg"
+              mkdir -p "$AWG_DIR"
+
+              # Download and install packages
+              for pkg in kmod-amneziawg amneziawg-tools; do
+                  FILENAME="${pkg}_v${DISTRIB_RELEASE}_${PKGARCH}_${TARGET}_${SUBTARGET}.ipk"
+                  URL="${BASE_URL}/v${DISTRIB_RELEASE}/${FILENAME}"
+                  echo "Downloading $FILENAME..."
+                  if wget -q -O "$AWG_DIR/$FILENAME" "$URL"; then
+                      opkg install "$AWG_DIR/$FILENAME" || {
+                          echo "Failed to install $pkg"
+                          rm -rf "$AWG_DIR"
+                          return 1
+                      }
+                  else
+                      echo "Failed to download $pkg"
+                      rm -rf "$AWG_DIR"
+                      return 1
+                  fi
+              done
+
+              rm -rf "$AWG_DIR"
+              echo "Amnezia-WireGuard installed successfully"
+              return 0
+          }
+
+          # Install appropriate WireGuard kernel module
+          install_wireguard() {
+              if [ "$MAJOR_VERSION" -ge 23 ] 2>/dev/null; then
+                  # OpenWrt 23.05+: Try Amnezia-WireGuard first
+                  if install_amneziawg; then
+                      return 0
+                  fi
+                  echo "Amnezia-WireGuard unavailable, falling back to standard WireGuard..."
+              fi
+              # Fallback to standard WireGuard
+              opkg update && opkg install kmod-wireguard wireguard-tools
+          }
+
+          # Only install on first install, not upgrades
+          if [ "$PKG_UPGRADE" != "1" ]; then
+              install_wireguard
+          fi
+
+          # Create TUN device if needed
+          [ -e /dev/net/tun ] || {
+              mkdir -p /dev/net
+              mknod /dev/net/tun c 10 200
+              chmod 0666 /dev/net/tun
+          }
+
+          # Enable and start service
           /etc/init.d/nym-vpnd enable
           /etc/init.d/nym-vpnd start
 
@@ -339,6 +418,10 @@ jobs:
 
           # Clean up all nym-vpn data and config files
           rm -rf /var/lib/nym-vpn 2>/dev/null
+
+          # Unload kernel modules if no longer needed
+          rmmod amneziawg 2>/dev/null || true
+          rmmod wireguard 2>/dev/null || true
 
           exit 0
           PRERM

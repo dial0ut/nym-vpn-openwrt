@@ -42,6 +42,17 @@ mod constants {
     pub const WGDEVICE_A_FWMARK: u16 = 7;
     pub const WGDEVICE_A_PEERS: u16 = 8;
 
+    // Amnezia-WireGuard device attributes (kmod-amneziawg only, indices 9-17)
+    pub const WGDEVICE_A_JC: u16 = 9;      // Junk packet count
+    pub const WGDEVICE_A_JMIN: u16 = 10;   // Junk packet min size
+    pub const WGDEVICE_A_JMAX: u16 = 11;   // Junk packet max size
+    pub const WGDEVICE_A_S1: u16 = 12;     // Init packet junk size
+    pub const WGDEVICE_A_S2: u16 = 13;     // Response packet junk size
+    pub const WGDEVICE_A_H1: u16 = 14;     // Init packet magic header
+    pub const WGDEVICE_A_H2: u16 = 15;     // Response packet magic header
+    pub const WGDEVICE_A_H3: u16 = 16;     // Under load packet magic header
+    pub const WGDEVICE_A_H4: u16 = 17;     // Transport packet magic header
+
     // wgpeer_flag
     pub const WGPEER_F_REMOVE_ME: u32 = 1 << 0;
     pub const WGPEER_F_REPLACE_ALLOWEDIPS: u32 = 1 << 1;
@@ -167,6 +178,25 @@ pub enum DeviceNla {
     ListenPort(u16),
     Fwmark(u32),
     Peers(Vec<PeerMessage>),
+    // Amnezia-WireGuard attributes (only valid with kmod-amneziawg)
+    /// Jc - Junk packet count (0-128)
+    Jc(u32),
+    /// Jmin - Minimum junk packet size
+    Jmin(u32),
+    /// Jmax - Maximum junk packet size
+    Jmax(u32),
+    /// S1 - Init packet junk size
+    S1(u32),
+    /// S2 - Response packet junk size
+    S2(u32),
+    /// H1 - Init packet magic header
+    H1(i32),
+    /// H2 - Response packet magic header
+    H2(i32),
+    /// H3 - Under load packet magic header
+    H3(i32),
+    /// H4 - Transport packet magic header
+    H4(i32),
     Unspec(Vec<u8>),
 }
 
@@ -179,6 +209,10 @@ impl Nla for DeviceNla {
             PrivateKey(key) | PublicKey(key) => key.len(),
             ListenPort(_) => 2,
             Peers(peers) => peers.as_slice().buffer_len(),
+            // Amnezia u16 attributes (kernel expects 2 bytes)
+            Jc(_) | Jmin(_) | Jmax(_) | S1(_) | S2(_) => 2,
+            // Amnezia i32 attributes (kernel expects 4 bytes)
+            H1(_) | H2(_) | H3(_) | H4(_) => 4,
             Unspec(payload) => payload.len(),
         }
     }
@@ -194,6 +228,16 @@ impl Nla for DeviceNla {
             ListenPort(_) => WGDEVICE_A_LISTEN_PORT,
             Fwmark(_) => WGDEVICE_A_FWMARK,
             Peers(_) => WGDEVICE_A_PEERS | NLA_F_NESTED,
+            // Amnezia attributes
+            Jc(_) => WGDEVICE_A_JC,
+            Jmin(_) => WGDEVICE_A_JMIN,
+            Jmax(_) => WGDEVICE_A_JMAX,
+            S1(_) => WGDEVICE_A_S1,
+            S2(_) => WGDEVICE_A_S2,
+            H1(_) => WGDEVICE_A_H1,
+            H2(_) => WGDEVICE_A_H2,
+            H3(_) => WGDEVICE_A_H3,
+            H4(_) => WGDEVICE_A_H4,
             Unspec(_) => WGDEVICE_A_UNSPEC,
         }
     }
@@ -214,6 +258,14 @@ impl Nla for DeviceNla {
             }
             ListenPort(value) => NativeEndian::write_u16(buffer, *value),
             Peers(peers) => peers.as_slice().emit(buffer),
+            // Amnezia u16 attributes (kernel expects 2 bytes)
+            Jc(v) | Jmin(v) | Jmax(v) | S1(v) | S2(v) => {
+                NativeEndian::write_u16(buffer, *v as u16)
+            }
+            // Amnezia i32 attributes
+            H1(v) | H2(v) | H3(v) | H4(v) => {
+                NativeEndian::write_i32(buffer, *v)
+            }
             Unspec(payload) => {
                 buffer[..payload.len()].copy_from_slice(payload);
             }
@@ -265,6 +317,35 @@ impl<'a> Parseable<NlaBuffer<&'a [u8]>> for DeviceNla {
                     peers.push(PeerMessage::parse(&peer_buf)?);
                 }
                 DeviceNla::Peers(peers)
+            }
+            // Amnezia u16 attributes (kernel returns these as u16, not u32)
+            WGDEVICE_A_JC => {
+                DeviceNla::Jc(netlink_packet_core::parse_u16(payload).map_err(|_| DecodeError::from("Invalid JC"))? as u32)
+            }
+            WGDEVICE_A_JMIN => {
+                DeviceNla::Jmin(netlink_packet_core::parse_u16(payload).map_err(|_| DecodeError::from("Invalid JMIN"))? as u32)
+            }
+            WGDEVICE_A_JMAX => {
+                DeviceNla::Jmax(netlink_packet_core::parse_u16(payload).map_err(|_| DecodeError::from("Invalid JMAX"))? as u32)
+            }
+            WGDEVICE_A_S1 => {
+                DeviceNla::S1(netlink_packet_core::parse_u16(payload).map_err(|_| DecodeError::from("Invalid S1"))? as u32)
+            }
+            WGDEVICE_A_S2 => {
+                DeviceNla::S2(netlink_packet_core::parse_u16(payload).map_err(|_| DecodeError::from("Invalid S2"))? as u32)
+            }
+            // Amnezia i32 attributes
+            WGDEVICE_A_H1 => {
+                DeviceNla::H1(NativeEndian::read_i32(payload))
+            }
+            WGDEVICE_A_H2 => {
+                DeviceNla::H2(NativeEndian::read_i32(payload))
+            }
+            WGDEVICE_A_H3 => {
+                DeviceNla::H3(NativeEndian::read_i32(payload))
+            }
+            WGDEVICE_A_H4 => {
+                DeviceNla::H4(NativeEndian::read_i32(payload))
             }
             _ => DeviceNla::Unspec(payload.to_vec()),
         })
