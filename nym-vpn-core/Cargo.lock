@@ -1257,9 +1257,9 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
 name = "cosmos-sdk-proto"
-version = "0.27.0"
+version = "0.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95ac39be7373404accccaede7cc1ec942ccef14f0ca18d209967a756bf1dbb1f"
+checksum = "462e1f6a8e005acc8835d32d60cbd7973ed65ea2a8d8473830e675f050956427"
 dependencies = [
  "prost 0.13.5",
  "tendermint-proto",
@@ -1267,9 +1267,9 @@ dependencies = [
 
 [[package]]
 name = "cosmrs"
-version = "0.22.0"
+version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34e74fa7a22930fe0579bef560f2d64b78415d4c47b9dd976c0635136809471d"
+checksum = "1394c263335da09e8ba8c4b2c675d804e3e0deb44cce0866a5f838d3ddd43d02"
 dependencies = [
  "bip32",
  "cosmos-sdk-proto",
@@ -3878,7 +3878,7 @@ dependencies = [
 [[package]]
 name = "nym-api-requests"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "bs58",
  "cosmrs",
@@ -3914,7 +3914,7 @@ dependencies = [
 
 [[package]]
 name = "nym-apple-network"
-version = "1.22.0-beta"
+version = "1.22.0"
 dependencies = [
  "block2",
  "dispatch2",
@@ -3927,7 +3927,7 @@ dependencies = [
 [[package]]
 name = "nym-authenticator-client"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "bincode",
  "futures",
@@ -3950,7 +3950,7 @@ dependencies = [
 [[package]]
 name = "nym-authenticator-requests"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "base64 0.22.1",
  "bincode",
@@ -3967,32 +3967,36 @@ dependencies = [
  "sha2 0.10.9",
  "strum_macros",
  "thiserror 2.0.17",
- "tracing",
  "x25519-dalek",
 ]
 
 [[package]]
 name = "nym-bandwidth-controller"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "async-trait",
+ "bip39",
  "log",
  "nym-credential-storage",
  "nym-credentials",
  "nym-credentials-interface",
  "nym-crypto",
+ "nym-ecash-contract-common",
  "nym-ecash-time",
+ "nym-network-defaults",
  "nym-task",
  "nym-validator-client",
  "rand 0.8.5",
  "thiserror 2.0.17",
+ "url",
+ "zeroize",
 ]
 
 [[package]]
 name = "nym-bin-common"
 version = "0.6.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "const-str",
  "log",
@@ -4007,7 +4011,7 @@ dependencies = [
 [[package]]
 name = "nym-client-core"
 version = "1.1.15"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -4066,7 +4070,7 @@ dependencies = [
 [[package]]
 name = "nym-client-core-config-types"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "humantime-serde",
  "nym-config",
@@ -4082,7 +4086,7 @@ dependencies = [
 [[package]]
 name = "nym-client-core-gateways-storage"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4102,7 +4106,7 @@ dependencies = [
 [[package]]
 name = "nym-client-core-surb-storage"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4121,7 +4125,7 @@ dependencies = [
 [[package]]
 name = "nym-coconut-dkg-common"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
@@ -4134,7 +4138,7 @@ dependencies = [
 
 [[package]]
 name = "nym-common"
-version = "1.22.0-beta"
+version = "1.22.0"
 dependencies = [
  "tracing",
  "tracing-test",
@@ -4143,7 +4147,7 @@ dependencies = [
 [[package]]
 name = "nym-compact-ecash"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "bincode",
  "bls12_381",
@@ -4166,7 +4170,7 @@ dependencies = [
 [[package]]
 name = "nym-config"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "dirs",
  "handlebars",
@@ -4180,7 +4184,7 @@ dependencies = [
 
 [[package]]
 name = "nym-connection-monitor"
-version = "1.22.0-beta"
+version = "1.22.0"
 dependencies = [
  "async-trait",
  "futures",
@@ -4199,7 +4203,7 @@ dependencies = [
 [[package]]
 name = "nym-contracts-common"
 version = "0.5.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "bs58",
  "cosmwasm-schema",
@@ -4214,7 +4218,7 @@ dependencies = [
 [[package]]
 name = "nym-credential-proxy-requests"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "async-trait",
  "nym-credentials",
@@ -4235,7 +4239,7 @@ dependencies = [
 [[package]]
 name = "nym-credential-storage"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4248,7 +4252,6 @@ dependencies = [
  "sqlx",
  "sqlx-pool-guard",
  "thiserror 2.0.17",
- "time",
  "tokio",
  "zeroize",
 ]
@@ -4256,7 +4259,7 @@ dependencies = [
 [[package]]
 name = "nym-credential-utils"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "log",
  "nym-bandwidth-controller",
@@ -4275,7 +4278,7 @@ dependencies = [
 [[package]]
 name = "nym-credentials"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "bincode",
  "bls12_381",
@@ -4299,13 +4302,12 @@ dependencies = [
 [[package]]
 name = "nym-credentials-interface"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "bls12_381",
  "nym-compact-ecash",
  "nym-ecash-time",
  "nym-network-defaults",
- "nym-upgrade-mode-check",
  "rand 0.8.5",
  "serde",
  "strum",
@@ -4318,7 +4320,7 @@ dependencies = [
 [[package]]
 name = "nym-crypto"
 version = "0.4.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "aead",
  "aes",
@@ -4348,7 +4350,7 @@ dependencies = [
 
 [[package]]
 name = "nym-dbus"
-version = "1.22.0-beta"
+version = "1.22.0"
 dependencies = [
  "dbus",
  "libc",
@@ -4359,7 +4361,7 @@ dependencies = [
 
 [[package]]
 name = "nym-dns"
-version = "1.22.0-beta"
+version = "1.22.0"
 dependencies = [
  "duct",
  "futures",
@@ -4384,7 +4386,7 @@ dependencies = [
 [[package]]
 name = "nym-ecash-contract-common"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "bs58",
  "cosmwasm-schema",
@@ -4398,7 +4400,7 @@ dependencies = [
 [[package]]
 name = "nym-ecash-signer-check-types"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "nym-coconut-dkg-common",
  "nym-crypto",
@@ -4414,7 +4416,7 @@ dependencies = [
 [[package]]
 name = "nym-ecash-time"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "nym-compact-ecash",
  "time",
@@ -4423,7 +4425,7 @@ dependencies = [
 [[package]]
 name = "nym-exit-policy"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "serde",
  "serde_json",
@@ -4434,7 +4436,7 @@ dependencies = [
 
 [[package]]
 name = "nym-firewall"
-version = "1.22.0-beta"
+version = "1.22.0"
 dependencies = [
  "ipnetwork",
  "iptables",
@@ -4457,7 +4459,7 @@ dependencies = [
 [[package]]
 name = "nym-gateway-client"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "futures",
  "getrandom 0.2.16",
@@ -4495,7 +4497,7 @@ dependencies = [
 
 [[package]]
 name = "nym-gateway-directory"
-version = "1.22.0-beta"
+version = "1.22.0"
 dependencies = [
  "anyhow",
  "itertools 0.14.0",
@@ -4521,7 +4523,7 @@ dependencies = [
 [[package]]
 name = "nym-gateway-requests"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "bs58",
  "futures",
@@ -4551,7 +4553,7 @@ dependencies = [
 [[package]]
 name = "nym-group-contract-common"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "cosmwasm-schema",
  "cw-controllers",
@@ -4563,7 +4565,7 @@ dependencies = [
 [[package]]
 name = "nym-http-api-client"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "async-trait",
  "bincode",
@@ -4595,7 +4597,7 @@ dependencies = [
 [[package]]
 name = "nym-http-api-client-macro"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -4607,7 +4609,7 @@ dependencies = [
 [[package]]
 name = "nym-http-api-common"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "bincode",
  "serde",
@@ -4618,7 +4620,7 @@ dependencies = [
 [[package]]
 name = "nym-id"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "nym-credential-storage",
  "nym-credentials",
@@ -4631,7 +4633,7 @@ dependencies = [
 [[package]]
 name = "nym-ip-packet-client"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "bincode",
  "bytes",
@@ -4647,7 +4649,7 @@ dependencies = [
 [[package]]
 name = "nym-ip-packet-requests"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "bincode",
  "bytes",
@@ -4665,7 +4667,7 @@ dependencies = [
 
 [[package]]
 name = "nym-ipc"
-version = "1.22.0-beta"
+version = "1.22.0"
 dependencies = [
  "async-stream",
  "hyper-util",
@@ -4679,7 +4681,7 @@ dependencies = [
 
 [[package]]
 name = "nym-macos"
-version = "1.22.0-beta"
+version = "1.22.0"
 dependencies = [
  "nix 0.30.1",
  "tokio",
@@ -4689,7 +4691,7 @@ dependencies = [
 [[package]]
 name = "nym-metrics"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "dashmap",
  "lazy_static",
@@ -4700,7 +4702,7 @@ dependencies = [
 [[package]]
 name = "nym-mixnet-client"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "dashmap",
  "futures",
@@ -4714,7 +4716,7 @@ dependencies = [
 [[package]]
 name = "nym-mixnet-contract-common"
 version = "0.6.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "bs58",
  "cosmwasm-schema",
@@ -4735,7 +4737,7 @@ dependencies = [
 [[package]]
 name = "nym-multisig-contract-common"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
@@ -4751,7 +4753,7 @@ dependencies = [
 [[package]]
 name = "nym-network-defaults"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "cargo_metadata 0.19.2",
  "dotenvy",
@@ -4766,15 +4768,15 @@ dependencies = [
 [[package]]
 name = "nym-node-requests"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "celes",
+ "humantime",
  "humantime-serde",
  "nym-bin-common",
  "nym-crypto",
  "nym-exit-policy",
  "nym-noise-keys",
- "nym-upgrade-mode-check",
  "nym-wireguard-types",
  "schemars 0.8.22",
  "serde",
@@ -4783,14 +4785,13 @@ dependencies = [
  "strum_macros",
  "thiserror 2.0.17",
  "time",
- "url",
  "utoipa",
 ]
 
 [[package]]
 name = "nym-noise"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "arc-swap",
  "bytes",
@@ -4811,7 +4812,7 @@ dependencies = [
 [[package]]
 name = "nym-noise-keys"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "nym-crypto",
  "schemars 0.8.22",
@@ -4822,7 +4823,7 @@ dependencies = [
 [[package]]
 name = "nym-nonexhaustive-delayqueue"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "tokio",
  "tokio-stream",
@@ -4832,7 +4833,7 @@ dependencies = [
 
 [[package]]
 name = "nym-offline-monitor"
-version = "1.22.0-beta"
+version = "1.22.0"
 dependencies = [
  "async-trait",
  "debounced",
@@ -4852,7 +4853,7 @@ dependencies = [
 [[package]]
 name = "nym-ordered-buffer"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "log",
  "thiserror 2.0.17",
@@ -4861,7 +4862,7 @@ dependencies = [
 [[package]]
 name = "nym-outfox"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "blake3",
  "chacha20",
@@ -4879,7 +4880,7 @@ dependencies = [
 [[package]]
 name = "nym-pemstore"
 version = "0.3.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "pem",
  "tracing",
@@ -4889,7 +4890,7 @@ dependencies = [
 [[package]]
 name = "nym-performance-contract-common"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
@@ -4902,7 +4903,7 @@ dependencies = [
 
 [[package]]
 name = "nym-platform-metadata"
-version = "1.22.0-beta"
+version = "1.22.0"
 dependencies = [
  "nym-dbus",
  "objc2-foundation",
@@ -4915,7 +4916,7 @@ dependencies = [
 [[package]]
 name = "nym-registration-client"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "futures",
  "nym-authenticator-client",
@@ -4937,7 +4938,7 @@ dependencies = [
 [[package]]
 name = "nym-registration-common"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "nym-authenticator-requests",
  "nym-crypto",
@@ -4948,7 +4949,7 @@ dependencies = [
 
 [[package]]
 name = "nym-routing"
-version = "1.22.0-beta"
+version = "1.22.0"
 dependencies = [
  "bitflags 2.9.4",
  "futures",
@@ -4972,7 +4973,7 @@ dependencies = [
 [[package]]
 name = "nym-sdk"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5027,7 +5028,7 @@ dependencies = [
 [[package]]
 name = "nym-serde-helpers"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "base64 0.22.1",
  "bs58",
@@ -5039,7 +5040,7 @@ dependencies = [
 [[package]]
 name = "nym-service-provider-requests-common"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "serde",
  "thiserror 2.0.17",
@@ -5048,7 +5049,7 @@ dependencies = [
 [[package]]
 name = "nym-service-providers-common"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "async-trait",
  "log",
@@ -5061,7 +5062,7 @@ dependencies = [
 
 [[package]]
 name = "nym-setup"
-version = "1.22.0-beta"
+version = "1.22.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -5072,7 +5073,7 @@ dependencies = [
 [[package]]
 name = "nym-socks5-client-core"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "anyhow",
  "dirs",
@@ -5105,7 +5106,7 @@ dependencies = [
 [[package]]
 name = "nym-socks5-proxy-helpers"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "bytes",
  "futures",
@@ -5120,7 +5121,7 @@ dependencies = [
 [[package]]
 name = "nym-socks5-requests"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "bincode",
  "log",
@@ -5136,7 +5137,7 @@ dependencies = [
 [[package]]
 name = "nym-sphinx"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "nym-crypto",
  "nym-metrics",
@@ -5162,7 +5163,7 @@ dependencies = [
 [[package]]
 name = "nym-sphinx-acknowledgements"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "nym-crypto",
  "nym-pemstore",
@@ -5179,7 +5180,7 @@ dependencies = [
 [[package]]
 name = "nym-sphinx-addressing"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "nym-crypto",
  "nym-sphinx-types",
@@ -5190,7 +5191,7 @@ dependencies = [
 [[package]]
 name = "nym-sphinx-anonymous-replies"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "bs58",
  "nym-crypto",
@@ -5208,7 +5209,7 @@ dependencies = [
 [[package]]
 name = "nym-sphinx-chunking"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "dashmap",
  "log",
@@ -5227,7 +5228,7 @@ dependencies = [
 [[package]]
 name = "nym-sphinx-cover"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "nym-crypto",
  "nym-sphinx-acknowledgements",
@@ -5245,7 +5246,7 @@ dependencies = [
 [[package]]
 name = "nym-sphinx-forwarding"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "nym-sphinx-addressing",
  "nym-sphinx-anonymous-replies",
@@ -5257,7 +5258,7 @@ dependencies = [
 [[package]]
 name = "nym-sphinx-framing"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "bytes",
  "nym-sphinx-acknowledgements",
@@ -5273,7 +5274,7 @@ dependencies = [
 [[package]]
 name = "nym-sphinx-params"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "nym-crypto",
  "nym-sphinx-types",
@@ -5284,7 +5285,7 @@ dependencies = [
 [[package]]
 name = "nym-sphinx-routing"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "nym-sphinx-addressing",
  "nym-sphinx-types",
@@ -5294,7 +5295,7 @@ dependencies = [
 [[package]]
 name = "nym-sphinx-types"
 version = "0.2.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "nym-outfox",
  "sphinx-packet",
@@ -5303,7 +5304,7 @@ dependencies = [
 
 [[package]]
 name = "nym-statistics"
-version = "1.22.0-beta"
+version = "1.22.0"
 dependencies = [
  "futures",
  "nym-bin-common",
@@ -5327,7 +5328,7 @@ dependencies = [
 
 [[package]]
 name = "nym-statistics-api-client"
-version = "1.22.0-beta"
+version = "1.22.0"
 dependencies = [
  "nym-http-api-client",
  "nym-statistics-common",
@@ -5339,7 +5340,7 @@ dependencies = [
 [[package]]
 name = "nym-statistics-common"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "futures",
  "log",
@@ -5364,7 +5365,7 @@ dependencies = [
 [[package]]
 name = "nym-task"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "cfg-if",
  "futures",
@@ -5381,7 +5382,7 @@ dependencies = [
 [[package]]
 name = "nym-ticketbooks-merkle"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "nym-credentials-interface",
  "nym-serde-helpers",
@@ -5396,7 +5397,7 @@ dependencies = [
 [[package]]
 name = "nym-topology"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "async-trait",
  "nym-api-requests",
@@ -5416,7 +5417,7 @@ dependencies = [
 [[package]]
 name = "nym-upgrade-mode-check"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "jwt-simple",
  "nym-crypto",
@@ -5427,13 +5428,12 @@ dependencies = [
  "thiserror 2.0.17",
  "time",
  "tracing",
- "utoipa",
 ]
 
 [[package]]
 name = "nym-validator-client"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -5483,7 +5483,7 @@ dependencies = [
 [[package]]
 name = "nym-vesting-contract-common"
 version = "0.7.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
@@ -5495,7 +5495,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpn-account-controller"
-version = "1.22.0-beta"
+version = "1.22.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5513,7 +5513,6 @@ dependencies = [
  "nym-network-defaults",
  "nym-offline-monitor",
  "nym-sdk",
- "nym-upgrade-mode-check",
  "nym-validator-client",
  "nym-vpn-api-client",
  "nym-vpn-lib-types",
@@ -5540,7 +5539,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpn-api-client"
-version = "1.22.0-beta"
+version = "1.22.0"
 dependencies = [
  "backon",
  "base64-url",
@@ -5573,7 +5572,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpn-lib"
-version = "1.22.0-beta"
+version = "1.22.0"
 dependencies = [
  "android_logger",
  "async-trait",
@@ -5652,7 +5651,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpn-lib-types"
-version = "1.22.0-beta"
+version = "1.22.0"
 dependencies = [
  "ipnetwork",
  "nym-bandwidth-controller",
@@ -5676,7 +5675,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpn-lib-uniffi"
-version = "1.22.0-beta"
+version = "1.22.0"
 dependencies = [
  "android_logger",
  "async-trait",
@@ -5716,7 +5715,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpn-network-config"
-version = "1.22.0-beta"
+version = "1.22.0"
 dependencies = [
  "futures-util",
  "itertools 0.14.0",
@@ -5742,7 +5741,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpn-proto"
-version = "1.22.0-beta"
+version = "1.22.0"
 dependencies = [
  "nym-ipc",
  "nym-vpn-lib-types",
@@ -5759,7 +5758,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpn-rpc-uniffi"
-version = "1.22.0-beta"
+version = "1.22.0"
 dependencies = [
  "futures",
  "nym-vpn-lib-types",
@@ -5772,7 +5771,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpn-store"
-version = "1.22.0-beta"
+version = "1.22.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5794,7 +5793,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpnc"
-version = "1.22.0-beta"
+version = "1.22.0"
 dependencies = [
  "anyhow",
  "celes",
@@ -5809,7 +5808,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpnd"
-version = "1.22.0-beta"
+version = "1.22.0"
 dependencies = [
  "anyhow",
  "bip39",
@@ -5868,7 +5867,7 @@ dependencies = [
 
 [[package]]
 name = "nym-wg-go"
-version = "1.22.0-beta"
+version = "1.22.0"
 dependencies = [
  "base64 0.22.1",
  "hex",
@@ -5884,7 +5883,7 @@ dependencies = [
 
 [[package]]
 name = "nym-wg-kernel"
-version = "1.22.0-beta"
+version = "1.22.0"
 dependencies = [
  "anyhow",
  "byteorder",
@@ -5904,7 +5903,7 @@ dependencies = [
 
 [[package]]
 name = "nym-wg-metadata-client"
-version = "1.22.0-beta"
+version = "1.22.0"
 dependencies = [
  "nym-credentials-interface",
  "nym-gateway-directory",
@@ -5919,7 +5918,7 @@ dependencies = [
 
 [[package]]
 name = "nym-windows"
-version = "1.22.0-beta"
+version = "1.22.0"
 dependencies = [
  "bitflags 2.9.4",
  "futures",
@@ -5933,7 +5932,7 @@ dependencies = [
 [[package]]
 name = "nym-wireguard-private-metadata-client"
 version = "1.0.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "async-trait",
  "nym-http-api-client",
@@ -5944,7 +5943,7 @@ dependencies = [
 [[package]]
 name = "nym-wireguard-private-metadata-shared"
 version = "1.0.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "axum 0.7.9",
  "bincode",
@@ -5958,10 +5957,12 @@ dependencies = [
 [[package]]
 name = "nym-wireguard-types"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "base64 0.22.1",
- "nym-crypto",
+ "log",
+ "nym-config",
+ "nym-network-defaults",
  "serde",
  "thiserror 2.0.17",
  "x25519-dalek",
@@ -8222,7 +8223,7 @@ dependencies = [
 [[package]]
 name = "sqlx-pool-guard"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "proc_pidinfo",
  "sqlx",
@@ -9450,7 +9451,7 @@ dependencies = [
 
 [[package]]
 name = "uniffi-bindgen"
-version = "1.22.0-beta"
+version = "1.22.0"
 dependencies = [
  "uniffi",
 ]
@@ -9907,7 +9908,7 @@ dependencies = [
 [[package]]
 name = "wasm-utils"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=develop#ae54e86bf46bbc38243d015c7ad8ebb1227e3c5b"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Fkiwi-release-mozzarella#530c501fbbe86420f054cda055bc58b4720eab2b"
 dependencies = [
  "futures",
  "getrandom 0.2.16",
