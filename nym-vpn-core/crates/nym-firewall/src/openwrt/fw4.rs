@@ -21,12 +21,12 @@ use crate::FirewallPolicy;
 
 /// fw4/nftables firewall backend.
 pub struct Fw4Firewall {
-    fwmark: u32,
+    _fwmark: u32,
 }
 
 impl Fw4Firewall {
     pub fn new(fwmark: u32) -> Result<Self> {
-        Ok(Fw4Firewall { fwmark })
+        Ok(Fw4Firewall { _fwmark: fwmark })
     }
 
     pub fn apply_policy(&mut self, policy: FirewallPolicy) -> Result<()> {
@@ -543,6 +543,7 @@ impl Fw4Firewall {
 
 /// Configure UCI to use the fw4 include script.
 /// The script itself is installed by the IPK package at FW4_INCLUDE_PATH.
+#[expect(dead_code, reason = "Intended for package postinst integration")]
 pub fn install_include_script() -> Result<()> {
     // Verify the script exists (should be installed by package)
     if !std::path::Path::new(FW4_INCLUDE_PATH).exists() {
@@ -559,6 +560,7 @@ pub fn install_include_script() -> Result<()> {
 }
 
 /// Install UCI firewall config for the include script.
+#[expect(dead_code, reason = "Intended for package postinst integration")]
 fn install_uci_config() -> Result<()> {
     // Check if already configured
     let check = std::process::Command::new("uci")

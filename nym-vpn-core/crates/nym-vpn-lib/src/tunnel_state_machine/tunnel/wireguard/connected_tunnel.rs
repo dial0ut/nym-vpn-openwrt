@@ -1,7 +1,7 @@
 // Copyright 2023 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
-#[cfg(unix)]
+#[cfg(all(unix, not(target_env = "musl")))]
 use std::ops::Deref;
 #[cfg(target_os = "ios")]
 use std::time::Duration;

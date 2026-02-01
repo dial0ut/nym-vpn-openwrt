@@ -60,6 +60,7 @@ pub struct PeerConfig {
 }
 
 impl PeerConfig {
+    #[cfg(not(target_env = "musl"))]
     fn append_to(&self, config_builder: &mut UapiConfigBuilder) {
         config_builder.add("public_key", self.public_key.as_bytes().as_ref());
         if let Some(preshared_key) = self.preshared_key.as_ref() {
@@ -100,6 +101,7 @@ pub struct PeerEndpointUpdate {
 }
 
 impl PeerEndpointUpdate {
+    #[cfg(not(target_env = "musl"))]
     fn append_to(&self, config_builder: &mut UapiConfigBuilder) {
         config_builder.add("public_key", self.public_key.as_bytes().as_ref());
         config_builder.add("endpoint", self.endpoint.to_string().as_str());

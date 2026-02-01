@@ -12,6 +12,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 pub struct PendingCredentialRequestStored {
     pub id: String,
     #[zeroize(skip)]
+    #[allow(unused)]
     pub expiration_date: Date,
     pub request_info: Vec<u8>,
 }

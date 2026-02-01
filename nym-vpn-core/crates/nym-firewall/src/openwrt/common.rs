@@ -6,15 +6,15 @@
 use std::net::IpAddr;
 use std::path::Path;
 
-use ipnetwork::IpNetwork;
-
 /// File paths for firewall rules.
 pub const RULES_V4_PATH: &str = "/tmp/nym-firewall-v4.rules";
 pub const RULES_V6_PATH: &str = "/tmp/nym-firewall-v6.rules";
 pub const RULES_NFT_PATH: &str = "/tmp/nym-firewall.nft";
 
 /// Include script paths (installed by the IPK package).
+#[expect(dead_code, reason = "Used by install_include_script in fw3.rs and fw4.rs")]
 pub const FW3_INCLUDE_PATH: &str = "/usr/share/nym-vpn/fw3-include.sh";
+#[expect(dead_code, reason = "Used by install_include_script in fw3.rs and fw4.rs")]
 pub const FW4_INCLUDE_PATH: &str = "/usr/share/nym-vpn/fw4-include.sh";
 
 /// Chain names for our custom chains.
@@ -26,9 +26,6 @@ pub const NYM_FORWARD: &str = "NYM_FORWARD";
 pub const FW3_HOOK_INPUT: &str = "input_rule";
 pub const FW3_HOOK_OUTPUT: &str = "output_rule";
 pub const FW3_HOOK_FORWARD: &str = "forwarding_rule";
-
-/// Priority for fw4 chains (run before fw4's default priority of 0).
-pub const FW4_CHAIN_PRIORITY: i32 = -10;
 
 /// LAN networks (RFC1918 private addresses).
 pub const LAN_NETWORKS_V4: &[&str] = &[
@@ -81,11 +78,6 @@ pub fn format_ip(ip: &IpAddr) -> String {
     }
 }
 
-/// Format a network for use in firewall rules.
-pub fn format_network(net: &IpNetwork) -> String {
-    net.to_string()
-}
-
 /// Check if an IP is IPv4.
 pub fn is_ipv4(ip: &IpAddr) -> bool {
     matches!(ip, IpAddr::V4(_))
@@ -94,15 +86,6 @@ pub fn is_ipv4(ip: &IpAddr) -> bool {
 /// Check if an IP is IPv6.
 pub fn is_ipv6(ip: &IpAddr) -> bool {
     matches!(ip, IpAddr::V6(_))
-}
-
-/// Ensure a directory exists.
-pub fn ensure_dir(path: &str) -> std::io::Result<()> {
-    let dir = Path::new(path).parent().unwrap_or(Path::new("/"));
-    if !dir.exists() {
-        std::fs::create_dir_all(dir)?;
-    }
-    Ok(())
 }
 
 /// Remove a file if it exists.

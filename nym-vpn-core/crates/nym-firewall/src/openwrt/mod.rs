@@ -20,8 +20,6 @@ pub use detect::{FirewallSystem, detect_system};
 pub use fw3::Fw3Firewall;
 pub use fw4::Fw4Firewall;
 
-use std::path::Path;
-
 use crate::{FirewallArguments, FirewallPolicy};
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -97,6 +95,7 @@ impl Firewall {
 
     /// Install the OpenWrt include scripts for proper integration.
     /// This should be called once during package installation.
+    #[expect(dead_code, reason = "Intended for package postinst integration")]
     pub fn install_include_scripts() -> Result<()> {
         let system = detect_system();
         match system {
@@ -110,7 +109,3 @@ impl Firewall {
     }
 }
 
-/// Check if we're running on OpenWrt.
-pub fn is_openwrt() -> bool {
-    Path::new("/etc/openwrt_release").exists()
-}

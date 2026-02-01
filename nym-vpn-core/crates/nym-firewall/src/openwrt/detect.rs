@@ -110,6 +110,7 @@ fn is_fw3_available() -> bool {
 }
 
 /// Get the OpenWrt version string if available.
+#[expect(dead_code, reason = "Useful for debugging and future version-specific logic")]
 pub fn get_openwrt_version() -> Option<String> {
     std::fs::read_to_string("/etc/openwrt_release")
         .ok()

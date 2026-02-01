@@ -19,7 +19,7 @@ use std::net::IpAddr;
 use std::process::{Command, Stdio};
 
 use super::common::{
-    self, ensure_dir, format_ip, is_ipv6_enabled, remove_file_if_exists,
+    self, format_ip, is_ipv6_enabled, remove_file_if_exists,
     FW3_HOOK_FORWARD, FW3_HOOK_INPUT, FW3_HOOK_OUTPUT, FW3_INCLUDE_PATH,
     LAN_NETWORKS_V4, LAN_NETWORKS_V6, MULTICAST_V4, MULTICAST_V6,
     NYM_FORWARD, NYM_INPUT, NYM_OUTPUT, RULES_V4_PATH, RULES_V6_PATH,
@@ -30,12 +30,12 @@ use crate::FirewallPolicy;
 
 /// fw3/iptables firewall backend.
 pub struct Fw3Firewall {
-    fwmark: u32,
+    _fwmark: u32,
 }
 
 impl Fw3Firewall {
     pub fn new(fwmark: u32) -> Result<Self> {
-        Ok(Fw3Firewall { fwmark })
+        Ok(Fw3Firewall { _fwmark: fwmark })
     }
 
     pub fn apply_policy(&mut self, policy: FirewallPolicy) -> Result<()> {
@@ -730,6 +730,7 @@ impl Fw3Firewall {
 
 /// Configure UCI to use the fw3 include script.
 /// The script itself is installed by the IPK package at FW3_INCLUDE_PATH.
+#[expect(dead_code, reason = "Intended for package postinst integration")]
 pub fn install_include_script() -> Result<()> {
     // Verify the script exists (should be installed by package)
     if !std::path::Path::new(FW3_INCLUDE_PATH).exists() {
@@ -746,6 +747,7 @@ pub fn install_include_script() -> Result<()> {
 }
 
 /// Install UCI firewall config for the include script.
+#[expect(dead_code, reason = "Intended for package postinst integration")]
 fn install_uci_config() -> Result<()> {
     // Check if already configured
     let check = Command::new("uci")
