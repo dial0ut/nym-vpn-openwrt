@@ -23,40 +23,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Standard targets - use stock messense/rust-musl-cross images
+          # Standard Tier 2 targets - use stock messense/rust-musl-cross images
           - target: x86_64-unknown-linux-musl
             arch: x86_64
             docker_image: messense/rust-musl-cross:x86_64-musl
-            custom: false
           - target: i686-unknown-linux-musl
             arch: i686
             docker_image: messense/rust-musl-cross:i686-musl
-            custom: false
           - target: aarch64-unknown-linux-musl
             arch: aarch64
             docker_image: messense/rust-musl-cross:aarch64-musl
-            custom: false
           - target: armv7-unknown-linux-musleabihf
             arch: armv7
             docker_image: messense/rust-musl-cross:armv7-musleabihf
-            custom: false
-          # Extended targets - require custom Docker images (portable-atomic patches, linker fixes)
-          - target: mips-unknown-linux-musl
-            arch: mips
-            dockerfile: Dockerfile.mips
-            custom: true
-          - target: mipsel-unknown-linux-musl
-            arch: mipsel
-            dockerfile: Dockerfile.mipsel
-            custom: true
-          - target: riscv64gc-unknown-linux-musl
-            arch: riscv64
-            dockerfile: Dockerfile.riscv64
-            custom: true
-          - target: armv5te-unknown-linux-musleabi
-            arch: armv5te
-            dockerfile: Dockerfile.armv5te
-            custom: true
 
     steps:
       - name: Checkout
@@ -75,33 +54,13 @@ jobs:
           echo "Swap enabled:"
           free -h
 
-      - name: Set up Docker Buildx
-        if: matrix.custom
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build custom Docker image
-        if: matrix.custom
-        run: |
-          cd docker/tier3-musl
-          docker build -f ${{ matrix.dockerfile }} -t nym-musl-cross:${{ matrix.arch }}-musl .
-
-      - name: Build (standard)
-        if: ${{ !matrix.custom }}
+      - name: Build
         run: |
           docker run --rm \
             -v "${{ github.workspace }}:/home/rust/src" \
             -e TARGET=${{ matrix.target }} \
-            -e RUSTFLAGS_EXTRA="${{ matrix.rustflags_extra }}" \
             ${{ matrix.docker_image }} \
             bash /home/rust/src/scripts/cross-compile-musl.sh
-
-      - name: Build (custom)
-        if: matrix.custom
-        run: |
-          docker run --rm \
-            -v "${{ github.workspace }}:/home/rust/src" \
-            nym-musl-cross:${{ matrix.arch }}-musl \
-            /opt/build-tier3.sh
 
       - name: Prepare artifacts
         run: |
@@ -144,18 +103,6 @@ jobs:
             openwrt_arch: arm_cortex-a7_neon-vfpv4
           - arch: armv7
             openwrt_arch: arm_cortex-a9_vfpv3-d16
-          - arch: armv5te
-            openwrt_arch: arm_cortex-a9
-          - arch: armv5te
-            openwrt_arch: arm_arm926ej-s
-          - arch: mips
-            openwrt_arch: mips_24kc
-          - arch: mipsel
-            openwrt_arch: mipsel_24kc
-          - arch: mipsel
-            openwrt_arch: mips_siflower
-          - arch: riscv64
-            openwrt_arch: riscv64
 
     steps:
       - name: Checkout
@@ -339,18 +286,10 @@ jobs:
             artifacts/nym-vpnd-i686
             artifacts/nym-vpnd-aarch64
             artifacts/nym-vpnd-armv7
-            artifacts/nym-vpnd-mips
-            artifacts/nym-vpnd-mipsel
-            artifacts/nym-vpnd-riscv64
-            artifacts/nym-vpnd-armv5te
             artifacts/nym-vpnc-x86_64
             artifacts/nym-vpnc-i686
             artifacts/nym-vpnc-aarch64
             artifacts/nym-vpnc-armv7
-            artifacts/nym-vpnc-mips
-            artifacts/nym-vpnc-mipsel
-            artifacts/nym-vpnc-riscv64
-            artifacts/nym-vpnc-armv5te
             artifacts/*.tar.gz
             artifacts/*.sha256
             artifacts/*.ipk
@@ -401,11 +340,5 @@ jobs:
             | `aarch64_cortex-a53` | ~54MB | MediaTek, Qualcomm ARM64 routers |
             | `arm_cortex-a7_neon-vfpv4` | ~55MB | Many MediaTek/Qualcomm routers |
             | `arm_cortex-a9_vfpv3-d16` | ~55MB | Linksys WRT, Netgear R7800 |
-            | `arm_cortex-a9` | ~44MB | Older Cortex-A9 devices |
-            | `arm_arm926ej-s` | ~44MB | Legacy ARM devices |
-            | `mips_24kc` | ~59MB | Atheros/Qualcomm MIPS routers |
-            | `mipsel_24kc` | ~59MB | MediaTek MIPS routers |
-            | `mips_siflower` | ~59MB | GL.iNet SFT1200, SiFlower SF19A28 |
-            | `riscv64` | ~40MB | RISC-V devices |
 
             Check your architecture: `opkg print-architecture | grep -v all`
