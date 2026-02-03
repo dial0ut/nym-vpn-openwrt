@@ -3,10 +3,11 @@
 
 use nym_vpn_lib_types::{
     AccountBalanceResponse, AccountCommandResponse, AccountControllerState, AvailableTickets,
-    EntryPoint, ExitPoint, FeatureFlags, Gateway, HttpRpcSettings, ListGatewaysOptions, LogPath,
-    LookupGatewayFilters, NetworkCompatibility, NetworkStatisticsIdentity, NymVpnDevice,
-    NymVpnUsage, ParsedAccountLinks, PrivyDerivationMessage, Socks5Settings, Socks5Status,
-    StoreAccountRequest, SystemMessage, TunnelEvent, TunnelState, VpnServiceConfig, VpnServiceInfo,
+    DiagnosticReport, EntryPoint, ExitPoint, FeatureFlags, Gateway, GetDeeplinkParams,
+    HttpRpcSettings, ListGatewaysOptions, LogPath, LookupGatewayFilters, NetworkCompatibility,
+    NetworkStatisticsIdentity, NymVpnDevice, NymVpnUsage, ParsedAccountLinks,
+    PrivyDerivationMessage, RegistrationReport, Socks5Settings, Socks5Status, StoreAccountRequest,
+    SystemMessage, TunnelEvent, TunnelState, VpnAccountSummary, VpnServiceConfig, VpnServiceInfo,
 };
 use std::{net::IpAddr, path::PathBuf};
 use tokio_stream::{Stream, StreamExt};
@@ -94,6 +95,15 @@ impl RpcClient {
         Ok(())
     }
 
+    pub async fn set_enable_lewes_protocol(&mut self, enable_lewes_protocol: bool) -> Result<()> {
+        self.0
+            .set_enable_lewes_protocol(enable_lewes_protocol)
+            .await
+            .map_err(Error::Rpc)?
+            .into_inner();
+        Ok(())
+    }
+
     pub async fn set_netstack(&mut self, netstack: bool) -> Result<()> {
         self.0
             .set_netstack(netstack)
@@ -146,6 +156,20 @@ impl RpcClient {
 
         self.0
             .set_custom_dns(request)
+            .await
+            .map_err(Error::Rpc)?
+            .into_inner();
+        Ok(())
+    }
+
+    pub async fn set_mixnet_traffic_config(
+        &mut self,
+        mixnet_traffic: nym_vpn_lib_types::MixnetTrafficConfig,
+    ) -> Result<()> {
+        let request = proto::MixnetTrafficConfig::from(mixnet_traffic);
+
+        self.0
+            .set_mixnet_traffic_config(request)
             .await
             .map_err(Error::Rpc)?
             .into_inner();
@@ -483,6 +507,7 @@ impl RpcClient {
 
         Ok(devices)
     }
+
     pub async fn get_available_tickets(&mut self) -> Result<AvailableTickets> {
         let response = self
             .0
@@ -492,6 +517,49 @@ impl RpcClient {
             .into_inner();
 
         Ok(AvailableTickets::from(response))
+    }
+
+    pub async fn get_account_summary(&mut self) -> Result<Option<VpnAccountSummary>> {
+        let response = self
+            .0
+            .get_account_summary(())
+            .await
+            .map_err(Error::Rpc)?
+            .into_inner();
+
+        let account_summary = response
+            .account_summary
+            .map(VpnAccountSummary::try_from)
+            .transpose()
+            .map_err(Error::InvalidResponse)?;
+
+        Ok(account_summary)
+    }
+
+    pub async fn get_deeplink(&mut self, params: GetDeeplinkParams) -> Result<String> {
+        let request: proto::GetDeeplinkParams = params.into();
+        let url = self
+            .0
+            .get_deeplink(request)
+            .await
+            .map_err(Error::Rpc)?
+            .into_inner();
+
+        Ok(url)
+    }
+
+    pub async fn deeplink_store_account(
+        &mut self,
+        deeplink_callback_url: String,
+    ) -> Result<AccountCommandResponse> {
+        let response = self
+            .0
+            .deeplink_store_account(deeplink_callback_url)
+            .await
+            .map_err(Error::Rpc)?
+            .into_inner();
+
+        AccountCommandResponse::try_from(response).map_err(Error::InvalidResponse)
     }
 
     pub async fn get_log_path(&mut self) -> Result<LogPath> {
@@ -632,6 +700,34 @@ impl RpcClient {
             .map_err(Error::Rpc)?;
 
         Ok(PrivyDerivationMessage::from(response))
+    }
+
+    pub async fn run_diagnostic(
+        &mut self,
+        params: nym_vpn_lib_types::DiagnosticRunParams,
+    ) -> Result<DiagnosticReport> {
+        let request = proto::DiagnosticRunParams::from(params);
+        let response = self
+            .0
+            .run_diagnostic(request)
+            .await
+            .map(|v| v.into_inner())
+            .map_err(Error::Rpc)?;
+        DiagnosticReport::try_from(response).map_err(Error::InvalidResponse)
+    }
+
+    pub async fn register_diagnostic(
+        &mut self,
+        params: nym_vpn_lib_types::DiagnosticRegisterParams,
+    ) -> Result<RegistrationReport> {
+        let request = proto::DiagnosticRegisterParams::from(params);
+        let response = self
+            .0
+            .register_diagnostic(request)
+            .await
+            .map(|v| v.into_inner())
+            .map_err(Error::Rpc)?;
+        RegistrationReport::try_from(response).map_err(Error::InvalidResponse)
     }
 }
 

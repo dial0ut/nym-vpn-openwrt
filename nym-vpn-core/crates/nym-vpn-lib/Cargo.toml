@@ -109,6 +109,7 @@ nym-windows.workspace = true
 nym-routing.workspace = true
 nym-dns.workspace = true
 nym-firewall.workspace = true
+nym-firewall-config.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 nym-wg-kernel.workspace = true
@@ -118,9 +119,9 @@ hickory-server = { workspace = true, features = ["resolver"] }
 nym-routing.workspace = true
 nym-dns.workspace = true
 nym-firewall.workspace = true
+nym-firewall-config.workspace = true
 
 [target.'cfg(target_os = "android")'.dependencies]
-android_logger.workspace = true
 rand.workspace = true
 
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]

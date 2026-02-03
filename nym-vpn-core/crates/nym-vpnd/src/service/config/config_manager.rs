@@ -21,6 +21,7 @@ use nym_vpn_lib::{
 use std::{
     net::IpAddr,
     path::{Path, PathBuf},
+    time::Duration,
 };
 use tokio::{fs, sync::broadcast};
 
@@ -118,6 +119,13 @@ impl VpnServiceConfigManager {
         }
     }
 
+    pub async fn set_enable_lewes_protocol(&mut self, enable_lewes_protocol: bool) {
+        if self.config.enable_lewes_protocol != enable_lewes_protocol {
+            self.config.enable_lewes_protocol = enable_lewes_protocol;
+            self.save_config_and_send_event().await;
+        }
+    }
+
     pub async fn set_netstack(&mut self, netstack: bool) {
         if self.config.netstack != netstack {
             self.config.netstack = netstack;
@@ -172,40 +180,16 @@ impl VpnServiceConfigManager {
         }
     }
 
-    #[allow(unused)]
-    pub async fn set_disable_poisson_rate(&mut self, disable_poisson_rate: bool) {
-        if self.config.disable_poisson_rate != disable_poisson_rate {
-            self.config.disable_poisson_rate = disable_poisson_rate;
-            self.save_config_and_send_event().await;
-        }
-    }
-
-    #[allow(unused)]
-    pub async fn set_disable_background_cover_traffic(&mut self, disable: bool) {
-        if self.config.disable_background_cover_traffic != disable {
-            self.config.disable_background_cover_traffic = disable;
-            self.save_config_and_send_event().await;
-        }
-    }
-
-    #[allow(unused)]
-    pub async fn set_min_mixnode_performance(&mut self, min_mixnode_performance: Option<u8>) {
-        if self.config.min_mixnode_performance != min_mixnode_performance {
-            self.config.min_mixnode_performance = min_mixnode_performance.map(|u| u.min(100));
-            self.save_config_and_send_event().await;
-        }
-    }
-
-    #[allow(unused)]
-    pub async fn set_min_gateway_mixnet_performance(
+    pub async fn set_mixnet_traffic_config(
         &mut self,
-        min_gateway_mixnet_performance: Option<u8>,
-    ) {
-        if self.config.min_gateway_mixnet_performance != min_gateway_mixnet_performance {
-            self.config.min_gateway_mixnet_performance =
-                min_gateway_mixnet_performance.map(|u| u.min(100));
+        mixnet_traffic: nym_vpn_lib_types::MixnetTrafficConfig,
+    ) -> Result<(), String> {
+        mixnet_traffic.validate()?;
+        if self.config.mixnet_traffic != mixnet_traffic {
+            self.config.mixnet_traffic = mixnet_traffic;
             self.save_config_and_send_event().await;
         }
+        Ok(())
     }
 
     #[allow(unused)]
@@ -333,23 +317,45 @@ impl VpnServiceConfigManager {
         tracing::info!("Using config: {:?}", self.config);
 
         let gateway_options = GatewayPerformanceOptions {
-            mixnet_min_performance: self.config.min_gateway_mixnet_performance,
+            mixnet_min_performance: self.config.mixnet_traffic.min_gateway_mixnet_performance,
             vpn_min_performance: self.config.min_gateway_vpn_performance,
         };
 
         let mixnet_client_config = MixnetClientConfig {
-            disable_poisson_rate: self.config.disable_poisson_rate,
-            disable_background_cover_traffic: self.config.disable_background_cover_traffic,
+            disable_real_traffic_poisson_process: self.config.mixnet_traffic.disable_poisson_rate,
+            disable_background_cover_traffic: self
+                .config
+                .mixnet_traffic
+                .disable_background_cover_traffic,
             min_mixnode_performance: Some(
                 self.config
+                    .mixnet_traffic
                     .min_mixnode_performance
                     .unwrap_or(DEFAULT_MIN_MIXNODE_PERFORMANCE),
             ),
             min_gateway_performance: Some(
                 self.config
+                    .mixnet_traffic
                     .min_gateway_mixnet_performance
                     .unwrap_or(DEFAULT_MIN_GATEWAY_PERFORMANCE),
             ),
+            loop_cover_traffic_average_delay: self
+                .config
+                .mixnet_traffic
+                .poisson_parameter_for_loop_cover_stream
+                .map(|ms| Duration::from_millis(ms.into())),
+
+            average_packet_delay: self
+                .config
+                .mixnet_traffic
+                .average_packet_delay
+                .map(|ms| Duration::from_millis(ms.into())),
+
+            message_sending_average_delay: self
+                .config
+                .mixnet_traffic
+                .message_sending_average_delay
+                .map(|ms| Duration::from_millis(ms.into())),
         };
 
         let tunnel_type = if self.config.enable_two_hop {

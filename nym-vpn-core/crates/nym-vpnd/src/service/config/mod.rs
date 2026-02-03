@@ -4,11 +4,14 @@
 mod config_manager;
 mod entry_exit;
 mod legacy;
+mod mixnet_traffic;
 mod network_stats;
 mod v1;
 mod v2;
 mod v3;
 mod v4;
+mod v5;
+mod v6;
 
 #[cfg(test)]
 mod tests;
@@ -27,6 +30,7 @@ use tokio::{
 
 use crate::service::config::{
     entry_exit::v2::{EntryPoint, ExitPoint},
+    mixnet_traffic::v5::MixnetTrafficConfig,
     network_stats::v1::NetworkStatisticsConfig,
 };
 #[cfg(unix)]
@@ -94,12 +98,14 @@ enum VpnServiceConfigVersion {
     V2,
     V3,
     V4,
+    V5,
+    V6,
 }
 
 impl VpnServiceConfigVersion {
     /// Returns the latest version of the config file.
     pub fn latest() -> Self {
-        VpnServiceConfigVersion::V4
+        VpnServiceConfigVersion::V6
     }
 }
 
@@ -110,6 +116,8 @@ impl fmt::Display for VpnServiceConfigVersion {
             VpnServiceConfigVersion::V2 => "v2",
             VpnServiceConfigVersion::V3 => "v3",
             VpnServiceConfigVersion::V4 => "v4",
+            VpnServiceConfigVersion::V5 => "v5",
+            VpnServiceConfigVersion::V6 => "v6",
         })
     }
 }
@@ -122,6 +130,8 @@ enum VpnServiceConfigExt {
     V2(v2::VpnServiceConfig),
     V3(v3::VpnServiceConfig),
     V4(v4::VpnServiceConfig),
+    V5(v5::VpnServiceConfig),
+    V6(v6::VpnServiceConfig),
 }
 
 impl VpnServiceConfigExt {
@@ -131,6 +141,8 @@ impl VpnServiceConfigExt {
             VpnServiceConfigExt::V2(_) => VpnServiceConfigVersion::V2,
             VpnServiceConfigExt::V3(_) => VpnServiceConfigVersion::V3,
             VpnServiceConfigExt::V4(_) => VpnServiceConfigVersion::V4,
+            VpnServiceConfigExt::V5(_) => VpnServiceConfigVersion::V5,
+            VpnServiceConfigExt::V6(_) => VpnServiceConfigVersion::V6,
         }
     }
 }
@@ -144,6 +156,8 @@ impl TryFrom<VpnServiceConfigExt> for nym_vpn_lib_types::VpnServiceConfig {
             VpnServiceConfigExt::V2(v2) => nym_vpn_lib_types::VpnServiceConfig::try_from(v2),
             VpnServiceConfigExt::V3(v3) => nym_vpn_lib_types::VpnServiceConfig::try_from(v3),
             VpnServiceConfigExt::V4(v4) => nym_vpn_lib_types::VpnServiceConfig::try_from(v4),
+            VpnServiceConfigExt::V5(v5) => nym_vpn_lib_types::VpnServiceConfig::try_from(v5),
+            VpnServiceConfigExt::V6(v6) => nym_vpn_lib_types::VpnServiceConfig::try_from(v6),
         }
     }
 }
@@ -152,31 +166,38 @@ impl TryFrom<&nym_vpn_lib_types::VpnServiceConfig> for VpnServiceConfigExt {
     type Error = ConfigSetupError;
 
     fn try_from(value: &nym_vpn_lib_types::VpnServiceConfig) -> Result<Self, Self::Error> {
+        let entry_point = EntryPoint::try_from(&value.entry_point)?;
+
+        let exit_point = ExitPoint::try_from(&value.exit_point)?;
+
         let custom_dns = value
             .custom_dns
             .iter()
             .map(|ip| ip.to_string())
             .collect::<Vec<_>>();
 
-        let v4 = v4::VpnServiceConfig {
-            entry_point: EntryPoint::try_from(&value.entry_point)?,
-            exit_point: ExitPoint::try_from(&value.exit_point)?,
+        let mixnet_traffic = MixnetTrafficConfig::from(&value.mixnet_traffic);
+
+        let network_stats = NetworkStatisticsConfig::from(&value.network_stats);
+
+        let v6 = v6::VpnServiceConfig {
+            entry_point,
+            exit_point,
             allow_lan: value.allow_lan,
             disable_ipv6: value.disable_ipv6,
             enable_two_hop: value.enable_two_hop,
             enable_bridges: value.enable_bridges,
+            enable_lewes_protocol: value.enable_lewes_protocol,
             netstack: value.netstack,
-            disable_poisson_rate: value.disable_poisson_rate,
-            disable_background_cover_traffic: value.disable_background_cover_traffic,
-            min_mixnode_performance: value.min_mixnode_performance,
-            min_gateway_mixnet_performance: value.min_gateway_mixnet_performance,
             min_gateway_vpn_performance: value.min_gateway_vpn_performance,
             residential_exit: value.residential_exit,
             enable_custom_dns: value.enable_custom_dns,
             custom_dns,
-            network_stats: NetworkStatisticsConfig::from(&value.network_stats),
+            mixnet_traffic,
+            network_stats,
         };
-        Ok(VpnServiceConfigExt::V4(v4))
+
+        Ok(VpnServiceConfigExt::V6(v6))
     }
 }
 

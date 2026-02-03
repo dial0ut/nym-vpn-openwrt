@@ -1,19 +1,20 @@
 // Copyright 2024 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::sync::Arc;
-
 use nym_offline_monitor::ConnectivityMonitor;
 use nym_vpn_api_client::{
     VpnApiClient,
     types::{Device, VpnAccount},
 };
+use nym_vpn_lib_types::VpnAccountSummary;
+use std::sync::Arc;
 
 use nym_vpn_store::keys::wireguard::WireguardKeysDb;
 use tokio::sync::mpsc;
 
 use crate::{
     AccountControllerConfig, AccountControllerEventSender,
+    deeplink::Deeplinks,
     nyxd_client::NyxdClient,
     storage::{AccountStorageOp, VpnCredentialStorage},
 };
@@ -43,8 +44,14 @@ pub(crate) struct SharedAccountState<C: ConnectivityMonitor> {
     /// Stored account
     pub(crate) vpn_api_account: Option<Arc<VpnAccount>>,
 
+    /// Account summary
+    pub(crate) vpn_account_summary: Option<VpnAccountSummary>,
+
     /// Registered device
     pub(crate) device: Option<Device>,
+
+    /// Deeplinks for signing-in via services like Privy
+    pub(crate) deeplinks: Deeplinks,
 
     /// Firewall status
     pub(crate) firewall_active: bool,
@@ -70,7 +77,9 @@ impl<C: ConnectivityMonitor> SharedAccountState<C> {
         storage_op_sender: mpsc::UnboundedSender<AccountStorageOp>,
         event_sender: AccountControllerEventSender,
     ) -> Self {
-        SharedAccountState {
+        let deeplinks = Deeplinks::default();
+
+        Self {
             connectivity_handle,
             config,
             credential_storage,
@@ -78,7 +87,9 @@ impl<C: ConnectivityMonitor> SharedAccountState<C> {
             vpn_api_client,
             nyxd_client,
             vpn_api_account: vpn_api_account.map(Arc::new),
+            vpn_account_summary: None,
             device,
+            deeplinks,
             firewall_active: false,
             storage_op_sender,
             event_sender,

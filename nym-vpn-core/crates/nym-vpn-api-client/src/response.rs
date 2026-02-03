@@ -331,7 +331,7 @@ impl IntoIterator for NymDirectoryGatewaysResponse {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ScoreValue {
     Offline,
@@ -530,6 +530,14 @@ pub struct ProbeOutcome {
     pub as_entry: Entry,
     pub as_exit: Option<Exit>,
     pub wg: Option<WgProbeResults>,
+    pub socks5: Option<Socks5>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Socks5 {
+    pub can_proxy_https: bool,
+    pub score: Option<ScoreValue>,
+    pub errors: Option<Vec<String>>,
 }
 
 impl ProbeOutcome {
@@ -563,6 +571,7 @@ pub struct Exit {
     pub can_route_ip_external_v4: bool,
     pub can_route_ip_v6: bool,
     pub can_route_ip_external_v6: bool,
+    pub socks5: Option<Socks5>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -571,7 +580,8 @@ pub struct WgProbeResults {
     pub can_register: bool,
     pub can_handshake: bool,
     pub can_resolve_dns: bool,
-    pub can_query_metadata_v4: bool,
+    #[serde(default)]
+    pub can_query_metadata_v4: Option<bool>,
     pub ping_hosts_performance: f32,
     pub ping_ips_performance: f32,
 }
@@ -719,6 +729,14 @@ pub struct AccountManagementPathsResponse {
     pub sign_up: String,
     pub sign_in: String,
     pub account: String,
+    pub privy: AccountManagementPrivyPathsResponse,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct AccountManagementPrivyPathsResponse {
+    pub mobile: String,
+    pub desktop: String,
+    pub web: String,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]

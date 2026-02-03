@@ -1,9 +1,18 @@
 // Copyright 2025 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
-use nym_vpn_lib_types::{AccountCommandError, AvailableTickets, VpnApiError, VpnApiErrorResponse};
+use nym_vpn_lib_types::{
+    AccountCommandError, AvailableTickets, DeeplinkClient, DeeplinkKind, GetDeeplinkParams,
+    VpnAccountSummary, VpnApiError, VpnApiErrorResponse,
+};
 
-use crate::{conversions::ConversionError, proto};
+use crate::{
+    conversions::{
+        ConversionError,
+        prost::{offset_datetime_into_proto_timestamp, prost_timestamp_into_offset_datetime},
+    },
+    proto,
+};
 
 impl TryFrom<proto::AccountCommandError> for AccountCommandError {
     type Error = ConversionError;
@@ -51,6 +60,9 @@ impl TryFrom<proto::AccountCommandError> for AccountCommandError {
             }
             proto::account_command_error::ErrorDetail::ZkNymAcquisitionFailure(err) => {
                 Self::ZkNymAcquisitionFailure(err)
+            }
+            proto::account_command_error::ErrorDetail::DeeplinkError(message) => {
+                Self::DeeplinkError(message)
             }
         })
     }
@@ -170,6 +182,11 @@ impl From<AccountCommandError> for proto::AccountCommandError {
                     proto::account_command_error::ErrorDetail::ZkNymAcquisitionFailure(err),
                 ),
             },
+            AccountCommandError::DeeplinkError(message) => proto::AccountCommandError {
+                error_detail: Some(proto::account_command_error::ErrorDetail::DeeplinkError(
+                    message,
+                )),
+            },
         }
     }
 }
@@ -238,6 +255,120 @@ impl From<VpnApiErrorResponse> for proto::VpnApiErrorResponse {
             message: value.message,
             message_id: value.message_id,
             code_reference_id: value.code_reference_id,
+        }
+    }
+}
+
+impl TryFrom<proto::VpnAccountSummary> for VpnAccountSummary {
+    type Error = ConversionError;
+
+    fn try_from(value: proto::VpnAccountSummary) -> Result<Self, Self::Error> {
+        let subscription_valid_until = value
+            .subscription_valid_until
+            .map(|ts| {
+                prost_timestamp_into_offset_datetime(ts).map_err(|e| {
+                    ConversionError::ConvertTime("VpnAccountSummary.subscription_valid_until", e)
+                })
+            })
+            .transpose()?;
+        let traffic_reset_time = value
+            .traffic_reset_time
+            .map(|ts| {
+                prost_timestamp_into_offset_datetime(ts).map_err(|e| {
+                    ConversionError::ConvertTime("VpnAccountSummary.traffic_reset_time", e)
+                })
+            })
+            .transpose()?;
+        Ok(Self {
+            subscription_valid_until,
+            traffic_used_gb: value.traffic_used_gb,
+            traffic_limit_gb: value.traffic_limit_gb,
+            traffic_reset_time,
+        })
+    }
+}
+
+impl From<VpnAccountSummary> for proto::VpnAccountSummary {
+    fn from(value: VpnAccountSummary) -> Self {
+        let subscription_valid_until = value
+            .subscription_valid_until
+            .map(offset_datetime_into_proto_timestamp);
+        let traffic_reset_time = value
+            .traffic_reset_time
+            .map(offset_datetime_into_proto_timestamp);
+        Self {
+            subscription_valid_until,
+            traffic_used_gb: value.traffic_used_gb,
+            traffic_limit_gb: value.traffic_limit_gb,
+            traffic_reset_time,
+        }
+    }
+}
+
+impl From<GetDeeplinkParams> for proto::GetDeeplinkParams {
+    fn from(value: GetDeeplinkParams) -> Self {
+        let client: proto::DeeplinkClient = value.client.into();
+        let kind: proto::DeeplinkKind = value.kind.into();
+        Self {
+            client: client as i32,
+            locale: value.locale,
+            kind: kind as i32,
+            name: value.name,
+        }
+    }
+}
+
+impl TryFrom<proto::GetDeeplinkParams> for GetDeeplinkParams {
+    type Error = ConversionError;
+
+    fn try_from(value: proto::GetDeeplinkParams) -> Result<Self, Self::Error> {
+        let client = proto::DeeplinkClient::try_from(value.client)
+            .map_err(|_| ConversionError::NoValueSet("GetDeeplinkParams.client"))?;
+
+        let kind = proto::DeeplinkKind::try_from(value.kind)
+            .map_err(|_| ConversionError::NoValueSet("GetDeeplinkParams.kind"))?;
+
+        Ok(Self {
+            client: client.into(),
+            locale: value.locale,
+            kind: kind.into(),
+            name: value.name,
+        })
+    }
+}
+
+impl From<DeeplinkClient> for proto::DeeplinkClient {
+    fn from(value: DeeplinkClient) -> Self {
+        match value {
+            DeeplinkClient::Mobile => proto::DeeplinkClient::Mobile,
+            DeeplinkClient::Desktop => proto::DeeplinkClient::Desktop,
+            DeeplinkClient::Web => proto::DeeplinkClient::Web,
+        }
+    }
+}
+
+impl From<proto::DeeplinkClient> for DeeplinkClient {
+    fn from(value: proto::DeeplinkClient) -> Self {
+        match value {
+            proto::DeeplinkClient::Mobile => DeeplinkClient::Mobile,
+            proto::DeeplinkClient::Desktop => DeeplinkClient::Desktop,
+            proto::DeeplinkClient::Web => DeeplinkClient::Web,
+        }
+    }
+}
+
+impl From<DeeplinkKind> for proto::DeeplinkKind {
+    fn from(value: DeeplinkKind) -> Self {
+        match value {
+            DeeplinkKind::Privy => proto::DeeplinkKind::Privy,
+        }
+    }
+}
+
+impl From<proto::DeeplinkKind> for DeeplinkKind {
+    fn from(value: proto::DeeplinkKind) -> Self {
+        match value {
+            proto::DeeplinkKind::Privy => DeeplinkKind::Privy,
         }
     }
 }
