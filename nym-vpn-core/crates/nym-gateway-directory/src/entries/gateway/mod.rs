@@ -500,10 +500,30 @@ impl From<nym_vpn_api_client::response::Probe> for Probe {
 
 impl From<nym_vpn_api_client::response::ProbeOutcome> for ProbeOutcome {
     fn from(outcome: nym_vpn_api_client::response::ProbeOutcome) -> Self {
+        // Move socks5 from ProbeOutcome level to Exit level if as_exit exists
+        // The API response has socks5 at the outcome level, but we store it in Exit
+        let as_exit = outcome.as_exit.map(|mut exit| {
+            // If socks5 is at ProbeOutcome level but not in Exit, move it
+            if exit.socks5.is_none() {
+                exit.socks5 = outcome.socks5.clone();
+            }
+            Exit::from(exit)
+        });
+
         ProbeOutcome {
             as_entry: Entry::from(outcome.as_entry),
-            as_exit: outcome.as_exit.map(Exit::from),
+            as_exit,
             wg: outcome.wg.map(WgProbeResults::from),
+        }
+    }
+}
+
+impl From<nym_vpn_api_client::response::Socks5> for Socks5 {
+    fn from(exit: nym_vpn_api_client::response::Socks5) -> Self {
+        Socks5 {
+            can_proxy_https: exit.can_proxy_https,
+            score: exit.score.map(ScoreValue::from),
+            errors: exit.errors,
         }
     }
 }
@@ -525,7 +545,7 @@ impl From<nym_vpn_api_client::response::Exit> for Exit {
             can_route_ip_external_v4: exit.can_route_ip_external_v4,
             can_route_ip_v6: exit.can_route_ip_v6,
             can_route_ip_external_v6: exit.can_route_ip_external_v6,
-            socks5: None, // TODO: Fill from exit.socks5 when available
+            socks5: exit.socks5.map(Socks5::from),
         }
     }
 }
@@ -536,7 +556,7 @@ impl From<nym_vpn_api_client::response::WgProbeResults> for WgProbeResults {
             can_register: results.can_register,
             can_handshake: results.can_handshake,
             can_resolve_dns: results.can_resolve_dns,
-            can_query_metadata_v4: results.can_query_metadata_v4,
+            can_query_metadata_v4: results.can_query_metadata_v4.unwrap_or(false),
             ping_hosts_performance: results.ping_hosts_performance,
             ping_ips_performance: results.ping_ips_performance,
         }
@@ -947,7 +967,7 @@ impl GatewayList {
         base_filters: &GatewayFilters,
     ) -> Result<Gateway> {
         for score in [ScoreValue::High, ScoreValue::Medium, ScoreValue::Low] {
-            tracing::debug!("Looking for entry gateway with minimum score: {score}");
+            tracing::debug!("Looking for exit gateway with minimum SOCKS5 score: {score}");
 
             let filters = base_filters.with(&[GatewayFilter::MinSocks5Score(score)]);
             match self.find_exit_gateway(exit_point, &filters) {
@@ -971,11 +991,11 @@ impl GatewayList {
             }),
             ExitPoint::Country {
                 two_letter_iso_country_code,
-            } => Err(Error::NoMatchingEntryGatewayForLocation {
+            } => Err(Error::NoMatchingExitGatewayForLocation {
                 requested_location: two_letter_iso_country_code.clone(),
                 available_countries: self.all_iso_codes(),
             }),
-            ExitPoint::Region { region } => Err(Error::NoMatchingEntryGatewayForLocation {
+            ExitPoint::Region { region } => Err(Error::NoMatchingExitGatewayForLocation {
                 requested_location: region.clone(),
                 available_countries: self.all_iso_codes(),
             }),

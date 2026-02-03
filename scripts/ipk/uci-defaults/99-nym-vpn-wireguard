@@ -1,0 +1,72 @@
+#!/bin/sh
+# Upgrade to Amnezia-WireGuard if available (OpenWrt 23.05+)
+#
+# Standard kmod-wireguard is installed as a package dependency.
+# This script attempts to upgrade to Amnezia-WG for obfuscation support.
+# If it fails, standard WireGuard remains functional.
+#
+# Based on: https://github.com/Slava-Shchipunov/awg-openwrt
+
+# Source OpenWrt release info
+if [ -f /etc/openwrt_release ]; then
+    . /etc/openwrt_release
+    MAJOR_VERSION="${DISTRIB_RELEASE%%.*}"
+else
+    exit 0  # Can't detect version, skip upgrade
+fi
+
+# Only attempt Amnezia upgrade on OpenWrt 23.05+
+[ "$MAJOR_VERSION" -ge 23 ] 2>/dev/null || exit 0
+
+# Skip if Amnezia is already installed
+lsmod | grep -q amneziawg && exit 0
+
+echo "Attempting to upgrade to Amnezia-WireGuard..."
+
+# Get system info for package selection
+TARGET=$(ubus call system board | jsonfilter -e '@.release.target' | cut -d '/' -f 1)
+SUBTARGET=$(ubus call system board | jsonfilter -e '@.release.target' | cut -d '/' -f 2)
+PKGARCH="$DISTRIB_ARCH"
+
+if [ -z "$TARGET" ] || [ -z "$SUBTARGET" ] || [ -z "$PKGARCH" ]; then
+    echo "Failed to detect system architecture, keeping standard WireGuard"
+    exit 0
+fi
+
+# Install kernel dependencies
+opkg update
+opkg install kmod-udptunnel4 kmod-udptunnel6 \
+    kmod-crypto-lib-chacha20poly1305 kmod-crypto-lib-curve25519 || {
+    echo "Failed to install kernel dependencies, keeping standard WireGuard"
+    exit 0
+}
+
+BASE_URL="https://github.com/Slava-Shchipunov/awg-openwrt/releases/download"
+AWG_DIR="/tmp/amneziawg"
+mkdir -p "$AWG_DIR"
+
+# Download and install Amnezia packages
+for pkg in kmod-amneziawg amneziawg-tools; do
+    FILENAME="${pkg}_v${DISTRIB_RELEASE}_${PKGARCH}_${TARGET}_${SUBTARGET}.ipk"
+    URL="${BASE_URL}/v${DISTRIB_RELEASE}/${FILENAME}"
+    echo "Downloading $FILENAME..."
+    if wget -q -O "$AWG_DIR/$FILENAME" "$URL"; then
+        opkg install "$AWG_DIR/$FILENAME" || {
+            echo "Failed to install $pkg, keeping standard WireGuard"
+            rm -rf "$AWG_DIR"
+            exit 0
+        }
+    else
+        echo "Failed to download $pkg, keeping standard WireGuard"
+        rm -rf "$AWG_DIR"
+        exit 0
+    fi
+done
+
+rm -rf "$AWG_DIR"
+echo "Amnezia-WireGuard installed successfully"
+
+# Restart daemon to pick up Amnezia module
+/etc/init.d/nym-vpnd restart 2>/dev/null
+
+exit 0

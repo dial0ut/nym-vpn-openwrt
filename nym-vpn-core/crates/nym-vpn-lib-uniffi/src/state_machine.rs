@@ -177,6 +177,8 @@ pub(super) async fn start_state_machine(
     })?;
 
     let discovery_watch_token = shutdown_token.child_token();
+    let user_agent_clone = user_agent.clone();
+    let topology_service_clone = topology_service.clone();
     let discovery_watch_handle = tokio::spawn(async move {
         loop {
             tokio::select! {
@@ -184,7 +186,18 @@ pub(super) async fn start_state_machine(
                     match event {
                         DiscoveryRefresherEvent::NewNetwork(new_network) => {
                             tracing::info!("Network environment updated");
-                            let _ = network_tx.send_replace(new_network);
+                            let _ = network_tx.send_replace(new_network.clone());
+
+                            // Update gateway cache and topology cache for new environment
+                            if let Ok(cache_handle) = gateway_cache::get_gateway_cache_handle().await {
+                                nym_vpn_lib::cache_refresh::update_caches_for_network(
+                                    &new_network,
+                                    &cache_handle,
+                                    &topology_service_clone,
+                                    &user_agent_clone,
+                                )
+                                .await;
+                            }
                         }
                         DiscoveryRefresherEvent::Error(_error) => {
                             // todo: handle error?
@@ -208,7 +221,7 @@ pub(super) async fn start_state_machine(
         account_controller_state,
         statistics_event_sender.clone(),
         gateway_cache_handle,
-        topology_service,
+        topology_service.clone(),
         connectivity_handle,
         discovery_refresher_command_tx,
         wireguard_key_db,
@@ -233,6 +246,7 @@ pub(super) async fn start_state_machine(
         command_sender,
         statistics_event_sender,
         topology_service_handle,
+        topology_service,
         shutdown_token,
     })
 }
@@ -245,6 +259,8 @@ pub(super) struct StateMachineHandle {
     command_sender: mpsc::UnboundedSender<TunnelCommand>,
     statistics_event_sender: StatisticsSender,
     topology_service_handle: JoinHandle<()>,
+    #[allow(dead_code)]
+    topology_service: nym_vpn_lib::VpnTopologyServiceHandle,
     shutdown_token: CancellationToken,
 }
 

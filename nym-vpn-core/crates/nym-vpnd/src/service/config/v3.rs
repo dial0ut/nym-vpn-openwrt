@@ -39,6 +39,10 @@ impl TryFrom<VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
     type Error = ConfigSetupError;
 
     fn try_from(value: VpnServiceConfig) -> Result<Self, Self::Error> {
+        let entry_point = nym_vpn_lib_types::EntryPoint::try_from(value.entry_point)?;
+
+        let exit_point = nym_vpn_lib_types::ExitPoint::try_from(value.exit_point)?;
+
         let custom_dns = match &value.custom_dns {
             None => vec![],
             Some(dns_list) if dns_list.is_empty() => vec![],
@@ -51,24 +55,34 @@ impl TryFrom<VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
                 .collect::<Result<_, _>>()?,
         };
 
+        let mixnet_traffic = nym_vpn_lib_types::MixnetTrafficConfig {
+            poisson_parameter_for_loop_cover_stream: None,
+            average_packet_delay: None,
+            message_sending_average_delay: None,
+
+            disable_poisson_rate: value.disable_poisson_rate,
+            disable_background_cover_traffic: value.disable_background_cover_traffic,
+
+            min_mixnode_performance: value.min_mixnode_performance,
+            min_gateway_mixnet_performance: value.min_gateway_mixnet_performance,
+        };
+
         let config = nym_vpn_lib_types::VpnServiceConfig {
-            entry_point: nym_vpn_lib_types::EntryPoint::try_from(value.entry_point)?,
-            exit_point: nym_vpn_lib_types::ExitPoint::try_from(value.exit_point)?,
+            entry_point,
+            exit_point,
             allow_lan: value.allow_lan,
             disable_ipv6: value.disable_ipv6,
             enable_two_hop: value.enable_two_hop,
             enable_bridges: value.enable_bridges,
             netstack: value.netstack,
-            disable_poisson_rate: value.disable_poisson_rate,
-            disable_background_cover_traffic: value.disable_background_cover_traffic,
-            min_mixnode_performance: value.min_mixnode_performance,
-            min_gateway_mixnet_performance: value.min_gateway_mixnet_performance,
             min_gateway_vpn_performance: value.min_gateway_vpn_performance,
             residential_exit: value.residential_exit,
+            mixnet_traffic,
             enable_custom_dns: !custom_dns.is_empty(),
             custom_dns,
-            network_stats: Default::default(),
+            ..Default::default()
         };
+
         Ok(config)
     }
 }

@@ -247,20 +247,21 @@ jobs:
           fi
           chmod 755 ipk/data/etc/init.d/nym-vpnd
 
-          # UCI defaults (post-install setup)
+          # === Copy IPK scripts from scripts/ipk/ ===
+          # UCI defaults - LuCI setup
           if [ -f luci/root/etc/uci-defaults/luci-app-nym-vpn ]; then
             cp luci/root/etc/uci-defaults/luci-app-nym-vpn ipk/data/etc/uci-defaults/
             chmod 755 ipk/data/etc/uci-defaults/luci-app-nym-vpn
           fi
 
-          # UCI config
-          cat > ipk/data/etc/config/nym-vpn << 'CONFIGEOF'
-          config nym-vpn 'settings'
-              option enabled '0'
-              option network 'mainnet'
-          CONFIGEOF
+          # UCI defaults - WireGuard installation (runs on first boot, outside opkg lock)
+          cp scripts/ipk/uci-defaults/99-nym-vpn-wireguard ipk/data/etc/uci-defaults/
+          chmod 755 ipk/data/etc/uci-defaults/99-nym-vpn-wireguard
 
-          # === Firewall include scripts ===
+          # UCI config
+          cp scripts/ipk/nym-vpn.conf ipk/data/etc/config/nym-vpn
+
+          # Firewall include scripts
           mkdir -p ipk/data/usr/share/nym-vpn
           cp nym-vpn-core/crates/nym-firewall/scripts/fw3-include.sh ipk/data/usr/share/nym-vpn/
           cp nym-vpn-core/crates/nym-firewall/scripts/fw4-include.sh ipk/data/usr/share/nym-vpn/
@@ -276,167 +277,15 @@ jobs:
           Installed-Size: ${INSTALLED_SIZE}
           Section: net
           Priority: optional
-          Depends: libc, kmod-tun, luci-base, rpcd
+          Depends: libc, kmod-tun, kmod-wireguard, luci-base, rpcd
           Description: NymVPN for OpenWrt
            Privacy-focused VPN using the Nym mixnet. Includes daemon, CLI, and LuCI web interface.
           EOF
 
-          # === Post-install script ===
-          cat > ipk/control/postinst << 'POSTINST'
-          #!/bin/sh
-          # Source OpenWrt release info
-          if [ -f /etc/openwrt_release ]; then
-              . /etc/openwrt_release
-              MAJOR_VERSION="${DISTRIB_RELEASE%%.*}"
-          else
-              MAJOR_VERSION="0"
-          fi
-
-          # Install Amnezia-WireGuard from community repo (OpenWrt 23.05+)
-          # Based on: https://github.com/Slava-Shchipunov/awg-openwrt
-          install_amneziawg() {
-              echo "Installing Amnezia-WireGuard for OpenWrt $DISTRIB_RELEASE..."
-
-              # Get system info for package selection
-              TARGET=$(ubus call system board | jsonfilter -e '@.release.target' | cut -d '/' -f 1)
-              SUBTARGET=$(ubus call system board | jsonfilter -e '@.release.target' | cut -d '/' -f 2)
-              PKGARCH=$(opkg print-architecture | awk 'NR==3 {print $2}')
-
-              if [ -z "$TARGET" ] || [ -z "$SUBTARGET" ] || [ -z "$PKGARCH" ]; then
-                  echo "Failed to detect system architecture"
-                  return 1
-              fi
-
-              # Update package lists and install kernel dependencies
-              echo "Installing kernel dependencies..."
-              opkg update
-              opkg install kmod-udptunnel4 kmod-udptunnel6 \
-                  kmod-crypto-lib-chacha20poly1305 kmod-crypto-lib-curve25519 || {
-                  echo "Failed to install kernel dependencies"
-                  return 1
-              }
-
-              BASE_URL="https://github.com/Slava-Shchipunov/awg-openwrt/releases/download"
-              AWG_DIR="/tmp/amneziawg"
-              mkdir -p "$AWG_DIR"
-
-              # Download and install packages
-              for pkg in kmod-amneziawg amneziawg-tools; do
-                  FILENAME="${pkg}_v${DISTRIB_RELEASE}_${PKGARCH}_${TARGET}_${SUBTARGET}.ipk"
-                  URL="${BASE_URL}/v${DISTRIB_RELEASE}/${FILENAME}"
-                  echo "Downloading $FILENAME..."
-                  if wget -q -O "$AWG_DIR/$FILENAME" "$URL"; then
-                      opkg install "$AWG_DIR/$FILENAME" || {
-                          echo "Failed to install $pkg"
-                          rm -rf "$AWG_DIR"
-                          return 1
-                      }
-                  else
-                      echo "Failed to download $pkg"
-                      rm -rf "$AWG_DIR"
-                      return 1
-                  fi
-              done
-
-              rm -rf "$AWG_DIR"
-              echo "Amnezia-WireGuard installed successfully"
-              return 0
-          }
-
-          # Install appropriate WireGuard kernel module
-          install_wireguard() {
-              if [ "$MAJOR_VERSION" -ge 23 ] 2>/dev/null; then
-                  # OpenWrt 23.05+: Try Amnezia-WireGuard first
-                  if install_amneziawg; then
-                      return 0
-                  fi
-                  echo "Amnezia-WireGuard unavailable, falling back to standard WireGuard..."
-              fi
-              # Fallback to standard WireGuard
-              opkg update && opkg install kmod-wireguard wireguard-tools
-          }
-
-          # Only install on first install, not upgrades
-          if [ "$PKG_UPGRADE" != "1" ]; then
-              install_wireguard
-          fi
-
-          # Create TUN device if needed
-          [ -e /dev/net/tun ] || {
-              mkdir -p /dev/net
-              mknod /dev/net/tun c 10 200
-              chmod 0666 /dev/net/tun
-          }
-
-          # Enable and start service
-          /etc/init.d/nym-vpnd enable
-          /etc/init.d/nym-vpnd start
-
-          # Restart rpcd to pick up new ACLs
-          /etc/init.d/rpcd restart
-
-          exit 0
-          POSTINST
-          chmod 755 ipk/control/postinst
-
-          # === Pre-remove script ===
-          cat > ipk/control/prerm << 'PRERM'
-          #!/bin/sh
-          # Stop and disable the service before removal
-          /etc/init.d/nym-vpnd stop 2>/dev/null
-          /etc/init.d/nym-vpnd disable 2>/dev/null
-
-          # Clean up firewall rules
-          if [ -x /sbin/fw4 ]; then
-            # fw4/nftables cleanup
-            nft delete table inet nym 2>/dev/null
-            # Remove rules from fw4 chains (srcnat, forward_lan)
-            for chain in srcnat forward_lan; do
-              handles=$(nft -a list chain inet fw4 "$chain" 2>/dev/null | grep "nym-vpn:" | sed 's/.*handle //')
-              for h in $handles; do
-                nft delete rule inet fw4 "$chain" handle "$h" 2>/dev/null
-              done
-            done
-          else
-            # fw3/iptables cleanup
-            for ipt in iptables ip6tables; do
-              # Remove jump rules from fw3 hook chains
-              for hook in input_rule output_rule forwarding_rule; do
-                $ipt -D "$hook" -j NYM_INPUT 2>/dev/null
-                $ipt -D "$hook" -j NYM_OUTPUT 2>/dev/null
-                $ipt -D "$hook" -j NYM_FORWARD 2>/dev/null
-              done
-              # Flush and delete our chains
-              for chain in NYM_INPUT NYM_OUTPUT NYM_FORWARD; do
-                $ipt -F "$chain" 2>/dev/null
-                $ipt -X "$chain" 2>/dev/null
-              done
-            done
-            # Remove masquerade rules from NAT table
-            for num in $(iptables -t nat -L POSTROUTING -n --line-numbers -v 2>/dev/null | grep "nym-vpn" | awk '{print $1}' | sort -rn); do
-              iptables -t nat -D POSTROUTING "$num" 2>/dev/null
-            done
-          fi
-
-          # Remove UCI firewall include config
-          uci delete firewall.nym_vpn 2>/dev/null
-          uci commit firewall 2>/dev/null
-
-          # Remove UCI app config
-          uci delete nym-vpn 2>/dev/null
-          uci commit nym-vpn 2>/dev/null
-          rm -f /etc/config/nym-vpn 2>/dev/null
-
-          # Clean up all nym-vpn data and config files
-          rm -rf /var/lib/nym-vpn 2>/dev/null
-
-          # Unload kernel modules if no longer needed
-          rmmod amneziawg 2>/dev/null || true
-          rmmod wireguard 2>/dev/null || true
-
-          exit 0
-          PRERM
-          chmod 755 ipk/control/prerm
+          # Post-install and pre-remove scripts
+          cp scripts/ipk/postinst ipk/control/postinst
+          cp scripts/ipk/prerm ipk/control/prerm
+          chmod 755 ipk/control/postinst ipk/control/prerm
 
           # === Build IPK ===
           (cd ipk/control && tar -czf ../control.tar.gz .)

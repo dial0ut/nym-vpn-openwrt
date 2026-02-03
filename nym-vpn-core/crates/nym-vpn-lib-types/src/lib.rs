@@ -35,6 +35,7 @@
 mod account;
 mod connection_data;
 mod device;
+mod diagnostic;
 mod gateway;
 mod log_path;
 mod network;
@@ -50,10 +51,12 @@ mod uniffi_std_types;
 mod user_agent;
 
 pub use account::{
-    AccountCommandError, RegisterAccountResponse, VpnApiError, VpnApiErrorResponse,
+    AccountCommandError, RegisterAccountResponse, VpnAccountSummary, VpnApiError,
+    VpnApiErrorResponse,
     controller_error::{AccountControllerError, AccountControllerErrorStateReason},
     controller_event::AccountControllerEvent,
     controller_state::AccountControllerState,
+    deeplink::{DeeplinkClient, DeeplinkKind, GetDeeplinkParams},
     request_zknym::{RequestZkNymError, RequestZkNymErrorReason, RequestZkNymSuccess},
     ticketbooks::AvailableTickets,
 };
@@ -63,10 +66,15 @@ pub use connection_data::{
     WireguardConnectionData, WireguardNode,
 };
 pub use device::{NymVpnDevice, NymVpnDeviceStatus, NymVpnUsage};
+pub use diagnostic::{
+    ApiTimeSkew, CompleteDnsReport, DiagnosticRegisterParams, DiagnosticReport, DiagnosticResult,
+    DiagnosticRunParams, DnsResolution, GatewayReport, HttpReport, PingReport, RegistrationReport,
+};
 pub use gateway::{
     Asn, AsnKind, BridgeInformation, BridgeParameters, Country, Entry, EntryPoint, Exit, ExitPoint,
     Gateway, GatewayFilter, GatewayType, Location, LookupGatewayFilters, NodeIdentity,
     ParseRecipientError, Performance, Probe, ProbeOutcome, QuicClientOptions, Recipient, Score,
+    Socks5,
 };
 pub use log_path::LogPath;
 pub use network::{
@@ -80,7 +88,7 @@ pub use rpc_requests::{
     AccountBalanceResponse, AccountCommandResponse, Coin, DecentralisedObtainTicketbooksRequest,
     ListGatewaysOptions, StoreAccountRequest,
 };
-pub use service::{TargetState, VpnServiceConfig, VpnServiceInfo};
+pub use service::{MixnetTrafficConfig, TargetState, VpnServiceConfig, VpnServiceInfo};
 pub use socks5::{EnableSocks5Request, HttpRpcSettings, Socks5Settings, Socks5State, Socks5Status};
 pub use tunnel_event::{
     BandwidthEvent, ConnectionEvent, ConnectionStatisticsEvent, MixnetEvent, SphinxPacketRates,

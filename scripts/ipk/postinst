@@ -1,0 +1,26 @@
+#!/bin/sh
+# Post-installation script for nym-vpn IPK package
+
+# Create TUN device if needed
+[ -e /dev/net/tun ] || {
+    mkdir -p /dev/net
+    mknod /dev/net/tun c 10 200
+    chmod 0666 /dev/net/tun
+}
+
+# Enable and start service
+/etc/init.d/nym-vpnd enable
+/etc/init.d/nym-vpnd start
+
+# Restart rpcd to pick up new ACLs
+/etc/init.d/rpcd restart
+
+echo ""
+echo "=============================================="
+echo "NymVPN installed successfully!"
+echo ""
+echo "On OpenWrt 23.05+, Amnezia-WireGuard will be"
+echo "installed on next reboot for obfuscation support."
+echo "=============================================="
+
+exit 0

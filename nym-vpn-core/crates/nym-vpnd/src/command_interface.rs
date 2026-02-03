@@ -13,15 +13,15 @@ use tokio::{
     task::JoinHandle,
 };
 use tokio_util::sync::CancellationToken;
-use tonic::transport::Server;
+use tonic::{Request, Response, Status, transport::Server};
 
 use nym_vpn_lib_types::{
-    EnableSocks5Request, EntryPoint, ExitPoint, ListGatewaysOptions, LookupGatewayFilters,
-    TargetState, TunnelEvent,
+    EnableSocks5Request, EntryPoint, ExitPoint, GetDeeplinkParams, ListGatewaysOptions,
+    LookupGatewayFilters, TargetState, TunnelEvent,
 };
 
 use nym_vpn_proto::proto::{
-    self,
+    self, MixnetTrafficConfig,
     nym_vpn_service_server::{NymVpnService, NymVpnServiceServer},
 };
 
@@ -157,6 +157,25 @@ impl NymVpnService for CommandInterface {
         Ok(tonic::Response::new(()))
     }
 
+    async fn set_enable_lewes_protocol(
+        &self,
+        request: tonic::Request<bool>,
+    ) -> Result<tonic::Response<()>> {
+        let enable_lewes_protocol = request.into_inner();
+
+        let _ = self
+            .send_and_wait(
+                VpnServiceCommand::SetEnableLewesProtocol,
+                enable_lewes_protocol,
+            )
+            .await
+            .map_err(|e| {
+                tonic::Status::internal(format!("Failed to set lewes-protocol config: {e}"))
+            })?;
+
+        Ok(tonic::Response::new(()))
+    }
+
     async fn set_netstack(&self, request: tonic::Request<bool>) -> Result<tonic::Response<()>> {
         let netstack = request.into_inner();
 
@@ -226,6 +245,28 @@ impl NymVpnService for CommandInterface {
             .map_err(|e| tonic::Status::internal(format!("Failed to set custom DNS: {e}")))?;
 
         Ok(tonic::Response::new(()))
+    }
+
+    async fn set_mixnet_traffic_config(
+        &self,
+        request: Request<MixnetTrafficConfig>,
+    ) -> std::result::Result<Response<()>, Status> {
+        let mixnet_traffic_config: nym_vpn_lib_types::MixnetTrafficConfig =
+            request.into_inner().into();
+
+        self.send_and_wait(
+            VpnServiceCommand::SetMixnetTrafficConfig,
+            mixnet_traffic_config,
+        )
+        .await
+        .map_err(|e| Status::internal(format!("[set_mixnet_traffic_config] transport error: {e}")))?
+        .map_err(|err| {
+            Status::invalid_argument(format!(
+                "[set_mixnet_traffic_config] validation failed: {err}"
+            ))
+        })?;
+
+        Ok(Response::new(()))
     }
 
     async fn set_network(&self, request: tonic::Request<String>) -> Result<tonic::Response<()>> {
@@ -652,6 +693,62 @@ impl NymVpnService for CommandInterface {
         Ok(tonic::Response::new(response))
     }
 
+    async fn get_account_summary(
+        &self,
+        _request: tonic::Request<()>,
+    ) -> Result<tonic::Response<proto::VpnAccountSummaryResponse>> {
+        let account_summary = self
+            .send_and_wait(VpnServiceCommand::GetAccountSummary, ())
+            .await?
+            .map_err(|err| {
+                tonic::Status::internal(format!("Failed to get account summary: {err}"))
+            })?;
+
+        let response = proto::VpnAccountSummaryResponse {
+            account_summary: account_summary.map(proto::VpnAccountSummary::from),
+        };
+
+        Ok(tonic::Response::new(response))
+    }
+
+    async fn get_deeplink(
+        &self,
+        request: tonic::Request<proto::GetDeeplinkParams>,
+    ) -> Result<tonic::Response<String>> {
+        let req = request.into_inner();
+
+        let params: GetDeeplinkParams = req.try_into().map_err(|err| {
+            tonic::Status::invalid_argument(format!("Invalid get deeplink request: {err}"))
+        })?;
+
+        let url = self
+            .send_and_wait(VpnServiceCommand::GetDeeplink, params)
+            .await?
+            .map_err(|err| tonic::Status::internal(format!("Failed to get deeplink: {err}")))?;
+
+        Ok(tonic::Response::new(url.to_string()))
+    }
+
+    async fn deeplink_store_account(
+        &self,
+        request: tonic::Request<String>,
+    ) -> Result<tonic::Response<proto::AccountCommandResponse>> {
+        let deeplink_callback_url = request.into_inner();
+
+        let result = self
+            .send_and_wait(
+                VpnServiceCommand::DeeplinkStoreAccount,
+                deeplink_callback_url,
+            )
+            .await?;
+
+        let response = proto::AccountCommandResponse {
+            error: result.err().map(proto::AccountCommandError::from),
+        };
+
+        Ok(tonic::Response::new(response))
+    }
+
     async fn get_log_path(
         &self,
         _: tonic::Request<()>,
@@ -814,7 +911,7 @@ impl NymVpnService for CommandInterface {
             .send_and_wait(VpnServiceCommand::GetSocks5Status, ())
             .await?
             .map_err(|err| {
-                tracing::error!("Failed to get SOCKS5 status: {err}");
+                tracing::debug!("Failed to get SOCKS5 status: {err}");
                 tonic::Status::internal(format!("Failed to get SOCKS5 status: {err}"))
             })?;
 
@@ -831,6 +928,41 @@ impl NymVpnService for CommandInterface {
         Ok(tonic::Response::new(proto::PrivyDerivationMessage {
             message: nym_vpn_lib::login::privy::message_to_sign(),
         }))
+    }
+
+    async fn run_diagnostic(
+        &self,
+        request: tonic::Request<proto::DiagnosticRunParams>,
+    ) -> Result<tonic::Response<proto::DiagnosticReport>> {
+        let req = request.into_inner();
+        let report = self
+            .send_and_wait(VpnServiceCommand::RunDiagnostic, req.into())
+            .await?;
+
+        let proto_report = report.try_into().map_err(|e| {
+            tonic::Status::internal(format!("Failed to run diagnostic report: {e}"))
+        })?;
+
+        Ok(tonic::Response::new(proto_report))
+    }
+
+    async fn register_diagnostic(
+        &self,
+        request: tonic::Request<proto::DiagnosticRegisterParams>,
+    ) -> Result<tonic::Response<proto::RegistrationReport>> {
+        let req = request.into_inner();
+        let register_params = req.try_into().map_err(|e| {
+            tonic::Status::invalid_argument(format!("Invalid Register diagnostic argument: {e}"))
+        })?;
+        let report = self
+            .send_and_wait(VpnServiceCommand::RegisterDiagnostic, register_params)
+            .await?;
+
+        let proto_report = report.try_into().map_err(|e| {
+            tonic::Status::internal(format!("Failed to run diagnostic report: {e}"))
+        })?;
+
+        Ok(tonic::Response::new(proto_report))
     }
 }
 

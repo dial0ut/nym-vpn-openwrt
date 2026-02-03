@@ -14,6 +14,8 @@ mod util;
 
 use http_rpc::HttpRpc;
 use lazy_socks5::{LazySocks5, LazySocks5Config, LazySocks5Error};
+use nym_gateway_directory::GatewayCacheHandle;
+use nym_sdk::NymNetworkDetails;
 use nym_vpn_lib_types::TunnelState;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tokio::{sync::RwLock, task::JoinHandle};
@@ -24,19 +26,24 @@ pub use config::{socks5_idle_timeout, socks5_request_timeout};
 pub use nym_vpn_lib_types::{HttpRpcSettings, Socks5Settings, Socks5State, Socks5Status};
 
 /// Configuration for enabling SOCKS5 service
-struct Socks5EnableConfig {
-    data_dir: PathBuf,
-    socks5_listen_address: Option<SocketAddr>,
-    http_rpc_proxy_listen_address: Option<SocketAddr>,
-    network_requester_address: String,
-    request_timeout: Duration,
-    idle_timeout: Duration,
+pub struct Socks5EnableConfig {
+    pub data_dir: PathBuf,
+    pub socks5_listen_address: Option<SocketAddr>,
+    pub http_rpc_proxy_listen_address: Option<SocketAddr>,
+    pub network_requester_address: Option<String>,
+    pub network_requester_rotation_interval: Option<Duration>,
+    pub gateway_cache_handle: Option<GatewayCacheHandle>,
+    pub request_timeout: Duration,
+    pub idle_timeout: Duration,
+    pub network_details: Option<NymNetworkDetails>,
+    /// VPN exit gateway identity to exclude during random Network Requester selection (for privacy)
+    pub vpn_exit_gateway_identity: Option<String>,
 }
 
 /// SOCKS5 service errors
 #[derive(Debug, thiserror::Error)]
 pub enum Socks5Error {
-    #[error("Gateway does not support SOCKS5 network requester")]
+    #[error("Server does not support SOCKS5 network requester")]
     GatewayNotSupported,
 
     #[error("Invalid configuration: {0}")]
@@ -56,8 +63,8 @@ struct Socks5ServiceState {
     socks5_listen_address: Option<SocketAddr>,
     /// HTTP RPC listen address
     http_rpc_proxy_listen_address: Option<SocketAddr>,
-    /// Network requester address
-    network_requester_address: String,
+    /// Network requester address (optional - None means random selection)
+    network_requester_address: Option<String>,
     /// Error message
     error_message: Option<String>,
     /// Cancellation token for the wrapper and HTTP proxy
@@ -77,7 +84,7 @@ impl Socks5ServiceState {
             tunnel_state,
             socks5_listen_address: None,
             http_rpc_proxy_listen_address: None,
-            network_requester_address: String::new(),
+            network_requester_address: None,
             error_message: None,
             cancel_token: None,
             lazy_socks5: None,
@@ -124,8 +131,12 @@ impl Socks5ServiceState {
             socks5_listen_address,
             http_rpc_proxy_listen_address,
             network_requester_address,
+            network_requester_rotation_interval,
+            gateway_cache_handle,
             request_timeout,
             idle_timeout,
+            network_details,
+            vpn_exit_gateway_identity,
         } = config;
 
         // Prevent concurrent enable calls
@@ -160,7 +171,9 @@ impl Socks5ServiceState {
         };
 
         // Internal SOCKS5 address (where Nym SDK will bind)
-        let internal_socks5_addr: SocketAddr = "127.0.0.1:1081".parse().unwrap();
+        let internal_socks5_addr: SocketAddr = "127.0.0.1:1081"
+            .parse()
+            .expect("Hardcoded internal SOCKS5 address should always be valid");
 
         if socks5_listen_address == internal_socks5_addr {
             return Err(Socks5Error::InvalidConfig(format!(
@@ -169,11 +182,12 @@ impl Socks5ServiceState {
         }
 
         info!(
-            "Enabling lazy SOCKS5 service: network_requester={}, socks5_listen={}, http_rpc_listen={:?}, idle_timeout={}s",
+            "Enabling lazy SOCKS5 service: network_requester={:?}, socks5_listen={}, http_rpc_listen={:?}, idle_timeout={}s, rotation_interval={:?}",
             network_requester_address,
             socks5_listen_address,
             http_rpc_proxy_listen_address,
-            idle_timeout.as_secs()
+            idle_timeout.as_secs(),
+            network_requester_rotation_interval
         );
 
         // Create an independent cancellation token for this enable operation.
@@ -188,6 +202,10 @@ impl Socks5ServiceState {
             request_timeout,
             idle_timeout,
             network_requester_address: network_requester_address.clone(),
+            network_requester_rotation_interval,
+            gateway_cache_handle,
+            network_details,
+            vpn_exit_gateway_identity,
         };
         let lazy_socks5 = Arc::new(LazySocks5::new(
             config,
@@ -304,26 +322,9 @@ impl Socks5Service {
     }
 
     /// Enable the lazy SOCKS5 proxy with optional HTTP RPC proxy
-    pub async fn enable(
-        &self,
-        data_dir: PathBuf,
-        socks5_listen_address: Option<SocketAddr>,
-        http_rpc_proxy_listen_address: Option<SocketAddr>,
-        network_requester_address: String,
-        request_timeout: Duration,
-        idle_timeout: Duration,
-    ) -> Result<(), Socks5Error> {
+    pub async fn enable(&self, config: Socks5EnableConfig) -> Result<(), Socks5Error> {
         let mut state = self.state.write().await;
-        state
-            .enable(Socks5EnableConfig {
-                data_dir,
-                socks5_listen_address,
-                http_rpc_proxy_listen_address,
-                network_requester_address,
-                request_timeout,
-                idle_timeout,
-            })
-            .await
+        state.enable(config).await
     }
 
     /// Disable the lazy SOCKS5 proxy
