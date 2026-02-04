@@ -124,122 +124,33 @@ jobs:
           fi
           # Strip 'v' prefix for package version
           echo "version=${VERSION#v}" >> $GITHUB_OUTPUT
+          echo "tag=${VERSION}" >> $GITHUB_OUTPUT
 
       - name: Clone LuCI package
         run: |
-          git clone --depth 1 https://github.com/dial0ut/nym-vpn-luci.git luci
-
-      - name: Create IPK package
-        run: |
-          PKG_VERSION="${{ steps.version.outputs.version }}"
-          PKG_ARCH="${{ matrix.openwrt_arch }}"
-          mkdir -p ipk/{control,data}
-
-          # === Binaries ===
-          mkdir -p ipk/data/usr/sbin ipk/data/usr/bin
-          cp artifacts/nym-vpnd-${{ matrix.arch }} ipk/data/usr/sbin/nym-vpnd
-          cp artifacts/nym-vpnc-${{ matrix.arch }} ipk/data/usr/bin/nym-vpnc
-          chmod 755 ipk/data/usr/sbin/nym-vpnd ipk/data/usr/bin/nym-vpnc
-
-          # === LuCI web interface ===
-          # Frontend JS - view file
-          mkdir -p ipk/data/www/luci-static/resources/view/nym-vpn
-          cp luci/htdocs/luci-static/resources/view/nym-vpn/config.js \
-             ipk/data/www/luci-static/resources/view/nym-vpn/
-
-          # Frontend JS - module files (rpc, ui, countries, assets, theme)
-          mkdir -p ipk/data/www/luci-static/resources/nym-vpn
-          cp luci/htdocs/luci-static/resources/nym-vpn/*.js \
-             ipk/data/www/luci-static/resources/nym-vpn/
-
-          # RPC backend
-          mkdir -p ipk/data/usr/libexec/rpcd
-          cp luci/root/usr/libexec/rpcd/nym-vpn ipk/data/usr/libexec/rpcd/
-          chmod 755 ipk/data/usr/libexec/rpcd/nym-vpn
-
-          # Menu and ACL config
-          mkdir -p ipk/data/usr/share/luci/menu.d ipk/data/usr/share/rpcd/acl.d
-          cp luci/root/usr/share/luci/menu.d/luci-app-nym-vpn.json ipk/data/usr/share/luci/menu.d/
-          cp luci/root/usr/share/rpcd/acl.d/luci-app-nym-vpn.json ipk/data/usr/share/rpcd/acl.d/
-
-          # === Service config ===
-          mkdir -p ipk/data/etc/init.d ipk/data/etc/config ipk/data/etc/uci-defaults
-          mkdir -p ipk/data/var/lib/nym-vpn
-
-          # Init script from LuCI repo (or create if not present)
-          if [ -f luci/root/etc/init.d/nym-vpnd ]; then
-            cp luci/root/etc/init.d/nym-vpnd ipk/data/etc/init.d/
+          # Try to clone the matching release tag, fall back to main branch
+          if git clone --depth 1 --branch "v${{ steps.version.outputs.version }}" \
+               https://github.com/dial0ut/nym-vpn-luci.git luci 2>/dev/null; then
+            echo "Cloned LuCI repo at tag v${{ steps.version.outputs.version }}"
           else
-            cat > ipk/data/etc/init.d/nym-vpnd << 'INITEOF'
-          #!/bin/sh /etc/rc.common
-          START=90
-          STOP=10
-          USE_PROCD=1
-
-          start_service() {
-              mkdir -p /var/lib/nym-vpn
-              procd_open_instance
-              procd_set_param command /usr/sbin/nym-vpnd --config-dir /var/lib/nym-vpn
-              procd_set_param respawn 3600 5 5
-              procd_set_param stdout 1
-              procd_set_param stderr 1
-              procd_set_param pidfile /var/run/nym-vpnd.pid
-              procd_close_instance
-          }
-
-          stop_service() {
-              /usr/bin/nym-vpnc disconnect 2>/dev/null || true
-          }
-          INITEOF
-          fi
-          chmod 755 ipk/data/etc/init.d/nym-vpnd
-
-          # === Copy IPK scripts from scripts/ipk/ ===
-          # UCI defaults - LuCI setup
-          if [ -f luci/root/etc/uci-defaults/luci-app-nym-vpn ]; then
-            cp luci/root/etc/uci-defaults/luci-app-nym-vpn ipk/data/etc/uci-defaults/
-            chmod 755 ipk/data/etc/uci-defaults/luci-app-nym-vpn
+            echo "Tag not found, cloning main branch"
+            git clone --depth 1 https://github.com/dial0ut/nym-vpn-luci.git luci
           fi
 
-          # UCI defaults - WireGuard installation (runs on first boot, outside opkg lock)
-          cp scripts/ipk/uci-defaults/99-nym-vpn-wireguard ipk/data/etc/uci-defaults/
-          chmod 755 ipk/data/etc/uci-defaults/99-nym-vpn-wireguard
+      - name: Prepare binaries
+        run: |
+          mkdir -p binaries
+          cp artifacts/nym-vpnd-${{ matrix.arch }} binaries/nym-vpnd
+          cp artifacts/nym-vpnc-${{ matrix.arch }} binaries/nym-vpnc
 
-          # UCI config
-          cp scripts/ipk/nym-vpn.conf ipk/data/etc/config/nym-vpn
-
-          # Firewall include scripts
-          mkdir -p ipk/data/usr/share/nym-vpn
-          cp nym-vpn-core/crates/nym-firewall/scripts/fw3-include.sh ipk/data/usr/share/nym-vpn/
-          cp nym-vpn-core/crates/nym-firewall/scripts/fw4-include.sh ipk/data/usr/share/nym-vpn/
-          chmod 755 ipk/data/usr/share/nym-vpn/*.sh
-
-          # === Control file ===
-          INSTALLED_SIZE=$(du -sk ipk/data | cut -f1)
-          cat > ipk/control/control << EOF
-          Package: nym-vpn
-          Version: ${PKG_VERSION}
-          Architecture: ${PKG_ARCH}
-          Maintainer: Nym Technologies <support@nymtech.net>
-          Installed-Size: ${INSTALLED_SIZE}
-          Section: net
-          Priority: optional
-          Depends: libc, kmod-tun, kmod-wireguard, luci-base, rpcd
-          Description: NymVPN for OpenWrt
-           Privacy-focused VPN using the Nym mixnet. Includes daemon, CLI, and LuCI web interface.
-          EOF
-
-          # Post-install and pre-remove scripts
-          cp scripts/ipk/postinst ipk/control/postinst
-          cp scripts/ipk/prerm ipk/control/prerm
-          chmod 755 ipk/control/postinst ipk/control/prerm
-
-          # === Build IPK ===
-          (cd ipk/control && tar -czf ../control.tar.gz .)
-          (cd ipk/data && tar -czf ../data.tar.gz .)
-          echo "2.0" > ipk/debian-binary
-          (cd ipk && tar -czf ../nym-vpn_${PKG_VERSION}_${PKG_ARCH}.ipk ./debian-binary ./control.tar.gz ./data.tar.gz)
-          ls -la *.ipk
+      - name: Build IPK
+        run: |
+          scripts/ipk/build-ipk.sh \
+            "${{ steps.version.outputs.version }}" \
+            "${{ matrix.openwrt_arch }}" \
+            "binaries" \
+            "luci" \
+            "."
 
       - name: Upload IPK artifacts
         uses: actions/upload-artifact@v4
@@ -301,12 +212,7 @@ jobs:
             ### Requirements
 
             - **Free space:** ~60MB minimum (see table below for exact sizes)
-            - **WireGuard:** Must be installed first
-
-            ```bash
-            opkg update
-            opkg install wireguard-tools kmod-wireguard
-            ```
+            - **Package feeds:** Run `opkg update` before installing
 
             ### Installation
 
@@ -314,6 +220,7 @@ jobs:
 
             ```bash
             cd /tmp
+            opkg update
             wget <IPK_URL>
             opkg install nym-vpn_*.ipk
             ```
@@ -321,10 +228,15 @@ jobs:
             **Option 2: Via LuCI Web Interface**
 
             1. Download the `.ipk` file for your architecture to your computer
-            2. Open LuCI (your router's web interface)
-            3. Go to **System → Software**
-            4. Click **Upload Package** and select the downloaded `.ipk` file
-            5. Click **Install**
+            2. SSH into your router and run `opkg update`
+            3. Open LuCI (your router's web interface)
+            4. Go to **System → Software**
+            5. Click **Upload Package** and select the downloaded `.ipk` file
+            6. Click **Install**
+
+            Dependencies (kmod-tun, kmod-wireguard, luci-base) are installed automatically.
+
+            On OpenWrt 23.05+, Amnezia-WireGuard is installed on first reboot for obfuscation support.
 
             ### After Installation
 
