@@ -36,6 +36,8 @@ OUTPUT_DIR="${5:-.}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+mkdir -p "$OUTPUT_DIR"
+OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"
 
 # --- Validation ---
 echo "=== Validating inputs ==="
@@ -190,7 +192,6 @@ echo "=== Building IPK ==="
 echo "2.0" > "$BUILD_DIR/debian-binary"
 
 OUTPUT_FILE="$OUTPUT_DIR/nym-vpn_${VERSION}_${OPENWRT_ARCH}.ipk"
-mkdir -p "$OUTPUT_DIR"
 (cd "$BUILD_DIR" && tar -czf "$OUTPUT_FILE" ./debian-binary ./control.tar.gz ./data.tar.gz)
 
 echo ""
