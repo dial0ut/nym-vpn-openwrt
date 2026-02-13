@@ -91,18 +91,39 @@ jobs:
     strategy:
       matrix:
         include:
+          # aarch64
           - arch: aarch64
             openwrt_arch: aarch64_generic
           - arch: aarch64
             openwrt_arch: aarch64_cortex-a53
+          - arch: aarch64
+            openwrt_arch: aarch64_cortex-a72
+          # x86
           - arch: x86_64
             openwrt_arch: x86_64
           - arch: i686
             openwrt_arch: i386_pentium4
+          - arch: i686
+            openwrt_arch: i386_pentium-mmx
+          # armv7
+          - arch: armv7
+            openwrt_arch: arm_cortex-a5_vfpv4
+          - arch: armv7
+            openwrt_arch: arm_cortex-a7
           - arch: armv7
             openwrt_arch: arm_cortex-a7_neon-vfpv4
           - arch: armv7
+            openwrt_arch: arm_cortex-a7_vfpv4
+          - arch: armv7
+            openwrt_arch: arm_cortex-a8_vfpv3
+          - arch: armv7
+            openwrt_arch: arm_cortex-a9
+          - arch: armv7
+            openwrt_arch: arm_cortex-a9_neon
+          - arch: armv7
             openwrt_arch: arm_cortex-a9_vfpv3-d16
+          - arch: armv7
+            openwrt_arch: arm_cortex-a15_neon-vfpv4
 
     steps:
       - name: Checkout
@@ -244,13 +265,22 @@ jobs:
 
             ### Supported Architectures
 
-            | Architecture | Installed Size | Example Devices |
-            |--------------|----------------|-----------------|
-            | `x86_64` | ~58MB | x86 VMs, PC Engines APU |
-            | `i386_pentium4` | ~53MB | Older x86 devices |
-            | `aarch64_generic` | ~54MB | Raspberry Pi 3/4, modern ARM64 routers |
-            | `aarch64_cortex-a53` | ~54MB | MediaTek, Qualcomm ARM64 routers |
-            | `arm_cortex-a7_neon-vfpv4` | ~55MB | Many MediaTek/Qualcomm routers |
-            | `arm_cortex-a9_vfpv3-d16` | ~55MB | Linksys WRT, Netgear R7800 |
+            | Architecture | Example Devices |
+            |--------------|-----------------|
+            | `x86_64` | x86 VMs, PC Engines APU |
+            | `i386_pentium4` | Older x86 devices |
+            | `i386_pentium-mmx` | Legacy x86 devices |
+            | `aarch64_generic` | Raspberry Pi 3/4, modern ARM64 routers |
+            | `aarch64_cortex-a53` | MediaTek, Qualcomm ARM64 routers |
+            | `aarch64_cortex-a72` | Raspberry Pi 4, Marvell Armada |
+            | `arm_cortex-a5_vfpv4` | Marvell Armada 375 |
+            | `arm_cortex-a7` | GL.iNet Flint, custom ARM builds |
+            | `arm_cortex-a7_neon-vfpv4` | Many MediaTek/Qualcomm routers |
+            | `arm_cortex-a7_vfpv4` | Zyxel, some MediaTek routers |
+            | `arm_cortex-a8_vfpv3` | TI AM335x, BeagleBone |
+            | `arm_cortex-a9` | Broadcom BCM47xx, older Netgear |
+            | `arm_cortex-a9_neon` | Zyxel NBG6817, some Marvell |
+            | `arm_cortex-a9_vfpv3-d16` | Linksys WRT, Netgear R7800 |
+            | `arm_cortex-a15_neon-vfpv4` | TI OMAP5, Samsung Exynos |
 
             Check your architecture: `opkg print-architecture | grep -v all`
