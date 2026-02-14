@@ -2,6 +2,7 @@
 // Copyright 2024 Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
+mod dnsmasq;
 mod network_manager;
 mod resolvconf;
 mod static_resolv_conf;
@@ -12,8 +13,8 @@ use std::{env, fmt, net::IpAddr};
 use nym_routing::RouteManagerHandle;
 
 use self::{
-    network_manager::NetworkManager, resolvconf::Resolvconf, static_resolv_conf::StaticResolvConf,
-    systemd_resolved::SystemdResolved,
+    dnsmasq::Dnsmasq, network_manager::NetworkManager, resolvconf::Resolvconf,
+    static_resolv_conf::StaticResolvConf, systemd_resolved::SystemdResolved,
 };
 use super::ResolvedDnsConfig;
 
@@ -22,6 +23,10 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// Errors that can happen in the Linux DNS monitor
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    /// Error in OpenWrt dnsmasq DNS monitor
+    #[error("error in OpenWrt dnsmasq DNS monitor")]
+    Dnsmasq(#[from] dnsmasq::Error),
+
     /// Error in systemd-resolved DNS monitor
     #[error("error in systemd-resolved DNS monitor")]
     SystemdResolved(#[from] systemd_resolved::Error),
@@ -79,6 +84,7 @@ impl super::DnsMonitorT for DnsMonitor {
 }
 
 pub enum DnsMonitorHolder {
+    Dnsmasq(Dnsmasq),
     SystemdResolved(SystemdResolved),
     NetworkManager(NetworkManager),
     Resolvconf(Resolvconf),
@@ -89,6 +95,7 @@ impl fmt::Display for DnsMonitorHolder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use self::DnsMonitorHolder::*;
         let name = match self {
+            Dnsmasq(..) => "OpenWrt dnsmasq (UCI)",
             Resolvconf(..) => "resolvconf",
             StaticResolvConf(..) => "/etc/resolv.conf",
             SystemdResolved(..) => "systemd-resolved",
@@ -103,6 +110,7 @@ impl DnsMonitorHolder {
         let dns_module = env::var_os("NYM_DNS_MODULE");
 
         let manager = match dns_module.as_ref().and_then(|value| value.to_str()) {
+            Some("dnsmasq") => DnsMonitorHolder::Dnsmasq(Dnsmasq::new()?),
             Some("static-file") => DnsMonitorHolder::StaticResolvConf(StaticResolvConf::new()?),
             Some("resolvconf") => DnsMonitorHolder::Resolvconf(Resolvconf::new()?),
             Some("systemd") => DnsMonitorHolder::SystemdResolved(SystemdResolved::new()?),
@@ -114,14 +122,25 @@ impl DnsMonitorHolder {
     }
 
     fn with_detected_dns_manager() -> Result<Self> {
-        SystemdResolved::new()
-            .map(DnsMonitorHolder::SystemdResolved)
+        Dnsmasq::new()
+            .map(DnsMonitorHolder::Dnsmasq)
+            .or_else(|err| {
+                match err {
+                    dnsmasq::Error::NotOpenWrt => {
+                        tracing::debug!("Not on OpenWrt, skipping dnsmasq backend");
+                    }
+                    other => {
+                        tracing::debug!("OpenWrt dnsmasq backend unavailable: {}", other);
+                    }
+                }
+                SystemdResolved::new().map(DnsMonitorHolder::SystemdResolved)
+            })
             .or_else(|err| {
                 match err {
                     systemd_resolved::Error::SystemdResolvedError(
                         systemd_resolved::SystemdDbusError::NoSystemdResolved(_),
                     ) => (),
-                    other_error => {
+                    ref other_error => {
                         tracing::debug!("NetworkManager is being used because {}", other_error)
                     }
                 }
@@ -140,6 +159,7 @@ impl DnsMonitorHolder {
     ) -> Result<()> {
         use self::DnsMonitorHolder::*;
         match self {
+            Dnsmasq(dnsmasq) => dnsmasq.set_dns(servers)?,
             Resolvconf(resolvconf) => resolvconf.set_dns(interface, servers)?,
             StaticResolvConf(static_resolv_conf) => {
                 static_resolv_conf.set_dns(servers.to_vec()).await?
@@ -157,6 +177,7 @@ impl DnsMonitorHolder {
     async fn reset(&mut self) -> Result<()> {
         use self::DnsMonitorHolder::*;
         match self {
+            Dnsmasq(dnsmasq) => dnsmasq.reset()?,
             Resolvconf(resolvconf) => resolvconf.reset()?,
             StaticResolvConf(static_resolv_conf) => static_resolv_conf.reset().await?,
             SystemdResolved(systemd_resolved) => systemd_resolved.reset().await?,
