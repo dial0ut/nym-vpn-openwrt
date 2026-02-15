@@ -60,21 +60,25 @@ impl Firewall {
         Self::new(args.fwmark)
     }
 
-    pub fn new(fwmark: u32) -> Result<Self> {
+    pub fn new(_fwmark: u32) -> Result<Self> {
         let system = detect_system();
         tracing::info!("Detected OpenWrt firewall system: {:?}", system);
 
+        // Note: fwmark is not used in the OpenWrt firewall backends.
+        // It is used elsewhere (routing, socket marking, WireGuard device config)
+        // but the firewall rules don't need it — split tunneling and fwmark-based
+        // filtering from the upstream desktop backend are not applicable to routers.
         let inner = match system {
             FirewallSystem::Fw3 => {
-                FirewallInner::Fw3(Fw3Firewall::new(fwmark)?)
+                FirewallInner::Fw3(Fw3Firewall::new()?)
             }
             FirewallSystem::Fw4 => {
-                FirewallInner::Fw4(Fw4Firewall::new(fwmark)?)
+                FirewallInner::Fw4(Fw4Firewall::new()?)
             }
             FirewallSystem::Unknown => {
                 // Fall back to fw3/iptables for unknown OpenWrt systems
                 tracing::warn!("Unknown firewall system, falling back to iptables");
-                FirewallInner::Fw3(Fw3Firewall::new(fwmark)?)
+                FirewallInner::Fw3(Fw3Firewall::new()?)
             }
         };
 

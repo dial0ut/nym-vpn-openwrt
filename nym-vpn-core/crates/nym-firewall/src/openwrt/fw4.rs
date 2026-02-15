@@ -20,13 +20,11 @@ use crate::net::{AllowedEndpoint, TransportProtocol};
 use crate::FirewallPolicy;
 
 /// fw4/nftables firewall backend.
-pub struct Fw4Firewall {
-    fwmark: u32,
-}
+pub struct Fw4Firewall;
 
 impl Fw4Firewall {
-    pub fn new(fwmark: u32) -> Result<Self> {
-        Ok(Fw4Firewall { fwmark })
+    pub fn new() -> Result<Self> {
+        Ok(Fw4Firewall)
     }
 
     pub fn apply_policy(&mut self, policy: FirewallPolicy) -> Result<()> {
@@ -443,6 +441,8 @@ impl Fw4Firewall {
     fn add_lan_forward_rules(&self, rules: &mut String) {
         writeln!(rules, "        ip daddr {{ 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 }} accept").unwrap();
         writeln!(rules, "        ip saddr {{ 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 }} accept").unwrap();
+        writeln!(rules, "        ip6 daddr {{ fe80::/10, fc00::/7 }} accept").unwrap();
+        writeln!(rules, "        ip6 saddr {{ fe80::/10, fc00::/7 }} accept").unwrap();
     }
 
     fn apply_nft(&self) -> Result<()> {

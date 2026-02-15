@@ -29,13 +29,11 @@ use crate::net::{AllowedEndpoint, TransportProtocol, TunnelMetadata};
 use crate::FirewallPolicy;
 
 /// fw3/iptables firewall backend.
-pub struct Fw3Firewall {
-    fwmark: u32,
-}
+pub struct Fw3Firewall;
 
 impl Fw3Firewall {
-    pub fn new(fwmark: u32) -> Result<Self> {
-        Ok(Fw3Firewall { fwmark })
+    pub fn new() -> Result<Self> {
+        Ok(Fw3Firewall)
     }
 
     pub fn apply_policy(&mut self, policy: FirewallPolicy) -> Result<()> {
