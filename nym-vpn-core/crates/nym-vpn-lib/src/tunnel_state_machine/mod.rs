@@ -993,8 +993,6 @@ impl tunnel::Error {
             | Self::Wireguard(_)
             | Self::Cancelled
             | Self::Transport(_) => None,
-            #[cfg(all(target_os = "linux", target_env = "musl"))]
-            Self::KernelWireguard(_) => None,
             #[cfg(target_os = "ios")]
             Self::ResolveDns64(_) => None,
             #[cfg(windows)]
