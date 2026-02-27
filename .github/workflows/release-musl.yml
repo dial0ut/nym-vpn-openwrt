@@ -255,9 +255,7 @@ jobs:
             5. Click **Upload Package** and select the downloaded `.ipk` file
             6. Click **Install**
 
-            Dependencies (kmod-tun, kmod-wireguard, luci-base) are installed automatically.
-
-            On OpenWrt 23.05+, Amnezia-WireGuard is installed on first reboot for obfuscation support.
+            Dependencies (kmod-tun, luci-base) are installed automatically. Uses pure Rust userspace WireGuard (gotatun) — no kernel WireGuard module needed.
 
             ### After Installation
 

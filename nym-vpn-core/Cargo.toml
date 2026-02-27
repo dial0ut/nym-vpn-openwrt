@@ -27,7 +27,7 @@ members = [
     "crates/nym-vpnc",
     "crates/nym-vpnd",
     "crates/nym-wg-go",
-    "crates/nym-wg-kernel",
+    "crates/nym-wg-gotatun",
     "crates/nym-wg-metadata-client",
     "crates/nym-windows",
     "crates/uniffi-bindgen",
@@ -74,7 +74,7 @@ bitflags = "2"
 block2 = "0.6.2"
 boringtun = "0.7.0"
 bs58 = "0.5.1"
-bytes = "1.10"
+bytes = "1.11"
 chrono = "0.4.42"
 celes = "2.6.0"
 clap = "4.5"
@@ -217,7 +217,8 @@ nym-vpn-network-config = { path = "crates/nym-vpn-network-config" }
 nym-vpn-proto = { path = "crates/nym-vpn-proto" }
 nym-vpn-store = { path = "crates/nym-vpn-store" }
 nym-wg-go = { path = "crates/nym-wg-go" }
-nym-wg-kernel = { path = "crates/nym-wg-kernel" }
+nym-wg-gotatun = { path = "crates/nym-wg-gotatun" }
+gotatun = { git = "https://github.com/mullvad/gotatun", features = ["device", "tun"] }
 nym-wg-metadata-client = { path = "crates/nym-wg-metadata-client" }
 nym-windows = { path = "crates/nym-windows" }
 

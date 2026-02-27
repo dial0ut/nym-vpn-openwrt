@@ -62,11 +62,7 @@ pub enum Error {
     ResolveDns64(#[from] wireguard::dns64::Error),
 
     #[error("WireGuard error")]
-    Wireguard(#[from] nym_wg_go::Error),
-
-    #[cfg(all(target_os = "linux", target_env = "musl"))]
-    #[error("kernel WireGuard error: {0}")]
-    KernelWireguard(String),
+    Wireguard(#[from] nym_wg_gotatun::Error),
 
     #[error("failed to dup tunnel file descriptor")]
     DupFd(#[source] std::io::Error),

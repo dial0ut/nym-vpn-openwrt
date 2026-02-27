@@ -49,8 +49,4 @@ rm -f /etc/config/nym-vpn 2>/dev/null
 # Clean up all nym-vpn data and config files
 rm -rf /var/lib/nym-vpn 2>/dev/null
 
-# Unload kernel modules if no longer needed
-rmmod amneziawg 2>/dev/null || true
-rmmod wireguard 2>/dev/null || true
-
 exit 0

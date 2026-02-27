@@ -4,7 +4,7 @@
 use tun::AsyncDevice;
 
 #[cfg(windows)]
-use nym_wg_go::wireguard_go::Tunnel;
+use nym_wg_gotatun::wireguard_go::Tunnel;
 
 /// Holds the remains of the mixnet or wireguard tunnel.
 #[derive(Default)]

@@ -5,6 +5,6 @@ Maintainer: Nym Technologies <support@nymtech.net>
 Installed-Size: {{SIZE}}
 Section: net
 Priority: optional
-Depends: libc, kmod-tun, kmod-wireguard, luci-base, rpcd
+Depends: libc, kmod-tun, luci-base, rpcd
 Description: NymVPN for OpenWrt
  Privacy-focused VPN using the Nym mixnet. Includes daemon, CLI, and LuCI web interface.

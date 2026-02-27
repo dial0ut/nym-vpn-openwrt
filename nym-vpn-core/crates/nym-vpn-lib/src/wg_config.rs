@@ -9,12 +9,10 @@ use std::{
 use ipnetwork::{IpNetwork, Ipv4Network, Ipv6Network};
 use nym_registration_common::GatewayData;
 #[cfg(target_os = "ios")]
-use nym_wg_go::PeerEndpointUpdate;
-use nym_wg_go::{PrivateKey, PublicKey, amnezia::AmneziaConfig};
-#[cfg(not(target_env = "musl"))]
-use nym_wg_go::PeerConfig;
-#[cfg(not(target_env = "musl"))]
-use nym_wg_go::{netstack, wireguard_go};
+use nym_wg_gotatun::PeerEndpointUpdate;
+use nym_wg_gotatun::{PrivateKey, PublicKey, amnezia::AmneziaConfig};
+use nym_wg_gotatun::PeerConfig;
+use nym_wg_gotatun::{netstack, wireguard_go};
 
 #[derive(Debug, Clone)]
 pub struct WgNodeConfig {
@@ -50,7 +48,7 @@ pub struct WgInterface {
     pub fwmark: Option<u32>,
 
     /// Amnezia Configuration
-    pub azwg_config: Option<nym_wg_go::amnezia::AmneziaConfig>,
+    pub azwg_config: Option<nym_wg_gotatun::amnezia::AmneziaConfig>,
 }
 
 impl fmt::Debug for WgInterface {
@@ -98,7 +96,6 @@ impl WgPeer {
 }
 
 impl WgNodeConfig {
-    #[cfg(not(target_env = "musl"))]
     pub fn into_netstack_config(self) -> netstack::Config {
         let allowed_ips = self.allowed_ips();
         netstack::Config {
@@ -126,7 +123,6 @@ impl WgNodeConfig {
         }
     }
 
-    #[cfg(not(target_env = "musl"))]
     pub fn into_wireguard_config(self) -> wireguard_go::Config {
         let allowed_ips = self.allowed_ips();
         wireguard_go::Config {

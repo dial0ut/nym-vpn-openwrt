@@ -134,16 +134,6 @@ check_root() {
     fi
 }
 
-check_wireguard() {
-    if ! modprobe wireguard 2>/dev/null; then
-        log_warn "WireGuard kernel module not available"
-        log_warn "Make sure your kernel supports WireGuard (Linux 5.6+)"
-        log_warn "Or install: opkg install kmod-wireguard"
-    else
-        log_info "WireGuard kernel module loaded"
-    fi
-}
-
 install_binaries() {
     local arch="$1"
     local version="$2"
@@ -348,8 +338,6 @@ main() {
     local version
     version=$(get_latest_version)
     log_info "Version: $version"
-
-    check_wireguard
 
     install_binaries "$arch" "$version"
 

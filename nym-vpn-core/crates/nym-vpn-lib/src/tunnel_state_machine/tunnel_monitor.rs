@@ -13,7 +13,7 @@ use std::os::fd::{AsRawFd, IntoRawFd};
 #[cfg(target_os = "android")]
 use std::os::fd::{FromRawFd, OwnedFd};
 use std::{net::IpAddr, time::Duration};
-#[cfg(not(target_env = "musl"))]
+#[cfg(any(target_os = "linux", target_os = "ios", target_os = "android"))]
 use std::net::SocketAddr;
 #[cfg(unix)]
 use std::{os::fd::RawFd, sync::Arc};
@@ -58,25 +58,14 @@ use super::route_handler::{RouteHandler, RoutingConfig};
 use super::tun_ipv6;
 #[cfg(any(target_os = "ios", target_os = "android"))]
 use super::tun_name;
-#[cfg(all(target_os = "linux", not(target_env = "musl")))]
+#[cfg(target_os = "linux")]
 use super::tunnel::wireguard::connected_tunnel::TunTunTunnelOptions;
-#[cfg(all(target_os = "linux", target_env = "musl"))]
-use super::tunnel::wireguard::connected_tunnel::KernelWgTunnelOptions;
-#[cfg(all(target_os = "macos"))]
-use super::tunnel::wireguard::connected_tunnel::TunTunTunnelOptions;
-#[cfg(windows)]
-use super::tunnel::wireguard::connected_tunnel::TunTunTunnelOptions;
-#[cfg(windows)]
-use super::wintun::{self, WintunAdapterConfig};
 use super::{
     Error, NymConfig, Result, TunnelInterface, TunnelMetadata, TunnelSettings,
     tunnel::{
         self, AnyTunnelHandle, SelectedGateways, Tombstone,
-        wireguard::connected_tunnel::TunnelOptions,
     },
 };
-#[cfg(not(target_env = "musl"))]
-use super::tunnel::wireguard::connected_tunnel::NetstackTunnelOptions;
 #[cfg(target_os = "android")]
 use crate::tunnel_provider::AndroidTunProvider;
 #[cfg(target_os = "ios")]
@@ -97,7 +86,6 @@ use crate::{
         },
     },
 };
-#[cfg(not(target_env = "musl"))]
 use crate::tunnel_state_machine::WireguardMultihopMode;
 
 /// Default MTU for mixnet tun device.
@@ -608,8 +596,6 @@ impl TunnelMonitor {
         let (exit_metadata_tx, exit_metadata_rx) = tokio::sync::oneshot::channel::<MetadataEvent>();
 
         let (entry_metadata_addr_tx, entry_metadata_addr_rx) = tokio::sync::oneshot::channel();
-        #[cfg(target_env = "musl")]
-        let _ = entry_metadata_addr_tx; // Unused on musl - kernel WG doesn't need metadata addr
         let (bridge_close_tx, mut bridge_close_rx) = mpsc::unbounded_channel();
 
         // todo: refactor
@@ -664,22 +650,16 @@ impl TunnelMonitor {
                     connection_data,
                 );
 
+                #[cfg(target_os = "linux")]
                 let start_tunnel_result = match self
                     .tunnel_parameters
                     .tunnel_settings
                     .wireguard_tunnel_options
                     .multihop_mode
                 {
-                    #[cfg(all(not(any(target_os = "android", target_os = "ios")), not(target_env = "musl")))]
                     WireguardMultihopMode::TunTun => {
                         self.start_wireguard_tunnel(connected_tunnel).await?
                     }
-                    #[cfg(all(target_os = "linux", target_env = "musl"))]
-                    _ => {
-                        // On musl, always use kernel WireGuard
-                        self.start_wireguard_tunnel(connected_tunnel).await?
-                    }
-                    #[cfg(not(target_env = "musl"))]
                     WireguardMultihopMode::Netstack => {
                         self.start_wireguard_netstack_tunnel(
                             connected_tunnel,
@@ -687,6 +667,18 @@ impl TunnelMonitor {
                         )
                         .await?
                     }
+                };
+                #[cfg(any(target_os = "ios", target_os = "android"))]
+                let start_tunnel_result = self
+                    .start_wireguard_netstack_tunnel(
+                        connected_tunnel,
+                        entry_metadata_addr_tx,
+                    )
+                    .await?;
+                #[cfg(not(any(target_os = "linux", target_os = "ios", target_os = "android")))]
+                let start_tunnel_result = {
+                    let _ = (connected_tunnel, entry_metadata_addr_tx);
+                    unimplemented!("WireGuard tunnels only supported on Linux, iOS, Android")
                 };
 
                 let mixnet_client_token = wg_tunnel_runtime.mixnet_client_token();
@@ -1167,189 +1159,19 @@ impl TunnelMonitor {
         Ok((bridge_addr, join_handle))
     }
 
-    #[cfg(any(all(target_os = "linux", not(target_env = "musl")), target_os = "macos"))]
+    /// Netstack mode fallback: on Linux, just use TunTun mode (gotatun is userspace).
+    #[cfg(target_os = "linux")]
     async fn start_wireguard_netstack_tunnel(
         &mut self,
         connected_tunnel: wireguard::connected_tunnel::ConnectedTunnel,
-        entry_metadata_tx: tokio::sync::oneshot::Sender<SocketAddr>,
+        _entry_metadata_tx: tokio::sync::oneshot::Sender<SocketAddr>,
     ) -> Result<StartTunnelResult> {
-        let conn_data = connected_tunnel.connection_data();
-        let use_bridges = self.tunnel_parameters.tunnel_settings.bridges_enabled();
-
-        // Prepare network environment for the wireguard connection to the entry gateway
-        let exit_tun_mtu = connected_tunnel.exit_mtu();
-        let exit_tun = Self::create_wireguard_device(
-            conn_data.exit.private_ipv4,
-            self.enable_ipv6().then_some(conn_data.exit.private_ipv6),
-            Some(conn_data.entry.private_ipv4.into()),
-            exit_tun_mtu,
-        )?;
-        let exit_tun_name = exit_tun
-            .deref()
-            .tun_name()
-            .map_err(Error::GetTunDeviceName)?;
-        tracing::info!("Created exit tun device: {}", exit_tun_name);
-
-        #[cfg(not(target_os = "linux"))]
-        let entry_endpoint = conn_data.effective_remote_entry_endpoint();
-
-        let routing_config = RoutingConfig::WireguardNetstack {
-            exit_tun_name: exit_tun_name.clone(),
-            exit_tun_mtu,
-            #[cfg(not(target_os = "linux"))]
-            entry_gateway_address: entry_endpoint.ip(),
-        };
-
-        self.set_routes(routing_config, self.enable_ipv6()).await?;
-
-        let tunnel_conn_data = TunnelConnectionData::Wireguard(WireguardConnectionData {
-            entry_bridge_addr: conn_data.entry_bridge_addr.clone(),
-            entry: WireguardNode::from(conn_data.entry.clone()),
-            exit: WireguardNode::from(conn_data.exit.clone()),
-        });
-
-        let dns_config = self.tunnel_parameters.tunnel_settings.resolved_dns_config();
-        let tunnel_options = TunnelOptions::Netstack(NetstackTunnelOptions {
-            metadata_proxy_tx: entry_metadata_tx,
-            exit_tun,
-            dns: dns_config.tunnel_config().to_vec(),
-        });
-
-        let tunnel_metadata = TunnelMetadata {
-            interface: exit_tun_name,
-            ips: vec![
-                IpAddr::V4(conn_data.exit.private_ipv4),
-                IpAddr::V6(conn_data.exit.private_ipv6),
-            ],
-            ipv4_gateway: Some(conn_data.entry.private_ipv4),
-            ipv6_gateway: Some(conn_data.entry.private_ipv6),
-        };
-
-        let tunnel_handle = connected_tunnel
-            .run(
-                tunnel_options,
-                self.tunnel_parameters.tunnel_constants,
-                !use_bridges,
-            )
-            .await?;
-        let tunnel_handle = AnyTunnelHandle::from(tunnel_handle);
-
-        Ok(StartTunnelResult {
-            tunnel_interface: TunnelInterface::One(tunnel_metadata),
-            tunnel_conn_data,
-            tunnel_handle,
-        })
+        tracing::warn!("Netstack mode not supported with gotatun backend, falling back to TunTun");
+        self.start_wireguard_tunnel(connected_tunnel).await
     }
 
-    #[cfg(windows)]
-    async fn start_wireguard_netstack_tunnel(
-        &mut self,
-        connected_tunnel: wireguard::connected_tunnel::ConnectedTunnel,
-        entry_metadata_tx: tokio::sync::oneshot::Sender<SocketAddr>,
-    ) -> Result<StartTunnelResult> {
-        let conn_data = connected_tunnel.connection_data();
-        let use_bridges = self.tunnel_parameters.tunnel_settings.bridges_enabled();
-
-        // Prepare network environment for the wireguard connection to the entry gateway
-        let exit_mtu = connected_tunnel.exit_mtu();
-
-        let exit_adapter_config = WintunAdapterConfig {
-            interface_ipv4: conn_data.exit.private_ipv4,
-            interface_ipv6: self
-                .tunnel_parameters
-                .tunnel_settings
-                .enable_ipv6
-                .then_some(conn_data.exit.private_ipv6),
-            gateway_ipv4: Some(conn_data.entry.private_ipv4),
-            gateway_ipv6: self
-                .tunnel_parameters
-                .tunnel_settings
-                .enable_ipv6
-                .then_some(conn_data.entry.private_ipv6),
-        };
-        let mut tunnel_metadata = TunnelMetadata {
-            interface: "".to_owned(),
-            ips: vec![
-                IpAddr::V4(conn_data.exit.private_ipv4),
-                IpAddr::V6(conn_data.exit.private_ipv6),
-            ],
-            ipv4_gateway: Some(conn_data.entry.private_ipv4),
-            ipv6_gateway: Some(conn_data.entry.private_ipv6),
-        };
-
-        let tunnel_conn_data = TunnelConnectionData::Wireguard(WireguardConnectionData {
-            entry_bridge_addr: conn_data.entry_bridge_addr.clone(),
-            entry: WireguardNode::from(conn_data.entry.clone()),
-            exit: WireguardNode::from(conn_data.exit.clone()),
-        });
-
-        #[cfg(not(target_os = "linux"))]
-        let entry_endpoint = conn_data.effective_remote_entry_endpoint();
-
-        let dns_config = self.tunnel_parameters.tunnel_settings.resolved_dns_config();
-        let tunnel_options = TunnelOptions::Netstack(NetstackTunnelOptions {
-            metadata_proxy_tx: entry_metadata_tx,
-            exit_tun_name: WG_EXIT_WINTUN_NAME.to_owned(),
-            exit_tun_guid: WG_EXIT_WINTUN_GUID.to_owned(),
-            wintun_tunnel_type: WINTUN_TUNNEL_TYPE.to_owned(),
-            dns: dns_config.tunnel_config().to_vec(),
-        });
-
-        let mut tunnel_handle = connected_tunnel
-            .run(
-                #[cfg(windows)]
-                self.route_handler.clone(),
-                tunnel_options,
-                self.tunnel_parameters.tunnel_constants,
-                !use_bridges,
-            )
-            .await?;
-
-        let wintun_exit_interface = tunnel_handle
-            .exit_wintun_interface()
-            .expect("failed to obtain wintun exit interface");
-
-        tracing::info!("Created wintun device: {}", wintun_exit_interface.name);
-
-        wintun::setup_wintun_adapter(wintun_exit_interface.windows_luid(), exit_adapter_config)?;
-        wintun::wait_for_interfaces(
-            wintun_exit_interface.windows_luid(),
-            true,
-            self.enable_ipv6(),
-        )
-        .await?;
-        wintun::initialize_interfaces(
-            wintun_exit_interface.windows_luid(),
-            Some(exit_mtu),
-            self.enable_ipv6().then_some(exit_mtu),
-        )?;
-        wintun::wait_for_addresses(wintun_exit_interface.windows_luid()).await?;
-
-        let routing_config = RoutingConfig::WireguardNetstack {
-            exit_tun_name: wintun_exit_interface.name.clone(),
-            exit_tun_mtu: exit_mtu,
-            #[cfg(not(target_os = "linux"))]
-            entry_gateway_address: entry_endpoint.ip(),
-        };
-
-        if let Err(err) = self.set_routes(routing_config, self.enable_ipv6()).await {
-            tunnel_handle.cancel();
-            _ = tunnel_handle.wait().await;
-            return Err(err);
-        }
-
-        // Update interface name in tunnel metadata
-        tunnel_metadata.interface = wintun_exit_interface.name.clone();
-
-        Ok(StartTunnelResult {
-            tunnel_interface: TunnelInterface::One(tunnel_metadata),
-            tunnel_handle: AnyTunnelHandle::from(tunnel_handle),
-            tunnel_conn_data,
-        })
-    }
-
-    /// Start WireGuard tunnel using userspace wireguard-go (glibc Linux and macOS)
-    #[cfg(any(all(target_os = "linux", not(target_env = "musl")), target_os = "macos"))]
+    /// Start WireGuard tunnel using userspace gotatun
+    #[cfg(target_os = "linux")]
     async fn start_wireguard_tunnel(
         &mut self,
         connected_tunnel: wireguard::connected_tunnel::ConnectedTunnel,
@@ -1437,11 +1259,11 @@ impl TunnelMonitor {
         });
 
         let dns_config = self.tunnel_parameters.tunnel_settings.resolved_dns_config();
-        let tunnel_options = TunnelOptions::TunTun(TunTunTunnelOptions {
+        let tunnel_options = TunTunTunnelOptions {
             entry_tun,
             exit_tun,
             dns: dns_config.tunnel_config().to_vec(),
-        });
+        };
 
         let tunnel_handle = connected_tunnel
             .run(
@@ -1462,252 +1284,6 @@ impl TunnelMonitor {
         })
     }
 
-    /// Start WireGuard tunnel using kernel WireGuard via netlink (musl Linux only)
-    /// This avoids wireguard-go which segfaults on musl (golang/go#13492)
-    #[cfg(all(target_os = "linux", target_env = "musl"))]
-    async fn start_wireguard_tunnel(
-        &mut self,
-        connected_tunnel: wireguard::connected_tunnel::ConnectedTunnel,
-    ) -> Result<StartTunnelResult> {
-        let conn_data = connected_tunnel.connection_data();
-        let use_bridges = self.tunnel_parameters.tunnel_settings.bridges_enabled();
-
-        let entry_mtu = connected_tunnel.entry_mtu();
-        let exit_mtu = connected_tunnel.exit_mtu();
-
-        // Kernel WireGuard creates its own interfaces
-        let entry_tun_name = "nym-entry".to_string();
-        let exit_tun_name = "nym-exit".to_string();
-
-        tracing::info!("Using kernel WireGuard for entry: {}", entry_tun_name);
-        tracing::info!("Using kernel WireGuard for exit: {}", exit_tun_name);
-
-        let mut ips = vec![IpAddr::V4(conn_data.entry.private_ipv4)];
-        if self.enable_ipv6() {
-            ips.push(IpAddr::V6(conn_data.entry.private_ipv6));
-        }
-        let entry_tunnel_metadata = TunnelMetadata {
-            interface: entry_tun_name.clone(),
-            ips,
-            ipv4_gateway: None,
-            ipv6_gateway: None,
-        };
-
-        let mut ips = vec![IpAddr::V4(conn_data.exit.private_ipv4)];
-        if self.enable_ipv6() {
-            ips.push(IpAddr::V6(conn_data.exit.private_ipv6));
-        }
-        let exit_tunnel_metadata = TunnelMetadata {
-            interface: exit_tun_name.clone(),
-            ips,
-            ipv4_gateway: Some(conn_data.entry.private_ipv4),
-            ipv6_gateway: self
-                .tunnel_parameters
-                .tunnel_settings
-                .enable_ipv6
-                .then_some(conn_data.entry.private_ipv6),
-        };
-
-        let exit_gateway_address = conn_data.exit.endpoint.ip();
-
-        let tunnel_conn_data = TunnelConnectionData::Wireguard(WireguardConnectionData {
-            entry_bridge_addr: conn_data.entry_bridge_addr.clone(),
-            entry: WireguardNode::from(conn_data.entry.clone()),
-            exit: WireguardNode::from(conn_data.exit.clone()),
-        });
-
-        let dns_config = self.tunnel_parameters.tunnel_settings.resolved_dns_config();
-        let tunnel_options = TunnelOptions::KernelWg(KernelWgTunnelOptions {
-            entry_tun_name: entry_tun_name.clone(),
-            exit_tun_name: exit_tun_name.clone(),
-            dns: dns_config.tunnel_config().to_vec(),
-            enable_ipv6: self.enable_ipv6(),
-        });
-
-        let tunnel_handle = connected_tunnel
-            .run(
-                tunnel_options,
-                self.tunnel_parameters.tunnel_constants,
-                !use_bridges,
-            )
-            .await?;
-        let tunnel_handle = AnyTunnelHandle::from(tunnel_handle);
-
-        // Add routes AFTER tunnel is started (kernel WireGuard creates interfaces during run())
-        let routing_config = RoutingConfig::Wireguard {
-            entry_tun_name: entry_tunnel_metadata.interface.clone(),
-            exit_tun_name: exit_tunnel_metadata.interface.clone(),
-            entry_tun_mtu: entry_mtu,
-            exit_tun_mtu: exit_mtu,
-            private_entry_gateway_address: self
-                .tunnel_parameters
-                .tunnel_constants
-                .private_entry_gateway_address,
-            exit_gateway_address,
-        };
-        self.set_routes(routing_config, self.enable_ipv6()).await?;
-
-        Ok(StartTunnelResult {
-            tunnel_interface: TunnelInterface::Two {
-                entry: entry_tunnel_metadata,
-                exit: exit_tunnel_metadata,
-            },
-            tunnel_conn_data,
-            tunnel_handle,
-        })
-    }
-
-    #[cfg(windows)]
-    async fn start_wireguard_tunnel(
-        &mut self,
-        connected_tunnel: wireguard::connected_tunnel::ConnectedTunnel,
-    ) -> Result<StartTunnelResult> {
-        let conn_data = connected_tunnel.connection_data();
-        let use_bridges = self.tunnel_parameters.tunnel_settings.bridges_enabled();
-
-        // Prepare network environment for the wireguard connection to the entry gateway
-        let entry_tun_mtu = connected_tunnel.entry_mtu();
-        let exit_tun_mtu = connected_tunnel.exit_mtu();
-
-        let exit_gateway_address = conn_data.exit.endpoint.ip();
-        let entry_gateway_address = conn_data.effective_remote_entry_endpoint().ip();
-
-        let entry_adapter_config = WintunAdapterConfig {
-            interface_ipv4: conn_data.entry.private_ipv4,
-            interface_ipv6: self.enable_ipv6().then_some(conn_data.entry.private_ipv6),
-            gateway_ipv4: None,
-            gateway_ipv6: None,
-        };
-
-        let mut ips = vec![IpAddr::V4(conn_data.entry.private_ipv4)];
-        if self.enable_ipv6() {
-            ips.push(IpAddr::V6(conn_data.entry.private_ipv6))
-        }
-        let mut entry_tunnel_metadata = TunnelMetadata {
-            interface: "".to_owned(),
-            ips,
-            ipv4_gateway: None,
-            ipv6_gateway: None,
-        };
-
-        let exit_adapter_config = WintunAdapterConfig {
-            interface_ipv4: conn_data.exit.private_ipv4,
-            interface_ipv6: self.enable_ipv6().then_some(conn_data.exit.private_ipv6),
-            gateway_ipv4: Some(conn_data.entry.private_ipv4),
-            gateway_ipv6: self.enable_ipv6().then_some(conn_data.entry.private_ipv6),
-        };
-        let mut ips = vec![IpAddr::V4(conn_data.exit.private_ipv4)];
-        if self.enable_ipv6() {
-            ips.push(IpAddr::V6(conn_data.entry.private_ipv6));
-        }
-        let mut exit_tunnel_metadata = TunnelMetadata {
-            interface: "".to_owned(),
-            ips,
-            ipv4_gateway: Some(conn_data.entry.private_ipv4),
-            ipv6_gateway: self.enable_ipv6().then_some(conn_data.entry.private_ipv6),
-        };
-
-        let tunnel_conn_data = TunnelConnectionData::Wireguard(WireguardConnectionData {
-            entry_bridge_addr: conn_data.entry_bridge_addr.clone(),
-            entry: WireguardNode::from(conn_data.entry.clone()),
-            exit: WireguardNode::from(conn_data.exit.clone()),
-        });
-
-        let dns_config = self.tunnel_parameters.tunnel_settings.resolved_dns_config();
-        let tunnel_options = TunnelOptions::TunTun(TunTunTunnelOptions {
-            entry_tun_name: WG_ENTRY_WINTUN_NAME.to_owned(),
-            entry_tun_guid: WG_ENTRY_WINTUN_GUID.to_owned(),
-            exit_tun_name: WG_EXIT_WINTUN_NAME.to_owned(),
-            exit_tun_guid: WG_EXIT_WINTUN_GUID.to_owned(),
-            wintun_tunnel_type: WINTUN_TUNNEL_TYPE.to_owned(),
-            dns: dns_config.tunnel_config().to_vec(),
-        });
-
-        let mut tunnel_handle = connected_tunnel
-            .run(
-                #[cfg(windows)]
-                self.route_handler.clone(),
-                tunnel_options,
-                self.tunnel_parameters.tunnel_constants,
-                !use_bridges,
-            )
-            .await?;
-
-        let wintun_entry_interface = tunnel_handle
-            .entry_wintun_interface()
-            .expect("failed to obtain wintun entry interface");
-        let wintun_exit_interface = tunnel_handle
-            .exit_wintun_interface()
-            .expect("failed to obtain wintun exit interface");
-
-        tracing::info!(
-            "Created entry wintun device: {}",
-            wintun_entry_interface.name
-        );
-        tracing::info!("Created exit wintun device: {}", wintun_exit_interface.name);
-
-        wintun::setup_wintun_adapter(wintun_entry_interface.windows_luid(), entry_adapter_config)?;
-        wintun::setup_wintun_adapter(wintun_exit_interface.windows_luid(), exit_adapter_config)?;
-
-        wintun::wait_for_interfaces(
-            wintun_entry_interface.windows_luid(),
-            true,
-            self.enable_ipv6(),
-        )
-        .await?;
-        wintun::wait_for_interfaces(
-            wintun_exit_interface.windows_luid(),
-            true,
-            self.enable_ipv6(),
-        )
-        .await?;
-        wintun::initialize_interfaces(
-            wintun_entry_interface.windows_luid(),
-            Some(entry_tun_mtu),
-            self.enable_ipv6().then_some(entry_tun_mtu),
-        )?;
-        wintun::initialize_interfaces(
-            wintun_exit_interface.windows_luid(),
-            Some(exit_tun_mtu),
-            self.enable_ipv6().then_some(exit_tun_mtu),
-        )?;
-        wintun::wait_for_addresses(wintun_entry_interface.windows_luid()).await?;
-        wintun::wait_for_addresses(wintun_exit_interface.windows_luid()).await?;
-
-        // Update interface names in tunnel metadata
-        entry_tunnel_metadata.interface = wintun_entry_interface.name.clone();
-        exit_tunnel_metadata.interface = wintun_exit_interface.name.clone();
-
-        let tunnel_interface = TunnelInterface::Two {
-            entry: entry_tunnel_metadata,
-            exit: exit_tunnel_metadata,
-        };
-
-        let routing_config = RoutingConfig::Wireguard {
-            entry_tun_name: wintun_entry_interface.name.clone(),
-            exit_tun_name: wintun_exit_interface.name.clone(),
-            entry_tun_mtu,
-            exit_tun_mtu,
-            private_entry_gateway_address: self
-                .tunnel_parameters
-                .tunnel_constants
-                .private_entry_gateway_address,
-            entry_gateway_address,
-            exit_gateway_address,
-        };
-
-        if let Err(err) = self.set_routes(routing_config, self.enable_ipv6()).await {
-            tunnel_handle.cancel();
-            tunnel_handle.wait().await.ok();
-            return Err(err);
-        }
-
-        Ok(StartTunnelResult {
-            tunnel_interface,
-            tunnel_handle: AnyTunnelHandle::from(tunnel_handle),
-            tunnel_conn_data,
-        })
-    }
 
     #[cfg(any(target_os = "ios", target_os = "android"))]
     async fn start_wireguard_netstack_tunnel(
@@ -1858,7 +1434,7 @@ impl TunnelMonitor {
         Ok(tun_device)
     }
 
-    #[cfg(any(all(target_os = "linux", not(target_env = "musl")), target_os = "macos"))]
+    #[cfg(target_os = "linux")]
     fn create_wireguard_device(
         interface_ipv4: Ipv4Addr,
         interface_ipv6: Option<Ipv6Addr>,

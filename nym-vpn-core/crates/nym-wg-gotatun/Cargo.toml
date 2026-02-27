@@ -1,0 +1,27 @@
+[package]
+name = "nym-wg-gotatun"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = []
+amnezia = []
+
+[dependencies]
+gotatun.workspace = true
+ipnetwork.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+x25519-dalek = { workspace = true, features = ["static_secrets"] }
+tokio = { workspace = true, features = ["rt"] }
+tun = { workspace = true, features = ["async"] }
+base64.workspace = true
+bytes.workspace = true
+hex.workspace = true
+zeroize.workspace = true
+rand.workspace = true

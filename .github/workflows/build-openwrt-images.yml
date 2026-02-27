@@ -174,10 +174,7 @@ jobs:
           # Base packages for NymVPN
           PACKAGES="nym-vpn"
 
-          # WireGuard (kernel module + tools)
-          PACKAGES="$PACKAGES kmod-wireguard wireguard-tools"
-
-          # TUN device support
+          # TUN device support (gotatun uses userspace WireGuard)
           PACKAGES="$PACKAGES kmod-tun"
 
           # LuCI web interface

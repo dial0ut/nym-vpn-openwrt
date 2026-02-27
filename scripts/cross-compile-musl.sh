@@ -4,11 +4,7 @@
 # Cross-compile nym-vpnd for OpenWRT (musl targets)
 # This script runs INSIDE the messense/rust-musl-cross container
 # Supports both x86_64 and aarch64 host architectures
-# Uses kernel WireGuard exclusively (no wireguard-go)
-#
-# Requirements:
-#   - Linux kernel 5.6+ with WireGuard module on target system
-#   - Run: modprobe wireguard (on target device)
+# Uses gotatun (pure Rust userspace WireGuard) — only kmod-tun needed on target
 #
 # Usage from host:
 #   docker run --rm -it -v "$(pwd)":/home/rust/src \
@@ -368,7 +364,7 @@ cleanup() {
 
 main() {
     log_info "=== Cross-compiling nym-vpnd for OpenWRT/musl (${TARGET}) ==="
-    log_info "=== Using KERNEL WireGuard (pure Rust netlink) ==="
+    log_info "=== Using gotatun (pure Rust userspace WireGuard) ==="
     log_info ""
 
     check_arch
@@ -388,8 +384,8 @@ main() {
     log_info "  scp nym-vpn-core/target/${TARGET}/release/nym-vpnd root@openwrt.lan:/usr/bin/"
     log_info "  scp nym-vpn-core/target/${TARGET}/release/nym-vpnc root@openwrt.lan:/usr/bin/"
     log_info ""
-    log_info "IMPORTANT: Ensure WireGuard kernel module is loaded on target:"
-    log_info "  modprobe wireguard"
+    log_info "IMPORTANT: Ensure TUN kernel module is loaded on target:"
+    log_info "  modprobe tun"
     log_info ""
 }
 

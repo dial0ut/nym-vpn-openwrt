@@ -72,7 +72,7 @@ nym-vpn-account-controller.workspace = true
 nym-vpn-lib-types = { workspace = true, features = ["nym-type-conversions"] }
 nym-vpn-network-config.workspace = true
 nym-vpn-store.workspace = true
-nym-wg-go = { workspace = true, features = ["amnezia"], optional = true }
+nym-wg-gotatun = { workspace = true, features = ["amnezia"] }
 nym-wg-metadata-client.workspace = true
 
 ed25519-dalek = { workspace = true, features = [
@@ -111,9 +111,6 @@ nym-dns.workspace = true
 nym-firewall.workspace = true
 nym-firewall-config.workspace = true
 
-[target.'cfg(target_os = "linux")'.dependencies]
-nym-wg-kernel.workspace = true
-
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 hickory-server = { workspace = true, features = ["resolver"] }
 nym-routing.workspace = true
@@ -139,8 +136,7 @@ vergen-gitcl = { workspace = true, default-features = false, features = [
 ] }
 
 [features]
-default = ["wireguard-go"]
-wireguard-go = ["dep:nym-wg-go"]
+default = []
 metrics-server = ["nym-client-core/metrics-server"]
 
 [package.metadata.cargo-machete]
