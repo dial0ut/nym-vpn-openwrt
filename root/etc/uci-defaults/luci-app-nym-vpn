@@ -1,0 +1,14 @@
+#!/bin/sh
+# Copyright 2025 - Nym Technologies SA <contact@nymtech.net>
+# SPDX-License-Identifier: GPL-3.0-only
+
+# Enable nym-vpnd service on install
+/etc/init.d/nym-vpnd enable 2>/dev/null
+
+# Restart rpcd to register the ubus backend
+/etc/init.d/rpcd restart 2>/dev/null
+
+# Clear LuCI cache
+rm -rf /tmp/luci-modulecache/* /tmp/luci-indexcache* 2>/dev/null
+
+exit 0

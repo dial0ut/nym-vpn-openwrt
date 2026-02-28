@@ -1,0 +1,53 @@
+{
+  "luci-app-nym-vpn": {
+    "description": "Grant access to Nym VPN configuration",
+    "read": {
+      "ubus": {
+        "nym-vpn": [
+          "status",
+          "info",
+          "gateway_get",
+          "gateway_list",
+          "gateway_list_countries",
+          "gateway_list_by_country",
+          "tunnel_get",
+          "account_get",
+          "network_get",
+          "lan_get",
+          "daemon_status"
+        ],
+        "service": [
+          "list"
+        ]
+      },
+      "uci": [
+        "nym-vpn"
+      ]
+    },
+    "write": {
+      "ubus": {
+        "nym-vpn": [
+          "connect",
+          "disconnect",
+          "gateway_set",
+          "tunnel_set",
+          "account_set",
+          "account_forget",
+          "account_rotate_keys",
+          "network_set",
+          "lan_set",
+          "daemon_restart"
+        ],
+        "service": [
+          "start",
+          "stop",
+          "restart",
+          "reload"
+        ]
+      },
+      "uci": [
+        "nym-vpn"
+      ]
+    }
+  }
+}

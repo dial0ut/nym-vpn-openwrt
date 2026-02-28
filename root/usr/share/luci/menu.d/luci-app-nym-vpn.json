@@ -1,0 +1,14 @@
+{
+  "admin/vpn/nym-vpn": {
+    "title": "Nym VPN",
+    "order": 90,
+    "action": {
+      "type": "view",
+      "path": "nym-vpn/config"
+    },
+    "depends": {
+      "acl": ["luci-app-nym-vpn"],
+      "unauthenticated": false
+    }
+  }
+}
