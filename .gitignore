@@ -2,7 +2,6 @@
 /*/target
 target/
 build/
-/android/
 bin/
 .env/
 .env.dev/
@@ -12,30 +11,9 @@ bin/
 **/.DS_Store
 /.cargo
 /nym-vpn-core/.cargo
-nym-vpn-apple/MixnetLibrary/Sources/MixnetLibrary/RustFramework.xcframework
-
-# Wireguard-go artifacts
-wireguard/libwg/versioninfo_windows.syso
-wireguard/libwg/exports.def
-wireguard/libwg/libwg.exp
-wireguard/libwg/libwg.h
-
-# Auto-generated version headers
-wireguard/libwg/version.h
-nym-vpn-windows/winfw/src/winfw/version.h
 
 # uniffi binaries
 nym-vpn-core/crates/nym-vpn-rpc-uniffi/generated
 nym-vpn-core/crates/nym-vpn-rpc-uniffi/NymVPNRpc
 nym-vpn-core/crates/nym-vpn-lib-uniffi/generated
 nym-vpn-core/crates/nym-vpn-lib-uniffi/NymVPNLib
-
-# nym-vpnd
-nym-vpn-core/upload/mac
-
-# Visual Studio
-*.vcxproj.user
-.vs/
-
-# GitHub Copilot
-.github/copilot-instructions.md
