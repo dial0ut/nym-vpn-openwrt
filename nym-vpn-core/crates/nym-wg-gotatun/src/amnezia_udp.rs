@@ -84,10 +84,11 @@ impl<F: UdpTransportFactory> AmneziaUdpFactory<F> {
         let params = config.and_then(AmneziaParams::from_config).map(Arc::new);
 
         if let Some(ref p) = params {
-            tracing::info!(
+            tracing::info!("AmneziaWG obfuscation enabled");
+            tracing::debug!(
                 h1 = p.h1, h2 = p.h2, h3 = p.h3, h4 = p.h4,
                 s1 = p.s1, s2 = p.s2, jc = p.jc, jmin = p.jmin, jmax = p.jmax,
-                "AmneziaWG obfuscation enabled"
+                "AmneziaWG obfuscation parameters"
             );
         } else {
             tracing::debug!("AmneziaWG obfuscation disabled (passthrough mode)");
@@ -155,7 +156,7 @@ impl<S: UdpSend> UdpSend for AmneziaSend<S> {
             return self.inner.send_to(packet, destination).await;
         }
 
-        let msg_type = i32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+        let msg_type = read_header(data, 0);
 
         match msg_type {
             WG_INIT => {
@@ -173,17 +174,16 @@ impl<S: UdpSend> UdpSend for AmneziaSend<S> {
                     .send_to(Packet::from_bytes(obfuscated), destination)
                     .await
             }
-            WG_COOKIE => {
-                let obfuscated = remap_header(data, params.h3);
-                self.inner
-                    .send_to(Packet::from_bytes(obfuscated), destination)
-                    .await
-            }
-            WG_DATA => {
-                let obfuscated = remap_header(data, params.h4);
-                self.inner
-                    .send_to(Packet::from_bytes(obfuscated), destination)
-                    .await
+            WG_COOKIE | WG_DATA => {
+                // In-place header remap — no allocation needed
+                let new_header = if msg_type == WG_COOKIE {
+                    params.h3
+                } else {
+                    params.h4
+                };
+                let mut packet = packet;
+                packet.buf_mut()[..4].copy_from_slice(&new_header.to_le_bytes());
+                self.inner.send_to(packet, destination).await
             }
             _ => {
                 // Unknown message type — pass through unchanged
@@ -238,61 +238,51 @@ impl<R: UdpRecv> UdpRecv for AmneziaRecv<R> {
                 continue;
             }
 
-            let header = i32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+            let header = read_header(data, 0);
 
-            // Try to match cookie (H3) — fixed size 64
+            // Try to match cookie (H3) — fixed size 64, in-place remap
             if header == params.h3 && data.len() == WG_COOKIE_SIZE {
-                let restored = remap_header(data, WG_COOKIE);
-                return Ok((Packet::from_bytes(restored), addr));
+                let mut packet = packet;
+                packet.buf_mut()[..4].copy_from_slice(&WG_COOKIE.to_le_bytes());
+                return Ok((packet, addr));
             }
 
-            // Try to match data (H4) — minimum size 32
+            // Try to match data (H4) — minimum size 32, in-place remap (hot path)
             if header == params.h4 && data.len() >= WG_DATA_MIN_SIZE {
-                let restored = remap_header(data, WG_DATA);
-                return Ok((Packet::from_bytes(restored), addr));
+                let mut packet = packet;
+                packet.buf_mut()[..4].copy_from_slice(&WG_DATA.to_le_bytes());
+                return Ok((packet, addr));
             }
 
             // Try to match unpadded init (H1, S1==0) — exactly 148
             if params.s1 == 0 && header == params.h1 && data.len() == WG_INIT_SIZE {
-                let restored = remap_header(data, WG_INIT);
-                return Ok((Packet::from_bytes(restored), addr));
+                let mut packet = packet;
+                packet.buf_mut()[..4].copy_from_slice(&WG_INIT.to_le_bytes());
+                return Ok((packet, addr));
             }
 
             // Try to match unpadded response (H2, S2==0) — exactly 92
             if params.s2 == 0 && header == params.h2 && data.len() == WG_RESPONSE_SIZE {
-                let restored = remap_header(data, WG_RESPONSE);
-                return Ok((Packet::from_bytes(restored), addr));
+                let mut packet = packet;
+                packet.buf_mut()[..4].copy_from_slice(&WG_RESPONSE.to_le_bytes());
+                return Ok((packet, addr));
             }
 
             // Try to match padded init (S1 > 0) — size == S1 + 148
             if params.s1 > 0 && data.len() == params.s1 + WG_INIT_SIZE {
-                if data.len() >= params.s1 + 4 {
-                    let inner_header = i32::from_le_bytes([
-                        data[params.s1],
-                        data[params.s1 + 1],
-                        data[params.s1 + 2],
-                        data[params.s1 + 3],
-                    ]);
-                    if inner_header == params.h1 {
-                        let stripped = strip_padding_and_remap(data, params.s1, WG_INIT);
-                        return Ok((Packet::from_bytes(stripped), addr));
-                    }
+                let inner_header = read_header(data, params.s1);
+                if inner_header == params.h1 {
+                    let stripped = strip_padding_and_remap(data, params.s1, WG_INIT);
+                    return Ok((Packet::from_bytes(stripped), addr));
                 }
             }
 
             // Try to match padded response (S2 > 0) — size == S2 + 92
             if params.s2 > 0 && data.len() == params.s2 + WG_RESPONSE_SIZE {
-                if data.len() >= params.s2 + 4 {
-                    let inner_header = i32::from_le_bytes([
-                        data[params.s2],
-                        data[params.s2 + 1],
-                        data[params.s2 + 2],
-                        data[params.s2 + 3],
-                    ]);
-                    if inner_header == params.h2 {
-                        let stripped = strip_padding_and_remap(data, params.s2, WG_RESPONSE);
-                        return Ok((Packet::from_bytes(stripped), addr));
-                    }
+                let inner_header = read_header(data, params.s2);
+                if inner_header == params.h2 {
+                    let stripped = strip_padding_and_remap(data, params.s2, WG_RESPONSE);
+                    return Ok((Packet::from_bytes(stripped), addr));
                 }
             }
 
@@ -314,12 +304,14 @@ impl<R: UdpRecv> UdpRecv for AmneziaRecv<R> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Remap the first 4 bytes of a packet to `new_header`, returning a new BytesMut.
-fn remap_header(data: &[u8], new_header: i32) -> BytesMut {
-    let mut buf = BytesMut::with_capacity(data.len());
-    buf.extend_from_slice(&new_header.to_le_bytes());
-    buf.extend_from_slice(&data[4..]);
-    buf
+/// Read a little-endian i32 header at the given byte offset.
+fn read_header(data: &[u8], offset: usize) -> i32 {
+    i32::from_le_bytes([
+        data[offset],
+        data[offset + 1],
+        data[offset + 2],
+        data[offset + 3],
+    ])
 }
 
 /// Remap header and prepend `pad_size` random bytes.
@@ -327,10 +319,9 @@ fn remap_and_pad(data: &[u8], new_header: i32, pad_size: usize) -> BytesMut {
     let mut buf = BytesMut::with_capacity(pad_size + data.len());
 
     if pad_size > 0 {
-        // Fill padding with random bytes
-        let mut padding = vec![0u8; pad_size];
-        rand::thread_rng().fill(&mut padding[..]);
-        buf.extend_from_slice(&padding);
+        // Write random padding directly into the BytesMut — no intermediate Vec
+        buf.resize(pad_size, 0);
+        rand::thread_rng().fill(&mut buf[..pad_size]);
     }
 
     buf.extend_from_slice(&new_header.to_le_bytes());
@@ -368,9 +359,9 @@ async fn send_junk<S: UdpSend>(
                 } else {
                     rng.gen_range(params.jmin..=params.jmax)
                 };
-                let mut junk = vec![0u8; size];
+                let mut junk = BytesMut::zeroed(size);
                 rng.fill(&mut junk[..]);
-                BytesMut::from(&junk[..])
+                junk
             })
             .collect()
     };
@@ -388,6 +379,14 @@ async fn send_junk<S: UdpSend>(
 mod tests {
     use super::*;
 
+    /// Helper: remap header in a copy (test-only, production code does in-place).
+    fn remap_header_copy(data: &[u8], new_header: i32) -> BytesMut {
+        let mut buf = BytesMut::with_capacity(data.len());
+        buf.extend_from_slice(&new_header.to_le_bytes());
+        buf.extend_from_slice(&data[4..]);
+        buf
+    }
+
     /// Verify header remap round-trips correctly.
     #[test]
     fn header_remap_roundtrip() {
@@ -401,18 +400,16 @@ mod tests {
         let custom_h1: i32 = 12345;
 
         // Remap 1 -> custom
-        let remapped = remap_header(&init_packet, custom_h1);
+        let remapped = remap_header_copy(&init_packet, custom_h1);
         assert_eq!(remapped.len(), WG_INIT_SIZE);
-        let header = i32::from_le_bytes([remapped[0], remapped[1], remapped[2], remapped[3]]);
-        assert_eq!(header, custom_h1);
+        assert_eq!(read_header(&remapped, 0), custom_h1);
         assert_eq!(remapped[4], 0xAA);
         assert_eq!(remapped[5], 0xBB);
 
         // Remap custom -> 1
-        let restored = remap_header(&remapped, WG_INIT);
+        let restored = remap_header_copy(&remapped, WG_INIT);
         assert_eq!(restored.len(), WG_INIT_SIZE);
-        let header = i32::from_le_bytes([restored[0], restored[1], restored[2], restored[3]]);
-        assert_eq!(header, WG_INIT);
+        assert_eq!(read_header(&restored, 0), WG_INIT);
         assert_eq!(restored[4], 0xAA);
         assert_eq!(restored[5], 0xBB);
     }
@@ -432,14 +429,12 @@ mod tests {
         assert_eq!(padded.len(), s1 + WG_INIT_SIZE);
 
         // Verify the header is at offset s1
-        let header = i32::from_le_bytes([padded[s1], padded[s1 + 1], padded[s1 + 2], padded[s1 + 3]]);
-        assert_eq!(header, custom_h1);
+        assert_eq!(read_header(&padded, s1), custom_h1);
 
         // Strip and restore
         let restored = strip_padding_and_remap(&padded, s1, WG_INIT);
         assert_eq!(restored.len(), WG_INIT_SIZE);
-        let header = i32::from_le_bytes([restored[0], restored[1], restored[2], restored[3]]);
-        assert_eq!(header, WG_INIT);
+        assert_eq!(read_header(&restored, 0), WG_INIT);
         assert_eq!(restored[10], 0xCC);
     }
 
@@ -467,7 +462,7 @@ mod tests {
     #[test]
     fn rand_config_params() {
         let mut rng = rand::thread_rng();
-        let config = AmneziaConfig::rand(&mut rng);
+        let config = AmneziaConfig::rand(&mut rng).expect("valid random config");
         let params = AmneziaParams::from_config(&config).unwrap();
 
         // Random configs should have non-standard headers
@@ -490,14 +485,12 @@ mod tests {
 
         let custom_h4: i32 = 777;
 
-        let remapped = remap_header(&data_packet, custom_h4);
-        let header = i32::from_le_bytes([remapped[0], remapped[1], remapped[2], remapped[3]]);
-        assert_eq!(header, custom_h4);
+        let remapped = remap_header_copy(&data_packet, custom_h4);
+        assert_eq!(read_header(&remapped, 0), custom_h4);
         assert_eq!(remapped[20], 0xFF);
 
-        let restored = remap_header(&remapped, WG_DATA);
-        let header = i32::from_le_bytes([restored[0], restored[1], restored[2], restored[3]]);
-        assert_eq!(header, WG_DATA);
+        let restored = remap_header_copy(&remapped, WG_DATA);
+        assert_eq!(read_header(&restored, 0), WG_DATA);
         assert_eq!(restored[20], 0xFF);
     }
 }

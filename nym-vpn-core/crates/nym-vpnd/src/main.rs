@@ -9,8 +9,6 @@ mod logging;
 mod sentry;
 mod service;
 mod shutdown_handler;
-#[cfg(windows)]
-mod windows_service;
 
 use std::path::PathBuf;
 
@@ -30,12 +28,6 @@ use crate::{
 use service::{NymVpnService, NymVpnServiceParameters};
 
 fn main() -> anyhow::Result<()> {
-    // COM must be initialized on main thread to prevent crash in firewall
-    // internals where we use a combination of COM and thread_local
-    // See: https://github.com/ohadravid/wmi-rs/issues/136
-    #[cfg(windows)]
-    let _com = wmi::COMLibrary::new().context("failed to initialize COM")?;
-
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(10)
         .enable_all()
@@ -48,26 +40,6 @@ async fn async_main() -> anyhow::Result<()> {
     let args = CliArgs::parse();
 
     match args.command.unwrap_or_default() {
-        #[cfg(windows)]
-        Command::InstallService => {
-            println!(
-                "Installing {} as a service...",
-                windows_service::SERVICE_NAME
-            );
-            windows_service::installation::install_service()
-        }
-        #[cfg(windows)]
-        Command::UninstallService => {
-            println!("Uninstalling {} service...", windows_service::SERVICE_NAME);
-            windows_service::installation::uninstall_service().await?;
-            Ok(())
-        }
-        #[cfg(windows)]
-        Command::StartService => {
-            println!("Starting {} service...", windows_service::SERVICE_NAME);
-            windows_service::installation::start_service()?;
-            Ok(())
-        }
         Command::RunAsService | Command::RunStandalone => run_vpn_service(args).await,
     }
 }
@@ -101,14 +73,6 @@ async fn run_vpn_service(args: CliArgs) -> anyhow::Result<()> {
         tracing::info!("Sentry monitoring enabled");
     }
 
-    #[cfg(windows)]
-    if run_as_service {
-        windows_service::start(run_parameters, remove_log_file_signal, shutdown_token).await?;
-    } else {
-        run_standalone(run_parameters, remove_log_file_signal, shutdown_token).await?;
-    }
-
-    #[cfg(not(windows))]
     run_standalone(run_parameters, remove_log_file_signal, shutdown_token).await?;
 
     let _worker_guard = if let Some(setup) = logging_setup {

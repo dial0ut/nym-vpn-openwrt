@@ -196,39 +196,6 @@ impl<'de> Deserialize<'de> for Recipient {
     }
 }
 
-#[cfg(feature = "uniffi-bindings")]
-pub type BoxedRecepient = Box<Recipient>;
-#[cfg(feature = "uniffi-bindings")]
-pub type BoxedNodeIdentity = Box<NodeIdentity>;
-
-#[cfg(feature = "uniffi-bindings")]
-uniffi::custom_type!(NodeIdentity, String, {
-    remote,
-    try_lift: |val| Ok(NodeIdentity::from_base58_string(val)?),
-    lower: |val| val.to_base58_string()
-});
-
-#[cfg(feature = "uniffi-bindings")]
-uniffi::custom_type!(BoxedNodeIdentity, String, {
-    remote,
-    try_lift: |val| Ok(Box::new(NodeIdentity::from_base58_string(val)?)),
-    lower: |val| val.to_base58_string()
-});
-
-#[cfg(feature = "uniffi-bindings")]
-uniffi::custom_type!(Recipient, String, {
-    remote,
-    try_lift: |val| Ok(Recipient::try_from_base58_string(val)?),
-    lower: |val| val.to_string()
-});
-
-#[cfg(feature = "uniffi-bindings")]
-uniffi::custom_type!(BoxedRecepient, String, {
-    remote,
-    try_lift: |val| Ok(Box::new(Recipient::try_from_base58_string(val)?)),
-    lower: |val| val.to_string()
-});
-
 #[cfg(feature = "nym-type-conversions")]
 impl From<Recipient> for nym_gateway_directory::Recipient {
     fn from(value: Recipient) -> Self {
@@ -252,7 +219,6 @@ impl From<nym_gateway_directory::Recipient> for Recipient {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Enum))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -322,7 +288,6 @@ impl From<EntryPoint> for nym_gateway_directory::EntryPoint {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Enum))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -403,7 +368,6 @@ impl From<nym_gateway_directory::ExitPoint> for ExitPoint {
 }
 
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Enum))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -430,7 +394,6 @@ impl From<GatewayType> for nym_gateway_directory::GatewayType {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Enum))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -469,7 +432,6 @@ impl From<GatewayFilter> for nym_gateway_directory::GatewayFilter {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 pub struct LookupGatewayFilters {
     pub gw_type: GatewayType,
     pub filters: Vec<GatewayFilter>,
@@ -503,7 +465,6 @@ impl From<LookupGatewayFilters> for nym_gateway_directory::LookupGatewayFilters 
 }
 
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -528,7 +489,6 @@ pub struct Gateway {
 }
 
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -543,7 +503,6 @@ pub struct BridgeInformation {
 }
 
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Enum))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -557,7 +516,6 @@ pub enum BridgeParameters {
 }
 
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -573,7 +531,6 @@ pub struct QuicClientOptions {
 }
 
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -604,7 +561,6 @@ impl From<nym_gateway_directory::Performance> for Performance {
 }
 
 #[derive(Debug, Clone, Copy)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Enum))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -619,7 +575,6 @@ pub enum AsnKind {
 }
 
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -635,7 +590,6 @@ pub struct Asn {
 }
 
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -660,7 +614,6 @@ impl fmt::Display for Location {
 }
 
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -681,7 +634,6 @@ impl fmt::Display for Probe {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Enum))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -710,7 +662,6 @@ impl From<nym_gateway_directory::ScoreValue> for Score {
 }
 
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -725,7 +676,6 @@ pub struct ProbeOutcome {
 }
 
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -740,7 +690,6 @@ pub struct Entry {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -756,7 +705,6 @@ pub struct Socks5 {
 }
 
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -775,7 +723,6 @@ pub struct Exit {
 }
 
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),

@@ -8,8 +8,6 @@ pub mod cache_refresh;
 mod error;
 pub mod login;
 mod mixnet;
-#[cfg(any(target_os = "ios", target_os = "android"))]
-pub mod tunnel_provider;
 pub mod tunnel_state_machine;
 mod wg_config;
 
@@ -60,11 +58,9 @@ pub static DEFAULT_DNS_SERVERS: LazyLock<Vec<IpAddr>> = LazyLock::new(|| {
 });
 
 /// Routing table id used for routing all traffic through the tunnel.
-#[cfg(target_os = "linux")]
 pub const TUNNEL_TABLE_ID: u32 = 0x14d;
 
 /// Firewall mark used for marking traffic that should bypass the tunnel.
-#[cfg(target_os = "linux")]
 pub const TUNNEL_FWMARK: u32 = 0x14d;
 
 /// Macro that creates `UserAgent` from compiled in vergen metadata.

@@ -12,7 +12,6 @@ use crate::ExitPoint;
 
 /// SOCKS5 enable request
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -29,7 +28,6 @@ pub struct EnableSocks5Request {
 
 /// SOCKS5 proxy settings
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -46,7 +44,6 @@ pub struct Socks5Settings {
 
 /// HTTP RPC proxy settings
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -63,7 +60,6 @@ pub struct HttpRpcSettings {
 
 /// SOCKS5 service state
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Enum))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -97,7 +93,6 @@ impl std::fmt::Display for Socks5State {
 
 /// SOCKS5 service status
 #[derive(Clone, Debug)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),

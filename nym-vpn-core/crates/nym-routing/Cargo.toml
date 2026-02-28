@@ -23,30 +23,12 @@ tokio = { workspace = true, features = [
     "sync",
     "macros",
 ] }
-
-[target.'cfg(not(target_os="android"))'.dependencies]
 nym-common.workspace = true
-
-[target.'cfg(target_os = "linux")'.dependencies]
 libc.workspace = true
 netlink-packet-route = { workspace = true, features = ["rich_nlas"] }
 netlink-packet-core.workspace = true
 netlink-sys.workspace = true
 rtnetlink.workspace = true
-
-[target.'cfg(target_os = "macos")'.dependencies]
-bitflags.workspace = true
-libc.workspace = true
-nix = { workspace = true, features = ["socket", "fs", "net"] }
-system-configuration.workspace = true
-
-[target.'cfg(windows)'.dependencies]
-nym-windows.workspace = true
-widestring.workspace = true
-
-[target.'cfg(windows)'.dependencies.windows]
-workspace = true
-features = ["Win32_NetworkManagement_Ndis", "Win32_Globalization"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -24,7 +23,6 @@ pub struct NymVpnDevice {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Enum))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -40,7 +38,6 @@ pub enum NymVpnDeviceStatus {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),

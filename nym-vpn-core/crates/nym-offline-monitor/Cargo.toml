@@ -14,17 +14,10 @@ workspace = true
 [dependencies]
 thiserror.workspace = true
 tracing.workspace = true
-futures.workspace = true
 tokio = { workspace = true, features = ["macros", "sync", "time", "rt"] }
-debounced.workspace = true
-tokio-stream.workspace = true
 tokio-util.workspace = true
+
+async-trait.workspace = true
 
 nym-common.workspace = true
 nym-routing.workspace = true
-nym-windows.workspace = true
-async-trait.workspace = true
-
-[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
-dispatch2.workspace = true
-nym-apple-network.workspace = true

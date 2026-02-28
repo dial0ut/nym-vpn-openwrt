@@ -33,14 +33,10 @@ use crate::service::config::{
     mixnet_traffic::v5::MixnetTrafficConfig,
     network_stats::v1::NetworkStatisticsConfig,
 };
-#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
-#[cfg(not(windows))]
 const DEFAULT_DATA_DIR: &str = "/var/lib/nym-vpnd";
-#[cfg(not(windows))]
 const DEFAULT_LOG_DIR: &str = "/var/log/nym-vpnd";
-#[cfg(not(windows))]
 const DEFAULT_CONFIG_DIR: &str = "/etc/nym";
 pub const DEFAULT_CONFIG_FILE_TOML: &str = "nym-vpnd.toml";
 pub const DEFAULT_CONFIG_FILE_JSON: &str = "nym-vpnd.json";
@@ -248,20 +244,11 @@ pub enum ConfigSetupError {
     #[error("failed to write file {file}")]
     WriteFile { file: PathBuf, error: io::Error },
 
-    #[cfg(unix)]
     #[error("failed to set permissions for directory {dir}")]
     SetPermissions {
         dir: PathBuf,
         #[source]
         error: io::Error,
-    },
-
-    #[cfg(windows)]
-    #[error("failed to set permissions for directory {dir}")]
-    SetPermissions {
-        dir: PathBuf,
-        #[source]
-        error: nym_windows::security::Error,
     },
 
     #[error("failed to convert entry point: {0}")]
@@ -282,17 +269,8 @@ pub enum ConfigSetupError {
     },
 }
 
-#[cfg(windows)]
-pub fn program_data_path() -> PathBuf {
-    PathBuf::from(std::env::var("ProgramData").unwrap_or(std::env::var("PROGRAMDATA").unwrap()))
-}
-
 fn default_data_dir() -> PathBuf {
-    #[cfg(windows)]
-    return program_data_path().join("nym-vpnd").join("data");
-
-    #[cfg(not(windows))]
-    return DEFAULT_DATA_DIR.into();
+    DEFAULT_DATA_DIR.into()
 }
 
 pub fn data_dir() -> PathBuf {
@@ -302,11 +280,7 @@ pub fn data_dir() -> PathBuf {
 }
 
 fn default_log_dir() -> PathBuf {
-    #[cfg(windows)]
-    return program_data_path().join("nym-vpnd").join("log");
-
-    #[cfg(not(windows))]
-    return DEFAULT_LOG_DIR.into();
+    DEFAULT_LOG_DIR.into()
 }
 
 pub fn log_dir() -> PathBuf {
@@ -316,11 +290,7 @@ pub fn log_dir() -> PathBuf {
 }
 
 pub fn default_config_dir() -> PathBuf {
-    #[cfg(windows)]
-    return program_data_path().join("nym-vpnd").join("config");
-
-    #[cfg(not(windows))]
-    return DEFAULT_CONFIG_DIR.into();
+    DEFAULT_CONFIG_DIR.into()
 }
 
 pub fn config_dir() -> PathBuf {
@@ -428,59 +398,15 @@ pub async fn create_data_dir(data_dir: &Path, network_name: &str) -> Result<(), 
     );
 
     for dir_path in [&network_data_dir, data_dir] {
-        #[cfg(unix)]
-        {
-            // Set directory permissions to 700 (rwx------)
-            let permissions = std::fs::Permissions::from_mode(0o700);
-            fs::set_permissions(dir_path, permissions)
-                .await
-                .map_err(|error| ConfigSetupError::SetPermissions {
-                    dir: dir_path.to_path_buf(),
-                    error,
-                })?;
-        }
-
-        #[cfg(windows)]
-        {
-            set_data_dir_permissions(dir_path).map_err(|error| {
-                ConfigSetupError::SetPermissions {
-                    dir: dir_path.to_path_buf(),
-                    error,
-                }
+        // Set directory permissions to 700 (rwx------)
+        let permissions = std::fs::Permissions::from_mode(0o700);
+        fs::set_permissions(dir_path, permissions)
+            .await
+            .map_err(|error| ConfigSetupError::SetPermissions {
+                dir: dir_path.to_path_buf(),
+                error,
             })?;
-        }
     }
-
-    Ok(())
-}
-
-/// Set directory permissions to Administrators with Full Control.
-#[cfg(windows)]
-fn set_data_dir_permissions(data_dir: &Path) -> nym_windows::security::Result<()> {
-    use nym_windows::security::{
-        AccessMode, AceFlags, Acl, ExplicitAccess, FileAccessRights, SecurityInfo,
-        SecurityObjectType, Sid, Trustee, TrusteeType, WellKnownSid, set_named_security_info,
-    };
-
-    let administrators_sid = Sid::well_known(WellKnownSid::BuiltinAdministrators)?;
-
-    let allow_admin_group_access = ExplicitAccess::new(
-        Trustee::new(administrators_sid.try_clone()?, TrusteeType::WellKnownGroup),
-        AccessMode::SetAccess,
-        FileAccessRights::FILE_ALL_ACCESS.into(),
-        AceFlags::OBJECT_INHERIT_ACE | AceFlags::CONTAINER_INHERIT_ACE,
-    );
-
-    let acl = Acl::new(vec![allow_admin_group_access])?;
-
-    set_named_security_info(
-        data_dir,
-        SecurityObjectType::FileObject,
-        SecurityInfo::DACL | SecurityInfo::PROTECTED_DACL,
-        None,
-        None,
-        Some(&acl),
-    )?;
 
     Ok(())
 }

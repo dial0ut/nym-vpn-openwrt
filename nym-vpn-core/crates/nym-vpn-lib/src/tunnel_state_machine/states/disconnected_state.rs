@@ -9,7 +9,6 @@ use crate::tunnel_state_machine::{
     states::{ConnectingState, OfflineState},
     tunnel::Tombstone,
 };
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use nym_common::trace_err_chain;
 
 pub struct DisconnectedState;
@@ -19,31 +18,24 @@ impl DisconnectedState {
         tombstone: Option<Tombstone>,
         shared_state: &mut SharedState,
     ) -> (Box<dyn TunnelStateHandler>, PrivateTunnelState) {
-        #[cfg(target_os = "macos")]
-        Self::reset_dns(shared_state).await;
-
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         Self::reset_firewall_policy(shared_state);
 
         // Drop tombstone to close tunnel devices.
         drop(tombstone);
 
         // Reset resolver overrides and allow all networking since firewall is no longer active
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         shared_state.reset_resolver_overrides().await;
         shared_state.allow_networking().await;
 
         (Box::new(Self), PrivateTunnelState::Disconnected)
     }
 
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     fn reset_firewall_policy(shared_state: &mut SharedState) {
         if let Err(e) = shared_state.firewall.reset_policy() {
             trace_err_chain!(e, "Failed to reset firewall policy");
         }
     }
 
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     async fn reset_dns(shared_state: &mut SharedState) {
         if let Err(error) = shared_state.dns_handler.reset().await {
             trace_err_chain!(error, "Failed to reset DNS");
@@ -81,7 +73,6 @@ impl TunnelStateHandler for DisconnectedState {
                 }
             }
             _ = shutdown_token.cancelled() => {
-                #[cfg(not(any(target_os = "android", target_os = "ios")))]
                 Self::reset_dns(shared_state).await;
                 NextTunnelState::Finished
             }

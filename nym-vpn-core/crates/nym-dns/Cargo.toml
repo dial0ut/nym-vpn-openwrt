@@ -31,28 +31,7 @@ nym-routing.workspace = true
 nym-dbus.workspace = true
 nym-common.workspace = true
 
-[target.'cfg(target_os = "macos")'.dependencies]
-system-configuration.workspace = true
-
-[target.'cfg(target_os = "linux")'.dependencies]
 which.workspace = true
 inotify.workspace = true
 resolv-conf.workspace = true
 duct.workspace = true
-
-[target.'cfg(windows)'.dependencies]
-once_cell.workspace = true
-winreg = { workspace = true, features = ["transactions"] }
-
-nym-windows = { workspace = true }
-nym-common = { workspace = true }
-
-[target.'cfg(windows)'.dependencies.windows]
-workspace = true
-features = [
-    "Win32_Foundation",
-    "Win32_System_Rpc",
-    "Win32_System_LibraryLoader",
-    "Win32_System_SystemInformation",
-    "Win32_System_Com",
-]

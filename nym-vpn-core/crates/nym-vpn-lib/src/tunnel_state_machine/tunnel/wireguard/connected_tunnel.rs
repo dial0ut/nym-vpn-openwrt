@@ -65,16 +65,6 @@ impl ConnectedTunnel {
         tunnel_constants: TunnelConstants,
         entry_amnezia: bool,
     ) -> Result<TunnelHandle> {
-        self.run_using_tun_tun(options, tunnel_constants, entry_amnezia)
-            .await
-    }
-
-    async fn run_using_tun_tun(
-        self,
-        options: TunTunTunnelOptions,
-        tunnel_constants: TunnelConstants,
-        entry_amnezia: bool,
-    ) -> Result<TunnelHandle> {
         let mut wg_entry_config = WgNodeConfig::with_gateway_data(
             self.connection_data.effective_entry_gateway_data(),
             self.entry_wg_keypair.private_key(),
@@ -85,7 +75,6 @@ impl ConnectedTunnel {
             options.dns.clone(),
             self.entry_mtu(),
             true, // gotatun handles IPv6 fine
-            #[cfg(target_os = "linux")]
             Some(tunnel_constants.fwmark),
         );
         if entry_amnezia {
@@ -99,7 +88,6 @@ impl ConnectedTunnel {
             options.dns,
             self.exit_mtu(),
             true, // gotatun handles IPv6 fine
-            #[cfg(target_os = "linux")]
             None,
         );
 

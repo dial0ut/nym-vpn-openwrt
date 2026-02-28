@@ -11,7 +11,6 @@ use super::connection_data::{
 };
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Enum))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -36,7 +35,6 @@ impl TunnelType {
 
 /// Public enum describing the tunnel state
 #[derive(Debug, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Enum))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -196,7 +194,6 @@ impl std::fmt::Display for TunnelState {
 
 /// Public enum describing action to perform after disconnect
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Enum))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -220,7 +217,6 @@ pub enum ActionAfterDisconnect {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Enum))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),

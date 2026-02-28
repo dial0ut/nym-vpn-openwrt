@@ -17,8 +17,3 @@ tokio-stream = { workspace = true, features = ["net"] }
 tracing.workspace = true
 tonic.workspace = true
 hyper-util.workspace = true
-
-[target.'cfg(windows)'.dependencies]
-async-stream = { workspace = true }
-windows = { workspace = true, features = ["Win32_Foundation"] }
-nym-windows.workspace = true

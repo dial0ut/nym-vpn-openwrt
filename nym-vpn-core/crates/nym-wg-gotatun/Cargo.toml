@@ -17,11 +17,9 @@ gotatun.workspace = true
 ipnetwork.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
-x25519-dalek = { workspace = true, features = ["static_secrets"] }
-tokio = { workspace = true, features = ["rt"] }
+x25519-dalek = { workspace = true, features = ["static_secrets", "zeroize"] }
 tun = { workspace = true, features = ["async"] }
 base64.workspace = true
 bytes.workspace = true
-hex.workspace = true
-zeroize.workspace = true
+zeroize = { workspace = true, features = ["derive"] }
 rand.workspace = true

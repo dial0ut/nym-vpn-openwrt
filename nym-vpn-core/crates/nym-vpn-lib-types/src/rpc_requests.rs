@@ -9,7 +9,6 @@ use ts_rs::TS;
 use crate::{GatewayType, UserAgent};
 
 #[derive(Debug)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 pub struct ListGatewaysOptions {
     pub gw_type: GatewayType,
     #[allow(unused)]
@@ -17,7 +16,6 @@ pub struct ListGatewaysOptions {
 }
 
 #[derive(zeroize::Zeroize)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Enum))]
 pub enum StoreAccountRequest {
     Vpn { mnemonic: String },
     Privy { hex_signature: String },
@@ -39,19 +37,16 @@ impl std::fmt::Debug for StoreAccountRequest {
 }
 
 #[derive(Debug)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 pub struct DecentralisedObtainTicketbooksRequest {
     pub amount: u64,
 }
 
 #[derive(Debug)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 pub struct AccountCommandResponse {
     pub error: Option<crate::AccountCommandError>,
 }
 
 #[derive(Clone, Debug)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -87,9 +82,7 @@ impl From<nym_validator_client::nyxd::Coin> for Coin {
     }
 }
 
-// todo: figure out how to pass Result over uniffi
 #[derive(Debug)]
-//#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 pub struct AccountBalanceResponse {
     pub result: Result<Vec<Coin>, crate::AccountCommandError>,
 }

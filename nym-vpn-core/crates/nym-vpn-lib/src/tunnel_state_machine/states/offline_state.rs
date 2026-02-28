@@ -4,21 +4,13 @@
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-#[cfg(target_os = "macos")]
-use crate::tunnel_state_machine::resolver::LOCAL_DNS_RESOLVER;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::tunnel_state_machine::{Error, Result, states::error_state::BlockedPolicyParameters};
-#[cfg(target_os = "macos")]
-use crate::tunnel_state_machine::{ErrorStateReason, states::ErrorState};
 use crate::tunnel_state_machine::{
     NextTunnelState, PrivateTunnelState, SharedState, TunnelCommand, TunnelStateHandler,
     states::{ConnectingState, DisconnectedState},
     tunnel::SelectedGateways,
 };
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use nym_common::trace_err_chain;
-#[cfg(target_os = "macos")]
-use nym_dns::DnsConfig;
 
 pub struct OfflineState {
     /// Whether to connect the tunnel once online
@@ -27,7 +19,6 @@ pub struct OfflineState {
     /// Gateways to which the tunnel will reconnect to once online
     selected_gateways: Option<SelectedGateways>,
 
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     firewall_policy_params: BlockedPolicyParameters,
 }
 
@@ -39,17 +30,10 @@ impl OfflineState {
     ) -> (Box<dyn TunnelStateHandler>, PrivateTunnelState) {
         shared_state.disallow_networking().await;
 
-        #[cfg(target_os = "macos")]
-        if Self::set_local_dns_resolver(shared_state).await.is_err() {
-            return Box::pin(ErrorState::enter(ErrorStateReason::SetDns, shared_state)).await;
-        }
-
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         let firewall_policy_params = BlockedPolicyParameters {
             allow_lan: shared_state.tunnel_settings.allow_lan,
         };
 
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         if let Err(e) = Self::set_firewall_policy(shared_state, &firewall_policy_params) {
             trace_err_chain!(e, "Failed to apply firewall policy for blocked state");
         }
@@ -58,14 +42,12 @@ impl OfflineState {
             Box::new(Self {
                 reconnect,
                 selected_gateways,
-                #[cfg(not(any(target_os = "android", target_os = "ios")))]
                 firewall_policy_params,
             }),
             PrivateTunnelState::Offline { reconnect },
         )
     }
 
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     fn set_firewall_policy(
         shared_state: &mut SharedState,
         params: &BlockedPolicyParameters,
@@ -78,35 +60,16 @@ impl OfflineState {
             .map_err(Error::SetFirewallPolicy)
     }
 
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     fn reset_firewall_policy(shared_state: &mut SharedState) {
         if let Err(e) = shared_state.firewall.reset_policy() {
             trace_err_chain!(e, "Failed to reset firewall policy");
         }
     }
 
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     async fn reset_dns(shared_state: &mut SharedState) {
         if let Err(error) = shared_state.dns_handler.reset().await {
             trace_err_chain!(error, "Unable to reset DNS");
         }
-    }
-
-    #[cfg(target_os = "macos")]
-    async fn set_local_dns_resolver(shared_state: &mut SharedState) -> Result<()> {
-        // Set system DNS to our local DNS resolver
-        let system_dns = DnsConfig::default().resolve(
-            &[shared_state.filtering_resolver.listen_addr().ip()],
-            shared_state.filtering_resolver.listen_addr().port(),
-        );
-        shared_state
-            .dns_handler
-            .set("lo".to_owned(), system_dns)
-            .await
-            .inspect_err(|err| {
-                trace_err_chain!(err, "Failed to configure system to use filtering resolver");
-            })
-            .map_err(Error::SetDns)
     }
 }
 
@@ -145,14 +108,11 @@ impl TunnelStateHandler for OfflineState {
                             return NextTunnelState::SameState(self);
                         };
 
-                        #[cfg(not(any(target_os = "android", target_os = "ios")))]
-                        {
-                            if diff.allow_lan_changed() {
-                                self.firewall_policy_params.allow_lan = tunnel_settings.allow_lan;
+                        if diff.allow_lan_changed() {
+                            self.firewall_policy_params.allow_lan = tunnel_settings.allow_lan;
 
-                                if let Err(e) = Self::set_firewall_policy(shared_state, &self.firewall_policy_params) {
-                                    trace_err_chain!(e, "failed to set firewall policy");
-                                }
+                            if let Err(e) = Self::set_firewall_policy(shared_state, &self.firewall_policy_params) {
+                                trace_err_chain!(e, "failed to set firewall policy");
                             }
                         }
 
@@ -169,14 +129,6 @@ impl TunnelStateHandler for OfflineState {
                 if connectivity.is_offline() {
                     NextTunnelState::SameState(self)
                 } else {
-                    #[cfg(target_os = "macos")]
-                    if !*LOCAL_DNS_RESOLVER {
-                        // This is probably unnecessary, since DNS is already configured on the
-                        // primary interface.
-                        Self::reset_dns(shared_state).await;
-                    }
-
-                    #[cfg(any(target_os = "linux", target_os = "windows"))]
                     Self::reset_dns(shared_state).await;
 
                     if self.reconnect {
@@ -187,11 +139,8 @@ impl TunnelStateHandler for OfflineState {
                 }
             }
             _ = shutdown_token.cancelled() => {
-                #[cfg(not(any(target_os = "android", target_os = "ios")))]
-                {
-                    Self::reset_dns(shared_state).await;
-                    Self::reset_firewall_policy(shared_state);
-                }
+                Self::reset_dns(shared_state).await;
+                Self::reset_firewall_policy(shared_state);
                 NextTunnelState::Finished
             }
         }

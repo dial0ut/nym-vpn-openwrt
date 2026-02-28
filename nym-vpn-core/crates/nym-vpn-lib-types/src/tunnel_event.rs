@@ -21,7 +21,6 @@ use nym_statistics_common::clients::packet_statistics::{
 use super::tunnel_state::TunnelState;
 
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Enum))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -49,7 +48,6 @@ impl fmt::Display for TunnelEvent {
 }
 
 #[derive(Debug, Copy, Clone)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Enum))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -75,7 +73,6 @@ impl fmt::Display for MixnetEvent {
 }
 
 #[derive(Debug, Copy, Clone)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Enum))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -105,7 +102,6 @@ impl fmt::Display for BandwidthEvent {
 }
 
 #[derive(Debug, Copy, Clone)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Enum))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -151,7 +147,6 @@ impl fmt::Display for ConnectionEvent {
 }
 
 #[derive(Debug, Copy, Clone)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -171,7 +166,6 @@ impl fmt::Display for ConnectionStatisticsEvent {
 }
 
 #[derive(Debug, Copy, Clone)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),

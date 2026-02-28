@@ -16,7 +16,6 @@ use crate::TunnelType;
 
 // Represents the identity of a gateway
 #[derive(Debug, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -44,7 +43,6 @@ impl From<nym_gateway_directory::Gateway> for GatewayId {
 
 // Represents a gateway's info for ConnectionData
 #[derive(Debug, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -75,7 +73,6 @@ impl From<nym_gateway_directory::Gateway> for GatewayLightInfo {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -98,7 +95,6 @@ pub struct EstablishConnectionData {
 
 /// Describes the current state when establishing connection.
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Enum))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -141,7 +137,6 @@ impl fmt::Display for EstablishConnectionState {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -167,7 +162,6 @@ pub struct ConnectionData {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Enum))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -192,7 +186,6 @@ impl TunnelConnectionData {
 
 // Represents a nym-address of the form id.enc@gateway
 #[derive(Debug, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -240,7 +233,6 @@ impl From<nym_gateway_directory::IpPacketRouterAddress> for NymAddress {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -259,7 +251,6 @@ pub struct MixnetConnectionData {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -277,7 +268,6 @@ pub struct BridgeAddress {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -293,7 +283,6 @@ pub struct WireguardConnectionData {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),

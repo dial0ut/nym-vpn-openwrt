@@ -1,27 +1,15 @@
 // Copyright 2024 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 use std::ops::Deref;
 
-#[cfg(any(target_os = "linux", target_os = "ios", target_os = "android"))]
 use std::os::fd::BorrowedFd;
-#[cfg(any(target_os = "android", target_os = "ios"))]
-use std::os::fd::{AsRawFd, IntoRawFd};
-#[cfg(target_os = "android")]
-use std::os::fd::{FromRawFd, OwnedFd};
 use std::{net::IpAddr, time::Duration};
-#[cfg(any(target_os = "linux", target_os = "ios", target_os = "android"))]
-use std::net::SocketAddr;
-#[cfg(unix)]
 use std::{os::fd::RawFd, sync::Arc};
 
 use futures::{FutureExt, future::Fuse, pin_mut};
-#[cfg(any(target_os = "ios", target_os = "android"))]
-use ipnetwork::{IpNetwork, Ipv4Network, Ipv6Network};
-#[cfg(target_os = "linux")]
 use nix::sys::socket::{SetSockOpt, sockopt::Mark};
 use nym_gateway_directory::{
     BlacklistedGateways, GatewayCacheHandle, GatewayClient, GatewayMinPerformance, ResolvedConfig,
@@ -29,7 +17,6 @@ use nym_gateway_directory::{
 use time::OffsetDateTime;
 use tokio::{sync::mpsc, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tun::AbstractDevice;
 use tun::AsyncDevice;
 
@@ -52,13 +39,8 @@ use nym_vpn_lib_types::{
 };
 use nym_vpn_store::keys::wireguard::WireguardKeysDb;
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use super::route_handler::{RouteHandler, RoutingConfig};
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 use super::tun_ipv6;
-#[cfg(any(target_os = "ios", target_os = "android"))]
-use super::tun_name;
-#[cfg(target_os = "linux")]
 use super::tunnel::wireguard::connected_tunnel::TunTunTunnelOptions;
 use super::{
     Error, NymConfig, Result, TunnelInterface, TunnelMetadata, TunnelSettings,
@@ -66,10 +48,6 @@ use super::{
         self, AnyTunnelHandle, SelectedGateways, Tombstone,
     },
 };
-#[cfg(target_os = "android")]
-use crate::tunnel_provider::AndroidTunProvider;
-#[cfg(target_os = "ios")]
-use crate::tunnel_provider::OSTunProvider;
 use crate::{
     DEFAULT_MIN_GATEWAY_PERFORMANCE, DEFAULT_MIN_MIXNODE_PERFORMANCE, UserAgent,
     bandwidth_controller::BandwidthController,
@@ -80,47 +58,14 @@ use crate::{
             mixnet,
             transports::{self, TransportError},
             wireguard::{
-                self, ConnectionData as WgConnectionData, MetadataEvent, MetadataReceiver,
+                ConnectionData as WgConnectionData, MetadataEvent, MetadataReceiver,
                 connected_tunnel::ConnectedTunnel,
             },
         },
     },
 };
-use crate::tunnel_state_machine::WireguardMultihopMode;
-
 /// Default MTU for mixnet tun device.
-const DEFAULT_TUN_MTU: u16 = if cfg!(any(target_os = "ios", target_os = "android")) {
-    1280
-} else {
-    1500
-};
-
-/// User-facing tunnel type identifier.
-#[cfg(windows)]
-const WINTUN_TUNNEL_TYPE: &str = "Nym";
-
-/// The user-facing name of wintun adapter.
-///
-/// Note that it refers to tunnel type because rust-tun uses the same name for adapter and
-/// tunnel type and there is no way to change that.
-#[cfg(windows)]
-const MIXNET_WINTUN_NAME: &str = WINTUN_TUNNEL_TYPE;
-
-/// The user-facing name of wintun adapter used as entry tunnel.
-#[cfg(windows)]
-const WG_ENTRY_WINTUN_NAME: &str = "WireGuard (entry)";
-
-/// The user-facing name of wintun adapter used as exit tunnel.
-#[cfg(windows)]
-const WG_EXIT_WINTUN_NAME: &str = "WireGuard (exit)";
-
-/// WireGuard entry adapter GUID.
-#[cfg(windows)]
-const WG_ENTRY_WINTUN_GUID: &str = "{AFE43773-E1F8-4EBB-8536-176AB86AFE9B}";
-
-/// WireGuard exit adapter GUID.
-#[cfg(windows)]
-const WG_EXIT_WINTUN_GUID: &str = "{AFE43773-E1F8-4EBB-8536-176AB86AFE9C}";
+const DEFAULT_TUN_MTU: u16 = 1500;
 
 pub type TunnelMonitorEventSender = mpsc::UnboundedSender<TunnelMonitorEvent>;
 pub type TunnelMonitorEventReceiver = mpsc::UnboundedReceiver<TunnelMonitorEvent>;
@@ -226,12 +171,7 @@ pub struct TunnelParameters {
 pub struct TunnelMonitor {
     tunnel_parameters: TunnelParameters,
     monitor_event_sender: mpsc::UnboundedSender<TunnelMonitorEvent>,
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     route_handler: RouteHandler,
-    #[cfg(target_os = "ios")]
-    tun_provider: Arc<dyn OSTunProvider>,
-    #[cfg(target_os = "android")]
-    tun_provider: Arc<dyn AndroidTunProvider>,
     account_controller_state: AccountStateReceiver,
     account_command_tx: AccountCommandSender,
     gateway_cache_handle: GatewayCacheHandle,
@@ -250,18 +190,13 @@ impl TunnelMonitor {
         custom_topology_provider: VpnTopologyServiceHandle,
         monitor_event_sender: mpsc::UnboundedSender<TunnelMonitorEvent>,
         wg_keys_db: WireguardKeysDb,
-        #[cfg(not(any(target_os = "android", target_os = "ios")))] route_handler: RouteHandler,
-        #[cfg(target_os = "ios")] tun_provider: Arc<dyn OSTunProvider>,
-        #[cfg(target_os = "android")] tun_provider: Arc<dyn AndroidTunProvider>,
+        route_handler: RouteHandler,
     ) -> TunnelMonitorHandle {
         let shutdown_token = CancellationToken::new();
         let tunnel_monitor = Self {
             tunnel_parameters,
             monitor_event_sender,
-            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             route_handler,
-            #[cfg(any(target_os = "ios", target_os = "android"))]
-            tun_provider,
             account_controller_state,
             account_command_tx,
             gateway_cache_handle,
@@ -398,25 +333,12 @@ impl TunnelMonitor {
 
         self.send_event(TunnelMonitorEvent::RegisteringWithGateways);
 
-        #[cfg(target_os = "android")]
-        let tun_provider = self.tun_provider.clone();
-        #[cfg(target_os = "linux")]
         let fwmark = self.tunnel_parameters.tunnel_constants.fwmark;
-        #[cfg(unix)]
-        let connection_fd_callback = move |_fd: RawFd| {
-            #[cfg(target_os = "android")]
-            {
-                tracing::debug!("Bypass websocket");
-                tun_provider.bypass(_fd);
-            }
-
-            #[cfg(target_os = "linux")]
-            {
-                tracing::debug!("Bypass websocket");
-                let borrowed_fd = unsafe { &BorrowedFd::borrow_raw(_fd) };
-                if let Err(err) = Mark.set(borrowed_fd, &fwmark) {
-                    tracing::error!("Could not set fwmark for websocket fd: {err}");
-                }
+        let connection_fd_callback = move |fd: RawFd| {
+            tracing::debug!("Bypass websocket");
+            let borrowed_fd = unsafe { &BorrowedFd::borrow_raw(fd) };
+            if let Err(err) = Mark.set(borrowed_fd, &fwmark) {
+                tracing::error!("Could not set fwmark for websocket fd: {err}");
             }
         };
 
@@ -538,7 +460,6 @@ impl TunnelMonitor {
             .network_env(nym_network)
             .cancel_token(self.shutdown_token.child_token());
 
-        #[cfg(unix)]
         let rcb_config_builder =
             rcb_config_builder.connection_fd_callback(Arc::new(connection_fd_callback));
 
@@ -650,36 +571,9 @@ impl TunnelMonitor {
                     connection_data,
                 );
 
-                #[cfg(target_os = "linux")]
-                let start_tunnel_result = match self
-                    .tunnel_parameters
-                    .tunnel_settings
-                    .wireguard_tunnel_options
-                    .multihop_mode
-                {
-                    WireguardMultihopMode::TunTun => {
-                        self.start_wireguard_tunnel(connected_tunnel).await?
-                    }
-                    WireguardMultihopMode::Netstack => {
-                        self.start_wireguard_netstack_tunnel(
-                            connected_tunnel,
-                            entry_metadata_addr_tx,
-                        )
-                        .await?
-                    }
-                };
-                #[cfg(any(target_os = "ios", target_os = "android"))]
-                let start_tunnel_result = self
-                    .start_wireguard_netstack_tunnel(
-                        connected_tunnel,
-                        entry_metadata_addr_tx,
-                    )
-                    .await?;
-                #[cfg(not(any(target_os = "linux", target_os = "ios", target_os = "android")))]
-                let start_tunnel_result = {
-                    let _ = (connected_tunnel, entry_metadata_addr_tx);
-                    unimplemented!("WireGuard tunnels only supported on Linux, iOS, Android")
-                };
+                let _ = entry_metadata_addr_tx;
+                let start_tunnel_result =
+                    self.start_wireguard_tunnel(connected_tunnel).await?;
 
                 let mixnet_client_token = wg_tunnel_runtime.mixnet_client_token();
 
@@ -896,28 +790,19 @@ impl TunnelMonitor {
         {
             mtu
         } else {
-            #[cfg(any(target_os = "linux", target_os = "windows"))]
-            {
-                use nym_common::ErrorExt;
-                self.route_handler
-                    .get_mtu_for_route(assigned_addresses.entry_mixnet_gateway_ip)
-                    .await
-                    .inspect_err(|e| {
-                        tracing::warn!(
-                            "{}",
-                            e.display_chain_with_msg("Failed to detect mtu for route")
-                        );
-                    })
-                    .unwrap_or(DEFAULT_TUN_MTU)
-            }
-
-            #[cfg(not(any(target_os = "linux", target_os = "windows")))]
-            {
-                DEFAULT_TUN_MTU
-            }
+            use nym_common::ErrorExt;
+            self.route_handler
+                .get_mtu_for_route(assigned_addresses.entry_mixnet_gateway_ip)
+                .await
+                .inspect_err(|e| {
+                    tracing::warn!(
+                        "{}",
+                        e.display_chain_with_msg("Failed to detect mtu for route")
+                    );
+                })
+                .unwrap_or(DEFAULT_TUN_MTU)
         };
 
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         let tun_device = Self::create_mixnet_device(
             assigned_addresses.interface_addresses.ipv4,
             self.enable_ipv6()
@@ -926,57 +811,19 @@ impl TunnelMonitor {
         )
         .await?;
 
-        #[cfg(any(target_os = "ios", target_os = "android"))]
-        let tun_device = {
-            let mut interface_addresses = vec![IpNetwork::V4(Ipv4Network::from(
-                assigned_addresses.interface_addresses.ipv4,
-            ))];
-
-            if self.enable_ipv6() {
-                interface_addresses.push(IpNetwork::V6(Ipv6Network::from(
-                    assigned_addresses.interface_addresses.ipv6,
-                )));
-            }
-            let packet_tunnel_settings = crate::tunnel_provider::TunnelSettings {
-                dns_servers: self
-                    .tunnel_parameters
-                    .tunnel_settings
-                    .dns
-                    .ip_addresses(&self.tunnel_parameters.tunnel_settings.dns_ips())
-                    .to_vec(),
-                interface_addresses,
-                remote_addresses: vec![assigned_addresses.entry_mixnet_gateway_ip],
-                mtu,
-            };
-
-            self.create_tun_device(packet_tunnel_settings).await?
-        };
-
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         let tun_name = tun_device
             .deref()
             .tun_name()
             .map_err(Error::GetTunDeviceName)?;
 
-        #[cfg(any(target_os = "ios", target_os = "android"))]
-        let tun_name = {
-            let tun_fd = unsafe { BorrowedFd::borrow_raw(tun_device.deref().as_raw_fd()) };
-            tun_name::get_tun_name(&tun_fd).map_err(Error::GetTunDeviceName)?
-        };
-
         tracing::info!("Created tun device: {}", tun_name);
 
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
-        {
-            let routing_config = RoutingConfig::Mixnet {
-                tun_name: tun_name.clone(),
-                tun_mtu: mtu,
-                #[cfg(not(target_os = "linux"))]
-                entry_gateway_address: assigned_addresses.entry_mixnet_gateway_ip,
-            };
+        let routing_config = RoutingConfig::Mixnet {
+            tun_name: tun_name.clone(),
+            tun_mtu: mtu,
+        };
 
-            self.set_routes(routing_config, self.enable_ipv6()).await?;
-        }
+        self.set_routes(routing_config, self.enable_ipv6()).await?;
 
         let tunnel_conn_data = TunnelConnectionData::Mixnet(MixnetConnectionData {
             nym_address: NymAddress::from(assigned_addresses.mixnet_client_address),
@@ -1112,31 +959,17 @@ impl TunnelMonitor {
         // as the endpoint address.
         tracing::info!("Establishing DVPN QUIC transport tunnel");
 
-        #[cfg(target_os = "linux")]
         let fwmark = self.tunnel_parameters.tunnel_constants.fwmark;
-        #[cfg(target_os = "android")]
-        let tun_provider = self.tun_provider.clone();
-        #[cfg(any(target_os = "linux", target_os = "android"))]
         let on_quic_socket_open = move |fd| {
-            #[cfg(target_os = "android")]
-            {
-                tracing::debug!("Bypass quic socket");
-                tun_provider.bypass(fd);
-            }
-
-            #[cfg(target_os = "linux")]
-            {
-                tracing::debug!("Bypass quic socket");
-                let borrowed_fd = unsafe { &BorrowedFd::borrow_raw(fd) };
-                if let Err(err) = Mark.set(borrowed_fd, &fwmark) {
-                    tracing::error!("Could not set fwmark for quic socket fd: {err}");
-                }
+            tracing::debug!("Bypass quic socket");
+            let borrowed_fd = unsafe { &BorrowedFd::borrow_raw(fd) };
+            if let Err(err) = Mark.set(borrowed_fd, &fwmark) {
+                tracing::error!("Could not set fwmark for quic socket fd: {err}");
             }
         };
         let bridge_conn = transports::BridgeConn::try_connect(
             entry_bridge_params,
             self.shutdown_token.child_token(),
-            #[cfg(any(target_os = "linux", target_os = "android"))]
             on_quic_socket_open,
         )
         .await?;
@@ -1159,22 +992,10 @@ impl TunnelMonitor {
         Ok((bridge_addr, join_handle))
     }
 
-    /// Netstack mode fallback: on Linux, just use TunTun mode (gotatun is userspace).
-    #[cfg(target_os = "linux")]
-    async fn start_wireguard_netstack_tunnel(
-        &mut self,
-        connected_tunnel: wireguard::connected_tunnel::ConnectedTunnel,
-        _entry_metadata_tx: tokio::sync::oneshot::Sender<SocketAddr>,
-    ) -> Result<StartTunnelResult> {
-        tracing::warn!("Netstack mode not supported with gotatun backend, falling back to TunTun");
-        self.start_wireguard_tunnel(connected_tunnel).await
-    }
-
     /// Start WireGuard tunnel using userspace gotatun
-    #[cfg(target_os = "linux")]
     async fn start_wireguard_tunnel(
         &mut self,
-        connected_tunnel: wireguard::connected_tunnel::ConnectedTunnel,
+        connected_tunnel: ConnectedTunnel,
     ) -> Result<StartTunnelResult> {
         let conn_data = connected_tunnel.connection_data();
         let use_bridges = self.tunnel_parameters.tunnel_settings.bridges_enabled();
@@ -1234,9 +1055,6 @@ impl TunnelMonitor {
                 .then_some(conn_data.entry.private_ipv6),
         };
 
-        #[cfg(not(target_os = "linux"))]
-        let entry_endpoint = conn_data.effective_remote_entry_endpoint();
-
         let routing_config = RoutingConfig::Wireguard {
             entry_tun_name: entry_tunnel_metadata.interface.clone(),
             exit_tun_name: exit_tunnel_metadata.interface.clone(),
@@ -1246,8 +1064,6 @@ impl TunnelMonitor {
                 .tunnel_parameters
                 .tunnel_constants
                 .private_entry_gateway_address,
-            #[cfg(not(target_os = "linux"))]
-            entry_gateway_address: entry_endpoint.ip(),
             exit_gateway_address: conn_data.exit.endpoint.ip(),
         };
         self.set_routes(routing_config, self.enable_ipv6()).await?;
@@ -1284,93 +1100,6 @@ impl TunnelMonitor {
         })
     }
 
-
-    #[cfg(any(target_os = "ios", target_os = "android"))]
-    async fn start_wireguard_netstack_tunnel(
-        &self,
-        connected_tunnel: wireguard::connected_tunnel::ConnectedTunnel,
-        entry_metadata_tx: tokio::sync::oneshot::Sender<SocketAddr>,
-    ) -> Result<StartTunnelResult> {
-        let mtu = connected_tunnel.exit_mtu();
-        let conn_data = connected_tunnel.connection_data();
-        let use_bridges = self.tunnel_parameters.tunnel_settings.bridges_enabled();
-
-        let mut interface_addresses = vec![IpNetwork::V4(Ipv4Network::from(
-            conn_data.exit.private_ipv4,
-        ))];
-        if self.enable_ipv6() {
-            interface_addresses.push(IpNetwork::V6(Ipv6Network::from(
-                conn_data.exit.private_ipv6,
-            )));
-        }
-
-        let entry_endpoint = conn_data.effective_remote_entry_endpoint().ip();
-
-        let packet_tunnel_settings = crate::tunnel_provider::TunnelSettings {
-            dns_servers: self
-                .tunnel_parameters
-                .tunnel_settings
-                .dns
-                .ip_addresses(&self.tunnel_parameters.tunnel_settings.dns_ips())
-                .to_vec(),
-            interface_addresses,
-            remote_addresses: vec![entry_endpoint],
-            mtu,
-        };
-
-        let tun_device = self.create_tun_device(packet_tunnel_settings).await?;
-        let tun_fd = unsafe { BorrowedFd::borrow_raw(tun_device.deref().as_raw_fd()) };
-        let interface = tun_name::get_tun_name(&tun_fd).map_err(Error::GetTunDeviceName)?;
-        let mut ips = vec![IpAddr::V4(conn_data.exit.private_ipv4)];
-        if self.enable_ipv6() {
-            ips.push(IpAddr::V6(conn_data.exit.private_ipv6));
-        }
-        let tunnel_metadata = TunnelMetadata {
-            interface,
-            ips,
-            ipv4_gateway: None,
-            ipv6_gateway: None,
-        };
-
-        tracing::info!("Created tun device: {}", tunnel_metadata.interface);
-
-        let tunnel_conn_data = TunnelConnectionData::Wireguard(WireguardConnectionData {
-            entry_bridge_addr: conn_data.entry_bridge_addr.clone(),
-            entry: WireguardNode::from(conn_data.entry.clone()),
-            exit: WireguardNode::from(conn_data.exit.clone()),
-        });
-
-        let dns_servers = self
-            .tunnel_parameters
-            .tunnel_settings
-            .dns
-            .ip_addresses(&self.tunnel_parameters.tunnel_settings.dns_ips())
-            .to_vec();
-
-        let tunnel_options = TunnelOptions::Netstack(NetstackTunnelOptions {
-            metadata_proxy_tx: entry_metadata_tx,
-            exit_tun: tun_device,
-            dns: dns_servers,
-        });
-
-        let tunnel_handle = connected_tunnel
-            .run(
-                #[cfg(target_os = "android")]
-                self.tun_provider.clone(),
-                tunnel_options,
-                self.tunnel_parameters.tunnel_constants,
-                !use_bridges,
-            )
-            .await?;
-
-        Ok(StartTunnelResult {
-            tunnel_conn_data,
-            tunnel_interface: TunnelInterface::One(tunnel_metadata),
-            tunnel_handle: AnyTunnelHandle::from(tunnel_handle),
-        })
-    }
-
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     async fn set_routes(&mut self, routing_config: RoutingConfig, enable_ipv6: bool) -> Result<()> {
         self.route_handler
             .add_routes(routing_config, enable_ipv6)
@@ -1380,7 +1109,6 @@ impl TunnelMonitor {
         Ok(())
     }
 
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     async fn create_mixnet_device(
         interface_ipv4: Ipv4Addr,
         interface_ipv6: Option<Ipv6Addr>,
@@ -1389,16 +1117,7 @@ impl TunnelMonitor {
         let tun_device = {
             let mut tun_config = tun::Configuration::default();
 
-            // rust-tun uses the same name for tunnel type.
-            #[cfg(windows)]
-            tun_config.tun_name(MIXNET_WINTUN_NAME);
-
             tun_config.address(interface_ipv4).mtu(mtu).up();
-
-            #[cfg(target_os = "macos")]
-            tun_config.platform_config(|platform_config| {
-                platform_config.enable_routing(false);
-            });
 
             tun::create_as_async(&tun_config).map_err(Error::CreateTunDevice)?
         };
@@ -1408,33 +1127,14 @@ impl TunnelMonitor {
             .tun_name()
             .map_err(Error::GetTunDeviceName)?;
 
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
         if let Some(interface_ipv6) = interface_ipv6 {
             tun_ipv6::set_ipv6_addr(&tun_name, interface_ipv6)
                 .map_err(Error::SetTunDeviceIpv6Addr)?;
         }
 
-        #[cfg(windows)]
-        {
-            let interface_luid = wintun::get_interface_luid_for_alias(&tun_name)?;
-
-            if let Some(interface_ipv6) = interface_ipv6 {
-                wintun::add_ipv6_address(interface_luid, interface_ipv6)?;
-            }
-
-            wintun::wait_for_interfaces(interface_luid, true, interface_ipv6.is_some()).await?;
-            wintun::initialize_interfaces(
-                interface_luid,
-                Some(mtu),
-                interface_ipv6.is_some().then_some(mtu),
-            )?;
-            wintun::wait_for_addresses(interface_luid).await?;
-        }
-
         Ok(tun_device)
     }
 
-    #[cfg(target_os = "linux")]
     fn create_wireguard_device(
         interface_ipv4: Ipv4Addr,
         interface_ipv6: Option<Ipv6Addr>,
@@ -1453,11 +1153,6 @@ impl TunnelMonitor {
             tun_config.destination(destination);
         }
 
-        #[cfg(target_os = "macos")]
-        tun_config.platform_config(|platform_config| {
-            platform_config.enable_routing(false);
-        });
-
         let tun_device = tun::create_as_async(&tun_config).map_err(Error::CreateTunDevice)?;
 
         let tun_name = tun_device
@@ -1473,94 +1168,20 @@ impl TunnelMonitor {
         Ok(tun_device)
     }
 
-    #[cfg(any(target_os = "ios", target_os = "android"))]
-    async fn create_tun_device(
-        &self,
-        packet_tunnel_settings: crate::tunnel_provider::TunnelSettings,
-    ) -> Result<AsyncDevice> {
-        #[cfg(target_os = "ios")]
-        let owned_tun_fd =
-            crate::tunnel_provider::ios::get_tun_fd().map_err(Error::LocateTunDevice)?;
-
-        #[cfg(target_os = "android")]
-        let owned_tun_fd = {
-            let raw_tun_fd = self
-                .tun_provider
-                .configure_tunnel(packet_tunnel_settings)
-                .map_err(|e| Error::ConfigureTunnelProvider(e.to_string()))?;
-            unsafe { OwnedFd::from_raw_fd(raw_tun_fd) }
-        };
-
-        let mut tun_config = tun::Configuration::default();
-        tun_config.raw_fd(owned_tun_fd.as_raw_fd());
-
-        #[cfg(target_os = "ios")]
-        tun_config.close_fd_on_drop(false);
-
-        #[cfg(target_os = "ios")]
-        {
-            self.tun_provider
-                .set_tunnel_network_settings(packet_tunnel_settings)
-                .await
-                .map_err(|e| Error::ConfigureTunnelProvider(e.to_string()))?
-        }
-
-        let device = tun::create_as_async(&tun_config).map_err(Error::CreateTunDevice)?;
-
-        // Consume the owned fd, since the device is now responsible for closing the underlying raw fd.
-        let _ = owned_tun_fd.into_raw_fd();
-
-        Ok(device)
-    }
-
     fn enable_ipv6(&self) -> bool {
         self.tunnel_parameters.tunnel_settings.enable_ipv6
     }
 
     fn create_icmp_probe(&self, exit_tunnel_metadata: &TunnelMetadata) -> Result<IcmpProbe> {
-        let mut icmp_probe_config = IcmpProbeConfig::default_v4();
-
-        // Prefer bind to interface on supported platforms
-        #[cfg(any(target_os = "linux", target_os = "ios", target_os = "macos"))]
-        {
-            icmp_probe_config =
-                icmp_probe_config.with_interface(exit_tunnel_metadata.interface.clone());
-        }
-
-        // Bind to local interface IP on other platforms
-        #[cfg(not(any(target_os = "linux", target_os = "ios", target_os = "macos")))]
-        {
-            let local_addr = exit_tunnel_metadata
-                .ips
-                .iter()
-                .find(|v| v.is_ipv4())
-                .ok_or(Error::ProbeRequiresIPv4Addr)?;
-            icmp_probe_config = icmp_probe_config.with_local_address(*local_addr);
-        }
+        let icmp_probe_config = IcmpProbeConfig::default_v4()
+            .with_interface(exit_tunnel_metadata.interface.clone());
 
         IcmpProbe::new(icmp_probe_config).map_err(Error::CreateIcmpProbe)
     }
 
     fn create_tcp_probe(&self, exit_tunnel_metadata: &TunnelMetadata) -> Result<TcpProbe> {
-        let mut tcp_probe_config = TcpProbeConfig::default_v4();
-
-        // Prefer bind to interface on supported platforms
-        #[cfg(any(target_os = "linux", target_os = "ios", target_os = "macos"))]
-        {
-            tcp_probe_config =
-                tcp_probe_config.with_interface(exit_tunnel_metadata.interface.clone());
-        }
-
-        // Bind to local interface IP on other platforms
-        #[cfg(not(any(target_os = "linux", target_os = "ios", target_os = "macos")))]
-        {
-            let local_addr = exit_tunnel_metadata
-                .ips
-                .iter()
-                .find(|v| v.is_ipv4())
-                .ok_or(Error::ProbeRequiresIPv4Addr)?;
-            tcp_probe_config = tcp_probe_config.with_local_address(SocketAddr::new(*local_addr, 0));
-        }
+        let tcp_probe_config = TcpProbeConfig::default_v4()
+            .with_interface(exit_tunnel_metadata.interface.clone());
 
         TcpProbe::new(tcp_probe_config).map_err(Error::CreateTcpProbe)
     }

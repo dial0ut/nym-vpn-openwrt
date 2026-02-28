@@ -7,20 +7,8 @@ use std::{collections::HashMap, env, fmt::Display};
 use sha2::{Digest, Sha256};
 use sysinfo::System;
 
-#[cfg(any(target_os = "android", target_os = "linux"))]
 mod command;
-
-#[cfg(target_os = "android")]
-mod android;
-
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-mod apple;
-
-#[cfg(target_os = "linux")]
 mod linux;
-
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-pub use apple::AppleVersion;
 
 #[derive(Debug, Clone)]
 pub struct SysInfo {
@@ -70,20 +58,7 @@ impl SysInfo {
     }
 
     fn extra_metadata() -> HashMap<String, String> {
-        #[cfg(target_os = "android")]
-        {
-            android::extra_metadata()
-        }
-
-        #[cfg(target_os = "linux")]
-        {
-            linux::extra_metadata()
-        }
-
-        #[cfg(not(any(target_os = "android", target_os = "linux")))]
-        {
-            HashMap::new()
-        }
+        linux::extra_metadata()
     }
 }
 

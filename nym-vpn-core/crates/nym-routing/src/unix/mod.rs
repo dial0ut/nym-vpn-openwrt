@@ -2,32 +2,14 @@
 // Copyright 2024 Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
-#[cfg(target_os = "linux")]
 use crate::Route;
-#[cfg(target_os = "macos")]
-pub use crate::{Gateway, imp::imp::DefaultRoute};
 
 use super::RequiredRoute;
 
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::HashSet, net::IpAddr, sync::Arc};
 use tokio::sync::{mpsc, oneshot};
 
-#[cfg(target_os = "linux")]
-use std::net::IpAddr;
-
-#[allow(clippy::module_inception)]
-#[cfg(target_os = "macos")]
-#[path = "macos/mod.rs"]
-pub mod imp;
-
-#[allow(clippy::module_inception)]
-#[cfg(target_os = "linux")]
 #[path = "linux.rs"]
-mod imp;
-
-#[allow(clippy::module_inception)]
-#[cfg(any(target_os = "android", target_os = "ios"))]
-#[path = "android.rs"]
 mod imp;
 
 pub use imp::Error as PlatformError;
@@ -48,29 +30,15 @@ pub enum Error {
 
 impl Error {
     /// Return whether retrying the operation that caused this error is likely to succeed.
-    #[cfg(target_os = "macos")]
-    pub fn is_recoverable(&self) -> bool {
-        // If the default route disappears while connecting but before it is caught by the offline
-        // monitor, then the gateway will be unreachable. In this case, just retry.
-        matches!(
-            self,
-            Error::PlatformError(PlatformError::AddRoute(imp::RouteError::Unreachable,))
-        )
-    }
-
-    /// Return whether retrying the operation that caused this error is likely to succeed.
-    #[cfg(not(target_os = "macos"))]
     pub fn is_recoverable(&self) -> bool {
         false
     }
 }
 
 /// Represents a firewall mark.
-#[cfg(target_os = "linux")]
 type Fwmark = u32;
 
 /// Commands for the underlying route manager object.
-#[cfg(target_os = "linux")]
 #[derive(Debug)]
 pub(crate) enum RouteManagerCommand {
     AddRoutes(
@@ -91,62 +59,6 @@ pub(crate) enum RouteManagerCommand {
     ),
 }
 
-/// Commands for the underlying route manager object.
-#[cfg(any(target_os = "android", target_os = "ios"))]
-#[derive(Debug)]
-pub(crate) enum RouteManagerCommand {
-    AddRoutes(
-        HashSet<RequiredRoute>,
-        oneshot::Sender<Result<(), PlatformError>>,
-    ),
-    ClearRoutes,
-    Shutdown(oneshot::Sender<()>),
-}
-
-/// Commands for the underlying route manager object.
-#[cfg(target_os = "macos")]
-#[derive(Debug)]
-pub(crate) enum RouteManagerCommand {
-    AddRoutes(
-        HashSet<RequiredRoute>,
-        oneshot::Sender<Result<(), PlatformError>>,
-    ),
-    ClearRoutes,
-    Shutdown(oneshot::Sender<()>),
-    RefreshRoutes,
-    NewDefaultRouteListener(oneshot::Sender<mpsc::UnboundedReceiver<DefaultRouteEvent>>),
-    GetDefaultRoutes(oneshot::Sender<(Option<DefaultRoute>, Option<DefaultRoute>)>),
-    NewInterfaceChangeListener(oneshot::Sender<mpsc::UnboundedReceiver<InterfaceEvent>>),
-    /// Return gateway for V4 and V6
-    GetDefaultGateway(oneshot::Sender<(Option<Gateway>, Option<Gateway>)>),
-}
-
-/// Event that is sent when interface details may have changed for some interface.
-#[cfg(target_os = "macos")]
-pub struct InterfaceEvent {
-    /// Interface index.
-    pub interface_index: u16,
-
-    /// Interface MTU.
-    pub mtu: u16,
-}
-
-/// Event that is sent when a preferred non-tunnel default route is
-/// added or removed.
-#[cfg(target_os = "macos")]
-#[derive(Debug, Clone, Copy)]
-pub enum DefaultRouteEvent {
-    /// Added or updated a non-tunnel default IPv4 route
-    AddedOrChangedV4,
-    /// Added or updated a non-tunnel default IPv6 route
-    AddedOrChangedV6,
-    /// Non-tunnel default IPv4 route was removed
-    RemovedV4,
-    /// Non-tunnel default IPv6 route was removed
-    RemovedV6,
-}
-
-#[cfg(target_os = "linux")]
 #[derive(Debug, Clone)]
 pub enum CallbackMessage {
     NewRoute(Route),
@@ -163,21 +75,10 @@ pub struct RouteManagerHandle {
 
 impl RouteManagerHandle {
     /// Construct a route manager.
-    pub async fn spawn(
-        #[cfg(target_os = "linux")] fwmark: u32,
-        #[cfg(target_os = "linux")] table_id: u32,
-    ) -> Result<Self, Error> {
+    pub async fn spawn(fwmark: u32, table_id: u32) -> Result<Self, Error> {
         let (manage_tx, manage_rx) = tokio::sync::mpsc::unbounded_channel();
         let manage_tx = Arc::new(manage_tx);
-        let manager = imp::RouteManagerImpl::new(
-            #[cfg(target_os = "linux")]
-            fwmark,
-            #[cfg(target_os = "linux")]
-            table_id,
-            #[cfg(target_os = "macos")]
-            Arc::downgrade(&manage_tx),
-        )
-        .await?;
+        let manager = imp::RouteManagerImpl::new(fwmark, table_id).await?;
         tokio::spawn(manager.run(manage_rx));
 
         Ok(Self { tx: manage_tx })
@@ -210,62 +111,7 @@ impl RouteManagerHandle {
             .map_err(|_| Error::RouteManagerDown)
     }
 
-    /// Listen for non-tunnel default route changes.
-    #[cfg(target_os = "macos")]
-    pub async fn default_route_listener(
-        &self,
-    ) -> Result<mpsc::UnboundedReceiver<DefaultRouteEvent>, Error> {
-        let (response_tx, response_rx) = oneshot::channel();
-        self.tx
-            .send(RouteManagerCommand::NewDefaultRouteListener(response_tx))
-            .map_err(|_| Error::RouteManagerDown)?;
-        response_rx.await.map_err(|_| Error::ManagerChannelDown)
-    }
-
-    /// Get current non-tunnel default routes.
-    #[cfg(target_os = "macos")]
-    pub async fn get_default_routes(
-        &self,
-    ) -> Result<(Option<DefaultRoute>, Option<DefaultRoute>), Error> {
-        let (response_tx, response_rx) = oneshot::channel();
-        self.tx
-            .send(RouteManagerCommand::GetDefaultRoutes(response_tx))
-            .map_err(|_| Error::RouteManagerDown)?;
-        response_rx.await.map_err(|_| Error::ManagerChannelDown)
-    }
-
-    /// Listen for interface changes.
-    #[cfg(target_os = "macos")]
-    pub async fn interface_change_listener(
-        &self,
-    ) -> Result<mpsc::UnboundedReceiver<InterfaceEvent>, Error> {
-        let (response_tx, response_rx) = oneshot::channel();
-        self.tx
-            .send(RouteManagerCommand::NewInterfaceChangeListener(response_tx))
-            .map_err(|_| Error::RouteManagerDown)?;
-        response_rx.await.map_err(|_| Error::ManagerChannelDown)
-    }
-
-    /// Get default gateway
-    #[cfg(target_os = "macos")]
-    pub async fn get_default_gateway(&self) -> Result<(Option<Gateway>, Option<Gateway>), Error> {
-        let (response_tx, response_rx) = oneshot::channel();
-        self.tx
-            .send(RouteManagerCommand::GetDefaultGateway(response_tx))
-            .map_err(|_| Error::RouteManagerDown)?;
-        response_rx.await.map_err(|_| Error::ManagerChannelDown)
-    }
-
-    /// Get current non-tunnel default routes.
-    #[cfg(target_os = "macos")]
-    pub fn refresh_routes(&self) -> Result<(), Error> {
-        self.tx
-            .send(RouteManagerCommand::RefreshRoutes)
-            .map_err(|_| Error::RouteManagerDown)
-    }
-
     /// Ensure that packets are routed using the correct tables.
-    #[cfg(target_os = "linux")]
     pub async fn create_routing_rules(&self, enable_ipv6: bool) -> Result<(), Error> {
         let (response_tx, response_rx) = oneshot::channel();
         self.tx
@@ -281,7 +127,6 @@ impl RouteManagerHandle {
     }
 
     /// Remove any routing rules created by [Self::create_routing_rules].
-    #[cfg(target_os = "linux")]
     pub async fn clear_routing_rules(&self) -> Result<(), Error> {
         let (response_tx, response_rx) = oneshot::channel();
         self.tx
@@ -294,7 +139,6 @@ impl RouteManagerHandle {
     }
 
     /// Listen for route changes.
-    #[cfg(target_os = "linux")]
     pub async fn change_listener(&self) -> Result<mpsc::UnboundedReceiver<CallbackMessage>, Error> {
         let (response_tx, response_rx) = oneshot::channel();
         self.tx
@@ -303,8 +147,7 @@ impl RouteManagerHandle {
         response_rx.await.map_err(|_| Error::ManagerChannelDown)
     }
 
-    /// Listen for route changes.
-    #[cfg(target_os = "linux")]
+    /// Get a route for the given destination.
     pub async fn get_destination_route(
         &self,
         destination: IpAddr,
@@ -324,8 +167,7 @@ impl RouteManagerHandle {
             .map_err(Error::PlatformError)
     }
 
-    /// Listen for route changes.
-    #[cfg(target_os = "linux")]
+    /// Get MTU for the route to the given IP.
     pub async fn get_mtu_for_route(&self, ip: IpAddr) -> Result<u16, Error> {
         let (response_tx, response_rx) = oneshot::channel();
         self.tx

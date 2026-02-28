@@ -20,7 +20,6 @@ pub struct InterfaceConfig {
     pub listen_port: Option<u16>,
     pub private_key: PrivateKey,
     pub mtu: u16,
-    #[cfg(target_os = "linux")]
     pub fwmark: Option<u32>,
     #[cfg(feature = "amnezia")]
     pub azwg_config: Option<AmneziaConfig>,
@@ -32,7 +31,6 @@ impl fmt::Debug for InterfaceConfig {
         d.field("listen_port", &self.listen_port)
             .field("private_key", &"(hidden)")
             .field("mtu", &self.mtu);
-        #[cfg(target_os = "linux")]
         d.field("fwmark", &self.fwmark);
         #[cfg(feature = "amnezia")]
         d.field("azwg_config", &self.azwg_config);
@@ -109,7 +107,6 @@ impl Tunnel {
             .with_private_key(private_key)
             .with_listen_port(config.interface.listen_port.unwrap_or(0));
 
-        // Set fwmark on Linux
         #[cfg(target_os = "linux")]
         if let Some(fwmark) = config.interface.fwmark {
             builder = builder.with_fwmark(fwmark);

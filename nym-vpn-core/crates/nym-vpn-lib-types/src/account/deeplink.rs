@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -24,7 +23,6 @@ pub struct GetDeeplinkParams {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Enum))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -40,7 +38,6 @@ pub enum DeeplinkClient {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Enum))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),

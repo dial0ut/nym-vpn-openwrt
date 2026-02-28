@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),

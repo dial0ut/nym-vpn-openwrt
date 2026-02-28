@@ -1,7 +1,6 @@
 // Copyright 2025 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
 use std::os::fd::{AsRawFd, RawFd};
 use std::{
     io,
@@ -76,7 +75,7 @@ impl BridgeConn {
     pub async fn try_connect(
         params: BridgeParameters,
         token: CancellationToken,
-        #[cfg(any(target_os = "linux", target_os = "android"))] on_socket_open: impl FnOnce(RawFd),
+        on_socket_open: impl FnOnce(RawFd),
     ) -> Result<Self, TransportError> {
         let start = Instant::now();
 
@@ -87,7 +86,6 @@ impl BridgeConn {
                 let conn = token
                     .run_until_cancelled(transport_conn(
                         &opts,
-                        #[cfg(any(target_os = "linux", target_os = "android"))]
                         on_socket_open,
                     ))
                     .await
@@ -394,7 +392,7 @@ use quinn_proto::crypto::rustls::QuicClientConfig;
 
 pub async fn transport_conn(
     options: &ClientOptions,
-    #[cfg(any(target_os = "linux", target_os = "android"))] on_socket_open: impl FnOnce(RawFd),
+    on_socket_open: impl FnOnce(RawFd),
 ) -> Result<quinn::Connection, TransportError> {
     info!("initializing from transport identity pubkey");
 
@@ -421,7 +419,6 @@ pub async fn transport_conn(
         false => (Ipv6Addr::UNSPECIFIED, 0).into(),
     };
     let socket = make_socket(Some(bind_addr)).map_err(TransportError::SocketIo)?;
-    #[cfg(any(target_os = "linux", target_os = "android"))]
     on_socket_open(socket.as_raw_fd());
 
     let runtime =

@@ -976,7 +976,6 @@ pub async fn start_command_interface(
     let (vpn_command_tx, vpn_command_rx) = mpsc::unbounded_channel();
 
     // Remove previous socket file in case if the daemon crashed in the prior run and could not clean up the socket file.
-    #[cfg(unix)]
     remove_previous_socket_file(&socket_path).await;
     tracing::info!("Starting socket listener on: {}", socket_path.display());
 
@@ -1013,7 +1012,6 @@ pub async fn start_command_interface(
     Ok((server_handle, vpn_command_rx))
 }
 
-#[cfg(unix)]
 async fn remove_previous_socket_file(socket_path: &std::path::Path) {
     match tokio::fs::remove_file(socket_path).await {
         Ok(_) => tracing::info!(
@@ -1031,13 +1029,5 @@ async fn remove_previous_socket_file(socket_path: &std::path::Path) {
 }
 
 fn default_socket_path() -> PathBuf {
-    #[cfg(unix)]
-    {
-        PathBuf::from("/var/run/nym-vpn.sock")
-    }
-
-    #[cfg(windows)]
-    {
-        PathBuf::from(r"\\.\pipe\nym-vpn")
-    }
+    PathBuf::from("/var/run/nym-vpn.sock")
 }

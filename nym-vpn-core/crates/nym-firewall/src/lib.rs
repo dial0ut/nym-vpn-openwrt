@@ -1,67 +1,17 @@
 // Copyright 2025 Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{borrow::Cow, fmt, net::IpAddr};
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-use std::{net::Ipv6Addr, sync::LazyLock};
+use std::{
+    borrow::Cow,
+    fmt,
+    net::{IpAddr, Ipv6Addr},
+    sync::LazyLock,
+};
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 use ipnetwork::Ipv6Network;
-#[cfg(not(target_os = "android"))]
 use nym_dns::ResolvedDnsConfig;
 
-#[cfg(target_os = "macos")]
-#[path = "macos.rs"]
-mod imp;
-
-#[cfg(target_os = "linux")]
 mod openwrt;
-
-#[cfg(target_os = "linux")]
-mod imp {
-    use super::{FirewallArguments, FirewallPolicy};
-
-    pub use super::openwrt::Error;
-
-    /// Firewall implementation for OpenWrt (fw3/fw4).
-    pub struct Firewall {
-        inner: super::openwrt::Firewall,
-    }
-
-    impl Firewall {
-        pub fn from_args(args: FirewallArguments) -> Result<Self, Error> {
-            Ok(Firewall {
-                inner: super::openwrt::Firewall::from_args(args)?,
-            })
-        }
-
-        pub fn new(fwmark: u32) -> Result<Self, Error> {
-            Ok(Firewall {
-                inner: super::openwrt::Firewall::new(fwmark)?,
-            })
-        }
-
-        pub fn apply_policy(&mut self, policy: FirewallPolicy) -> Result<(), Error> {
-            self.inner.apply_policy(policy)
-        }
-
-        pub fn reset_policy(&mut self) -> Result<(), Error> {
-            self.inner.reset_policy()
-        }
-    }
-}
-
-#[cfg(windows)]
-#[path = "windows/mod.rs"]
-mod imp;
-
-#[cfg(target_os = "android")]
-#[path = "android.rs"]
-mod imp;
-
-#[cfg(target_os = "ios")]
-#[path = "ios.rs"]
-mod imp;
 
 mod net;
 mod split_tunnel;
@@ -70,44 +20,34 @@ pub use net::{
     TunnelInterface, TunnelMetadata,
 };
 
-pub use self::imp::Error;
+pub use openwrt::Error;
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 static IPV6_LINK_LOCAL: LazyLock<Ipv6Network> =
     LazyLock::new(|| Ipv6Network::new(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 0), 10).unwrap());
 /// The allowed target addresses of outbound DHCPv6 requests
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 static DHCPV6_SERVER_ADDRS: LazyLock<[Ipv6Addr; 2]> = LazyLock::new(|| {
     [
         Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 1, 2),
         Ipv6Addr::new(0xff05, 0, 0, 0, 0, 0, 1, 3),
     ]
 });
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 static ROUTER_SOLICITATION_OUT_DST_ADDR: LazyLock<Ipv6Addr> =
     LazyLock::new(|| Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 2));
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 static SOLICITED_NODE_MULTICAST: LazyLock<Ipv6Network> = LazyLock::new(|| {
     Ipv6Network::new(Ipv6Addr::new(0xff02, 0, 0, 0, 0, 1, 0xFF00, 0), 104).unwrap()
 });
 
-#[cfg(all(unix, not(any(target_os = "android", target_os = "ios"))))]
 const DHCPV4_SERVER_PORT: u16 = 67;
 
-#[cfg(all(unix, not(any(target_os = "android", target_os = "ios"))))]
 const DHCPV4_CLIENT_PORT: u16 = 68;
 
-#[cfg(all(unix, not(any(target_os = "android", target_os = "ios"))))]
 const DHCPV6_SERVER_PORT: u16 = 547;
 
-#[cfg(all(unix, not(any(target_os = "android", target_os = "ios"))))]
 const DHCPV6_CLIENT_PORT: u16 = 546;
 
-#[cfg(all(unix, not(any(target_os = "android", target_os = "ios"))))]
 const ROOT_UID: u32 = 0;
 
 /// Allowed TCP ports to DNS servers when connecting.
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 const DNS_TCP_PORTS: [u16; 2] = [443, 853];
 
 /// A enum that describes network security strategy
@@ -127,7 +67,6 @@ pub enum FirewallPolicy {
         /// Flag setting if communication with LAN networks should be possible.
         allow_lan: bool,
         /// Servers that are allowed to respond to DNS requests.
-        #[cfg(not(target_os = "android"))]
         dns_config: ResolvedDnsConfig,
         /// Hosts that should be reachable while connecting.
         allowed_endpoints: Vec<AllowedEndpoint>,
@@ -136,9 +75,6 @@ pub enum FirewallPolicy {
         /// Networks for which to permit exit in-tunnel traffic.
         /// Used when only one tunnel interface is utilized.
         allowed_exit_tunnel_traffic: AllowedTunnelTraffic,
-        /// Interface to redirect (VPN tunnel) traffic to
-        #[cfg(target_os = "macos")]
-        redirect_interface: Option<String>,
     },
 
     /// Allow traffic only to server and over tunnel interface
@@ -150,11 +86,7 @@ pub enum FirewallPolicy {
         /// Flag setting if communication with LAN networks should be possible.
         allow_lan: bool,
         /// Servers that are allowed to respond to DNS requests.
-        #[cfg(not(target_os = "android"))]
         dns_config: ResolvedDnsConfig,
-        /// Interface to redirect (VPN tunnel) traffic to
-        #[cfg(target_os = "macos")]
-        redirect_interface: Option<String>,
     },
 
     /// Block all network traffic in and out from the computer.
@@ -250,17 +182,13 @@ impl fmt::Display for FirewallPolicy {
                 peer_endpoints,
                 tunnel,
                 allow_lan,
-                #[cfg(not(target_os = "android"))]
                 dns_config,
                 allowed_endpoints,
                 allowed_entry_tunnel_traffic,
                 allowed_exit_tunnel_traffic,
                 ..
             } => {
-                #[cfg(not(target_os = "android"))]
                 let dns_str = display_allowed_non_tunnel_dns(dns_config);
-                #[cfg(target_os = "android")]
-                let dns_str = "none".to_owned();
 
                 if let Some(tunnel) = tunnel {
                     write!(
@@ -289,14 +217,10 @@ impl fmt::Display for FirewallPolicy {
                 peer_endpoints,
                 tunnel,
                 allow_lan,
-                #[cfg(not(target_os = "android"))]
                 dns_config,
                 ..
             } => {
-                #[cfg(not(target_os = "android"))]
                 let dns_str = display_allowed_non_tunnel_dns(dns_config);
-                #[cfg(target_os = "android")]
-                let dns_str = "none".to_owned();
 
                 write!(
                     f,
@@ -321,7 +245,6 @@ impl fmt::Display for FirewallPolicy {
     }
 }
 
-#[cfg(not(target_os = "android"))]
 fn display_allowed_non_tunnel_dns(dns_config: &ResolvedDnsConfig) -> String {
     if dns_config.non_tunnel_config().is_empty() {
         "none".to_owned()
@@ -397,7 +320,7 @@ fn display_ips(ips: &[IpAddr]) -> String {
 /// Manages network security of the computer/device. Can apply and enforce firewall policies
 /// by manipulating the OS firewall and DNS settings.
 pub struct Firewall {
-    inner: imp::Firewall,
+    inner: openwrt::Firewall,
 }
 
 /// Arguments required when first initializing the firewall.
@@ -408,7 +331,6 @@ pub struct FirewallArguments {
     pub allow_lan: bool,
     /// Specifies the firewall mark used to identify traffic that is allowed to be excluded from
     /// the tunnel and _leaked_ during blocked states.
-    #[cfg(target_os = "linux")]
     pub fwmark: u32,
 }
 
@@ -424,17 +346,14 @@ impl Firewall {
     /// Creates a firewall instance with the given arguments.
     pub fn from_args(args: FirewallArguments) -> Result<Self, Error> {
         Ok(Firewall {
-            inner: imp::Firewall::from_args(args)?,
+            inner: openwrt::Firewall::from_args(args)?,
         })
     }
 
     /// Creates a new firewall instance.
-    pub fn new(#[cfg(target_os = "linux")] fwmark: u32) -> Result<Self, Error> {
+    pub fn new(fwmark: u32) -> Result<Self, Error> {
         Ok(Firewall {
-            inner: imp::Firewall::new(
-                #[cfg(target_os = "linux")]
-                fwmark,
-            )?,
+            inner: openwrt::Firewall::new(fwmark)?,
         })
     }
 
@@ -453,22 +372,10 @@ impl Firewall {
     }
 }
 
-/// Application that prevents setting the firewall policy.
-#[cfg(windows)]
-#[derive(Debug, Clone)]
-pub struct BlockingApplication {
-    pub name: String,
-    pub pid: u32,
-}
-
 /// Errors that can occur when setting the firewall policy.
 #[derive(thiserror::Error, Debug, Clone)]
 pub enum FirewallPolicyError {
     /// General firewall failure
     #[error("failed to set firewall policy")]
     Generic,
-    /// An application prevented the firewall policy from being set
-    #[cfg(windows)]
-    #[error("an application prevented the firewall policy from being set")]
-    Locked(Option<BlockingApplication>),
 }

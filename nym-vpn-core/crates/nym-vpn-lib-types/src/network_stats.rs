@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 #[derive(Clone, Debug, Eq, PartialEq, Copy)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -54,7 +53,6 @@ impl fmt::Display for NetworkStatisticsConfig {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),

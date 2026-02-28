@@ -55,14 +55,12 @@ nym-sdk.workspace = true
 nym-validator-client.workspace = true
 nym-wireguard-types.workspace = true
 
-nym-apple-network.workspace = true
 nym-authenticator-client.workspace = true
 nym-common.workspace = true
 nym-platform-metadata.workspace = true
 nym-connection-monitor.workspace = true
 nym-gateway-directory.workspace = true
 nym-ip-packet-client.workspace = true
-nym-macos.workspace = true
 nym-offline-monitor.workspace = true
 nym-registration-client.workspace = true
 nym-registration-common.workspace = true
@@ -92,8 +90,6 @@ webpki-roots.workspace = true
 x509-parser = { workspace = true, features = ["verify"] }
 bs58.workspace = true
 base64.workspace = true
-
-[target.'cfg(unix)'.dependencies]
 nix = { workspace = true, features = [
     "socket",
     "net",
@@ -101,32 +97,11 @@ nix = { workspace = true, features = [
     "signal",
     "ioctl",
 ] }
-
-[target.'cfg(windows)'.dependencies]
-windows = { workspace = true, features = ["Win32_NetworkManagement_Ndis"] }
-winreg.workspace = true
-nym-windows.workspace = true
-nym-routing.workspace = true
-nym-dns.workspace = true
-nym-firewall.workspace = true
-nym-firewall-config.workspace = true
-
-[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 hickory-server = { workspace = true, features = ["resolver"] }
 nym-routing.workspace = true
 nym-dns.workspace = true
 nym-firewall.workspace = true
 nym-firewall-config.workspace = true
-
-[target.'cfg(target_os = "android")'.dependencies]
-rand.workspace = true
-
-[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
-tracing-oslog.workspace = true
-
-[target.'cfg(target_os = "ios")'.dependencies]
-debounced.workspace = true
-dispatch2.workspace = true
 
 [build-dependencies]
 vergen-gitcl = { workspace = true, default-features = false, features = [

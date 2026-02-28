@@ -8,7 +8,6 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-#[cfg(target_os = "linux")]
 use super::route_handler::RouteHandler;
 
 struct DnsHandler {
@@ -16,14 +15,9 @@ struct DnsHandler {
 }
 
 impl DnsHandler {
-    fn new(
-        #[cfg(target_os = "linux")] route_handler: &RouteHandler,
-    ) -> Result<Self, nym_dns::Error> {
+    fn new(route_handler: &RouteHandler) -> Result<Self, nym_dns::Error> {
         Ok(Self {
-            inner: DnsMonitor::new(
-                #[cfg(target_os = "linux")]
-                route_handler.inner_handle(),
-            )?,
+            inner: DnsMonitor::new(route_handler.inner_handle())?,
         })
     }
 
@@ -39,7 +33,6 @@ impl DnsHandler {
         self.inner.reset().await
     }
 
-    #[cfg(any(target_os = "linux", target_os = "windows"))]
     pub async fn reset_before_interface_removal(&mut self) -> Result<(), nym_dns::Error> {
         self.inner.reset_before_interface_removal().await
     }
@@ -55,7 +48,6 @@ enum DnsHandlerCommand {
     Reset {
         reply_tx: oneshot::Sender<Result<(), nym_dns::Error>>,
     },
-    #[cfg(any(target_os = "linux", target_os = "windows"))]
     ResetBeforeInterfaceRemoval {
         reply_tx: oneshot::Sender<Result<(), nym_dns::Error>>,
     },
@@ -68,13 +60,10 @@ pub struct DnsHandlerHandle {
 
 impl DnsHandlerHandle {
     pub fn spawn(
-        #[cfg(target_os = "linux")] route_handler: &RouteHandler,
+        route_handler: &RouteHandler,
         shutdown_token: CancellationToken,
     ) -> Result<(Self, JoinHandle<()>)> {
-        let mut dns_handler = DnsHandler::new(
-            #[cfg(target_os = "linux")]
-            route_handler,
-        )?;
+        let mut dns_handler = DnsHandler::new(route_handler)?;
 
         let (tx, mut rx) = mpsc::unbounded_channel();
         let join_handle = tokio::spawn(async move {
@@ -92,7 +81,6 @@ impl DnsHandlerHandle {
                             DnsHandlerCommand::Reset { reply_tx } => {
                                 _ = reply_tx.send(dns_handler.reset().await);
                             }
-                            #[cfg(any(target_os = "linux", target_os = "windows"))]
                             DnsHandlerCommand::ResetBeforeInterfaceRemoval { reply_tx } => {
                                 _ = reply_tx.send(dns_handler.reset_before_interface_removal().await);
                             }
@@ -129,7 +117,6 @@ impl DnsHandlerHandle {
             .await
     }
 
-    #[cfg(any(target_os = "linux", target_os = "windows"))]
     pub async fn reset_before_interface_removal(&mut self) -> Result<()> {
         let (reply_tx, reply_rx) = oneshot::channel();
 

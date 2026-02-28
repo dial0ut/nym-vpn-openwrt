@@ -4,8 +4,4 @@
 pub mod client;
 pub mod server;
 
-#[cfg(windows)]
-mod named_pipe;
-
-#[cfg(unix)]
 mod uds;

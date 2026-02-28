@@ -11,7 +11,6 @@ use ts_rs::TS;
 use crate::AccountControllerErrorStateReason;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Enum))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),

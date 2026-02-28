@@ -1,9 +1,7 @@
 // Copyright 2023 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use std::net::IpAddr;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use std::net::SocketAddr;
 use std::time::Duration;
 
@@ -14,12 +12,8 @@ use futures::{
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::tunnel_state_machine::Error;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::tunnel_state_machine::gateway_ext::GatewayExt;
-#[cfg(target_os = "macos")]
-use crate::tunnel_state_machine::resolver::LOCAL_DNS_RESOLVER;
 use crate::tunnel_state_machine::{
     ErrorStateReason, NextTunnelState, PrivateActionAfterDisconnect, PrivateTunnelState, Result,
     SharedState, TunnelCommand, TunnelInterface, TunnelStateHandler,
@@ -32,15 +26,12 @@ use crate::tunnel_state_machine::{
 };
 
 use nym_common::trace_err_chain;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use nym_dns::DnsConfig;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use nym_firewall::{
     AllowedClients, AllowedEndpoint, AllowedTunnelTraffic, Endpoint, FirewallPolicy,
     TransportProtocol,
 };
 use nym_gateway_directory::ResolvedConfig;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use nym_vpn_lib_types::TunnelConnectionData;
 use nym_vpn_lib_types::{
     EstablishConnectionData, EstablishConnectionState, GatewayLightInfo, TunnelType,
@@ -71,7 +62,6 @@ pub struct ConnectingState {
     tunnel_monitor_event_receiver: TunnelMonitorEventReceiver,
     selected_gateways: Option<SelectedGateways>,
     connection_data: Option<EstablishConnectionData>,
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     firewall_policy_params: ConnectingPolicyParameters,
     resolve_api_addrs_fut: Fuse<ResolveApiAddrsFuture>,
     reconnect_delay_fut: Fuse<ReconnectDelayFuture>,
@@ -84,18 +74,7 @@ impl ConnectingState {
         shared_state: &mut SharedState,
     ) -> (Box<dyn TunnelStateHandler>, PrivateTunnelState) {
         // Disallow networking until firewall exceptions and resolver overrides are configured
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         shared_state.disallow_networking().await;
-
-        // Always allow networking on mobile since there is no configurable firewall
-        #[cfg(any(target_os = "android", target_os = "ios"))]
-        shared_state.allow_networking().await;
-
-        #[cfg(target_os = "macos")]
-        if let Err(e) = Self::set_local_dns_resolver(shared_state).await {
-            trace_err_chain!(e, "Failed to configure system to use filtering resolver",);
-            return ErrorState::enter(ErrorStateReason::SetDns, shared_state).await;
-        }
 
         if shared_state
             .connectivity_handle
@@ -103,16 +82,9 @@ impl ConnectingState {
             .await
             .is_offline()
         {
-            // FIXME: Temporary: Nudge route manager to update the default interface
-            #[cfg(target_os = "macos")]
-            {
-                tracing::debug!("Poking route manager to update default routes");
-                shared_state.route_handler.refresh_routes().await;
-            }
             return OfflineState::enter(true, selected_gateways, shared_state).await;
         }
 
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         let firewall_policy_params = {
             let mut bridge_endpoints = Vec::new();
             if shared_state.tunnel_settings.bridges_enabled()
@@ -172,7 +144,6 @@ impl ConnectingState {
             connection_data: initial_connection_data.clone(),
             resolve_api_addrs_fut: Fuse::terminated(),
             reconnect_delay_fut,
-            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             firewall_policy_params,
         };
 
@@ -184,7 +155,6 @@ impl ConnectingState {
         (Box::new(connecting_state), tunnel_state)
     }
 
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     fn set_firewall_policy(
         shared_state: &mut SharedState,
         params: &ConnectingPolicyParameters,
@@ -197,25 +167,6 @@ impl ConnectingState {
             .map_err(Error::SetFirewallPolicy)
     }
 
-    #[cfg(target_os = "macos")]
-    async fn set_local_dns_resolver(shared_state: &mut SharedState) -> Result<()> {
-        if *LOCAL_DNS_RESOLVER {
-            // Set system DNS to our local DNS resolver
-            let system_dns = DnsConfig::default().resolve(
-                &[shared_state.filtering_resolver.listen_addr().ip()],
-                shared_state.filtering_resolver.listen_addr().port(),
-            );
-            shared_state
-                .dns_handler
-                .set("lo".to_owned(), system_dns)
-                .await
-                .map_err(Error::SetDns)
-        } else {
-            Ok(())
-        }
-    }
-
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     async fn reset_routes(shared_state: &mut SharedState) {
         shared_state.route_handler.remove_routes().await
     }
@@ -240,7 +191,6 @@ impl ConnectingState {
         tunnel_monitor_handle: TunnelMonitorHandle,
         shared_state: &mut SharedState,
     ) -> NextTunnelState {
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         Self::reset_routes(shared_state).await;
 
         NextTunnelState::NewState(
@@ -248,41 +198,30 @@ impl ConnectingState {
         )
     }
 
-    async fn handle_tunnel_close(tombstone: Tombstone, _shared_state: &mut SharedState) {
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
-        _shared_state.route_handler.remove_routes().await;
+    async fn handle_tunnel_close(tombstone: Tombstone, shared_state: &mut SharedState) {
+        shared_state.route_handler.remove_routes().await;
 
         // drop tombstone to close tunnel devices
         let _ = tombstone;
     }
 
     async fn handle_reconnect_delay(
-        #[allow(unused_mut)] mut self: Box<Self>,
+        mut self: Box<Self>,
         shared_state: &mut SharedState,
     ) -> NextTunnelState {
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
-        {
-            let gateway_config = shared_state.nym_config.gateway_config.clone();
+        let gateway_config = shared_state.nym_config.gateway_config.clone();
 
-            self.resolve_api_addrs_fut = async move {
-                nym_gateway_directory::resolve_config(&gateway_config)
-                    .await
-                    .map_err(|err| Error::ResolveApiHostnames(Box::new(err)))
-            }
-            .boxed()
-            .fuse();
-
-            NextTunnelState::SameState(self)
+        self.resolve_api_addrs_fut = async move {
+            nym_gateway_directory::resolve_config(&gateway_config)
+                .await
+                .map_err(|err| Error::ResolveApiHostnames(Box::new(err)))
         }
+        .boxed()
+        .fuse();
 
-        #[cfg(any(target_os = "android", target_os = "ios"))]
-        {
-            // Start tunnel monitor immediately since there is no configurable firewall on mobile
-            self.start_tunnel_monitor(None, shared_state).await
-        }
+        NextTunnelState::SameState(self)
     }
 
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     async fn handle_resolved_gateway_config(
         mut self: Box<Self>,
         resolver_result: Result<ResolvedConfig>,
@@ -338,24 +277,6 @@ impl ConnectingState {
             .await
     }
 
-    #[cfg(any(target_os = "android", target_os = "ios"))]
-    async fn handle_resolved_gateway_config(
-        self: Box<Self>,
-        _resolver_result: Result<ResolvedConfig>,
-        shared_state: &mut SharedState,
-    ) -> NextTunnelState {
-        NextTunnelState::NewState(
-            ErrorState::enter(
-                ErrorStateReason::Internal(
-                    "DNS resolution must not be performed on mobile. This is a logical error."
-                        .to_owned(),
-                ),
-                shared_state,
-            )
-            .await,
-        )
-    }
-
     async fn start_tunnel_monitor(
         mut self: Box<Self>,
         resolved_gateway_config: Option<ResolvedConfig>,
@@ -390,10 +311,7 @@ impl ConnectingState {
             shared_state.topology_service.clone(),
             tunnel_monitor_event_sender,
             shared_state.wg_keys_db.clone(),
-            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             shared_state.route_handler.clone(),
-            #[cfg(any(target_os = "ios", target_os = "android"))]
-            shared_state.tun_provider.clone(),
         );
 
         self.tunnel_monitor_handle = Some(tunnel_monitor_handle);
@@ -404,23 +322,20 @@ impl ConnectingState {
     async fn handle_registered_with_gateways(
         &mut self,
         connection_data: Box<EstablishConnectionData>,
-        _shared_state: &mut SharedState,
+        shared_state: &mut SharedState,
     ) -> Result<()> {
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        // Only allow entry wg endpoint in firewall when bridges are not enabled.
+        // Because all bridges are already added to firewall exceptions.
+        let wg_entry_endpoint = if let Some(TunnelConnectionData::Wireguard(ref wg)) =
+            connection_data.tunnel
+            && !shared_state.tunnel_settings.bridges_enabled()
         {
-            // Only allow entry wg endpoint in firewall when bridges are not enabled.
-            // Because all bridges are already added to firewall exceptions.
-            let wg_entry_endpoint = if let Some(TunnelConnectionData::Wireguard(ref wg)) =
-                connection_data.tunnel
-                && !_shared_state.tunnel_settings.bridges_enabled()
-            {
-                Some(wg.entry.endpoint)
-            } else {
-                None
-            };
-            self.firewall_policy_params.wg_entry_endpoint = wg_entry_endpoint;
-            Self::set_firewall_policy(_shared_state, &self.firewall_policy_params)?;
-        }
+            Some(wg.entry.endpoint)
+        } else {
+            None
+        };
+        self.firewall_policy_params.wg_entry_endpoint = wg_entry_endpoint;
+        Self::set_firewall_policy(shared_state, &self.firewall_policy_params)?;
 
         self.connection_data = Some(*connection_data);
 
@@ -429,17 +344,14 @@ impl ConnectingState {
 
     async fn handle_interface_up(
         &mut self,
-        _tunnel_interface: TunnelInterface,
+        tunnel_interface: TunnelInterface,
         connection_data: Box<EstablishConnectionData>,
-        _shared_state: &mut SharedState,
+        shared_state: &mut SharedState,
     ) -> Result<()> {
         self.connection_data = Some(*connection_data);
 
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
-        {
-            self.firewall_policy_params.tunnel_interface = Some(_tunnel_interface);
-            Self::set_firewall_policy(_shared_state, &self.firewall_policy_params)?;
-        }
+        self.firewall_policy_params.tunnel_interface = Some(tunnel_interface);
+        Self::set_firewall_policy(shared_state, &self.firewall_policy_params)?;
 
         Ok(())
     }
@@ -447,28 +359,21 @@ impl ConnectingState {
     async fn handle_selected_gateways(
         &mut self,
         gateways: Box<SelectedGateways>,
-        _shared_state: &mut SharedState,
+        shared_state: &mut SharedState,
     ) -> Result<()> {
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         let set_policy_result = {
-            if _shared_state.tunnel_settings.bridges_enabled()
+            if shared_state.tunnel_settings.bridges_enabled()
                 && let Some(params) = &gateways.entry_gateway().bridge_params
             {
                 self.firewall_policy_params.bridge_endpoints = params.get_addrs()
             }
 
             self.firewall_policy_params.ws_entry_endpoints = gateways.entry_gateway().endpoints();
-            Self::set_firewall_policy(_shared_state, &self.firewall_policy_params)
+            Self::set_firewall_policy(shared_state, &self.firewall_policy_params)
         };
         self.selected_gateways = Some(*gateways);
 
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
-        {
-            set_policy_result
-        }
-
-        #[cfg(any(target_os = "ios", target_os = "android"))]
-        Ok(())
+        set_policy_result
     }
 
     fn make_connecting_tunnel_state(
@@ -659,7 +564,6 @@ impl TunnelStateHandler for ConnectingState {
                         if let Some(tunnel_monitor_handle) = self.tunnel_monitor_handle {
                             Self::disconnect(PrivateActionAfterDisconnect::Nothing, tunnel_monitor_handle, shared_state).await
                         } else {
-                            #[cfg(not(any(target_os = "android", target_os = "ios")))]
                             Self::reset_routes(shared_state).await;
                             NextTunnelState::NewState(DisconnectedState::enter(None, shared_state).await)
                         }
@@ -669,15 +573,12 @@ impl TunnelStateHandler for ConnectingState {
                             return NextTunnelState::SameState(self);
                         };
 
-                        #[cfg(not(any(target_os = "android", target_os = "ios")))]
-                        {
-                            if diff.allow_lan_changed() {
-                                self.firewall_policy_params.allow_lan = tunnel_settings.allow_lan;
+                        if diff.allow_lan_changed() {
+                            self.firewall_policy_params.allow_lan = tunnel_settings.allow_lan;
 
-                                if let Err(e) = Self::set_firewall_policy(shared_state, &self.firewall_policy_params) {
-                                    trace_err_chain!(e, "failed to set firewall policy");
-                                    return NextTunnelState::NewState(ErrorState::enter(ErrorStateReason::SetFirewallPolicy, shared_state).await);
-                                }
+                            if let Err(e) = Self::set_firewall_policy(shared_state, &self.firewall_policy_params) {
+                                trace_err_chain!(e, "failed to set firewall policy");
+                                return NextTunnelState::NewState(ErrorState::enter(ErrorStateReason::SetFirewallPolicy, shared_state).await);
                             }
                         }
 
@@ -719,7 +620,6 @@ impl TunnelStateHandler for ConnectingState {
                 if let Some(tunnel_monitor_handle) = self.tunnel_monitor_handle {
                     Self::disconnect(PrivateActionAfterDisconnect::Nothing, tunnel_monitor_handle, shared_state).await
                 } else {
-                    #[cfg(not(any(target_os = "android", target_os = "ios")))]
                     Self::reset_routes(shared_state).await;
                     NextTunnelState::NewState(DisconnectedState::enter(None, shared_state).await)
                 }
@@ -729,7 +629,6 @@ impl TunnelStateHandler for ConnectingState {
 }
 
 /// Firewall policy configuration when connecting
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[derive(Debug, Clone)]
 struct ConnectingPolicyParameters {
     /// Whether IPv6 is enabled
@@ -757,7 +656,6 @@ struct ConnectingPolicyParameters {
     tunnel_interface: Option<TunnelInterface>,
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 impl ConnectingPolicyParameters {
     pub fn as_policy(&self) -> FirewallPolicy {
         // Allow websocket entry endpoints
@@ -768,10 +666,7 @@ impl ConnectingPolicyParameters {
             .map(|addr| {
                 AllowedEndpoint::new(
                     Endpoint::from_socket_address(*addr, TransportProtocol::Tcp),
-                    #[cfg(any(target_os = "linux", target_os = "macos"))]
                     AllowedClients::Root,
-                    #[cfg(target_os = "windows")]
-                    AllowedClients::current_exe(),
                 )
             })
             .collect::<Vec<_>>();
@@ -781,10 +676,7 @@ impl ConnectingPolicyParameters {
             if addr.is_ipv4() || (self.enable_ipv6 && addr.is_ipv6()) {
                 let allow_wg_endpoint = AllowedEndpoint::new(
                     Endpoint::from_socket_address(addr, TransportProtocol::Udp),
-                    #[cfg(any(target_os = "linux", target_os = "macos"))]
                     AllowedClients::Root,
-                    #[cfg(target_os = "windows")]
-                    AllowedClients::current_exe(),
                 );
 
                 peer_endpoints.push(allow_wg_endpoint);
@@ -800,10 +692,7 @@ impl ConnectingPolicyParameters {
             .for_each(|addr| {
                 let allow_bridge_endpoint = AllowedEndpoint::new(
                     Endpoint::from_socket_address(*addr, TransportProtocol::Udp),
-                    #[cfg(any(target_os = "linux", target_os = "macos"))]
                     AllowedClients::Root,
-                    #[cfg(target_os = "windows")]
-                    AllowedClients::current_exe(),
                 );
                 peer_endpoints.push(allow_bridge_endpoint);
             });
@@ -816,10 +705,7 @@ impl ConnectingPolicyParameters {
             .map(|addr| {
                 AllowedEndpoint::new(
                     Endpoint::from_socket_address(*addr, TransportProtocol::Tcp),
-                    #[cfg(any(target_os = "linux", target_os = "macos"))]
                     AllowedClients::Root,
-                    #[cfg(target_os = "windows")]
-                    AllowedClients::current_exe(),
                 )
             })
             .collect::<Vec<_>>();
@@ -833,8 +719,6 @@ impl ConnectingPolicyParameters {
         let dns_config = DnsConfig::from_addresses(&[], &self.dns_servers).resolve(
             // pass empty because we already override the config with non-tunnel addresses.
             &[],
-            #[cfg(target_os = "macos")]
-            53,
         );
 
         FirewallPolicy::Connecting {
@@ -846,9 +730,6 @@ impl ConnectingPolicyParameters {
             // todo: only allow connection towards entry endpoint?
             allowed_entry_tunnel_traffic: AllowedTunnelTraffic::All,
             allowed_exit_tunnel_traffic: AllowedTunnelTraffic::All,
-            // todo: split tunneling
-            #[cfg(target_os = "macos")]
-            redirect_interface: None,
         }
     }
 }

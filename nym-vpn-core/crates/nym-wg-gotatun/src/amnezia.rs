@@ -57,7 +57,7 @@ impl AmneziaConfig {
     pub const BASE: Self = BASE;
 
     /// Creates a randomized configuration with parameters within suggested ranges.
-    pub fn rand(rng: &mut impl RngCore) -> Self {
+    pub fn rand(rng: &mut impl RngCore) -> Result<Self, &'static str> {
         for _ in 0..16 {
             let c = Self {
                 junk_pkt_count: rng.gen_range(3..10),
@@ -71,10 +71,10 @@ impl AmneziaConfig {
                 transport_pkt_magic_header: rng.gen_range(5..i32::MAX),
             };
             if c.validate() {
-                return c;
+                return Ok(c);
             }
         }
-        panic!("this should not be possible");
+        Err("failed to generate valid AmneziaConfig after 16 attempts")
     }
 
     /// Returns true if this config represents Amnezia being disabled.

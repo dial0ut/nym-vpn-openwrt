@@ -10,7 +10,6 @@ use time::OffsetDateTime;
 use ts_rs::TS;
 
 #[derive(Clone, Debug)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -30,7 +29,6 @@ pub struct NymNetworkDetails {
 }
 
 #[derive(Clone, Debug)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -46,7 +44,6 @@ pub struct ChainDetails {
 }
 
 #[derive(Clone, Debug)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -62,7 +59,6 @@ pub struct DenomDetailsOwned {
 }
 
 #[derive(Clone, Debug)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -78,7 +74,6 @@ pub struct ValidatorDetails {
 }
 
 #[derive(Clone, Debug)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -98,7 +93,6 @@ pub struct NymContracts {
 }
 
 #[derive(Clone, Debug)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -113,7 +107,6 @@ pub struct ApiUrl {
 }
 
 #[derive(Clone, Debug)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -127,7 +120,6 @@ pub struct NymVpnNetwork {
 }
 
 #[derive(Clone, Debug)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -145,7 +137,6 @@ pub struct Network {
 }
 
 #[derive(Clone, Debug)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Object))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -158,43 +149,7 @@ pub struct FeatureFlags {
     pub flags: HashMap<String, FlagValue>,
 }
 
-#[cfg(feature = "uniffi-bindings")]
-#[cfg_attr(feature = "uniffi-bindings", uniffi::export)]
-impl FeatureFlags {
-    /// If domain fronting is enabled or not, if set
-    #[uniffi::method]
-    pub fn is_domain_fronting_enabled(&self) -> Option<bool> {
-        // todo: harmonize with nym-vpn-network-config/src/feature_flags.rs
-        self.get_group_flag("domain_fronting", "enabled")
-    }
-
-    /// If quic is enabled or not, if set
-    #[uniffi::method]
-    pub fn is_quic_enabled(&self) -> Option<bool> {
-        // todo: harmonize with nym-vpn-network-config/src/feature_flags.rs
-        self.get_group_flag("quic", "enabled")
-    }
-
-    /// If privy is enabled or not, if set
-    #[uniffi::method]
-    pub fn is_privy_enabled(&self) -> Option<bool> {
-        // todo: harmonize with nym-vpn-network-config/src/feature_flags.rs
-        self.get_group_flag("privy", "enabled")
-    }
-
-    fn get_group_flag(&self, group_name: &str, flag_name: &str) -> Option<bool> {
-        if let Some(FlagValue::Group(group)) = self.flags.get(group_name)
-            && let Some(value) = group.get(flag_name)
-        {
-            Some(value == "true")
-        } else {
-            None
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Enum))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -209,7 +164,6 @@ pub enum FlagValue {
 }
 
 #[derive(Clone, Debug)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -225,7 +179,6 @@ pub struct ParsedAccountLinks {
 }
 
 #[derive(Clone, Copy, Debug)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -241,7 +194,6 @@ pub struct ScoreThresholds {
 }
 
 #[derive(Clone, Debug)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -258,7 +210,6 @@ pub struct SystemConfiguration {
 }
 
 #[derive(Clone, Debug)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -280,7 +231,6 @@ pub struct SystemMessage {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),

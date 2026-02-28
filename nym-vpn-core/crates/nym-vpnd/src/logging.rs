@@ -13,8 +13,6 @@ use tokio_util::sync::CancellationToken;
 use tracing::{Event, Level, Subscriber};
 use tracing_appender::{non_blocking::WorkerGuard, rolling::RollingFileAppender};
 use tracing_opentelemetry::OtelData;
-#[cfg(target_os = "macos")]
-use tracing_oslog::OsLogger;
 use tracing_subscriber::{
     EnvFilter, Layer,
     fmt::{FmtContext, FormatEvent, FormatFields, format::FmtSpan},
@@ -302,11 +300,7 @@ pub fn setup_logging(options: Options) -> Option<LoggingSetup> {
 
     let mut layers = Vec::new();
 
-    // Create oslog output on macOS for debugging purposes
-    #[cfg(target_os = "macos")]
-    layers.push(OsLogger::new("net.nymtech.vpn.agent", "default").boxed());
-
-    // Create file logger but only when running as a service on windows or macos
+    // Create file logger
     let worker_guard = if options.enable_file_log {
         let file_appender = FileAppender::new();
         let file_manager = FileManager::new(file_appender.clone());
@@ -329,12 +323,9 @@ pub fn setup_logging(options: Options) -> Option<LoggingSetup> {
     };
 
     if options.enable_stdout_log {
-        // When debugging using WinDBG, the ANSI escape codes play havoc with the terminal output.
-        let with_ansi = !(cfg!(debug_assertions) && cfg!(windows));
-
         let console_layer = tracing_subscriber::fmt::layer()
             .with_span_events(FmtSpan::CLOSE)
-            .with_ansi(with_ansi);
+            .with_ansi(true);
         if options.enable_json_log {
             let console_layer = console_layer.json().event_format(JsonLogFormatter {
                 enable_opentelemetry,

@@ -377,11 +377,10 @@ impl VpnServiceConfigManager {
             tunnel_type,
             mixnet_tunnel_options: MixnetTunnelOptions { mtu: None },
             wireguard_tunnel_options: WireguardTunnelOptions {
-                multihop_mode: if self.config.netstack {
-                    WireguardMultihopMode::Netstack
-                } else {
-                    WireguardMultihopMode::TunTun
-                },
+                // netstack is no longer a separate mode; always use TunTun.
+                // The `netstack` config field is preserved for backward compatibility
+                // but has no effect.
+                multihop_mode: WireguardMultihopMode::TunTun,
                 enable_bridges: self.config.enable_bridges,
             },
             gateway_performance_options: gateway_options,

@@ -7,10 +7,7 @@ use std::error::Error;
 #[cfg(feature = "typescript-bindings")]
 use ts_rs::TS;
 
-// todo: rename this type back to ErrorStateReason once support for renaming uniffi structs is released
-//       see: https://github.com/mozilla/uniffi-rs/issues/2212
 #[derive(Debug, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Enum))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -102,7 +99,6 @@ impl std::fmt::Display for AccountControllerErrorStateReason {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, thiserror::Error)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Error))]
 pub enum AccountControllerError {
     #[error("Account controller is offline")]
     Offline,

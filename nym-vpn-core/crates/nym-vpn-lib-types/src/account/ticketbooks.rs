@@ -8,7 +8,6 @@ use ts_rs::TS;
 
 // todo: this type is not used anywhere in the codebase for some reason
 #[derive(Clone, Debug)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),

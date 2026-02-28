@@ -10,7 +10,6 @@
 pub mod amnezia;
 #[cfg(feature = "amnezia")]
 pub mod amnezia_udp;
-pub mod netstack;
 pub mod wireguard_go;
 
 use std::{fmt, net::SocketAddr};
@@ -65,7 +64,7 @@ pub struct PeerEndpointUpdate {
     pub endpoint: SocketAddr,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Zeroize, ZeroizeOnDrop)]
 pub struct PrivateKey(x25519_dalek::StaticSecret);
 
 impl PrivateKey {

@@ -338,11 +338,9 @@ impl NymVpnService {
         let state_machine_shutdown_token = CancellationToken::new();
         let services_shutdown_token = CancellationToken::new();
 
-        #[cfg(target_os = "linux")]
         let routing_params = nym_vpn_lib::tunnel_state_machine::RoutingParameters::default();
 
         let route_handler = nym_vpn_lib::tunnel_state_machine::RouteHandler::new(
-            #[cfg(target_os = "linux")]
             routing_params,
         )
         .await
@@ -352,7 +350,6 @@ impl NymVpnService {
         let tunnel_constants = TunnelConstants::default();
         let connectivity_handle = nym_offline_monitor::spawn_monitor(
             route_handler.inner_handle(),
-            #[cfg(target_os = "linux")]
             Some(tunnel_constants.fwmark),
         )
         .await;
@@ -503,7 +500,6 @@ impl NymVpnService {
             connectivity_handle,
             discovery_refresher_command_tx,
             wireguard_keys_db,
-            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             route_handler,
             parameters.user_agent.clone(),
             state_machine_shutdown_token.child_token(),

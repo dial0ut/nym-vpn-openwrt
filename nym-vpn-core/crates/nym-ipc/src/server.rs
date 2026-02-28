@@ -10,13 +10,5 @@ use tonic::transport::server::Connected;
 pub fn create_incoming(
     socket_path: PathBuf,
 ) -> Result<impl Stream<Item = Result<impl AsyncRead + AsyncWrite + Connected + 'static>>> {
-    #[cfg(unix)]
-    {
-        crate::uds::incoming(socket_path)
-    }
-
-    #[cfg(windows)]
-    {
-        crate::named_pipe::incoming(socket_path.into_os_string())
-    }
+    crate::uds::incoming(socket_path)
 }

@@ -13,7 +13,6 @@ pub fn install(shutdown_token: CancellationToken) -> JoinSet<()> {
         }
     });
 
-    #[cfg(unix)]
     join_set.spawn(async move {
         if let Err(e) = set_termination_handler(shutdown_token).await {
             tracing::error!("Failed to set the termination handler: {}", e);
@@ -30,7 +29,6 @@ async fn set_ctrlc_handler(shutdown_token: CancellationToken) -> io::Result<()> 
     Ok(())
 }
 
-#[cfg(unix)]
 async fn set_termination_handler(shutdown_token: CancellationToken) -> io::Result<()> {
     use tokio::signal::unix::{SignalKind, signal};
 

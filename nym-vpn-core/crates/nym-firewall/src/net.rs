@@ -2,8 +2,6 @@
 // Copyright 2025 Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
-#[cfg(windows)]
-use std::path::PathBuf;
 use std::{
     fmt,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -96,37 +94,11 @@ impl AllowedEndpoint {
 
 impl fmt::Display for AllowedEndpoint {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        #[cfg(not(windows))]
-        write!(f, "{}", self.endpoint)?;
-        #[cfg(windows)]
-        {
-            let clients = if self.clients.allow_all() {
-                "any executable".to_string()
-            } else {
-                self.clients
-                    .iter()
-                    .map(|client| {
-                        client
-                            .file_name()
-                            .map(|s| s.to_string_lossy())
-                            .unwrap_or(std::borrow::Cow::Borrowed("<UNKNOWN>"))
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            };
-            write!(
-                f,
-                "{endpoint} for {clients}",
-                endpoint = self.endpoint,
-                clients = clients
-            )?;
-        }
-        Ok(())
+        write!(f, "{}", self.endpoint)
     }
 }
 
 /// Clients which should be able to reach an allowed host in any tunnel state.
-#[cfg(unix)]
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum AllowedClients {
     /// Allow only clients running as `root` to leak traffic to an allowed [`Endpoint`].
@@ -142,54 +114,9 @@ pub enum AllowedClients {
     All,
 }
 
-#[cfg(unix)]
 impl AllowedClients {
     pub fn allow_all(&self) -> bool {
         matches!(self, AllowedClients::All)
-    }
-}
-
-/// Clients which should be able to reach an allowed host in any tunnel state.
-///
-/// # Note
-/// On Windows, there is no predetermined binary which should be allowed to leak
-/// traffic outside of the tunnel. Thus, [`std::default::Default`] is not
-/// implemented for [`AllowedClients`].
-#[cfg(windows)]
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct AllowedClients(std::sync::Arc<[PathBuf]>);
-
-#[cfg(windows)]
-impl std::ops::Deref for AllowedClients {
-    type Target = [PathBuf];
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-#[cfg(windows)]
-impl From<Vec<PathBuf>> for AllowedClients {
-    fn from(value: Vec<PathBuf>) -> Self {
-        Self(value.into())
-    }
-}
-
-#[cfg(windows)]
-impl AllowedClients {
-    /// Allow all clients to leak traffic to an allowed [`Endpoint`].
-    pub fn all() -> Self {
-        vec![].into()
-    }
-
-    /// Allow current executable to leak traffic to an allowed [`Endpoint`]
-    pub fn current_exe() -> Self {
-        let current_exe_path = std::env::current_exe().expect("failed to obtain current_exe");
-        Self::from(vec![current_exe_path])
-    }
-
-    pub fn allow_all(&self) -> bool {
-        self.is_empty()
     }
 }
 

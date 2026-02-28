@@ -8,11 +8,9 @@ use std::{
 
 use ipnetwork::{IpNetwork, Ipv4Network, Ipv6Network};
 use nym_registration_common::GatewayData;
-#[cfg(target_os = "ios")]
-use nym_wg_gotatun::PeerEndpointUpdate;
 use nym_wg_gotatun::{PrivateKey, PublicKey, amnezia::AmneziaConfig};
 use nym_wg_gotatun::PeerConfig;
-use nym_wg_gotatun::{netstack, wireguard_go};
+use nym_wg_gotatun::wireguard_go;
 
 #[derive(Debug, Clone)]
 pub struct WgNodeConfig {
@@ -44,7 +42,6 @@ pub struct WgInterface {
     pub mtu: u16,
 
     /// Mark used for mark-based routing.
-    #[cfg(target_os = "linux")]
     pub fwmark: Option<u32>,
 
     /// Amnezia Configuration
@@ -59,7 +56,6 @@ impl fmt::Debug for WgInterface {
             .field("address", &self.addresses)
             .field("dns", &self.dns)
             .field("mtu", &self.mtu);
-        #[cfg(target_os = "linux")]
         d.field("fwmark", &self.fwmark);
         d.field("amnezia", &self.azwg_config);
         d.finish()
@@ -85,44 +81,7 @@ pub struct WgPeer {
     pub endpoint: SocketAddr,
 }
 
-impl WgPeer {
-    #[cfg(target_os = "ios")]
-    pub fn into_peer_endpoint_update(self) -> PeerEndpointUpdate {
-        PeerEndpointUpdate {
-            public_key: self.public_key,
-            endpoint: self.endpoint,
-        }
-    }
-}
-
 impl WgNodeConfig {
-    pub fn into_netstack_config(self) -> netstack::Config {
-        let allowed_ips = self.allowed_ips();
-        netstack::Config {
-            interface: netstack::InterfaceConfig {
-                private_key: self.interface.private_key,
-                local_addrs: self
-                    .interface
-                    .addresses
-                    .into_iter()
-                    .map(|x| x.ip())
-                    .collect(),
-                dns_addrs: self.interface.dns,
-                mtu: self.interface.mtu,
-                #[cfg(target_os = "linux")]
-                fwmark: self.interface.fwmark,
-                azwg_config: self.interface.azwg_config,
-            },
-            peers: vec![PeerConfig {
-                public_key: self.peer.public_key,
-                preshared_key: None,
-                endpoint: self.peer.endpoint,
-                // todo: limit to loopback?
-                allowed_ips,
-            }],
-        }
-    }
-
     pub fn into_wireguard_config(self) -> wireguard_go::Config {
         let allowed_ips = self.allowed_ips();
         wireguard_go::Config {
@@ -130,7 +89,6 @@ impl WgNodeConfig {
                 listen_port: self.interface.listen_port,
                 private_key: self.interface.private_key,
                 mtu: self.interface.mtu,
-                #[cfg(target_os = "linux")]
                 fwmark: self.interface.fwmark,
                 azwg_config: self.interface.azwg_config,
             },
@@ -170,7 +128,7 @@ impl WgNodeConfig {
         dns: Vec<IpAddr>,
         mtu: u16,
         enable_ipv6: bool,
-        #[cfg(target_os = "linux")] fwmark: Option<u32>,
+        fwmark: Option<u32>,
     ) -> Self {
         // Build address list based on IPv6 setting
         // Some systems (e.g., GL.iNet routers) have IPv6 disabled at kernel level
@@ -187,7 +145,6 @@ impl WgNodeConfig {
                 addresses,
                 dns,
                 mtu,
-                #[cfg(target_os = "linux")]
                 fwmark,
                 azwg_config: Some(AmneziaConfig::OFF),
             },

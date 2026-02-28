@@ -15,22 +15,8 @@ workspace = true
 default = ["network-manager"]
 network-manager = ["nym-dbus"]
 
-[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
-objc2-foundation = { workspace = true, features = ["NSProcessInfo"] }
-
-[target.'cfg(target_os = "linux")'.dependencies]
+[dependencies]
 rs-release.workspace = true
 nym-dbus = { workspace = true, optional = true }
-
-[target.'cfg(windows)'.dependencies.windows]
-workspace = true
-features = [
-    "Win32_Foundation",
-    "Win32_System_LibraryLoader",
-    "Win32_System_SystemInformation",
-    "Win32_System_SystemServices",
-]
-
-[dependencies]
 sha2.workspace = true
 sysinfo.workspace = true

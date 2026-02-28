@@ -2,76 +2,19 @@
 // Copyright 2024 Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! Manage routing tables on various platforms.
+//! Manage routing tables on Linux.
 #![allow(rustdoc::private_intra_doc_links)]
 #![deny(missing_docs)]
 
 use ipnetwork::IpNetwork;
 use std::{fmt, net::IpAddr};
 
-#[cfg(any(target_os = "windows", target_os = "macos"))]
-/// Burst guard
-pub mod debounce;
-
-#[cfg(target_os = "windows")]
-#[path = "windows/mod.rs"]
-mod imp;
-
-#[cfg(target_os = "windows")]
-pub use imp::{Callback, CallbackHandle, EventType, InterfaceAndGateway, get_best_default_route};
-
-#[cfg(not(target_os = "windows"))]
 #[path = "unix/mod.rs"]
 mod imp;
 
-#[cfg(target_os = "linux")]
 use netlink_packet_route::route::RouteHeader;
 
-#[cfg(target_os = "macos")]
-pub use imp::{DefaultRouteEvent, InterfaceEvent, PlatformError, imp::RouteError};
-
 pub use imp::{Error, RouteManagerHandle};
-
-/// Link-layer/MAC adress
-#[cfg(target_os = "macos")]
-#[derive(Debug, Eq, PartialEq, Clone, Copy)]
-pub struct MacAddress(pub [u8; 6]);
-
-#[cfg(target_os = "macos")]
-impl MacAddress {
-    /// Consume bytes that make up the link address
-    pub fn into_bytes(self) -> [u8; 6] {
-        self.0
-    }
-}
-
-#[cfg(target_os = "macos")]
-impl From<[u8; 6]> for MacAddress {
-    fn from(addr: [u8; 6]) -> Self {
-        Self(addr)
-    }
-}
-
-#[cfg(target_os = "macos")]
-impl fmt::Display for MacAddress {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{:<02X}{:<02X}{:<02X}{:<02X}{:<02X}{:<02X}",
-            self.0[0], self.0[1], self.0[2], self.0[3], self.0[4], self.0[5]
-        )
-    }
-}
-
-/// Gateway, including IP address and MAC address
-#[cfg(target_os = "macos")]
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub struct Gateway {
-    /// Network layer address for the gateway
-    pub ip_address: IpAddr,
-    /// Link layer address for the gateway
-    pub mac_address: MacAddress,
-}
 
 /// A network route with a specific network node, destination and an optional metric.
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
@@ -79,9 +22,7 @@ pub struct Route {
     node: Node,
     prefix: IpNetwork,
     metric: Option<u32>,
-    #[cfg(target_os = "linux")]
     table_id: u32,
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
     mtu: Option<u32>,
 }
 
@@ -92,14 +33,11 @@ impl Route {
             node,
             prefix,
             metric: None,
-            #[cfg(target_os = "linux")]
             table_id: u32::from(RouteHeader::RT_TABLE_MAIN),
-            #[cfg(any(target_os = "linux", target_os = "macos"))]
             mtu: None,
         }
     }
 
-    #[cfg(target_os = "linux")]
     fn table(mut self, new_id: u32) -> Self {
         self.table_id = new_id;
         self
@@ -117,9 +55,7 @@ impl fmt::Display for Route {
         if let Some(metric) = &self.metric {
             write!(f, " metric {}", *metric)?;
         }
-        #[cfg(target_os = "linux")]
         write!(f, " table {}", self.table_id)?;
-        #[cfg(target_os = "linux")]
         if let Some(mtu) = self.mtu {
             write!(f, " mtu {mtu}")?;
         }
@@ -136,10 +72,8 @@ pub struct RequiredRoute {
     pub prefix: IpNetwork,
     node: NetNode,
     /// Specifies whether the route should be added to the main routing table or not.
-    #[cfg(target_os = "linux")]
     main_table: bool,
     /// Specifies route MTU
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
     mtu: Option<u16>,
 }
 
@@ -149,22 +83,18 @@ impl RequiredRoute {
         Self {
             node: node.into(),
             prefix,
-            #[cfg(target_os = "linux")]
             main_table: true,
-            #[cfg(any(target_os = "linux", target_os = "macos"))]
             mtu: None,
         }
     }
 
     /// Sets the routing table ID of the route.
-    #[cfg(target_os = "linux")]
     pub fn use_main_table(mut self, main_table: bool) -> Self {
         self.main_table = main_table;
         self
     }
 
     /// Set route MTU to the given value.
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
     pub fn mtu(mut self, mtu: u16) -> Self {
         self.mtu = Some(mtu);
         self
@@ -178,10 +108,6 @@ pub enum NetNode {
     /// A real node will be used to set a regular route that will remain unchanged for the lifetime
     /// of the route manager
     RealNode(Node),
-    /// A default node is a symbolic node that will resolve to the network node used in the current
-    /// most preferable default route
-    #[cfg(not(target_os = "linux"))]
-    DefaultNode,
 }
 
 impl From<Node> for NetNode {

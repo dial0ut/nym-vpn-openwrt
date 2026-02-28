@@ -4,27 +4,12 @@
 
 use std::{fmt, net::IpAddr};
 
-#[cfg(target_os = "linux")]
 use nym_routing::RouteManagerHandle;
 
-#[cfg(target_os = "macos")]
-#[path = "macos.rs"]
-mod imp;
-
-#[cfg(target_os = "linux")]
 #[path = "linux/mod.rs"]
 mod imp;
 
-#[cfg(target_os = "linux")]
 pub use imp::will_use_nm;
-
-#[cfg(windows)]
-#[path = "windows/mod.rs"]
-mod imp;
-
-#[cfg(any(target_os = "android", target_os = "ios"))]
-#[path = "android.rs"]
-mod imp;
 
 pub use self::imp::Error;
 
@@ -55,17 +40,11 @@ impl DnsConfig {
 }
 
 impl DnsConfig {
-    pub fn resolve(
-        &self,
-        default_tun_config: &[IpAddr],
-        #[cfg(target_os = "macos")] port: u16,
-    ) -> ResolvedDnsConfig {
+    pub fn resolve(&self, default_tun_config: &[IpAddr]) -> ResolvedDnsConfig {
         match &self.config {
             InnerDnsConfig::Default => ResolvedDnsConfig {
                 tunnel_config: default_tun_config.to_owned(),
                 non_tunnel_config: vec![],
-                #[cfg(target_os = "macos")]
-                port,
             },
             InnerDnsConfig::Override {
                 tunnel_config,
@@ -73,8 +52,6 @@ impl DnsConfig {
             } => ResolvedDnsConfig {
                 tunnel_config: tunnel_config.to_owned(),
                 non_tunnel_config: non_tunnel_config.to_owned(),
-                #[cfg(target_os = "macos")]
-                port,
             },
         }
     }
@@ -104,9 +81,6 @@ pub struct ResolvedDnsConfig {
     /// For the most part, the tunnel state machine will not handle any of this configuration
     /// on non-tunnel interface, only allow them in the firewall.
     non_tunnel_config: Vec<IpAddr>,
-    /// Port to use
-    #[cfg(target_os = "macos")]
-    port: u16,
 }
 
 impl fmt::Display for ResolvedDnsConfig {
@@ -116,9 +90,6 @@ impl fmt::Display for ResolvedDnsConfig {
 
         f.write_str(" Non-tunnel DNS: ")?;
         Self::fmt_addr_set(f, &self.non_tunnel_config)?;
-
-        #[cfg(target_os = "macos")]
-        write!(f, " Port: {}", self.port)?;
 
         Ok(())
     }
@@ -174,14 +145,9 @@ pub struct DnsMonitor {
 
 impl DnsMonitor {
     /// Returns a new `DnsMonitor` that can set and monitor the system DNS.
-    pub fn new(
-        #[cfg(target_os = "linux")] route_manager: RouteManagerHandle,
-    ) -> Result<Self, Error> {
+    pub fn new(route_manager: RouteManagerHandle) -> Result<Self, Error> {
         Ok(DnsMonitor {
-            inner: imp::DnsMonitor::new(
-                #[cfg(target_os = "linux")]
-                route_manager,
-            )?,
+            inner: imp::DnsMonitor::new(route_manager)?,
         })
     }
 
@@ -210,9 +176,7 @@ impl DnsMonitor {
 trait DnsMonitorT: Sized {
     type Error: std::error::Error;
 
-    fn new(
-        #[cfg(target_os = "linux")] route_manager: RouteManagerHandle,
-    ) -> Result<Self, Self::Error>;
+    fn new(route_manager: RouteManagerHandle) -> Result<Self, Self::Error>;
 
     async fn set(&mut self, interface: &str, servers: ResolvedDnsConfig)
     -> Result<(), Self::Error>;

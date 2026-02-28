@@ -13,13 +13,11 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 #[derive(Clone, Debug)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 pub struct RegisterAccountResponse {
     pub account_token: String,
 }
 
 #[derive(Clone, Debug, thiserror::Error, PartialEq, Eq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Error))]
 pub enum AccountCommandError {
     // Internal error that should not happen
     #[error("internal error: {0}")]
@@ -99,7 +97,6 @@ impl From<nym_validator_client::nyxd::error::NyxdError> for AccountCommandError 
 }
 
 #[derive(Clone, Debug, thiserror::Error, PartialEq, Eq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Error))]
 pub enum VpnApiError {
     #[error("timeout: {0}")]
     Timeout(String),
@@ -182,7 +179,6 @@ impl From<nym_vpn_api_client::error::VpnApiClientError> for AccountCommandError 
 
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
 #[error("{message}, message_id: {message_id:?}, code_reference_id: {code_reference_id:?}")]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 pub struct VpnApiErrorResponse {
     pub message: String,
     pub message_id: Option<String>,
@@ -212,7 +208,6 @@ impl From<nym_vpn_api_client::response::NymErrorResponse> for VpnApiErrorRespons
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),

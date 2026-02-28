@@ -13,8 +13,6 @@ use nym_gateway_directory::{BlacklistedGateways, GatewayCacheHandle};
 use nym_vpn_store::keys::wireguard::WireguardKeysDb;
 use tokio_util::sync::CancellationToken;
 
-#[cfg(windows)]
-use super::route_handler;
 use crate::{GatewayDirectoryError, MixnetError, tunnel_state_machine::TunnelSettings};
 pub use any_tunnel_handle::AnyTunnelHandle;
 pub use tombstone::Tombstone;
@@ -57,19 +55,11 @@ pub enum Error {
     #[error("registration client error")]
     RegistrationClient(#[source] Box<nym_registration_client::RegistrationClientError>),
 
-    #[cfg(target_os = "ios")]
-    #[error("failed to resolve using dns64")]
-    ResolveDns64(#[from] wireguard::dns64::Error),
-
     #[error("WireGuard error")]
     Wireguard(#[from] nym_wg_gotatun::Error),
 
     #[error("failed to dup tunnel file descriptor")]
     DupFd(#[source] std::io::Error),
-
-    #[cfg(windows)]
-    #[error("failed to add default route listener")]
-    AddDefaultRouteListener(#[source] route_handler::Error),
 
     #[error("transport error")]
     Transport(#[from] transports::TransportError),

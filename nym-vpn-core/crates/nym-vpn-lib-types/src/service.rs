@@ -17,7 +17,6 @@ use ts_rs::TS;
 use crate::{EntryPoint, ExitPoint, NetworkStatisticsConfig, NymNetworkDetails, NymVpnNetwork};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -107,17 +106,7 @@ impl Default for VpnServiceConfig {
     }
 }
 
-#[cfg(feature = "uniffi-bindings")]
-pub type BoxedVpnServiceConfig = Box<VpnServiceConfig>;
-#[cfg(feature = "uniffi-bindings")]
-uniffi::custom_type!(BoxedVpnServiceConfig, VpnServiceConfig, {
-    remote,
-    try_lift: |val| Ok(Box::new(val)),
-    lower: |val| *val
-});
-
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -202,7 +191,6 @@ impl MixnetTrafficConfig {
 
 /// The target tunnel state.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Enum))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),
@@ -230,7 +218,6 @@ impl fmt::Display for TargetState {
 }
 
 #[derive(Clone, Debug)]
-#[cfg_attr(feature = "uniffi-bindings", derive(uniffi::Record))]
 #[cfg_attr(
     feature = "typescript-bindings",
     derive(TS),

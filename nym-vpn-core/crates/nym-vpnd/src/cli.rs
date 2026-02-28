@@ -56,18 +56,6 @@ impl CliArgs {
 
 #[derive(Debug, Copy, Clone, Default, Subcommand)]
 pub enum Command {
-    #[cfg(windows)]
-    /// Install windows service
-    InstallService,
-
-    #[cfg(windows)]
-    /// Uninstall windows service
-    UninstallService,
-
-    #[cfg(windows)]
-    /// Start windows service
-    StartService,
-
     /// Run daemon as a system service
     RunAsService,
 
