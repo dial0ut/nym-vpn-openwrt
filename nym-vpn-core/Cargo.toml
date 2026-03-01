@@ -46,6 +46,7 @@ rust-version = "1.88"
 
 [profile.release]
 lto = true
+strip = true
 
 [workspace.lints.clippy]
 large_futures = "warn"
