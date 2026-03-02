@@ -343,7 +343,7 @@ build_nym_vpnd() {
         # Verify static linking on nym-vpnd
         local vpnd_binary="$binary_dir/nym-vpnd"
         if [ -f "$vpnd_binary" ]; then
-            if ldd "$vpnd_binary" 2>&1 | grep -q "not a dynamic executable"; then
+            if ldd "$vpnd_binary" 2>&1 | grep -qE "not a dynamic executable|statically linked"; then
                 log_info "✓ Binaries are statically linked (good for OpenWRT)"
             else
                 log_warn "Binaries have dynamic dependencies:"
