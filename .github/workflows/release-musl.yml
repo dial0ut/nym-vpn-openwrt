@@ -163,6 +163,8 @@ jobs:
           # mips
           - arch: mips
             openwrt_arch: mips_24kc
+          - arch: mips
+            openwrt_arch: mips_siflower
           # aarch64
           - arch: aarch64
             openwrt_arch: aarch64_generic
@@ -361,5 +363,6 @@ jobs:
             | `arm_cortex-a15_neon-vfpv4` | TI OMAP5, Samsung Exynos |
             | `mipsel_24kc` | MediaTek MT7621 routers (GL.iNet, Xiaomi) |
             | `mips_24kc` | Atheros/Qualcomm routers (AR71xx, QCA9xxx) |
+            | `mips_siflower` | Siflower SF19A28 (GL.iNet SFT1200) |
 
             Check your architecture: `opkg print-architecture | grep -v all`
