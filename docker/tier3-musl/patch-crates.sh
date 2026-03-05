@@ -145,6 +145,24 @@ _sed_i() {
 }
 
 # ============================================================================
+# Patch: boringtun
+# ============================================================================
+# Problem: Uses std::sync::atomic::AtomicU64 in rate_limiter.rs (same origin as gotatun)
+# Fix: Import AtomicU64 from portable-atomic instead
+patch_boringtun() {
+    local dir="$1"
+    log_info "Patching boringtun..."
+
+    local f="$dir/src/noise/rate_limiter.rs"
+    if grep -q 'std::sync::atomic.*AtomicU64' "$f"; then
+        _sed_i 's|use std::sync::atomic::{AtomicU64, Ordering};|use std::sync::atomic::Ordering;\nuse portable_atomic::AtomicU64;|' "$f"
+        log_info "  patched src/noise/rate_limiter.rs"
+    fi
+
+    add_portable_atomic_dep "$dir"
+}
+
+# ============================================================================
 # Patch: coarsetime
 # ============================================================================
 # Problem: Uses std::sync::atomic::AtomicU64 which doesn't exist on 32-bit
@@ -321,9 +339,15 @@ main() {
         prometheus_dir=$(copy_crate "$prometheus_src")
         patch_prometheus "$prometheus_dir"
 
+        local boringtun_src boringtun_dir
+        boringtun_src=$(find_crate "boringtun")
+        boringtun_dir=$(copy_crate "$boringtun_src")
+        patch_boringtun "$boringtun_dir"
+
         patches="${patches}
 coarsetime = { path = \"$coarsetime_dir\" }
-prometheus = { path = \"$prometheus_dir\" }"
+prometheus = { path = \"$prometheus_dir\" }
+boringtun = { path = \"$boringtun_dir\" }"
 
         # gotatun: git dependency — patch in-place in git checkout
         local gotatun_dir
