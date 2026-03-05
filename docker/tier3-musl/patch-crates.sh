@@ -177,12 +177,30 @@ patch_prometheus() {
     local dir="$1"
     log_info "Patching prometheus..."
 
+    # atomic64.rs: AtomicI64 + AtomicU64 aliased from std
     local f="$dir/src/atomic64.rs"
     if grep -q 'std::sync::atomic.*AtomicI64.*AtomicU64' "$f"; then
         _sed_i 's|use std::sync::atomic::{AtomicI64 as StdAtomicI64, AtomicU64 as StdAtomicU64, Ordering};|use std::sync::atomic::Ordering;|' "$f"
         _sed_i '/^use std::sync::atomic::Ordering;/a\
 use portable_atomic::{AtomicI64 as StdAtomicI64, AtomicU64 as StdAtomicU64};' "$f"
         log_info "  patched src/atomic64.rs"
+    fi
+
+    # histogram.rs: AtomicU64 as StdAtomicU64 from std (multi-line import)
+    f="$dir/src/histogram.rs"
+    if grep -q 'AtomicU64 as StdAtomicU64' "$f"; then
+        _sed_i 's|atomic::{AtomicU64 as StdAtomicU64, Ordering},|atomic::Ordering,|' "$f"
+        # Add portable-atomic import after the std::sync block
+        _sed_i '/^use std::time/i\
+use portable_atomic::AtomicU64 as StdAtomicU64;' "$f"
+        log_info "  patched src/histogram.rs"
+    fi
+
+    # timer.rs: AtomicU64 from std (used directly, not aliased)
+    f="$dir/src/timer.rs"
+    if grep -q 'std::sync::atomic.*AtomicU64' "$f"; then
+        _sed_i 's|use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};|use std::sync::atomic::{AtomicBool, Ordering};\nuse portable_atomic::AtomicU64;|' "$f"
+        log_info "  patched src/timer.rs"
     fi
 
     add_portable_atomic_dep "$dir"
