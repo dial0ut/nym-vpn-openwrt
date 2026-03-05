@@ -127,8 +127,6 @@ mkdir -p "$BUILD_DIR/data/etc/uci-defaults"
 mkdir -p "$BUILD_DIR/data/var/lib/nym-vpn"
 
 cp "$SCRIPT_DIR/nym-vpn.conf" "$BUILD_DIR/data/etc/config/nym-vpn"
-cp "$SCRIPT_DIR/uci-defaults/99-nym-vpn-wireguard" "$BUILD_DIR/data/etc/uci-defaults/"
-chmod 755 "$BUILD_DIR/data/etc/uci-defaults/99-nym-vpn-wireguard"
 
 # LuCI UCI defaults (if present in LuCI repo)
 if [ -f "$LUCI_DIR/root/etc/uci-defaults/luci-app-nym-vpn" ]; then

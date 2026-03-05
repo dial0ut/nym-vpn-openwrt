@@ -97,6 +97,8 @@ jobs:
           - arch: aarch64
             openwrt_arch: aarch64_cortex-a53
           - arch: aarch64
+            openwrt_arch: aarch64_cortex-a53_neon-vfpv4
+          - arch: aarch64
             openwrt_arch: aarch64_cortex-a72
           # x86
           - arch: x86_64
@@ -270,6 +272,7 @@ jobs:
             | `i386_pentium-mmx` | Legacy x86 devices |
             | `aarch64_generic` | Raspberry Pi 3/4, modern ARM64 routers |
             | `aarch64_cortex-a53` | MediaTek, Qualcomm ARM64 routers |
+            | `aarch64_cortex-a53_neon-vfpv4` | ARM64 Cortex-A53 with NEON/VFPv4 |
             | `aarch64_cortex-a72` | Raspberry Pi 4, Marvell Armada |
             | `arm_cortex-a5_vfpv4` | Marvell Armada 375 |
             | `arm_cortex-a7` | GL.iNet Flint, custom ARM builds |
