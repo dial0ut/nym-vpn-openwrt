@@ -207,6 +207,59 @@ use portable_atomic::AtomicU64 as StdAtomicU64;' "$f"
 }
 
 # ============================================================================
+# Patch: gotatun (git dependency)
+# ============================================================================
+# Problem: Uses std::sync::atomic::AtomicU64 in noise module (rate_limiter, session)
+# Fix: Import AtomicU64 from portable-atomic instead
+# Note: gotatun is a git dependency, so we patch it in-place in the git checkout
+patch_gotatun() {
+    local dir="$1"
+    log_info "Patching gotatun..."
+
+    local f
+    for f in "$dir/gotatun/src/noise/rate_limiter.rs" "$dir/gotatun/src/noise/session.rs"; do
+        if [ -f "$f" ] && grep -q 'std::sync::atomic.*AtomicU64' "$f"; then
+            _sed_i 's|use std::sync::atomic::{AtomicU64, Ordering};|use std::sync::atomic::Ordering;\nuse portable_atomic::AtomicU64;|' "$f"
+            log_info "  patched $(echo "$f" | grep -o 'noise/.*')"
+        fi
+    done
+
+    # Add portable-atomic dependency to the gotatun sub-crate
+    local cargo_toml="$dir/gotatun/Cargo.toml"
+    if [ -f "$cargo_toml" ]; then
+        add_portable_atomic_dep "$dir/gotatun"
+    fi
+}
+
+# Find the gotatun git checkout directory in CARGO_HOME.
+# Uses Cargo.lock to determine the exact revision.
+find_gotatun() {
+    local cargo_lock_dir
+    cargo_lock_dir=$(dirname "$CARGO_TOML")
+    local rev=""
+    if [ -f "$cargo_lock_dir/Cargo.lock" ]; then
+        # Extract git rev from: source = "git+https://...#<full-rev>"
+        rev=$(awk '/^name = "gotatun"/{found=1} found && /^source =.*gotatun/{print; exit}' \
+            "$cargo_lock_dir/Cargo.lock" | grep -o '#[a-f0-9]*' | tr -d '#')
+    fi
+
+    local short_rev="${rev:0:7}"
+    if [ -n "$short_rev" ]; then
+        local found
+        found=$(find "$CARGO_HOME/git/checkouts" -maxdepth 2 -type d -name "${short_rev}*" \
+            -path "*/gotatun-*/*" 2>/dev/null | head -1)
+        if [ -n "$found" ]; then
+            echo "$found"
+            return
+        fi
+    fi
+
+    # Fallback: use most recent checkout
+    find "$CARGO_HOME/git/checkouts/gotatun-"*/  -maxdepth 1 -type d 2>/dev/null \
+        | grep -v '\.git' | tail -1
+}
+
+# ============================================================================
 # Patch: schemars
 # ============================================================================
 # Problem: autocfg probe fails on Docker volume mounts -> indexmap compiles in
@@ -271,6 +324,15 @@ main() {
         patches="${patches}
 coarsetime = { path = \"$coarsetime_dir\" }
 prometheus = { path = \"$prometheus_dir\" }"
+
+        # gotatun: git dependency — patch in-place in git checkout
+        local gotatun_dir
+        gotatun_dir=$(find_gotatun)
+        if [ -n "$gotatun_dir" ]; then
+            patch_gotatun "$gotatun_dir"
+        else
+            log_warn "gotatun git checkout not found — skipping (may fail to compile)"
+        fi
 
         # Replace nym git URLs with tier3 fork for portable-atomic patches
         log_info "Replacing nym git URLs with tier3-portable-atomic fork..."
