@@ -151,48 +151,19 @@ cd "$BUILD_DIR/nym-vpn-core"
 
 # Tier 3 Target Patches
 # ====================
-# Pre-patched crates are stored in docker/tier3-musl/patches/
-# These patches fix:
+# Patches are applied at build time by patch-crates.sh, which:
+#   - Finds crates in the cargo registry cache (version-agnostic)
+#   - Copies them to /tmp/patches/ and applies sed transformations
 #   - schemars: Use BTreeMap instead of IndexMap (avoids generic args mismatch)
-#   - coarsetime: Use portable-atomic for AtomicU64 (32-bit MIPS doesn't have native AtomicU64)
-#   - prometheus: Use portable-atomic for AtomicU64
+#   - coarsetime: Use portable-atomic for AtomicU64 (32-bit targets only)
+#   - prometheus: Use portable-atomic for AtomicU64/AtomicI64 (32-bit targets only)
 
-PATCH_SRC="$BUILD_DIR/docker/tier3-musl/patches"
+PATCH_SCRIPT="$BUILD_DIR/docker/tier3-musl/patch-crates.sh"
+log_info "Fetching dependencies..."
+cargo fetch --target="${TARGET}" 2>/dev/null || true
 
-log_info "Using pre-patched crates from $PATCH_SRC"
-
-# Add patches to Cargo.toml
-if ! grep -q '\[patch.crates-io\]' Cargo.toml; then
-    log_info "Adding [patch.crates-io] section..."
-
-    if [[ "$TARGET" == mips* ]] || [[ "$TARGET" == armv5te* ]]; then
-        # 32-bit targets (MIPS, ARMv5TE) need portable-atomic patches for AtomicU64/AtomicI64
-        # Replace all nym git dependencies to use the tier3 fork
-        log_info "Replacing nym git URLs with tier3-portable-atomic fork..."
-        sed -i 's|git = "https://github.com/nymtech/nym"|git = "https://github.com/dial0ut/nym"|g' Cargo.toml
-        sed -i 's|branch = "develop"|branch = "feat/tier3-portable-atomic"|g' Cargo.toml
-
-        cat >> Cargo.toml << PATCH_EOF
-
-# Tier 3 target build-std compatibility patches
-[patch.crates-io]
-schemars = { path = "$PATCH_SRC/schemars-0.8.22" }
-coarsetime = { path = "$PATCH_SRC/coarsetime-0.1.36" }
-prometheus = { path = "$PATCH_SRC/prometheus-0.14.0" }
-PATCH_EOF
-    else
-        # 64-bit targets only need schemars patch
-        cat >> Cargo.toml << PATCH_EOF
-
-# Tier 3 target build-std compatibility patch
-[patch.crates-io]
-schemars = { path = "$PATCH_SRC/schemars-0.8.22" }
-PATCH_EOF
-    fi
-    log_info "Cargo.toml patched"
-else
-    log_info "Cargo.toml already has patch section"
-fi
+log_info "Applying build-time crate patches..."
+bash "$PATCH_SCRIPT" "$HOME/.cargo" "$TARGET" "$BUILD_DIR/nym-vpn-core/Cargo.toml"
 
 # Set up environment
 # Note: PKG_CONFIG_PATH and lib dirs use COMPILER_TRIPLET (actual toolchain paths)
