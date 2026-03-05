@@ -150,8 +150,8 @@ jobs:
           path: artifacts/*
           retention-days: 7
 
-  package-ipk:
-    name: Create IPK packages
+  package:
+    name: Create packages (${{ matrix.openwrt_arch }})
     needs: [build, build-tier3]
     runs-on: ubuntu-latest
     strategy:
@@ -240,7 +240,7 @@ jobs:
           cp artifacts/nym-vpnd-${{ matrix.arch }} binaries/nym-vpnd
           cp artifacts/nym-vpnc-${{ matrix.arch }} binaries/nym-vpnc
 
-      - name: Build IPK
+      - name: Build IPK (for OpenWrt ≤23.05 with opkg)
         run: |
           scripts/ipk/build-ipk.sh \
             "${{ steps.version.outputs.version }}" \
@@ -249,16 +249,27 @@ jobs:
             "luci" \
             "."
 
-      - name: Upload IPK artifacts
+      - name: Build APK (for OpenWrt ≥24.10 with apk)
+        run: |
+          scripts/apk/build-apk.sh \
+            "${{ steps.version.outputs.version }}" \
+            "${{ matrix.openwrt_arch }}" \
+            "binaries" \
+            "luci" \
+            "."
+
+      - name: Upload package artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ipk-${{ matrix.openwrt_arch }}
-          path: "*.ipk"
+          name: pkg-${{ matrix.openwrt_arch }}
+          path: |
+            *.ipk
+            *.apk
           retention-days: 7
 
   release:
     name: Create Release
-    needs: [build, build-tier3, package-ipk]
+    needs: [build, build-tier3, package]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
@@ -305,35 +316,37 @@ jobs:
             artifacts/*.tar.gz
             artifacts/*.sha256
             artifacts/*.ipk
+            artifacts/*.apk
           body: |
             ## Nym VPN ${{ steps.version.outputs.version }} - OpenWRT Edition
 
-            Pre-built static binaries and IPK packages for OpenWRT routers.
+            Pre-built static binaries and packages (.apk + .ipk) for OpenWrt routers.
 
             ### Requirements
 
             - **Free space:** ~60MB minimum (see table below for exact sizes)
-            - **Package feeds:** Run `opkg update` before installing
+            - **Package feeds:** Run `opkg update` (OpenWrt ≤23.05) or `apk update` (OpenWrt ≥24.10) before installing
 
             ### Installation
 
-            **Option 1: Via SSH**
+            **OpenWrt 24.10+ (apk package manager):**
+
+            ```bash
+            cd /tmp
+            wget <APK_URL>
+            apk add --allow-untrusted ./nym-vpn_*.apk
+            ```
+
+            **OpenWrt 23.05 and earlier (opkg package manager):**
 
             ```bash
             cd /tmp
             opkg update
             wget <IPK_URL>
-            opkg install nym-vpn_*.ipk
+            opkg install ./nym-vpn_*.ipk
             ```
 
-            **Option 2: Via LuCI Web Interface**
-
-            1. Download the `.ipk` file for your architecture to your computer
-            2. SSH into your router and run `opkg update`
-            3. Open LuCI (your router's web interface)
-            4. Go to **System → Software**
-            5. Click **Upload Package** and select the downloaded `.ipk` file
-            6. Click **Install**
+            > **Which package format?** Check with `which apk && echo "Use .apk" || echo "Use .ipk"`
 
             Dependencies (kmod-tun, luci-base) are installed automatically. Uses pure Rust userspace WireGuard (gotatun) — no kernel WireGuard module needed.
 
@@ -365,4 +378,4 @@ jobs:
             | `mips_24kc` | Atheros/Qualcomm routers (AR71xx, QCA9xxx) |
             | `mips_siflower` | Siflower SF19A28 (GL.iNet SFT1200) |
 
-            Check your architecture: `opkg print-architecture | grep -v all`
+            Check your architecture: `grep OPENWRT_ARCH /etc/os-release` or `opkg print-architecture | grep -v all`
