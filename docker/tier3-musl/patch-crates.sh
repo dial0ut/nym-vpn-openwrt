@@ -225,6 +225,32 @@ use portable_atomic::AtomicU64 as StdAtomicU64;' "$f"
 }
 
 # ============================================================================
+# Patch: opentelemetry_sdk
+# ============================================================================
+# Problem: Uses std::sync::atomic::{AtomicI64, AtomicU64} in metrics module
+# Fix: Import both from portable-atomic instead
+patch_opentelemetry_sdk() {
+    local dir="$1"
+    log_info "Patching opentelemetry_sdk..."
+
+    # metrics/internal/mod.rs: AtomicI64 + AtomicU64 in import with AtomicBool and AtomicUsize
+    local f="$dir/src/metrics/internal/mod.rs"
+    if [ -f "$f" ] && grep -q 'AtomicI64\|AtomicU64' "$f"; then
+        _sed_i 's|use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};|use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};\nuse portable_atomic::{AtomicI64, AtomicU64};|' "$f"
+        log_info "  patched src/metrics/internal/mod.rs"
+    fi
+
+    # logs/logger_provider.rs: standalone AtomicU64 import
+    f="$dir/src/logs/logger_provider.rs"
+    if [ -f "$f" ] && grep -q 'std::sync::atomic::AtomicU64' "$f"; then
+        _sed_i 's|use std::sync::atomic::AtomicU64;|use portable_atomic::AtomicU64;|' "$f"
+        log_info "  patched src/logs/logger_provider.rs"
+    fi
+
+    add_portable_atomic_dep "$dir"
+}
+
+# ============================================================================
 # Patch: gotatun (git dependency)
 # ============================================================================
 # Problem: Uses std::sync::atomic::AtomicU64 in noise module (rate_limiter, session)
@@ -344,10 +370,16 @@ main() {
         boringtun_dir=$(copy_crate "$boringtun_src")
         patch_boringtun "$boringtun_dir"
 
+        local otel_sdk_src otel_sdk_dir
+        otel_sdk_src=$(find_crate "opentelemetry_sdk")
+        otel_sdk_dir=$(copy_crate "$otel_sdk_src")
+        patch_opentelemetry_sdk "$otel_sdk_dir"
+
         patches="${patches}
 coarsetime = { path = \"$coarsetime_dir\" }
 prometheus = { path = \"$prometheus_dir\" }
-boringtun = { path = \"$boringtun_dir\" }"
+boringtun = { path = \"$boringtun_dir\" }
+opentelemetry_sdk = { path = \"$otel_sdk_dir\" }"
 
         # gotatun: git dependency — patch in-place in git checkout
         local gotatun_dir
