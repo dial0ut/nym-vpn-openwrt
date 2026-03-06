@@ -264,3 +264,10 @@ sqlx-pool-guard = { git = "https://github.com/nymtech/nym", branch = "vpn/releas
 #nym-wireguard-private-metadata-shared = { path = "../../nym/common/wireguard-private-metadata/shared" }
 #nym-wireguard-types = { path = "../../nym/common/wireguard-types" }
 #sqlx-pool-guard = { path = "../../nym/sqlx-pool-guard" }
+
+# Fix BLS12-381 arithmetic on 32-bit targets (MIPS, ARM32).
+# The upstream bls12_381 crate uses u128 for field arithmetic, which LLVM
+# can miscompile on 32-bit platforms. Our fork adds u32-based schoolbook
+# multiplication that avoids u128 entirely on non-64-bit targets.
+[patch."https://github.com/jstuczyn/bls12_381"]
+bls12_381 = { git = "https://github.com/dial0ut/bls12_381", branch = "fix/32bit-safe-arithmetic" }

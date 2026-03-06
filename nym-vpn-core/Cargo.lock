@@ -797,7 +797,7 @@ dependencies = [
 [[package]]
 name = "bls12_381"
 version = "0.8.0"
-source = "git+https://github.com/jstuczyn/bls12_381?branch=temp%2Fexperimental-serdect-updated#9bf520059cb28323fc51469cae86868ef4fa6fbd"
+source = "git+https://github.com/dial0ut/bls12_381?branch=fix%2F32bit-safe-arithmetic#06c7db66458aaa35d8fdd05c62542fbab52238f4"
 dependencies = [
  "digest 0.10.7",
  "ff",
