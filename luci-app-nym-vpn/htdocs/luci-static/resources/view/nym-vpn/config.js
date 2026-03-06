@@ -134,7 +134,14 @@ return view.extend({
                         actionBtn.className = 'nym-btn nym-btn-primary';
                         actionBtn.disabled = false;
                         actionBtn.onclick = handleConnect;
+                    } else if (state === 'connecting') {
+                        actionBtn.textContent = 'Cancel';
+                        actionBtn.className = 'nym-btn nym-btn-danger';
+                        actionBtn.disabled = false;
+                        actionBtn.onclick = handleCancel;
                     } else {
+                        // disconnecting — keep disabled
+                        actionBtn.textContent = 'Disconnecting';
                         actionBtn.disabled = true;
                     }
                 }
@@ -209,7 +216,12 @@ return view.extend({
         var handleConnect = function() {
             if (statusHero) statusHero.className = 'nym-status-hero connecting';
             if (statusLabel) statusLabel.textContent = 'Connecting';
-            if (actionBtn) actionBtn.disabled = true;
+            if (actionBtn) {
+                actionBtn.textContent = 'Cancel';
+                actionBtn.className = 'nym-btn nym-btn-danger';
+                actionBtn.disabled = false;
+                actionBtn.onclick = handleCancel;
+            }
 
             // Get selected gateway settings
             var entry_country = entryCountrySelect ? entryCountrySelect.value : 'none';
@@ -274,6 +286,27 @@ return view.extend({
                     showToast('Connection error: ' + err.message, 'error');
                     updateStatus();
                 });
+        };
+
+        var handleCancel = function() {
+            if (statusHero) statusHero.className = 'nym-status-hero disconnecting';
+            if (statusLabel) statusLabel.textContent = 'Cancelling';
+            if (actionBtn) {
+                actionBtn.textContent = 'Cancelling';
+                actionBtn.disabled = true;
+            }
+
+            rpc.disconnect().then(function(result) {
+                if (result && result.success) {
+                    showToast('Connection cancelled', 'warning');
+                } else {
+                    showToast('Cancel failed: ' + (result.error || 'Unknown'), 'error');
+                }
+                updateStatus();
+            }).catch(function(err) {
+                showToast('Cancel error: ' + err.message, 'error');
+                updateStatus();
+            });
         };
 
         var handleDisconnect = function() {
@@ -972,6 +1005,10 @@ return view.extend({
                 actionBtn.textContent = 'Disconnect';
                 actionBtn.className = 'nym-btn nym-btn-danger';
                 actionBtn.onclick = handleDisconnect;
+            } else if (status.state === 'connecting') {
+                actionBtn.textContent = 'Cancel';
+                actionBtn.className = 'nym-btn nym-btn-danger';
+                actionBtn.onclick = handleCancel;
             } else {
                 // Disconnected or other state - set Connect handler
                 actionBtn.textContent = 'Connect';
