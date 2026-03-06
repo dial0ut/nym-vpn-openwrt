@@ -28,7 +28,19 @@ impl TryFrom<PendingCredentialRequestStored> for PendingCredentialRequest {
     type Error = bincode::Error;
 
     fn try_from(value: PendingCredentialRequestStored) -> Result<Self, Self::Error> {
-        let request_info = binary_serialiser().deserialize(&value.request_info)?;
+        tracing::debug!(
+            "Deserializing RequestInfo for pending request '{}' ({} bytes)",
+            value.id,
+            value.request_info.len()
+        );
+        let request_info = binary_serialiser().deserialize(&value.request_info)
+            .inspect_err(|err| {
+                tracing::error!(
+                    "Failed to deserialize RequestInfo for '{}': {err} (data len: {} bytes)",
+                    value.id,
+                    value.request_info.len()
+                );
+            })?;
         Ok(Self {
             id: value.id.clone(),
             expiration_date: value.expiration_date,
@@ -41,7 +53,18 @@ impl TryFrom<PendingCredentialRequest> for PendingCredentialRequestStored {
     type Error = bincode::Error;
 
     fn try_from(value: PendingCredentialRequest) -> Result<Self, Self::Error> {
-        let request_info = binary_serialiser().serialize(&value.request_info)?;
+        let request_info = binary_serialiser().serialize(&value.request_info)
+            .inspect_err(|err| {
+                tracing::error!(
+                    "Failed to serialize RequestInfo for '{}': {err}",
+                    value.id
+                );
+            })?;
+        tracing::debug!(
+            "Serialized RequestInfo for '{}': {} bytes",
+            value.id,
+            request_info.len()
+        );
         Ok(Self {
             id: value.id.clone(),
             expiration_date: value.expiration_date,

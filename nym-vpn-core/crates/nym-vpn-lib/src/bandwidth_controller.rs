@@ -424,15 +424,27 @@ impl TemporaryBandwidthClient {
         credential: nym_credentials_interface::CredentialSpendingData,
         ticketbook_type: TicketType,
     ) -> Result<AvailableBandwidth, SpecificGatewayError> {
+        tracing::info!(
+            "Sending bandwidth topup to gateway {} (type: {ticketbook_type}, client: {})",
+            self.gateway_id(),
+            if matches!(self, TemporaryBandwidthClient::Latest(_)) { "metadata" } else { "mixnet" }
+        );
         match self {
             TemporaryBandwidthClient::Deprecated(authenticator_client) => {
                 let response = authenticator_client.top_up(credential).await.map_err(|e| {
+                    tracing::error!(
+                        "Gateway topup via mixnet client failed: {e}"
+                    );
                     SpecificGatewayError::from_deprecated_topup_wireguard(
                         self.gateway_id().to_string(),
                         ticketbook_type,
                         e,
                     )
                 })?;
+                tracing::info!(
+                    "Gateway topup response: remaining={} bytes",
+                    response.remaining_bandwidth_bytes
+                );
                 Ok(AvailableBandwidth {
                     bandwidth_bytes: response.remaining_bandwidth_bytes,
                     upgrade_mode: response.current_upgrade_mode_status.into(),
@@ -443,12 +455,20 @@ impl TemporaryBandwidthClient {
                     .topup_bandwidth(credential)
                     .await
                     .map_err(|e| {
+                        tracing::error!(
+                            "Gateway topup via metadata client failed: {e}"
+                        );
                         SpecificGatewayError::from_topup_wireguard(
                             self.gateway_id().to_string(),
                             ticketbook_type,
                             e,
                         )
                     })?;
+                tracing::info!(
+                    "Gateway topup response: remaining={} bytes, upgrade_mode={:?}",
+                    response.bandwidth_bytes,
+                    response.upgrade_mode
+                );
                 Ok(AvailableBandwidth {
                     bandwidth_bytes: response.bandwidth_bytes,
                     upgrade_mode: response.upgrade_mode,
@@ -648,7 +668,10 @@ impl BandwidthController {
         entry: bool,
     ) -> Result<AvailableBandwidth, SpecificGatewayError> {
         let ticketbook_type = self.ticket_type(entry);
-        tracing::debug!("Topping up our bandwidth allowance for {ticketbook_type}");
+        let side = if entry { "entry" } else { "exit" };
+        tracing::info!(
+            "Topping up bandwidth for {side} gateway (type: {ticketbook_type})"
+        );
 
         let bw_client = if entry {
             &mut self.wg_entry_gateway_client
@@ -656,6 +679,10 @@ impl BandwidthController {
             &mut self.wg_exit_gateway_client
         };
 
+        tracing::debug!(
+            "Requesting ecash ticket for {side} gateway {} (type: {ticketbook_type}, tickets: {DEFAULT_TICKETS_TO_SPEND})",
+            bw_client.gateway_id()
+        );
         let credential = self
             .ticket_provider
             .get_ecash_ticket(
@@ -664,15 +691,32 @@ impl BandwidthController {
                 DEFAULT_TICKETS_TO_SPEND,
             )
             .await
-            .map_err(|source| SpecificGatewayError::RequestCredential {
-                gateway_id: bw_client.gateway_id().to_string(),
-                ticketbook_type,
-                source: Box::new(source),
+            .map_err(|source| {
+                tracing::error!(
+                    "Failed to get ecash ticket for {side} gateway {}: {source}",
+                    bw_client.gateway_id()
+                );
+                SpecificGatewayError::RequestCredential {
+                    gateway_id: bw_client.gateway_id().to_string(),
+                    ticketbook_type,
+                    source: Box::new(source),
+                }
             })?
             .data;
+        tracing::debug!("Got ecash ticket for {side}, sending topup to gateway");
         let remaining_bandwidth = bw_client
             .topup_bandwidth(credential, ticketbook_type)
-            .await?;
+            .await
+            .inspect(|bw| {
+                tracing::info!(
+                    "Topup successful for {side} gateway: remaining={} bytes, upgrade_mode={:?}",
+                    bw.bandwidth_bytes,
+                    bw.upgrade_mode
+                );
+            })
+            .inspect_err(|err| {
+                tracing::error!("Topup failed for {side} gateway: {err}");
+            })?;
         Ok(remaining_bandwidth)
     }
 
@@ -843,6 +887,7 @@ impl BandwidthController {
     }
 
     async fn check_bandwidth(&mut self, entry: bool, current_period: Duration) -> Option<Duration> {
+        let side = if entry { "entry" } else { "exit" };
         let bw_client = if entry {
             &mut self.wg_entry_gateway_client
         } else {
@@ -854,8 +899,18 @@ impl BandwidthController {
             }
             ret = bw_client.query_bandwidth_with_retries(DEFAULT_CLIENT_RETRIES) => {
                 match ret {
-                    Ok(query_res) => return self.handle_bandwidth_query(entry, current_period, query_res).await,
-                    Err(err) => self.handle_bandwidth_query_error(entry, err).await,
+                    Ok(query_res) => {
+                        tracing::info!(
+                            "Bandwidth query for {side} gateway: {} bytes, upgrade_mode={:?}",
+                            query_res.bandwidth_bytes,
+                            query_res.upgrade_mode
+                        );
+                        return self.handle_bandwidth_query(entry, current_period, query_res).await;
+                    }
+                    Err(err) => {
+                        tracing::warn!("Bandwidth query failed for {side} gateway: {err}");
+                        self.handle_bandwidth_query_error(entry, err).await;
+                    }
                 }
             }
         }

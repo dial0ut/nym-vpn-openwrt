@@ -208,22 +208,26 @@ impl RequestZkNymTask {
         &self,
         ticketbook_type: TicketType,
     ) -> Result<ZkNymRequestData, RequestZkNymError> {
-        tracing::debug!("Constructing zk-nym request");
+        tracing::info!("Constructing zk-nym request for ticket type: {ticketbook_type}");
 
         let ecash_keypair = self
             .account
             .create_ecash_keypair()
+            .inspect_err(|err| tracing::error!("Failed to create ecash keypair: {err}"))
             .map_err(|err| RequestZkNymError::CreateEcashKeyPair(err.to_string()))?;
         let expiration_date = nym_ecash_time::ecash_default_expiration_date();
+        tracing::debug!("ecash expiration_date: {expiration_date}");
 
         let (withdrawal_request, request_info) = nym_credentials_interface::withdrawal_request(
             ecash_keypair.secret_key(),
             expiration_date.ecash_unix_timestamp(),
             ticketbook_type.encode(),
         )
+        .inspect_err(|err| tracing::error!("Failed to construct withdrawal request: {err}"))
         .map_err(|err| RequestZkNymError::ConstructWithdrawalRequest(err.to_string()))?;
 
         let ecash_pubkey = ecash_keypair.public_key();
+        tracing::debug!("Withdrawal request constructed successfully");
 
         Ok(ZkNymRequestData {
             withdrawal_request,
@@ -481,7 +485,12 @@ impl RequestZkNymTask {
         response: NymVpnZkNym,
         pending_request: PendingCredentialRequest,
     ) -> Result<(), RequestZkNymError> {
-        tracing::info!("Importing zk-nym ticketbook");
+        tracing::info!(
+            "Importing zk-nym ticketbook (id: {}, type: {}, status: {})",
+            response.id,
+            response.ticketbook_type,
+            response.status
+        );
 
         let Some(ref shares) = response.blinded_shares else {
             return Err(RequestZkNymError::MissingBlindedShares);
@@ -589,39 +598,44 @@ impl RequestZkNymTask {
         expiration_date: Date,
         request_info: &RequestInfo,
     ) -> Result<IssuedTicketBook, RequestZkNymError> {
-        tracing::trace!("Unblinding and aggregating zk-nym shares");
+        tracing::info!(
+            "Unblinding and aggregating zk-nym shares (epoch: {}, type: {ticketbook_type}, expiry: {expiration_date}, shares: {}, issuers: {})",
+            shares.epoch_id,
+            shares.shares.len(),
+            issuers.keys.len()
+        );
 
         let ecash_keypair = self
             .account
             .create_ecash_keypair()
             .map_err(|err| RequestZkNymError::CreateEcashKeyPair(err.to_string()))?;
 
-        tracing::trace!("Setting up decoded keys");
+        tracing::debug!("Decoding {} issuer verification keys", issuers.keys.len());
         let mut decoded_keys = HashMap::new();
         for key in issuers.keys {
             let vk = VerificationKeyAuth::try_from_bs58(&key.bs58_encoded_key)
                 .inspect_err(|err| {
-                    tracing::error!("Failed to create VerificationKeyAuth: {err:#?}")
+                    tracing::error!("Failed to decode VerificationKeyAuth for node_index {}: {err:#?}", key.node_index)
                 })
                 .map_err(|err| RequestZkNymError::InvalidVerificationKey(err.to_string()))?;
             decoded_keys.insert(key.node_index, vk);
         }
 
-        tracing::trace!("Verifying zk-nym shares");
+        tracing::debug!("Verifying {} zk-nym shares via issue_verify (BLS12-381 pairing)", shares.shares.len());
         let mut partial_wallets = Vec::new();
-        for share in shares.shares {
-            tracing::trace!("Creating blinded signature");
+        for (i, share) in shares.shares.iter().enumerate() {
             let blinded_sig =
                 BlindedSignature::try_from_bs58(&share.bs58_encoded_share).map_err(|err| {
-                    tracing::error!("Failed to create BlindedSignature: {err:#?}");
+                    tracing::error!("Failed to deserialize BlindedSignature for share {i} (node_index {}): {err:#?}", share.node_index);
                     RequestZkNymError::DeserializeBlindedSignature(err.to_string())
                 })?;
 
             let Some(vk) = decoded_keys.get(&share.node_index) else {
+                tracing::error!("No verification key for node_index {} (share {i})", share.node_index);
                 return Err(RequestZkNymError::DecodedKeysMissingIndex);
             };
 
-            tracing::trace!("Calling issue_verify");
+            tracing::debug!("issue_verify: share {i}, node_index {}", share.node_index);
             match nym_credentials_interface::issue_verify(
                 vk,
                 ecash_keypair.secret_key(),
@@ -630,11 +644,14 @@ impl RequestZkNymTask {
                 share.node_index,
             ) {
                 Ok(partial_wallet) => {
-                    tracing::trace!("Partial wallet created and appended");
+                    tracing::debug!("issue_verify succeeded for share {i}");
                     partial_wallets.push(partial_wallet)
                 }
                 Err(err) => {
-                    tracing::error!("Failed to issue verify: {err:#?}");
+                    tracing::error!(
+                        "issue_verify FAILED for share {i} (node_index {}, type: {ticketbook_type}): {err:#?}",
+                        share.node_index
+                    );
                     return Err(RequestZkNymError::ImportZkNym {
                         ticket_type: ticketbook_type.to_string(),
                         error: err.to_string(),
@@ -643,16 +660,19 @@ impl RequestZkNymTask {
             }
         }
 
-        tracing::trace!("Aggregating wallets");
+        tracing::info!("All {} shares verified, aggregating wallets", partial_wallets.len());
         let aggregated_wallets = nym_credentials_interface::aggregate_wallets(
             &master_vk,
             ecash_keypair.secret_key(),
             &partial_wallets,
             request_info,
         )
+        .inspect_err(|err| {
+            tracing::error!("aggregate_wallets FAILED (type: {ticketbook_type}): {err:#?}");
+        })
         .map_err(|err| RequestZkNymError::AggregateWallets(err.to_string()))?;
 
-        tracing::trace!("Creating ticketbook");
+        tracing::info!("Wallet aggregation successful, creating ticketbook (epoch: {}, type: {ticketbook_type})", shares.epoch_id);
         let ticketbook = IssuedTicketBook::new(
             aggregated_wallets.into_wallet_signatures(),
             shares.epoch_id,

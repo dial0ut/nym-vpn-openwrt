@@ -124,9 +124,14 @@ impl RequestingZkNymsState {
             .map_err(|err| ZkNymError::Storage(err.to_string()))?;
 
         if ticket_types_to_request.is_empty() {
-            // We have enough credential, we can return
+            info!("All ticket types have sufficient bandwidth, no zk-nym request needed");
             return Ok(ZkNymFetchResult::SufficientBandwidth);
         }
+
+        info!(
+            "Ticket types running low (need replenishment): {:?}, fair_usage_left: {fair_usage_left}",
+            ticket_types_to_request
+        );
 
         let request_handler =
             RequestZkNymCommandHandler::new(vpn_api_account, device, storage, vpn_api_client);
