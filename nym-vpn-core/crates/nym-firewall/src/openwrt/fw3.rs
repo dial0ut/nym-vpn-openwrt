@@ -111,6 +111,9 @@ impl Fw3Firewall {
             self.add_ndp_rules(&mut rules);
         }
 
+        // Allow mwan3 tracking pings so WAN interfaces stay up
+        self.add_mwan3_rules(&mut rules, is_ipv6);
+
         // Add policy-specific rules
         self.add_policy_rules(&mut rules, policy, is_ipv6)?;
 
@@ -270,6 +273,33 @@ impl Fw3Firewall {
                 rules,
                 "-A {} -p udp --sport 68 --dport 67 -j ACCEPT",
                 NYM_INPUT
+            ).unwrap();
+        }
+    }
+
+    /// Allow ICMP pings to mwan3 tracking IPs.
+    ///
+    /// mwan3 pings these IPs to determine if WAN interfaces are alive.
+    /// Without this, our kill-switch blocks the pings, mwan3 declares WAN down,
+    /// and triggers a firewall reload cascade that kills VPN connections.
+    fn add_mwan3_rules(&self, rules: &mut String, is_ipv6: bool) {
+        let track_ips = common::get_mwan3_track_ips();
+        let icmp_proto = if is_ipv6 { "icmpv6" } else { "icmp" };
+
+        for ip in &track_ips {
+            if is_ipv6 != common::is_ipv6(ip) {
+                continue;
+            }
+            let ip_str = common::format_ip(ip);
+            writeln!(
+                rules,
+                "-A {} -p {} -d {} -j ACCEPT",
+                NYM_OUTPUT, icmp_proto, ip_str
+            ).unwrap();
+            writeln!(
+                rules,
+                "-A {} -p {} -s {} -j ACCEPT",
+                NYM_INPUT, icmp_proto, ip_str
             ).unwrap();
         }
     }

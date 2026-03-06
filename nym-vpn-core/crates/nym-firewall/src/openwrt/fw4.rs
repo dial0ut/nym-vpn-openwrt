@@ -96,6 +96,9 @@ impl Fw4Firewall {
         // DHCPv6: router as server
         writeln!(rules, "        udp dport 547 accept").unwrap();
         writeln!(rules, "        icmpv6 type {{ nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert, nd-redirect }} accept").unwrap();
+
+        // Allow mwan3 tracking pings (keeps WAN interfaces alive)
+        self.add_mwan3_input_rules(rules);
         writeln!(rules).unwrap();
 
         // Policy rules
@@ -125,6 +128,9 @@ impl Fw4Firewall {
         // DHCPv6: router as server
         writeln!(rules, "        udp sport 547 udp dport 546 accept").unwrap();
         writeln!(rules, "        icmpv6 type {{ nd-router-solicit, nd-neighbor-solicit, nd-neighbor-advert }} accept").unwrap();
+
+        // Allow mwan3 tracking pings (keeps WAN interfaces alive)
+        self.add_mwan3_output_rules(rules);
         writeln!(rules).unwrap();
 
         // Policy rules
@@ -151,6 +157,46 @@ impl Fw4Firewall {
         writeln!(rules, "    }}").unwrap();
 
         Ok(())
+    }
+
+    /// Allow ICMP replies from mwan3 tracking IPs (input chain).
+    fn add_mwan3_input_rules(&self, rules: &mut String) {
+        let track_ips = get_mwan3_track_ips();
+        for ip in &track_ips {
+            if is_ipv6(ip) {
+                writeln!(
+                    rules,
+                    "        icmpv6 type echo-reply ip6 saddr {} accept",
+                    format_ip(ip)
+                ).unwrap();
+            } else {
+                writeln!(
+                    rules,
+                    "        icmp type echo-reply ip saddr {} accept",
+                    format_ip(ip)
+                ).unwrap();
+            }
+        }
+    }
+
+    /// Allow ICMP pings to mwan3 tracking IPs (output chain).
+    fn add_mwan3_output_rules(&self, rules: &mut String) {
+        let track_ips = get_mwan3_track_ips();
+        for ip in &track_ips {
+            if is_ipv6(ip) {
+                writeln!(
+                    rules,
+                    "        icmpv6 type echo-request ip6 daddr {} accept",
+                    format_ip(ip)
+                ).unwrap();
+            } else {
+                writeln!(
+                    rules,
+                    "        icmp type echo-request ip daddr {} accept",
+                    format_ip(ip)
+                ).unwrap();
+            }
+        }
     }
 
     fn add_input_policy_rules(&self, rules: &mut String, policy: &FirewallPolicy) -> Result<()> {

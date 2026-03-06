@@ -112,3 +112,44 @@ pub fn remove_file_if_exists(path: &str) -> std::io::Result<()> {
     }
     Ok(())
 }
+
+/// Read mwan3 tracking IPs from UCI config.
+///
+/// mwan3 pings these IPs to determine if WAN interfaces are alive.
+/// If our firewall rules block these pings, mwan3 declares WAN down
+/// and triggers a firewall reload cascade that kills VPN connections.
+pub fn get_mwan3_track_ips() -> Vec<IpAddr> {
+    let output = match std::process::Command::new("uci")
+        .args(["show", "mwan3"])
+        .output()
+    {
+        Ok(o) if o.status.success() => o,
+        _ => return Vec::new(),
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut ips = Vec::new();
+
+    for line in stdout.lines() {
+        // Lines look like: mwan3.wan.track_ip='1.1.1.1' '8.8.8.8' ...
+        if !line.contains(".track_ip=") {
+            continue;
+        }
+        if let Some(value) = line.split('=').nth(1) {
+            for token in value.split_whitespace() {
+                let ip_str = token.trim_matches('\'');
+                if let Ok(ip) = ip_str.parse::<IpAddr>() {
+                    if !ips.contains(&ip) {
+                        ips.push(ip);
+                    }
+                }
+            }
+        }
+    }
+
+    if !ips.is_empty() {
+        tracing::debug!("Found mwan3 tracking IPs: {:?}", ips);
+    }
+
+    ips
+}
