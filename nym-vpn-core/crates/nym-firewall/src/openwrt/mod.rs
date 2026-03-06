@@ -86,6 +86,26 @@ impl Firewall {
     }
 
     pub fn apply_policy(&mut self, policy: FirewallPolicy) -> Result<()> {
+        // On OpenWrt, skip applying the kill-switch when in the initial Connecting
+        // state before gateway endpoints are resolved. At this point peer_endpoints
+        // and allowed_endpoints are both empty, so the policy would block ALL
+        // outbound traffic. This causes mwan3 to declare WAN down and trigger a
+        // firewall reload cascade, killing the connection attempt.
+        // The real kill-switch kicks in once peers are known.
+        if let FirewallPolicy::Connecting {
+            ref peer_endpoints,
+            ref allowed_endpoints,
+            ..
+        } = policy
+        {
+            if peer_endpoints.is_empty() && allowed_endpoints.is_empty() {
+                tracing::info!(
+                    "Skipping firewall policy: Connecting state with no peers/endpoints yet"
+                );
+                return Ok(());
+            }
+        }
+
         match &mut self.inner {
             FirewallInner::Fw3(fw) => fw.apply_policy(policy),
             FirewallInner::Fw4(fw) => fw.apply_policy(policy),
