@@ -125,7 +125,7 @@ impl Fw3Firewall {
         let cmd = if is_ipv6 { "ip6tables-restore" } else { "iptables-restore" };
 
         let output = Command::new(cmd)
-            .arg("--noflush")
+            .args(["--noflush", "-w"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -158,12 +158,12 @@ impl Fw3Firewall {
         ] {
             // Delete existing jump (ignore errors if not present)
             let _ = Command::new(ipt)
-                .args(["-D", hook, "-j", target])
+                .args(["-w", "-D", hook, "-j", target])
                 .output();
 
             // Insert jump at position 1
             let output = Command::new(ipt)
-                .args(["-I", hook, "1", "-j", target])
+                .args(["-w", "-I", hook, "1", "-j", target])
                 .output()
                 .map_err(|e| Error::ApplyError(format!("Failed to run {}: {}", ipt, e)))?;
 
@@ -189,13 +189,13 @@ impl Fw3Firewall {
             (FW3_HOOK_OUTPUT, NYM_OUTPUT),
             (FW3_HOOK_FORWARD, NYM_FORWARD),
         ] {
-            let _ = Command::new(ipt).args(["-D", hook, "-j", target]).output();
+            let _ = Command::new(ipt).args(["-w", "-D", hook, "-j", target]).output();
         }
 
         // Flush and delete our chains
         for chain in [NYM_INPUT, NYM_OUTPUT, NYM_FORWARD] {
-            let _ = Command::new(ipt).args(["-F", chain]).output();
-            let _ = Command::new(ipt).args(["-X", chain]).output();
+            let _ = Command::new(ipt).args(["-w", "-F", chain]).output();
+            let _ = Command::new(ipt).args(["-w", "-X", chain]).output();
         }
     }
 
@@ -680,6 +680,7 @@ impl Fw3Firewall {
             // iptables -t nat -A POSTROUTING -o <iface> -m comment --comment "nym-vpn" -j MASQUERADE
             let _ = Command::new("iptables")
                 .args([
+                    "-w",
                     "-t", "nat",
                     "-A", "POSTROUTING",
                     "-o", iface,
@@ -698,7 +699,7 @@ impl Fw3Firewall {
     fn remove_masquerade_rules(&self) {
         // List NAT POSTROUTING rules and remove ones with our comment
         if let Ok(output) = Command::new("iptables")
-            .args(["-t", "nat", "-L", "POSTROUTING", "-n", "--line-numbers", "-v"])
+            .args(["-w", "-t", "nat", "-L", "POSTROUTING", "-n", "--line-numbers", "-v"])
             .output()
         {
             let stdout = String::from_utf8_lossy(&output.stdout);
@@ -719,7 +720,7 @@ impl Fw3Firewall {
             to_delete.reverse();
             for num in to_delete {
                 let _ = Command::new("iptables")
-                    .args(["-t", "nat", "-D", "POSTROUTING", &num.to_string()])
+                    .args(["-w", "-t", "nat", "-D", "POSTROUTING", &num.to_string()])
                     .output();
             }
         }
