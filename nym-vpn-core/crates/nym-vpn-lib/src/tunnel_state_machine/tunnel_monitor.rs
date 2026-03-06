@@ -73,8 +73,11 @@ pub type TunnelMonitorEventReceiver = mpsc::UnboundedReceiver<TunnelMonitorEvent
 /// Timeout when waiting for reply from the event handler.
 const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Timeout for starting the registration client
-const REGISTRATION_CLIENT_STARTUP_TIMEOUT: Duration = Duration::from_secs(8);
+/// Timeout for starting the registration client.
+/// On embedded devices (MIPS routers etc.), BLS12-381 ecash credential
+/// operations can take much longer than on desktop CPUs, so we use a
+/// generous timeout to avoid a connect/timeout/reconnect loop.
+const REGISTRATION_CLIENT_STARTUP_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Debug)]
 pub enum TunnelMonitorEvent {
