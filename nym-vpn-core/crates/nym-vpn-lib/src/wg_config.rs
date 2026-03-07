@@ -7,7 +7,7 @@ use std::{
 };
 
 use ipnetwork::{IpNetwork, Ipv4Network, Ipv6Network};
-use nym_registration_common::GatewayData;
+use nym_registration_common::WireguardConfiguration;
 use nym_wg_gotatun::{PrivateKey, PublicKey, amnezia::AmneziaConfig};
 use nym_wg_gotatun::PeerConfig;
 use nym_wg_gotatun::wireguard_go;
@@ -122,7 +122,7 @@ impl WgNodeConfig {
 
 impl WgNodeConfig {
     pub fn with_gateway_data(
-        gateway_data: GatewayData,
+        gateway_data: WireguardConfiguration,
         private_key: &nym_crypto::asymmetric::encryption::PrivateKey,
         allowed_ips: AllowedIps,
         dns: Vec<IpAddr>,

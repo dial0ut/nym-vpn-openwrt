@@ -28,9 +28,9 @@ use nym_connection_monitor::{
 };
 use nym_registration_client::{
     MixnetRegistrationResult, RegistrationClientBuilder, RegistrationClientBuilderConfig,
-    RegistrationNymNode, RegistrationResult, WireguardRegistrationResult,
+    RegistrationMode, RegistrationNymNode, RegistrationResult, WireguardRegistrationResult,
 };
-use nym_registration_common::NymNode;
+use nym_registration_common::NymNodeInformation;
 use nym_vpn_account_controller::{AccountCommandSender, AccountStateReceiver};
 use nym_vpn_lib_types::{
     AccountControllerError, BridgeAddress, ConnectionData, ErrorStateReason,
@@ -412,7 +412,7 @@ impl TunnelMonitor {
             .map_err(Box::new)?;
 
         let entry_node = RegistrationNymNode {
-            node: NymNode {
+            node: NymNodeInformation {
                 identity: selected_gateways.entry_gateway().identity,
                 ipr_address: selected_gateways
                     .entry_gateway()
@@ -424,12 +424,13 @@ impl TunnelMonitor {
                     .map(Into::into),
                 ip_address: entry_ip,
                 version: selected_gateways.entry_gateway().version.clone().into(),
+                lp_data: None,
             },
             keys: selected_gateways.entry_keypair().clone(),
         };
 
         let exit_node = RegistrationNymNode {
-            node: NymNode {
+            node: NymNodeInformation {
                 identity: selected_gateways.exit_gateway().identity,
                 ipr_address: selected_gateways.exit_gateway().ipr_address.map(Into::into),
                 authenticator_address: selected_gateways
@@ -438,6 +439,7 @@ impl TunnelMonitor {
                     .map(Into::into),
                 ip_address: exit_ip,
                 version: selected_gateways.exit_gateway().version.clone().into(),
+                lp_data: None,
             },
             keys: selected_gateways.exit_keypair().clone(),
         };
@@ -449,13 +451,17 @@ impl TunnelMonitor {
             .borrow()
             .clone();
         let nym_network = network_env.nym_network.network.clone();
+        let mode = match self.tunnel_parameters.tunnel_settings.tunnel_type {
+            TunnelType::Mixnet => RegistrationMode::Mixnet,
+            TunnelType::Wireguard => RegistrationMode::Wireguard,
+        };
         let rcb_config_builder = RegistrationClientBuilderConfig::builder()
             .entry_node(entry_node)
             .exit_node(exit_node)
             .data_path(self.tunnel_parameters.nym_config.data_path.clone())
             .mixnet_client_config(mixnet_client_config)
             .mixnet_client_startup_timeout(REGISTRATION_CLIENT_STARTUP_TIMEOUT)
-            .two_hops(self.tunnel_parameters.tunnel_settings.tunnel_type == TunnelType::Wireguard)
+            .mode(mode)
             .user_agent(user_agent)
             .custom_topology_provider(Box::new(
                 self.custom_topology_provider.make_topology_provider(),
@@ -499,6 +505,9 @@ impl TunnelMonitor {
                     entry: WireguardNode::from(result.entry_gateway_data.clone()),
                     exit: WireguardNode::from(result.exit_gateway_data.clone()),
                 })
+            }
+            RegistrationResult::Lp(_) => {
+                return Err(tunnel::Error::Cancelled.into());
             }
         };
         let connection_data = Box::new(EstablishConnectionData {
@@ -586,6 +595,9 @@ impl TunnelMonitor {
                     mixnet_client_token,
                     bridge_close_tx,
                 )
+            }
+            RegistrationResult::Lp(_) => {
+                return Err(tunnel::Error::Cancelled.into());
             }
         };
 

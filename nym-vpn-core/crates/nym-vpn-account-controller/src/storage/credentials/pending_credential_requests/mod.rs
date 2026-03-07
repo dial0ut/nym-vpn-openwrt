@@ -13,7 +13,7 @@ use std::{
 
 use sqlite::SqliteZkNymRequestsStorageManager;
 use sqlx::ConnectOptions;
-use sqlx_pool_guard::SqlitePoolGuard;
+use nym_sqlx_pool_guard::SqlitePoolGuard;
 use time::OffsetDateTime;
 use tracing::log::LevelFilter;
 

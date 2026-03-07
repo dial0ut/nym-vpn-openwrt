@@ -4,7 +4,7 @@
 use std::net::SocketAddr;
 
 use crate::tunnel_state_machine::TunnelMetadata;
-use nym_registration_common::GatewayData;
+use nym_registration_common::WireguardConfiguration;
 
 use nym_vpn_lib_types::BridgeAddress;
 
@@ -15,8 +15,8 @@ pub mod two_hop_config;
 #[derive(Debug, Clone)]
 pub struct ConnectionData {
     pub entry_bridge_addr: Option<BridgeAddress>,
-    pub entry: GatewayData,
-    pub exit: GatewayData,
+    pub entry: WireguardConfiguration,
+    pub exit: WireguardConfiguration,
 }
 
 impl ConnectionData {
@@ -29,7 +29,7 @@ impl ConnectionData {
     }
 
     /// Returns effective entry gateway data set to bridge listen endpoint when entry bridge address is available.
-    pub fn effective_entry_gateway_data(&self) -> GatewayData {
+    pub fn effective_entry_gateway_data(&self) -> WireguardConfiguration {
         let mut gateway_data = self.entry.clone();
         gateway_data.endpoint = self.effective_entry_endpoint();
         gateway_data

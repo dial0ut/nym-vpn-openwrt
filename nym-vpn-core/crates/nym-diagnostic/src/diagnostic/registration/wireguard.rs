@@ -1,7 +1,7 @@
 // Copyright 2026 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
-use nym_registration_common::GatewayData;
+use nym_registration_common::WireguardConfiguration;
 use nym_sdk::mixnet::x25519;
 use nym_vpn_lib_types::{DiagnosticResult, PingReport};
 
@@ -31,7 +31,7 @@ pub struct WireguardDiagnostic {
 
 impl WireguardDiagnostic {
     pub async fn run_diagnostic(
-        gateway_data: GatewayData,
+        gateway_data: WireguardConfiguration,
         gateway_keypair: Arc<x25519::KeyPair>,
     ) -> anyhow::Result<Vec<PingReport>> {
         // We only have one endpoint so we have to adapt, we can't do both

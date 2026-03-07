@@ -8,7 +8,7 @@ use crate::storage::{
 };
 use rand::distributions::{Alphanumeric, DistString};
 use sqlx::ConnectOptions;
-use sqlx_pool_guard::SqlitePoolGuard;
+use nym_sqlx_pool_guard::SqlitePoolGuard;
 use std::path::Path;
 use tracing::log::LevelFilter;
 

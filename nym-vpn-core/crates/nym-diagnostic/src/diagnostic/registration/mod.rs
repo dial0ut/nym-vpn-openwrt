@@ -6,7 +6,7 @@ use nym_authenticator_client::{AuthClientMixnetListener, AuthenticatorClient, Re
 use nym_bandwidth_controller::{BandwidthController, BandwidthTicketProvider};
 use nym_client_core::client::topology_control::nym_api_provider::Config;
 use nym_credentials_interface::TicketType;
-use nym_registration_common::GatewayData;
+use nym_registration_common::WireguardConfiguration;
 use nym_sdk::{
     DebugConfig, NymApiTopologyProvider, NymNetworkDetails, TopologyProvider,
     mixnet::{DisconnectedMixnetClient, Ephemeral, MixnetClient, MixnetClientBuilder, x25519},
@@ -165,7 +165,7 @@ impl RegistrationDiagnostic {
     async fn wireguard_registration(
         mixnet_client: MixnetClient,
         wg_registration_config: &WgRegistrationConfig,
-    ) -> Result<GatewayData, RegistrationError> {
+    ) -> Result<WireguardConfiguration, RegistrationError> {
         let address = *mixnet_client.nym_address();
 
         let mixnet_listener =
