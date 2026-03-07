@@ -304,6 +304,118 @@ find_gotatun() {
 }
 
 # ============================================================================
+# Patch: nym-compact-ecash (git dependency)
+# ============================================================================
+# Problem: VerificationKeyAuth::to_bytes() and SecretKeyAuth::to_bytes() use
+#          usize::to_le_bytes() to serialize vector lengths. On 32-bit this
+#          produces 4 bytes, but from_bytes() and the gateway (64-bit) expect
+#          8 bytes (u64). This causes ZK proof challenge hash mismatch and
+#          "the provided ticket failed to get verified" on all 32-bit platforms.
+# Fix: Cast usize to u64 before calling to_le_bytes()
+patch_nym_ecash() {
+    local dir="$1"
+    log_info "Patching nym-compact-ecash (usize -> u64 in to_bytes)..."
+
+    local f="$dir/common/nym_offline_compact_ecash/src/scheme/keygen.rs"
+    if [ ! -f "$f" ]; then
+        log_warn "  keygen.rs not found at $f — skipping"
+        return
+    fi
+
+    # SecretKeyAuth::to_bytes() — ys_len.to_le_bytes()
+    if grep -q '&ys_len\.to_le_bytes()' "$f"; then
+        _sed_i 's|&ys_len\.to_le_bytes()|\&(ys_len as u64).to_le_bytes()|' "$f"
+        log_info "  patched SecretKeyAuth::to_bytes()"
+    fi
+
+    # VerificationKeyAuth::to_bytes() — beta_g1_len.to_le_bytes()
+    if grep -q '&beta_g1_len\.to_le_bytes()' "$f"; then
+        _sed_i 's|&beta_g1_len\.to_le_bytes()|\&(beta_g1_len as u64).to_le_bytes()|' "$f"
+        log_info "  patched VerificationKeyAuth::to_bytes()"
+    fi
+}
+
+# Find the nym git checkout directory in CARGO_HOME.
+find_nym() {
+    local cargo_lock_dir
+    cargo_lock_dir=$(dirname "$CARGO_TOML")
+    local rev=""
+    if [ -f "$cargo_lock_dir/Cargo.lock" ]; then
+        rev=$(awk '/^name = "nym-compact-ecash"/{found=1} found && /^source =.*nymtech\/nym/{print; exit}' \
+            "$cargo_lock_dir/Cargo.lock" | grep -o '#[a-f0-9]*' | tr -d '#')
+    fi
+
+    local short_rev="${rev:0:7}"
+    if [ -n "$short_rev" ]; then
+        local found
+        found=$(find "$CARGO_HOME/git/checkouts" -maxdepth 2 -type d -name "${short_rev}*" \
+            -path "*/nym-*/*" 2>/dev/null | head -1)
+        if [ -n "$found" ]; then
+            echo "$found"
+            return
+        fi
+    fi
+
+    # Fallback: use most recent checkout
+    find "$CARGO_HOME/git/checkouts/nym-"*/  -maxdepth 1 -type d 2>/dev/null \
+        | grep -v '\.git' | tail -1
+}
+
+# ============================================================================
+# Patch: nym-compact-ecash (git dependency, patched in-place)
+# ============================================================================
+# Problem: VerificationKeyAuth::to_bytes() and SecretKeyAuth::to_bytes() use
+#          usize::to_le_bytes() which produces 4 bytes on 32-bit but the
+#          gateway (64-bit) expects 8 bytes. This causes ZK proof challenge
+#          hash mismatch: "the provided ticket failed to get verified".
+# Fix: Cast usize to u64 before to_le_bytes()
+patch_nym_ecash() {
+    local dir="$1"
+    log_info "Patching nym-compact-ecash (usize -> u64 in to_bytes)..."
+
+    local f="$dir/common/nym_offline_compact_ecash/src/scheme/keygen.rs"
+    if [ ! -f "$f" ]; then
+        log_warn "  keygen.rs not found at $f — skipping"
+        return
+    fi
+
+    if grep -q '&ys_len\.to_le_bytes()' "$f"; then
+        _sed_i 's|&ys_len\.to_le_bytes()|\&(ys_len as u64).to_le_bytes()|' "$f"
+        log_info "  patched SecretKeyAuth::to_bytes()"
+    fi
+
+    if grep -q '&beta_g1_len\.to_le_bytes()' "$f"; then
+        _sed_i 's|&beta_g1_len\.to_le_bytes()|\&(beta_g1_len as u64).to_le_bytes()|' "$f"
+        log_info "  patched VerificationKeyAuth::to_bytes()"
+    fi
+}
+
+# Find the nym git checkout directory in CARGO_HOME.
+find_nym() {
+    local cargo_lock_dir
+    cargo_lock_dir=$(dirname "$CARGO_TOML")
+    local rev=""
+    if [ -f "$cargo_lock_dir/Cargo.lock" ]; then
+        rev=$(awk '/^name = "nym-compact-ecash"/{found=1} found && /^source =.*nym/{print; exit}' \
+            "$cargo_lock_dir/Cargo.lock" | grep -o '#[a-f0-9]*' | tr -d '#')
+    fi
+
+    local short_rev="${rev:0:7}"
+    if [ -n "$short_rev" ]; then
+        local found
+        found=$(find "$CARGO_HOME/git/checkouts" -maxdepth 2 -type d -name "${short_rev}*" \
+            -path "*/nym-*/*" 2>/dev/null | head -1)
+        if [ -n "$found" ]; then
+            echo "$found"
+            return
+        fi
+    fi
+
+    find "$CARGO_HOME/git/checkouts/nym-"*/  -maxdepth 1 -type d 2>/dev/null \
+        | grep -v '\.git' | tail -1
+}
+
+# ============================================================================
 # Patch: schemars
 # ============================================================================
 # Problem: autocfg probe fails on Docker volume mounts -> indexmap compiles in
@@ -388,6 +500,15 @@ opentelemetry_sdk = { path = \"$otel_sdk_dir\" }"
             patch_gotatun "$gotatun_dir"
         else
             log_warn "gotatun git checkout not found — skipping (may fail to compile)"
+        fi
+
+        # nym-compact-ecash: git dependency — patch in-place in git checkout
+        local nym_dir
+        nym_dir=$(find_nym)
+        if [ -n "$nym_dir" ]; then
+            patch_nym_ecash "$nym_dir"
+        else
+            log_warn "nym git checkout not found — skipping (ecash tickets will fail on 32-bit)"
         fi
 
         # Replace nym git URLs with tier3 fork for portable-atomic patches
