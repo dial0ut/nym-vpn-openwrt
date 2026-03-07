@@ -271,3 +271,10 @@ sqlx-pool-guard = { git = "https://github.com/nymtech/nym", branch = "vpn/releas
 # multiplication that avoids u128 entirely on non-64-bit targets.
 [patch."https://github.com/jstuczyn/bls12_381"]
 bls12_381 = { git = "https://github.com/dial0ut/bls12_381", branch = "fix/32bit-safe-arithmetic" }
+
+# Fix ecash ticket verification on 32-bit targets (MIPS, ARM32).
+# VerificationKeyAuth::to_bytes() uses usize::to_le_bytes() which produces
+# 4 bytes on 32-bit vs 8 bytes on 64-bit, causing ZK proof challenge hash
+# mismatch when a 32-bit client's ticket is verified by a 64-bit gateway.
+[patch."https://github.com/nymtech/nym"]
+nym-compact-ecash = { git = "https://github.com/dial0ut/nym", branch = "fix/32bit-usize-to-bytes" }
