@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/nymwrt.svg" alt="NymVPN for OpenWrt" width="160">
+<img src=".github/assets/nymwrt.svg" alt="NymVPN for OpenWrt" width="160">
 
 # NymVPN for OpenWrt
 
