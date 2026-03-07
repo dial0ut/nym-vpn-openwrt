@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/nymwrt.svg" alt="NymVPN for OpenWrt" width="160">
+
 # NymVPN for OpenWrt
 
 **Privacy-preserving VPN for OpenWrt routers**
