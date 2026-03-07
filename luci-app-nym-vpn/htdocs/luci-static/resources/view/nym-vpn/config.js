@@ -11,34 +11,25 @@
 
 return view.extend({
     load: function() {
-        return Promise.all([
-            rpc.status(),
-            rpc.info(),
-            rpc.gatewayGet(),
-            rpc.gatewayListCountries('mixnet-entry'),
-            rpc.gatewayListCountries('mixnet-exit'),
-            rpc.tunnelGet(),
-            rpc.accountGet(),
-            rpc.networkGet(),
-            rpc.lanGet(),
-            rpc.daemonStatus()
-        ]).catch(function(err) {
+        // Single batch RPC call replaces 11 separate calls.
+        // Gateway country lists are deferred until user interaction.
+        return rpc.init().catch(function(err) {
             console.error('Failed to load Nym VPN data:', err);
-            return [null, null, null, [], [], null, null, null, null, null];
+            return {};
         });
     },
 
-    render: function(data) {
-        var status = data[0] || {};
-        var info = data[1] || {};
-        var gateway_config = data[2] || {};
-        var entry_countries = (data[3] && data[3].countries) || [];
-        var exit_countries = (data[4] && data[4].countries) || [];
-        var tunnel_config = data[5] || {};
-        var account_info = data[6] || {};
-        var network = data[7] || {};
-        var lan_policy = data[8] || {};
-        var daemon_status = data[9] || {};
+    render: function(initData) {
+        var data = initData || {};
+        var status = data.status || {};
+        var info = data.info || {};
+        var gateway_config = data.gateway_config || {};
+        var tunnel_config = data.tunnel_config || {};
+        var account_info = data.account || {};
+        var network = data.network || {};
+        var lan_policy = data.lan || {};
+        var daemon_status = data.daemon || {};
+        var ad_block = data.ad_block || {};
 
         var self = this;
         var E = dom.create.bind(dom);
@@ -414,21 +405,48 @@ return view.extend({
         };
 
         // Create country select
-        var createCountrySelect = function(countryList, name, onSelect) {
-            var options = [E('option', { 'value': 'none' }, '— Select Country —')];
-            options.push(E('option', { 'value': 'random' }, '🌐 Random'));
-
+        var populateCountrySelect = function(select, countryList) {
+            while (select.options.length > 0) select.remove(0);
+            select.appendChild(E('option', { 'value': 'none' }, '— Select Country —'));
+            select.appendChild(E('option', { 'value': 'random' }, '🌐 Random'));
             countryList.forEach(function(c) {
                 var info = countries.getDisplay(c.code);
-                options.push(E('option', { 'value': c.code },
+                select.appendChild(E('option', { 'value': c.code },
                     info.flag + ' ' + info.name + ' (' + c.count + ')'));
             });
+        };
 
-            return E('select', {
+        // Cache for loaded country lists
+        var countryCache = {};
+
+        var createCountrySelect = function(gwType, name, onSelect) {
+            var select = E('select', {
                 'class': 'nym-select',
                 'name': name,
                 'change': onSelect
-            }, options);
+            }, [E('option', { 'value': 'none' }, '— Loading countries... —')]);
+
+            // Lazy-load country list on first focus
+            var loaded = false;
+            select.addEventListener('focus', function() {
+                if (loaded) return;
+                loaded = true;
+
+                if (countryCache[gwType]) {
+                    populateCountrySelect(select, countryCache[gwType]);
+                    return;
+                }
+
+                rpc.gatewayListCountries(gwType).then(function(result) {
+                    var list = (result && result.countries) || [];
+                    countryCache[gwType] = list;
+                    populateCountrySelect(select, list);
+                }).catch(function() {
+                    select.options[0].textContent = '— Failed to load —';
+                });
+            });
+
+            return select;
         };
 
         // Gateway update handler
@@ -650,6 +668,28 @@ return view.extend({
             });
         };
 
+        // Ad-blocking handler
+        var handleAdBlock = function(enabled) {
+            rpc.adBlockSet(enabled).then(function(result) {
+                if (result && result.success) {
+                    showToast(enabled ? 'Ad-blocking enabled' : 'Ad-blocking disabled', 'success');
+                    var display = document.getElementById('adblock-status-display');
+                    if (display) display.textContent = enabled ? 'Enabled' : 'Disabled';
+                    var toggle = document.getElementById('adblock-toggle');
+                    if (toggle) toggle.checked = enabled;
+                } else {
+                    showToast('Failed: ' + (result.error || 'Unknown'), 'error');
+                    // Revert toggle
+                    var toggle = document.getElementById('adblock-toggle');
+                    if (toggle) toggle.checked = !enabled;
+                }
+            }).catch(function(err) {
+                showToast('Error: ' + err.message, 'error');
+                var toggle = document.getElementById('adblock-toggle');
+                if (toggle) toggle.checked = !enabled;
+            });
+        };
+
         // Check if logged in
         var identity = account_info.identity || '';
         var state = account_info.state || '';
@@ -679,7 +719,7 @@ return view.extend({
                         E('div', { 'class': 'nym-gateway-box-title' }, 'Entry Gateway'),
                         E('div', { 'class': 'nym-form-group', 'style': 'margin-bottom: 0' }, [
                             E('label', { 'class': 'nym-form-label' }, 'Country'),
-                            entryCountrySelect = createCountrySelect(entry_countries, 'entry_country', function(ev) {
+                            entryCountrySelect = createCountrySelect('mixnet-entry', 'entry_country', function(ev) {
                                 loadGatewaysForCountry(ev.target.value, 'mixnet-entry', entryGatewayContainer);
                             })
                         ]),
@@ -707,7 +747,7 @@ return view.extend({
                         E('div', { 'class': 'nym-gateway-box-title' }, 'Exit Gateway'),
                         E('div', { 'class': 'nym-form-group', 'style': 'margin-bottom: 0' }, [
                             E('label', { 'class': 'nym-form-label' }, 'Country'),
-                            exitCountrySelect = createCountrySelect(exit_countries, 'exit_country', function(ev) {
+                            exitCountrySelect = createCountrySelect('mixnet-exit', 'exit_country', function(ev) {
                                 loadGatewaysForCountry(ev.target.value, 'mixnet-exit', exitGatewayContainer);
                             })
                         ]),
@@ -821,6 +861,44 @@ return view.extend({
             ])
         ]);
         container.appendChild(lanCard);
+
+        // DNS & Ad Blocking Card
+        var adBlockEnabled = ad_block.enabled ? true : false;
+        var dnsCard = E('div', { 'class': 'nym-card' }, [
+            E('div', { 'class': 'nym-card-header', 'click': function() { toggleCard(dnsCard); } }, [
+                E('div', { 'class': 'nym-card-title' }, [
+                    E('div', { 'class': 'nym-card-icon' }, '🛡'),
+                    'DNS & Ad Blocking'
+                ]),
+                E('div', { 'class': 'nym-card-chevron' }, '▼')
+            ]),
+            E('div', { 'class': 'nym-card-body' }, [
+                E('div', { 'class': 'nym-card-description' },
+                    'Block ads and trackers at the DNS level using dnsmasq. Downloads a curated blocklist and applies it to all devices on the network.'),
+                E('div', { 'class': 'nym-toggle-row' }, [
+                    E('div', { 'class': 'nym-toggle-info' }, [
+                        E('div', { 'class': 'nym-toggle-title' }, 'Ad Blocking'),
+                        E('div', { 'class': 'nym-toggle-desc' }, 'Block ads, trackers, and malware domains via DNS')
+                    ]),
+                    E('label', { 'class': 'nym-toggle' }, [
+                        E('input', {
+                            'type': 'checkbox',
+                            'id': 'adblock-toggle',
+                            'checked': adBlockEnabled ? 'checked' : null,
+                            'change': function(ev) {
+                                handleAdBlock(ev.target.checked);
+                            }
+                        }),
+                        E('span', { 'class': 'nym-toggle-slider' })
+                    ])
+                ]),
+                E('div', { 'class': 'nym-info-item', 'style': 'margin-top: 12px' }, [
+                    E('div', { 'class': 'nym-info-label' }, 'Status'),
+                    E('div', { 'class': 'nym-info-value', 'id': 'adblock-status-display' }, adBlockEnabled ? 'Enabled' : 'Disabled')
+                ])
+            ])
+        ]);
+        container.appendChild(dnsCard);
 
         // Account Card
         var accountCard = E('div', { 'class': 'nym-card' }, [

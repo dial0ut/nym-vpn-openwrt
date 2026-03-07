@@ -4,6 +4,7 @@
     "read": {
       "ubus": {
         "nym-vpn": [
+          "init",
           "status",
           "info",
           "gateway_get",
@@ -14,6 +15,7 @@
           "account_get",
           "network_get",
           "lan_get",
+          "ad_block_get",
           "daemon_status"
         ],
         "service": [
@@ -36,6 +38,7 @@
           "account_rotate_keys",
           "network_set",
           "lan_set",
+          "ad_block_set",
           "daemon_restart"
         ],
         "service": [

@@ -3,6 +3,12 @@
 'require rpc';
 
 return baseclass.extend({
+    init: rpc.declare({
+        object: 'nym-vpn',
+        method: 'init',
+        params: []
+    }),
+
     status: rpc.declare({
         object: 'nym-vpn',
         method: 'status',
@@ -103,6 +109,18 @@ return baseclass.extend({
         object: 'nym-vpn',
         method: 'lan_set',
         params: ['policy']
+    }),
+
+    adBlockGet: rpc.declare({
+        object: 'nym-vpn',
+        method: 'ad_block_get',
+        params: []
+    }),
+
+    adBlockSet: rpc.declare({
+        object: 'nym-vpn',
+        method: 'ad_block_set',
+        params: ['enabled']
     }),
 
     daemonStatus: rpc.declare({

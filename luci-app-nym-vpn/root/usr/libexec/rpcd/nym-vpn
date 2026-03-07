@@ -685,6 +685,173 @@ handle_lan_set() {
     json_dump
 }
 
+handle_ad_block_get() {
+    local result=$($VPNC ad-block get 2>&1)
+    local enabled="0"
+
+    if echo "$result" | grep -qi "enabled"; then
+        enabled="1"
+    fi
+
+    json_init
+    json_add_boolean "enabled" "$enabled"
+    json_add_string "raw" "$result"
+    json_dump
+}
+
+handle_ad_block_set() {
+    read input
+    json_load "$input"
+    json_get_var enabled enabled
+
+    local state="disabled"
+    if [ "$enabled" = "1" -o "$enabled" = "true" ]; then
+        state="enabled"
+    fi
+
+    local result=$($VPNC ad-block set "$state" 2>&1)
+    local ret=$?
+
+    json_init
+    if [ $ret -eq 0 ]; then
+        json_add_boolean "success" 1
+        json_add_string "message" "Ad-blocking $state"
+    else
+        json_add_boolean "success" 0
+        json_add_string "error" "$result"
+    fi
+    json_dump
+}
+
+handle_init() {
+    # Batch all fast local nym-vpnc calls into a single RPC response.
+    # This replaces 8 separate rpcd→shell→nym-vpnc invocations with 1.
+    local status_raw=$($VPNC status 2>&1)
+    local info_raw=$($VPNC info 2>&1)
+    local gateway_raw=$($VPNC gateway get 2>&1)
+    local tunnel_raw=$($VPNC tunnel get 2>&1)
+    local account_raw=$($VPNC account get 2>&1)
+    local network_raw=$($VPNC network get 2>&1)
+    local lan_raw=$($VPNC lan get 2>&1)
+    local adblock_raw=$($VPNC ad-block get 2>&1)
+    local daemon_status=$(/etc/init.d/nym-vpnd status 2>&1)
+
+    json_init
+
+    # Status
+    json_add_object "status"
+    if echo "$status_raw" | grep -q "State: Connected"; then
+        json_add_string "state" "connected"
+        json_add_boolean "connected" 1
+
+        if echo "$status_raw" | grep -q "Connected mix"; then
+            json_add_string "mode" "mixnet"
+            local entry_part=$(echo "$status_raw" | sed -n 's/.*Connected mix to \([^→]*\)→.*/\1/p')
+            local exit_part=$(echo "$status_raw" | sed -n 's/.*→ \(.*\)/\1/p')
+            local entry_ip=$(echo "$entry_part" | sed -n 's/\([0-9.]*\).*/\1/p')
+            local entry_id=$(echo "$entry_part" | sed -n 's/.*\[\([^]]*\)\].*/\1/p')
+            local exit_ip=$(echo "$exit_part" | sed -n 's/\([0-9.]*\).*/\1/p')
+            local exit_id=$(echo "$exit_part" | sed -n 's/.*\[\([^]]*\)\].*/\1/p')
+        elif echo "$status_raw" | grep -q "Connected wg"; then
+            json_add_string "mode" "wireguard"
+            local entry_part=$(echo "$status_raw" | sed -n 's/.*Connected wg to \([^→]*\)→.*/\1/p')
+            local exit_part=$(echo "$status_raw" | sed -n 's/.*→ \(.*\)/\1/p')
+            local entry_ip=$(echo "$entry_part" | sed -n 's/\([0-9.]*\):.*/\1/p')
+            local entry_id=$(echo "$entry_part" | sed -n 's/.*\[\([^]]*\)\].*/\1/p')
+            local exit_ip=$(echo "$exit_part" | sed -n 's/\([0-9.]*\):.*/\1/p')
+            local exit_id=$(echo "$exit_part" | sed -n 's/.*\[\([^]]*\)\].*/\1/p')
+        fi
+        [ -n "$entry_ip" ] && json_add_string "entry_ip" "$entry_ip"
+        [ -n "$entry_id" ] && json_add_string "entry_id" "$entry_id"
+        [ -n "$exit_ip" ] && json_add_string "exit_ip" "$exit_ip"
+        [ -n "$exit_id" ] && json_add_string "exit_id" "$exit_id"
+    elif echo "$status_raw" | grep -q "State: Connecting"; then
+        json_add_string "state" "connecting"
+        json_add_boolean "connected" 0
+    elif echo "$status_raw" | grep -q "State: Disconnecting"; then
+        json_add_string "state" "disconnecting"
+        json_add_boolean "connected" 0
+    elif echo "$status_raw" | grep -q "State: Disconnected"; then
+        json_add_string "state" "disconnected"
+        json_add_boolean "connected" 0
+    else
+        json_add_string "state" "unknown"
+        json_add_boolean "connected" 0
+    fi
+    json_close_object
+
+    # Info
+    json_add_object "info"
+    local version=$(echo "$info_raw" | grep "version:" | head -1 | sed 's/.*version: //')
+    local info_network=$(echo "$info_raw" | grep "network_name:" | sed 's/.*network_name: //')
+    [ -n "$version" ] && json_add_string "version" "$version"
+    [ -n "$info_network" ] && json_add_string "network" "$info_network"
+    json_close_object
+
+    # Gateway config
+    json_add_object "gateway_config"
+    local gw_entry=$(echo "$gateway_raw" | grep "Entry point:" | sed 's/Entry point: //')
+    local gw_exit=$(echo "$gateway_raw" | grep "Exit point:" | sed 's/Exit point: //')
+    local gw_residential=$(echo "$gateway_raw" | grep "Residential exit:" | sed 's/Residential exit: //')
+    json_add_string "entry_point" "$(format_point "$gw_entry")"
+    json_add_string "exit_point" "$(format_point "$gw_exit")"
+    json_add_string "residential_exit" "$gw_residential"
+    json_close_object
+
+    # Tunnel config
+    json_add_object "tunnel_config"
+    local t_ipv6=$(echo "$tunnel_raw" | grep "IPv6:" | sed 's/.*IPv6: //')
+    local t_two_hop=$(echo "$tunnel_raw" | grep "Two-hop:" | sed 's/.*Two-hop: //')
+    local t_netstack=$(echo "$tunnel_raw" | grep "Netstack:" | sed 's/.*Netstack: //')
+    local t_circumvention=$(echo "$tunnel_raw" | grep "Circumvention transports:" | sed 's/.*Circumvention transports: //')
+    json_add_string "ipv6" "$t_ipv6"
+    json_add_string "two_hop" "$t_two_hop"
+    json_add_string "netstack" "$t_netstack"
+    json_add_string "circumvention_transports" "$t_circumvention"
+    json_close_object
+
+    # Account
+    json_add_object "account"
+    local a_identity=$(echo "$account_raw" | grep "Account identity:" | sed 's/Account identity: //')
+    local a_state=$(echo "$account_raw" | grep "Account state:" | sed 's/Account state: //')
+    json_add_string "identity" "$a_identity"
+    json_add_string "state" "$a_state"
+    json_close_object
+
+    # Network
+    json_add_object "network"
+    local net_name=$(echo "$network_raw" | sed 's/Current network: //')
+    json_add_string "network" "$net_name"
+    json_close_object
+
+    # LAN
+    json_add_object "lan"
+    json_add_string "policy" "$lan_raw"
+    json_close_object
+
+    # Ad-block
+    json_add_object "ad_block"
+    if echo "$adblock_raw" | grep -qi "enabled"; then
+        json_add_boolean "enabled" 1
+    else
+        json_add_boolean "enabled" 0
+    fi
+    json_close_object
+
+    # Daemon status
+    json_add_object "daemon"
+    if [ "$daemon_status" = "running" ]; then
+        json_add_string "status" "running"
+        json_add_boolean "running" 1
+    else
+        json_add_string "status" "stopped"
+        json_add_boolean "running" 0
+    fi
+    json_close_object
+
+    json_dump
+}
+
 handle_daemon_status() {
     json_init
 
@@ -730,6 +897,7 @@ case "$1" in
     list)
         cat <<'EOF'
 {
+    "init": {},
     "status": {},
     "connect": {},
     "disconnect": {},
@@ -757,6 +925,8 @@ case "$1" in
     "network_set": { "network": "str" },
     "lan_get": {},
     "lan_set": { "policy": "str" },
+    "ad_block_get": {},
+    "ad_block_set": { "enabled": "bool" },
     "daemon_status": {},
     "daemon_restart": {}
 }
@@ -764,6 +934,7 @@ EOF
         ;;
     call)
         case "$2" in
+            init)                    handle_init ;;
             status)                  handle_status ;;
             connect)                 handle_connect ;;
             disconnect)              handle_disconnect ;;
@@ -783,6 +954,8 @@ EOF
             network_set)             handle_network_set ;;
             lan_get)                 handle_lan_get ;;
             lan_set)                 handle_lan_set ;;
+            ad_block_get)            handle_ad_block_get ;;
+            ad_block_set)            handle_ad_block_set ;;
             daemon_status)           handle_daemon_status ;;
             daemon_restart)          handle_daemon_restart ;;
             *)
