@@ -322,16 +322,41 @@ patch_nym_ecash() {
         return
     fi
 
-    # SecretKeyAuth::to_bytes() — ys_len.to_le_bytes()
     if grep -q '&ys_len\.to_le_bytes()' "$f"; then
         _sed_i 's|&ys_len\.to_le_bytes()|\&(ys_len as u64).to_le_bytes()|' "$f"
         log_info "  patched SecretKeyAuth::to_bytes()"
     fi
 
-    # VerificationKeyAuth::to_bytes() — beta_g1_len.to_le_bytes()
     if grep -q '&beta_g1_len\.to_le_bytes()' "$f"; then
         _sed_i 's|&beta_g1_len\.to_le_bytes()|\&(beta_g1_len as u64).to_le_bytes()|' "$f"
         log_info "  patched VerificationKeyAuth::to_bytes()"
+    fi
+}
+
+# ============================================================================
+# Patch: nym-gateway-client (git dependency)
+# ============================================================================
+# Problem: Uses std::sync::atomic::AtomicI64 which doesn't exist on 32-bit
+# Fix: Import AtomicI64 from portable-atomic instead
+patch_nym_gateway_client() {
+    local dir="$1"
+    log_info "Patching nym-gateway-client (AtomicI64 -> portable-atomic)..."
+
+    local f="$dir/common/client-libs/gateway-client/src/bandwidth.rs"
+    if [ ! -f "$f" ]; then
+        log_warn "  bandwidth.rs not found at $f — skipping"
+        return
+    fi
+
+    if grep -q 'std::sync::atomic.*AtomicI64' "$f"; then
+        _sed_i 's|use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};|use std::sync::atomic::{AtomicBool, Ordering};\nuse portable_atomic::AtomicI64;|' "$f"
+        log_info "  patched bandwidth.rs"
+    fi
+
+    # Add portable-atomic dependency to gateway-client's Cargo.toml
+    local cargo_toml="$dir/common/client-libs/gateway-client/Cargo.toml"
+    if [ -f "$cargo_toml" ]; then
+        add_portable_atomic_dep "$dir/common/client-libs/gateway-client"
     fi
 }
 
@@ -502,19 +527,15 @@ opentelemetry_sdk = { path = \"$otel_sdk_dir\" }"
             log_warn "gotatun git checkout not found — skipping (may fail to compile)"
         fi
 
-        # nym-compact-ecash: git dependency — patch in-place in git checkout
+        # nym crates: git dependency — patch in-place in git checkout
         local nym_dir
         nym_dir=$(find_nym)
         if [ -n "$nym_dir" ]; then
             patch_nym_ecash "$nym_dir"
+            patch_nym_gateway_client "$nym_dir"
         else
-            log_warn "nym git checkout not found — skipping (ecash tickets will fail on 32-bit)"
+            log_warn "nym git checkout not found — skipping nym patches"
         fi
-
-        # Replace nym git URLs with tier3 fork for portable-atomic patches
-        log_info "Replacing nym git URLs with tier3-portable-atomic fork..."
-        _sed_i 's|git = "https://github.com/nymtech/nym"|git = "https://github.com/dial0ut/nym"|g' "$CARGO_TOML"
-        _sed_i 's|branch = "develop"|branch = "feat/tier3-portable-atomic"|g' "$CARGO_TOML"
     fi
 
     # Append [patch.crates-io] to Cargo.toml
