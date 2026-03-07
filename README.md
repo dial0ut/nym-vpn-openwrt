@@ -4,15 +4,13 @@
 
 # NymVPN for OpenWrt
 
-**Privacy-preserving VPN for OpenWrt routers**
-
-Routes all LAN traffic through the [Nym mixnet](https://nymtech.net/) with WireGuard tunneling, Amnezia obfuscation, and a LuCI web interface.
-
 [![GitHub Release](https://img.shields.io/github/v/release/dial0ut/nym-vpn-openwrt?style=flat-square&color=blue)](https://github.com/dial0ut/nym-vpn-openwrt/releases)
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-green.svg?style=flat-square)](LICENSE)
 [![OpenWrt](https://img.shields.io/badge/OpenWrt-18.06%2B-00B5E2?style=flat-square&logo=openwrt&logoColor=white)](https://openwrt.org/)
 [![Rust](https://img.shields.io/badge/Rust-1.88%2B-orange?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![CI](https://img.shields.io/github/actions/workflow/status/dial0ut/nym-vpn-openwrt/release-musl.yml?style=flat-square&label=build)](https://github.com/dial0ut/nym-vpn-openwrt/actions)
+
+**Privacy-preserving VPN for OpenWrt routers**
 
 Built from the [nym-vpn-client](https://github.com/nymtech/nym-vpn-client) codebase, stripped to Linux-only, with a pure Rust userspace WireGuard backend and OpenWrt-native firewall integration.
 
