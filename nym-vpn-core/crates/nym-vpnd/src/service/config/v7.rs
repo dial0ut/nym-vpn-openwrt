@@ -27,13 +27,14 @@ pub struct VpnServiceConfig {
     pub residential_exit: bool,
     pub enable_custom_dns: bool,
     pub custom_dns: Vec<String>,
+    pub enable_ad_blocking: bool,
     pub mixnet_traffic: MixnetTrafficConfig,
     pub network_stats: NetworkStatisticsConfig,
 }
 
 impl From<VpnServiceConfig> for VpnServiceConfigExt {
-    fn from(v6: VpnServiceConfig) -> Self {
-        VpnServiceConfigExt::V6(v6)
+    fn from(v7: VpnServiceConfig) -> Self {
+        VpnServiceConfigExt::V7(v7)
     }
 }
 
@@ -72,8 +73,8 @@ impl TryFrom<VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
             mixnet_traffic,
             enable_custom_dns: value.enable_custom_dns,
             custom_dns,
+            enable_ad_blocking: value.enable_ad_blocking,
             network_stats,
-            ..Default::default()
         };
 
         Ok(config)

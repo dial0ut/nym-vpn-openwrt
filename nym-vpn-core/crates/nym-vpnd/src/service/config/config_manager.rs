@@ -154,6 +154,13 @@ impl VpnServiceConfigManager {
         }
     }
 
+    pub async fn set_enable_ad_blocking(&mut self, enable_ad_blocking: bool) {
+        if self.config.enable_ad_blocking != enable_ad_blocking {
+            self.config.enable_ad_blocking = enable_ad_blocking;
+            self.save_config_and_send_event().await;
+        }
+    }
+
     /// Enable or disable custom DNS servers
     ///
     /// Returns true if the setting has changed, otherwise false if it's the same

@@ -162,6 +162,15 @@ impl RpcClient {
         Ok(())
     }
 
+    pub async fn set_enable_ad_blocking(&mut self, enable: bool) -> Result<()> {
+        self.0
+            .set_enable_ad_blocking(enable)
+            .await
+            .map_err(Error::Rpc)?
+            .into_inner();
+        Ok(())
+    }
+
     pub async fn set_mixnet_traffic_config(
         &mut self,
         mixnet_traffic: nym_vpn_lib_types::MixnetTrafficConfig,

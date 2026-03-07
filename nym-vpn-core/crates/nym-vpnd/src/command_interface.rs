@@ -247,6 +247,22 @@ impl NymVpnService for CommandInterface {
         Ok(tonic::Response::new(()))
     }
 
+    async fn set_enable_ad_blocking(
+        &self,
+        request: tonic::Request<bool>,
+    ) -> Result<tonic::Response<()>> {
+        let enable = request.into_inner();
+
+        let _ = self
+            .send_and_wait(VpnServiceCommand::SetEnableAdBlocking, enable)
+            .await
+            .map_err(|e| {
+                tonic::Status::internal(format!("Failed to set enable ad-blocking: {e}"))
+            })?;
+
+        Ok(tonic::Response::new(()))
+    }
+
     async fn set_mixnet_traffic_config(
         &self,
         request: Request<MixnetTrafficConfig>,

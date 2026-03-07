@@ -86,6 +86,12 @@ pub enum Command {
         subcommand: commands::dns::Command,
     },
 
+    /// Ad-blocking
+    AdBlock {
+        #[command(subcommand)]
+        subcommand: commands::ad_block::Command,
+    },
+
     /// Tunnel configuration (enable or disable ipv6, two-hop mode, circumvention transports)
     Tunnel {
         #[command(subcommand)]
@@ -145,6 +151,7 @@ impl Command {
             Command::Tunnel { subcommand } => subcommand.execute(rpc_client).await,
             Command::Lan { subcommand } => subcommand.execute(rpc_client).await,
             Command::Dns { subcommand } => subcommand.execute(rpc_client).await,
+            Command::AdBlock { subcommand } => subcommand.execute(rpc_client).await,
             Command::Network { subcommand } => subcommand.execute(rpc_client).await,
             Command::Account { subcommand } => subcommand.execute(rpc_client).await,
             Command::Device(args) => args.execute(rpc_client).await,

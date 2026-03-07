@@ -52,6 +52,7 @@ impl TryFrom<proto::VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
             residential_exit: value.residential_exit,
             enable_custom_dns: value.enable_custom_dns,
             custom_dns,
+            enable_ad_blocking: value.enable_ad_blocking,
             mixnet_traffic,
             network_stats,
         };
@@ -84,6 +85,7 @@ impl From<nym_vpn_lib_types::VpnServiceConfig> for proto::VpnServiceConfig {
             residential_exit: value.residential_exit,
             enable_custom_dns: value.enable_custom_dns,
             custom_dns,
+            enable_ad_blocking: value.enable_ad_blocking,
             mixnet_traffic,
             network_stats,
         }

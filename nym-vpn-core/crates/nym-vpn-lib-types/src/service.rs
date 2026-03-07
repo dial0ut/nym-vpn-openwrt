@@ -38,6 +38,7 @@ pub struct VpnServiceConfig {
     pub residential_exit: bool,
     pub enable_custom_dns: bool,
     pub custom_dns: Vec<IpAddr>,
+    pub enable_ad_blocking: bool,
     pub mixnet_traffic: MixnetTrafficConfig,
     pub network_stats: NetworkStatisticsConfig,
 }
@@ -74,6 +75,7 @@ impl fmt::Display for VpnServiceConfig {
                 .collect::<Vec<_>>()
                 .join(", ")
         )?;
+        writeln!(f, "enable_ad_blocking: {}", self.enable_ad_blocking)?;
         writeln!(f, "mixnet traffic config: {}", self.mixnet_traffic)?;
         writeln!(f, "networks stats config: {}", self.network_stats)?;
 
@@ -100,6 +102,7 @@ impl Default for VpnServiceConfig {
             residential_exit: false,
             enable_custom_dns: false,
             custom_dns: vec![],
+            enable_ad_blocking: false,
             network_stats: Default::default(),
             mixnet_traffic: MixnetTrafficConfig::default(),
         }

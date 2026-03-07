@@ -135,7 +135,7 @@ location = "BE"
 "#;
 
     let json_content = r#"{
-  "version": "v6",
+  "version": "v7",
   "entry_point": {
     "country": {
       "two_letter_iso_country_code": "FR"
@@ -156,6 +156,7 @@ location = "BE"
   "residential_exit": false,
   "enable_custom_dns": false,
   "custom_dns": [],
+  "enable_ad_blocking": false,
   "mixnet_traffic": {
     "poisson_parameter_for_loop_cover_stream": null,
     "average_packet_delay": null,
@@ -193,7 +194,7 @@ identity = [ 99, 23, 98, 234, 66, 161, 195, 63, 155, 161, 250, 207, 17, 158, 136
 "#;
 
     let json_content = r#"{
-  "version": "v6",
+  "version": "v7",
   "entry_point": {
     "gateway": {
       "identity": "7CWjY3QFoA9dgE535u9bQiXCfzgMZvSpJu842GA1Wn42"
@@ -214,6 +215,7 @@ identity = [ 99, 23, 98, 234, 66, 161, 195, 63, 155, 161, 250, 207, 17, 158, 136
   "residential_exit": false,
   "enable_custom_dns": false,
   "custom_dns": [],
+  "enable_ad_blocking": false,
   "mixnet_traffic": {
     "poisson_parameter_for_loop_cover_stream": null,
     "average_packet_delay": null,
@@ -258,7 +260,7 @@ address = [5, 56, 84, 195, 94, 238, 210, 124, 65, 143, 209, 144, 22, 255, 91, 18
 "#;
 
     let json_content = r#"{
-  "version": "v6",
+  "version": "v7",
   "entry_point": {
     "gateway": {
       "identity": "7CWjY3QFoA9dgE535u9bQiXCfzgMZvSpJu842GA1Wn42"
@@ -316,7 +318,7 @@ exit_point = "Random"
 "#;
 
     let json_content = r#"{
-  "version": "v6",
+  "version": "v7",
   "entry_point": "random",
   "exit_point": "random",
   "allow_lan": false,
@@ -329,6 +331,7 @@ exit_point = "Random"
   "residential_exit": false,
   "enable_custom_dns": false,
   "custom_dns": [],
+  "enable_ad_blocking": false,
   "mixnet_traffic": {
     "poisson_parameter_for_loop_cover_stream": null,
     "average_packet_delay": null,
@@ -367,7 +370,7 @@ async fn test_service_config_migrate_from_v1() {
 }"#;
 
     let json_latest_content = r#"{
-  "version": "v6",
+  "version": "v7",
   "entry_point": {
     "gateway": {
       "identity": "7CWjY3QFoA9dgE535u9bQiXCfzgMZvSpJu842GA1Wn42"
@@ -388,6 +391,7 @@ async fn test_service_config_migrate_from_v1() {
   "residential_exit": false,
   "enable_custom_dns": false,
   "custom_dns": [],
+  "enable_ad_blocking": false,
   "mixnet_traffic": {
     "poisson_parameter_for_loop_cover_stream": null,
     "average_packet_delay": null,
@@ -435,7 +439,7 @@ async fn test_service_config_migrate_from_v2() {
 }"#;
 
     let json_latest_content = r#"{
-  "version": "v6",
+  "version": "v7",
   "entry_point": {
     "gateway": {
       "identity": "7CWjY3QFoA9dgE535u9bQiXCfzgMZvSpJu842GA1Wn42"
@@ -456,6 +460,7 @@ async fn test_service_config_migrate_from_v2() {
   "residential_exit": false,
   "enable_custom_dns": true,
   "custom_dns": [ "192.168.50.1" ],
+  "enable_ad_blocking": false,
   "mixnet_traffic": {
     "poisson_parameter_for_loop_cover_stream": null,
     "average_packet_delay": null,
@@ -506,7 +511,7 @@ async fn test_service_config_migrate_from_v3() {
 }"#;
 
     let json_latest_content = r#"{
-  "version": "v6",
+  "version": "v7",
   "entry_point": {
     "gateway": {
       "identity": "7CWjY3QFoA9dgE535u9bQiXCfzgMZvSpJu842GA1Wn42"
@@ -530,6 +535,7 @@ async fn test_service_config_migrate_from_v3() {
     "192.168.50.1",
     "2001:db8:85a3::8a2e:370:7334"
   ],
+  "enable_ad_blocking": false,
   "mixnet_traffic": {
     "poisson_parameter_for_loop_cover_stream": null,
     "average_packet_delay": null,
@@ -585,7 +591,7 @@ async fn test_service_config_migrate_from_v4() {
 }"#;
 
     let json_latest_content = r#"{
-  "version": "v6",
+  "version": "v7",
   "entry_point": {
     "gateway": {
       "identity": "7CWjY3QFoA9dgE535u9bQiXCfzgMZvSpJu842GA1Wn42"
@@ -609,6 +615,7 @@ async fn test_service_config_migrate_from_v4() {
     "192.168.50.1",
     "2001:db8:85a3::8a2e:370:7334"
   ],
+  "enable_ad_blocking": false,
   "mixnet_traffic": {
     "poisson_parameter_for_loop_cover_stream": null,
     "average_packet_delay": null,
@@ -653,6 +660,7 @@ async fn test_service_config_migrate_from_v5() {
     "192.168.50.1",
     "2001:db8:85a3::8a2e:370:7334"
   ],
+  "enable_ad_blocking": false,
   "mixnet_traffic": {
     "poisson_parameter_for_loop_cover_stream": 12,
     "average_packet_delay": 34,
@@ -669,7 +677,7 @@ async fn test_service_config_migrate_from_v5() {
 }"#;
 
     let json_latest_content = r#"{
-  "version": "v6",
+  "version": "v7",
   "entry_point": {
     "gateway": {
       "identity": "7CWjY3QFoA9dgE535u9bQiXCfzgMZvSpJu842GA1Wn42"
@@ -693,6 +701,7 @@ async fn test_service_config_migrate_from_v5() {
     "192.168.50.1",
     "2001:db8:85a3::8a2e:370:7334"
   ],
+  "enable_ad_blocking": false,
   "mixnet_traffic": {
     "poisson_parameter_for_loop_cover_stream": 12,
     "average_packet_delay": 34,
@@ -709,6 +718,86 @@ async fn test_service_config_migrate_from_v5() {
 }"#;
 
     run_migrate_json_test(json_v5_content, json_latest_content).await;
+}
+
+#[tokio::test]
+async fn test_service_config_migrate_from_v6() {
+    let json_v6_content = r#"{
+  "version": "v6",
+  "entry_point": {
+    "country": {
+      "two_letter_iso_country_code": "CH"
+    }
+  },
+  "exit_point": {
+    "country": {
+      "two_letter_iso_country_code": "CH"
+    }
+  },
+  "allow_lan": true,
+  "disable_ipv6": false,
+  "enable_two_hop": true,
+  "enable_bridges": false,
+  "enable_lewes_protocol": false,
+  "netstack": false,
+  "min_gateway_vpn_performance": null,
+  "residential_exit": false,
+  "enable_custom_dns": false,
+  "custom_dns": [],
+  "mixnet_traffic": {
+    "poisson_parameter_for_loop_cover_stream": null,
+    "average_packet_delay": null,
+    "message_sending_average_delay": null,
+    "disable_poisson_rate": false,
+    "disable_background_cover_traffic": false,
+    "min_mixnode_performance": null,
+    "min_gateway_mixnet_performance": null
+  },
+  "network_stats": {
+    "enabled": true,
+    "allow_disconnected": false
+  }
+}"#;
+
+    let json_latest_content = r#"{
+  "version": "v7",
+  "entry_point": {
+    "country": {
+      "two_letter_iso_country_code": "CH"
+    }
+  },
+  "exit_point": {
+    "country": {
+      "two_letter_iso_country_code": "CH"
+    }
+  },
+  "allow_lan": true,
+  "disable_ipv6": false,
+  "enable_two_hop": true,
+  "enable_bridges": false,
+  "enable_lewes_protocol": false,
+  "netstack": false,
+  "min_gateway_vpn_performance": null,
+  "residential_exit": false,
+  "enable_custom_dns": false,
+  "custom_dns": [],
+  "enable_ad_blocking": false,
+  "mixnet_traffic": {
+    "poisson_parameter_for_loop_cover_stream": null,
+    "average_packet_delay": null,
+    "message_sending_average_delay": null,
+    "disable_poisson_rate": false,
+    "disable_background_cover_traffic": false,
+    "min_mixnode_performance": null,
+    "min_gateway_mixnet_performance": null
+  },
+  "network_stats": {
+    "enabled": true,
+    "allow_disconnected": false
+  }
+}"#;
+
+    run_migrate_json_test(json_v6_content, json_latest_content).await;
 }
 
 #[tokio::test]
@@ -860,6 +949,7 @@ async fn test_service_config_serialize_full() {
             IpAddr::from_str("192.168.50.1").unwrap(),
             IpAddr::from_str("2001:db8:85a3::8a2e:370:7334").unwrap(),
         ],
+        enable_ad_blocking: false,
         mixnet_traffic: nym_vpn_lib_types::MixnetTrafficConfig {
             poisson_parameter_for_loop_cover_stream: Some(10),
             average_packet_delay: Some(200),

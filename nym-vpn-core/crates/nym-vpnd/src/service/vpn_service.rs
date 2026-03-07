@@ -72,6 +72,7 @@ pub enum VpnServiceCommand {
     SetResidentialExit(oneshot::Sender<()>, bool),
     SetEnableCustomDns(oneshot::Sender<()>, bool),
     SetCustomDns(oneshot::Sender<()>, Vec<IpAddr>),
+    SetEnableAdBlocking(oneshot::Sender<()>, bool),
     SetMixnetTrafficConfig(oneshot::Sender<Result<(), String>>, MixnetTrafficConfig),
     SetNetwork(oneshot::Sender<Result<(), SetNetworkError>>, String),
     GetSystemMessages(oneshot::Sender<Vec<SystemMessage>>, ()),
@@ -543,6 +544,9 @@ impl NymVpnService {
     }
 
     pub async fn run(mut self) -> anyhow::Result<()> {
+        // Restore ad-blocking if it was enabled in config
+        crate::adblocker::restore_if_enabled(self.config_manager.config()).await;
+
         // Skip the initial account state value
         let mut account_state_rx = WatchStream::new(self.account_state_rx.subscribe()).skip(1);
 
@@ -811,6 +815,10 @@ impl NymVpnService {
                 self.handle_set_custom_dns(custom_dns).await;
                 let _ = tx.send(());
             }
+            VpnServiceCommand::SetEnableAdBlocking(tx, enable) => {
+                self.handle_set_enable_ad_blocking(enable).await;
+                let _ = tx.send(());
+            }
             VpnServiceCommand::SetMixnetTrafficConfig(tx, mixnet_traffic_config) => {
                 let res = self
                     .handle_set_mixnet_traffic_config(mixnet_traffic_config)
@@ -1064,6 +1072,19 @@ impl NymVpnService {
             // Only issue reconnect if custom DNS is enabled
             if config.enable_custom_dns {
                 self.update_tunnel_settings_with_throttle();
+            }
+        }
+    }
+
+    async fn handle_set_enable_ad_blocking(&mut self, enable: bool) {
+        self.config_manager.set_enable_ad_blocking(enable).await;
+        if enable {
+            if let Err(e) = crate::adblocker::apply_adblock().await {
+                tracing::error!("Failed to apply ad-blocking: {e}");
+            }
+        } else {
+            if let Err(e) = crate::adblocker::remove_adblock().await {
+                tracing::error!("Failed to remove ad-blocking: {e}");
             }
         }
     }

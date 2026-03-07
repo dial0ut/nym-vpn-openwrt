@@ -272,6 +272,7 @@ message VpnServiceConfig {
   optional uint32 min_gateway_vpn_performance = 10;
   NetworkStatsConfig network_stats = 18;
   MixnetTrafficConfig mixnet_traffic = 25;
+  bool enable_ad_blocking = 27;
 }
 
 message NetworkStatsConfig {
@@ -934,6 +935,7 @@ service NymVpnService {
   rpc SetEnableCustomDns (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
   rpc SetCustomDns (IpAddrList) returns (google.protobuf.Empty) {}
   rpc SetMixnetTrafficConfig (MixnetTrafficConfig) returns (google.protobuf.Empty) {}
+  rpc SetEnableAdBlocking (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
 
   // Set the network. This requires a restart to take effect
   rpc SetNetwork (google.protobuf.StringValue) returns (google.protobuf.Empty) {}
