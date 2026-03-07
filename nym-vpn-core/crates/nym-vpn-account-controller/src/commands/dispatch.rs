@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{AvailableTicketbooks, deeplink::CreateDeeplinkParams};
+use nym_credentials_interface::VerificationKeyAuth;
 use nym_validator_client::nyxd::Coin;
 use nym_vpn_api_client::{
     ResolverOverrides,
@@ -88,6 +89,9 @@ impl AccountCommand {
                 CommonCommand::DeriveDeeplinkMnemonic(return_sender, _) => {
                     return_sender.send(Err(error))
                 }
+                CommonCommand::GetMasterVerificationKey(return_sender, _) => {
+                    return_sender.send(Err(error))
+                }
             },
             AccountCommand::UpgradeMode(upgrade_mode_command) => match upgrade_mode_command {
                 UpgradeModeCommand::GetUpgradeModeEnabled(return_sender) => {
@@ -142,6 +146,12 @@ pub enum CommonCommand {
 
     /// Derive the mnemonic from the deeplink callback URL
     DeriveDeeplinkMnemonic(ReturnSender<bip39::Mnemonic, AccountCommandError>, String),
+
+    /// Returns the master verification key for a given epoch, if available
+    GetMasterVerificationKey(
+        ReturnSender<Option<VerificationKeyAuth>, AccountCommandError>,
+        u64,
+    ),
 }
 
 /// Commands relating to the upgrade mode

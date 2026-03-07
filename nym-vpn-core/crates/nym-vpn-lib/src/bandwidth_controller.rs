@@ -703,7 +703,34 @@ impl BandwidthController {
                 }
             })?
             .data;
-        tracing::debug!("Got ecash ticket for {side}, sending topup to gateway");
+        // Client-side self-verification: check the credential is valid before sending
+        // to the gateway. This catches BLS12-381 arithmetic bugs on 32-bit architectures.
+        match self
+            .account_command_tx
+            .query_master_verification_key(credential.epoch_id)
+            .await
+        {
+            Ok(Some(vk)) => match credential.verify(&vk) {
+                Ok(()) => tracing::info!(
+                    "Ecash ticket self-verification PASSED for {side} (epoch {})",
+                    credential.epoch_id
+                ),
+                Err(e) => tracing::error!(
+                    "CRITICAL: ecash ticket self-verification FAILED for {side} \
+                     (epoch {}): {e}. The gateway will likely reject this ticket.",
+                    credential.epoch_id
+                ),
+            },
+            Ok(None) => tracing::warn!(
+                "No master verification key found for epoch {}, skipping self-verification",
+                credential.epoch_id
+            ),
+            Err(e) => tracing::warn!(
+                "Could not fetch verification key for self-verification: {e}"
+            ),
+        }
+
+        tracing::debug!("Sending topup to {side} gateway");
         let remaining_bandwidth = bw_client
             .topup_bandwidth(credential, ticketbook_type)
             .await

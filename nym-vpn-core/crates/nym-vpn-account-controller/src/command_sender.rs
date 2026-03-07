@@ -6,6 +6,7 @@ use crate::{
     commands::{AccountCommand, CommonCommand, ReturnSender, UpgradeModeCommand},
     deeplink::CreateDeeplinkParams,
 };
+use nym_credentials_interface::VerificationKeyAuth;
 use nym_validator_client::nyxd::Coin;
 use nym_vpn_api_client::{
     ResolverOverrides,
@@ -287,6 +288,19 @@ impl AccountCommandSender {
         self.command_tx
             .send(AccountCommand::UpgradeMode(
                 UpgradeModeCommand::DisableUpgradeMode(tx),
+            ))
+            .map_err(AccountCommandError::internal)?;
+        rx.await.map_err(AccountCommandError::internal)?
+    }
+
+    pub async fn query_master_verification_key(
+        &self,
+        epoch_id: u64,
+    ) -> Result<Option<VerificationKeyAuth>, AccountCommandError> {
+        let (tx, rx) = ReturnSender::new();
+        self.command_tx
+            .send(AccountCommand::Common(
+                CommonCommand::GetMasterVerificationKey(tx, epoch_id),
             ))
             .map_err(AccountCommandError::internal)?;
         rx.await.map_err(AccountCommandError::internal)?

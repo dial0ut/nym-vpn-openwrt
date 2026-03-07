@@ -99,6 +99,7 @@ impl<C: ConnectivityMonitor> AccountControllerStateHandler<C> for LoggedOutState
                             CommonCommand::GetAccountSummary(return_sender) => return_sender.send(Ok(None)),
                             CommonCommand::GetDeeplink(return_sender, params) => return_sender.send(common_handler::handle_get_deeplink(shared_state, params).await),
                             CommonCommand::DeriveDeeplinkMnemonic(return_sender, deeplink_callback_url) => return_sender.send(common_handler::handle_derive_deeplink_mnemonic(shared_state, deeplink_callback_url).await),
+                            CommonCommand::GetMasterVerificationKey(return_sender, epoch_id) => return_sender.send(common_handler::handle_get_master_verification_key(shared_state, epoch_id).await),
                         }
                     },
                     AccountCommand::UpgradeMode(upgrade_mode_command) => match upgrade_mode_command {

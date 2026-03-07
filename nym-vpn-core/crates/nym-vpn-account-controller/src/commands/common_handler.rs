@@ -1,6 +1,7 @@
 // Copyright 2025 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
+use nym_credentials_interface::VerificationKeyAuth;
 use nym_offline_monitor::ConnectivityMonitor;
 use nym_vpn_api_client::{
     ResolverOverrides,
@@ -53,6 +54,9 @@ pub(crate) async fn handle_common_command<C: ConnectivityMonitor>(
         }
         CommonCommand::DeriveDeeplinkMnemonic(result_tx, deeplink_callback_url) => result_tx
             .send(handle_derive_deeplink_mnemonic(shared_state, deeplink_callback_url).await),
+        CommonCommand::GetMasterVerificationKey(result_tx, epoch_id) => {
+            result_tx.send(handle_get_master_verification_key(shared_state, epoch_id).await);
+        }
     };
 }
 
@@ -217,4 +221,15 @@ pub(crate) async fn handle_derive_deeplink_mnemonic<C: ConnectivityMonitor>(
     shared_state.deeplinks.remove_expired();
 
     Ok(mnemonic)
+}
+
+pub(crate) async fn handle_get_master_verification_key<C: ConnectivityMonitor>(
+    shared_state: &SharedAccountState<C>,
+    epoch_id: u64,
+) -> Result<Option<VerificationKeyAuth>, AccountCommandError> {
+    shared_state
+        .credential_storage
+        .get_master_verification_key(epoch_id)
+        .await
+        .map_err(|err| AccountCommandError::Storage(err.to_string()))
 }
