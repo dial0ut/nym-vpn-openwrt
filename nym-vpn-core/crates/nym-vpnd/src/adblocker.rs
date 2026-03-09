@@ -3,8 +3,8 @@
 
 //! OpenWrt dnsmasq-based ad-blocking.
 //!
-//! Downloads a blocklist and converts it to dnsmasq `server=` directives that
-//! resolve blocked domains to NXDOMAIN (by pointing them at an empty upstream).
+//! Downloads a blocklist and converts it to dnsmasq `local=` directives that
+//! resolve blocked domains to NXDOMAIN immediately without upstream forwarding.
 //! The blocklist is written to `/tmp/dnsmasq.d/nym-adblock.conf` and dnsmasq is
 //! restarted to pick up the changes.
 
@@ -16,7 +16,6 @@ const DNSMASQ_CONF_DIR: &str = "/tmp/dnsmasq.d";
 const DNSMASQ_CONF_FILE: &str = "/tmp/dnsmasq.d/nym-adblock.conf";
 
 /// Hagezi Multi Normal blocklist — good balance of coverage vs false positives.
-/// This is the hosts-format version (one domain per line).
 const BLOCKLIST_URL: &str =
     "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/hosts/multi.txt";
 
@@ -42,6 +41,12 @@ pub async fn apply_adblock() -> Result<(), AdblockError> {
 
     tracing::info!("Wrote ad-block config to {DNSMASQ_CONF_FILE}");
 
+    // Ensure dnsmasq is configured to read from our conf directory
+    ensure_dnsmasq_confdir().await?;
+
+    // Intercept LAN DNS so all clients go through dnsmasq
+    install_dns_redirect().await?;
+
     restart_dnsmasq().await?;
 
     Ok(())
@@ -50,6 +55,9 @@ pub async fn apply_adblock() -> Result<(), AdblockError> {
 /// Remove the dnsmasq ad-block config and restart dnsmasq.
 pub async fn remove_adblock() -> Result<(), AdblockError> {
     tracing::info!("Removing ad-blocking config");
+
+    // Remove DNS redirect rules
+    remove_dns_redirect().await?;
 
     if Path::new(DNSMASQ_CONF_FILE).exists() {
         fs::remove_file(DNSMASQ_CONF_FILE)
@@ -101,9 +109,9 @@ fn hosts_to_dnsmasq(hosts_content: &str) -> String {
             continue;
         }
 
-        // dnsmasq directive: return NXDOMAIN for this domain
-        // Using server=/domain/ with empty upstream causes NXDOMAIN
-        lines.push(format!("server=/{domain}/"));
+        // local= tells dnsmasq to answer NXDOMAIN immediately without
+        // forwarding to any upstream — much faster than server= with empty upstream
+        lines.push(format!("local=/{domain}/"));
     }
 
     let count = lines.len() - 2; // subtract header lines
@@ -133,6 +141,114 @@ async fn download_blocklist() -> Result<String, AdblockError> {
     }
 
     String::from_utf8(output.stdout).map_err(|e| AdblockError::Download(e.to_string()))
+}
+
+/// Configure dnsmasq to read from `/tmp/dnsmasq.d/` via UCI.
+async fn ensure_dnsmasq_confdir() -> Result<(), AdblockError> {
+    // Check if confdir is already set
+    let check = Command::new("uci")
+        .args(["get", "dhcp.@dnsmasq[0].confdir"])
+        .output()
+        .await
+        .map_err(|e| AdblockError::Io("uci get confdir", e))?;
+
+    let current = String::from_utf8_lossy(&check.stdout).trim().to_string();
+    if current == DNSMASQ_CONF_DIR {
+        tracing::debug!("dnsmasq confdir already set");
+        return Ok(());
+    }
+
+    tracing::info!("Setting dnsmasq confdir to {DNSMASQ_CONF_DIR}");
+
+    let set = Command::new("uci")
+        .args(["set", &format!("dhcp.@dnsmasq[0].confdir={DNSMASQ_CONF_DIR}")])
+        .output()
+        .await
+        .map_err(|e| AdblockError::Io("uci set confdir", e))?;
+
+    if !set.status.success() {
+        tracing::warn!(
+            "uci set confdir failed: {}",
+            String::from_utf8_lossy(&set.stderr)
+        );
+    }
+
+    let commit = Command::new("uci")
+        .args(["commit", "dhcp"])
+        .output()
+        .await
+        .map_err(|e| AdblockError::Io("uci commit dhcp", e))?;
+
+    if !commit.status.success() {
+        tracing::warn!(
+            "uci commit dhcp failed: {}",
+            String::from_utf8_lossy(&commit.stderr)
+        );
+    }
+
+    Ok(())
+}
+
+/// Redirect all LAN DNS (port 53) to the router's dnsmasq so the blocklist
+/// is enforced even for clients with hardcoded DNS servers.
+async fn install_dns_redirect() -> Result<(), AdblockError> {
+    // Idempotent: check if rule already exists
+    let check = Command::new("iptables")
+        .args([
+            "-t", "nat", "-C", "PREROUTING",
+            "-i", "br-lan", "-p", "udp", "--dport", "53",
+            "-j", "REDIRECT", "--to-ports", "53",
+        ])
+        .output()
+        .await
+        .map_err(|e| AdblockError::Io("iptables check", e))?;
+
+    if check.status.success() {
+        tracing::debug!("DNS redirect rules already installed");
+        return Ok(());
+    }
+
+    tracing::info!("Installing DNS redirect rules for ad-blocking");
+
+    for proto in &["udp", "tcp"] {
+        let output = Command::new("iptables")
+            .args([
+                "-t", "nat", "-A", "PREROUTING",
+                "-i", "br-lan", "-p", proto, "--dport", "53",
+                "-j", "REDIRECT", "--to-ports", "53",
+            ])
+            .output()
+            .await
+            .map_err(|e| AdblockError::Io("iptables add redirect", e))?;
+
+        if !output.status.success() {
+            tracing::warn!(
+                "Failed to add {proto} DNS redirect: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// Remove the DNS redirect rules.
+async fn remove_dns_redirect() -> Result<(), AdblockError> {
+    tracing::info!("Removing DNS redirect rules");
+
+    for proto in &["udp", "tcp"] {
+        // May fail if rules don't exist — that's fine
+        let _ = Command::new("iptables")
+            .args([
+                "-t", "nat", "-D", "PREROUTING",
+                "-i", "br-lan", "-p", proto, "--dport", "53",
+                "-j", "REDIRECT", "--to-ports", "53",
+            ])
+            .output()
+            .await;
+    }
+
+    Ok(())
 }
 
 async fn restart_dnsmasq() -> Result<(), AdblockError> {

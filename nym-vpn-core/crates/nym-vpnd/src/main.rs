@@ -30,7 +30,6 @@ use service::{NymVpnService, NymVpnServiceParameters};
 
 fn main() -> anyhow::Result<()> {
     let rt = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(10)
         .enable_all()
         .build()
         .context("failed to build tokio runtime")?;
