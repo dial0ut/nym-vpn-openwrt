@@ -192,6 +192,86 @@ impl<S: UdpSend> UdpSend for AmneziaSend<S> {
         }
     }
 
+    /// Batch-send packets with amnezia obfuscation, preserving sendmmsg batching
+    /// for the hot path (data packets).
+    ///
+    /// Handshake packets (init/response) are rare and handled individually since
+    /// they may require junk packets or padding. Data and cookie packets get
+    /// in-place header remapping and are forwarded as a batch via the inner
+    /// transport's `send_many_to` (which uses `sendmmsg` on Linux).
+    async fn send_many_to(
+        &self,
+        send_buf: &mut Self::SendManyBuf,
+        packets: &mut Vec<(Packet, SocketAddr)>,
+    ) -> io::Result<()> {
+        let Some(ref params) = self.params else {
+            return self.inner.send_many_to(send_buf, packets).await;
+        };
+
+        // Partition: remap data/cookie headers in-place (batchable),
+        // pull out handshake packets that need special handling (rare).
+        let mut handshake_packets = Vec::new();
+        let mut i = 0;
+        while i < packets.len() {
+            let data: &[u8] = &packets[i].0;
+            if data.len() < 4 {
+                // Too short — leave in batch, pass through unchanged
+                i += 1;
+                continue;
+            }
+
+            let msg_type = read_header(data, 0);
+            match msg_type {
+                WG_INIT | WG_RESPONSE => {
+                    // Remove from batch — needs individual handling
+                    handshake_packets.push(packets.swap_remove(i));
+                    // Don't increment i — swap_remove moved the last element here
+                }
+                WG_COOKIE => {
+                    packets[i].0.buf_mut()[..4].copy_from_slice(&params.h3.to_le_bytes());
+                    i += 1;
+                }
+                WG_DATA => {
+                    packets[i].0.buf_mut()[..4].copy_from_slice(&params.h4.to_le_bytes());
+                    i += 1;
+                }
+                _ => {
+                    // Unknown — leave in batch unchanged
+                    i += 1;
+                }
+            }
+        }
+
+        // Send the remapped batch via sendmmsg (hot path)
+        if !packets.is_empty() {
+            self.inner.send_many_to(send_buf, packets).await?;
+        }
+
+        // Handle handshake packets individually (cold path — ~1 per 2 minutes)
+        for (packet, destination) in handshake_packets {
+            let data: &[u8] = &packet;
+            let msg_type = read_header(data, 0);
+            match msg_type {
+                WG_INIT => {
+                    send_junk(&self.inner, params, destination).await?;
+                    let obfuscated = remap_and_pad(data, params.h1, params.s1);
+                    self.inner
+                        .send_to(Packet::from_bytes(obfuscated), destination)
+                        .await?;
+                }
+                WG_RESPONSE => {
+                    let obfuscated = remap_and_pad(data, params.h2, params.s2);
+                    self.inner
+                        .send_to(Packet::from_bytes(obfuscated), destination)
+                        .await?;
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        Ok(())
+    }
+
     fn max_number_of_packets_to_send(&self) -> usize {
         self.inner.max_number_of_packets_to_send()
     }
@@ -231,68 +311,50 @@ impl<R: UdpRecv> UdpRecv for AmneziaRecv<R> {
 
         loop {
             let (packet, addr) = self.inner.recv_from(pool).await?;
-            let data: &[u8] = &packet;
-
-            if data.len() < 4 {
-                // Too short to be a WG packet, discard
-                continue;
+            if let Some(result) = deobfuscate_packet(packet, addr, params) {
+                return Ok(result);
             }
-
-            let header = read_header(data, 0);
-
-            // Try to match cookie (H3) — fixed size 64, in-place remap
-            if header == params.h3 && data.len() == WG_COOKIE_SIZE {
-                let mut packet = packet;
-                packet.buf_mut()[..4].copy_from_slice(&WG_COOKIE.to_le_bytes());
-                return Ok((packet, addr));
-            }
-
-            // Try to match data (H4) — minimum size 32, in-place remap (hot path)
-            if header == params.h4 && data.len() >= WG_DATA_MIN_SIZE {
-                let mut packet = packet;
-                packet.buf_mut()[..4].copy_from_slice(&WG_DATA.to_le_bytes());
-                return Ok((packet, addr));
-            }
-
-            // Try to match unpadded init (H1, S1==0) — exactly 148
-            if params.s1 == 0 && header == params.h1 && data.len() == WG_INIT_SIZE {
-                let mut packet = packet;
-                packet.buf_mut()[..4].copy_from_slice(&WG_INIT.to_le_bytes());
-                return Ok((packet, addr));
-            }
-
-            // Try to match unpadded response (H2, S2==0) — exactly 92
-            if params.s2 == 0 && header == params.h2 && data.len() == WG_RESPONSE_SIZE {
-                let mut packet = packet;
-                packet.buf_mut()[..4].copy_from_slice(&WG_RESPONSE.to_le_bytes());
-                return Ok((packet, addr));
-            }
-
-            // Try to match padded init (S1 > 0) — size == S1 + 148
-            if params.s1 > 0 && data.len() == params.s1 + WG_INIT_SIZE {
-                let inner_header = read_header(data, params.s1);
-                if inner_header == params.h1 {
-                    let stripped = strip_padding_and_remap(data, params.s1, WG_INIT);
-                    return Ok((Packet::from_bytes(stripped), addr));
-                }
-            }
-
-            // Try to match padded response (S2 > 0) — size == S2 + 92
-            if params.s2 > 0 && data.len() == params.s2 + WG_RESPONSE_SIZE {
-                let inner_header = read_header(data, params.s2);
-                if inner_header == params.h2 {
-                    let stripped = strip_padding_and_remap(data, params.s2, WG_RESPONSE);
-                    return Ok((Packet::from_bytes(stripped), addr));
-                }
-            }
-
-            // Doesn't match any known pattern — junk or unknown, discard and loop
-            tracing::trace!(
-                len = data.len(),
-                header,
-                "Discarding unrecognized packet (likely junk)"
-            );
         }
+    }
+
+    /// Batch-receive packets with amnezia deobfuscation, preserving recvmmsg
+    /// batching from the inner transport.
+    ///
+    /// Receives a batch from the inner transport, then filters and deobfuscates
+    /// each packet in-place. Junk packets are discarded. If the entire batch
+    /// was junk (unlikely in steady state), falls back to single recv_from to
+    /// ensure at least one valid packet is returned.
+    async fn recv_many_from(
+        &mut self,
+        recv_buf: &mut Self::RecvManyBuf,
+        pool: &mut PacketBufPool,
+        packets: &mut Vec<(Packet, SocketAddr)>,
+    ) -> io::Result<()> {
+        let Some(ref params) = self.params else {
+            return self.inner.recv_many_from(recv_buf, pool, packets).await;
+        };
+
+        // Receive a batch from the inner transport (recvmmsg on Linux)
+        let mut raw_packets = Vec::new();
+        self.inner
+            .recv_many_from(recv_buf, pool, &mut raw_packets)
+            .await?;
+
+        // Deobfuscate each packet, discarding junk
+        for (packet, addr) in raw_packets {
+            if let Some(result) = deobfuscate_packet(packet, addr, params) {
+                packets.push(result);
+            }
+        }
+
+        // If the entire batch was junk, we must return at least one valid packet
+        // to satisfy the caller's contract. Fall back to single-packet recv loop.
+        if packets.is_empty() {
+            let (packet, addr) = self.recv_from(pool).await?;
+            packets.push((packet, addr));
+        }
+
+        Ok(())
     }
 
     fn enable_udp_gro(&self) -> io::Result<()> {
@@ -303,6 +365,76 @@ impl<R: UdpRecv> UdpRecv for AmneziaRecv<R> {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Try to deobfuscate a single packet. Returns `None` if the packet is junk
+/// or unrecognized (should be discarded).
+fn deobfuscate_packet(
+    packet: Packet,
+    addr: SocketAddr,
+    params: &AmneziaParams,
+) -> Option<(Packet, SocketAddr)> {
+    let data: &[u8] = &packet;
+
+    if data.len() < 4 {
+        return None;
+    }
+
+    let header = read_header(data, 0);
+
+    // Try to match cookie (H3) — fixed size 64, in-place remap
+    if header == params.h3 && data.len() == WG_COOKIE_SIZE {
+        let mut packet = packet;
+        packet.buf_mut()[..4].copy_from_slice(&WG_COOKIE.to_le_bytes());
+        return Some((packet, addr));
+    }
+
+    // Try to match data (H4) — minimum size 32, in-place remap (hot path)
+    if header == params.h4 && data.len() >= WG_DATA_MIN_SIZE {
+        let mut packet = packet;
+        packet.buf_mut()[..4].copy_from_slice(&WG_DATA.to_le_bytes());
+        return Some((packet, addr));
+    }
+
+    // Try to match unpadded init (H1, S1==0) — exactly 148
+    if params.s1 == 0 && header == params.h1 && data.len() == WG_INIT_SIZE {
+        let mut packet = packet;
+        packet.buf_mut()[..4].copy_from_slice(&WG_INIT.to_le_bytes());
+        return Some((packet, addr));
+    }
+
+    // Try to match unpadded response (H2, S2==0) — exactly 92
+    if params.s2 == 0 && header == params.h2 && data.len() == WG_RESPONSE_SIZE {
+        let mut packet = packet;
+        packet.buf_mut()[..4].copy_from_slice(&WG_RESPONSE.to_le_bytes());
+        return Some((packet, addr));
+    }
+
+    // Try to match padded init (S1 > 0) — size == S1 + 148
+    if params.s1 > 0 && data.len() == params.s1 + WG_INIT_SIZE {
+        let inner_header = read_header(data, params.s1);
+        if inner_header == params.h1 {
+            let stripped = strip_padding_and_remap(data, params.s1, WG_INIT);
+            return Some((Packet::from_bytes(stripped), addr));
+        }
+    }
+
+    // Try to match padded response (S2 > 0) — size == S2 + 92
+    if params.s2 > 0 && data.len() == params.s2 + WG_RESPONSE_SIZE {
+        let inner_header = read_header(data, params.s2);
+        if inner_header == params.h2 {
+            let stripped = strip_padding_and_remap(data, params.s2, WG_RESPONSE);
+            return Some((Packet::from_bytes(stripped), addr));
+        }
+    }
+
+    // Doesn't match any known pattern — junk or unknown, discard
+    tracing::trace!(
+        len = data.len(),
+        header,
+        "Discarding unrecognized packet (likely junk)"
+    );
+    None
+}
 
 /// Read a little-endian i32 header at the given byte offset.
 fn read_header(data: &[u8], offset: usize) -> i32 {
