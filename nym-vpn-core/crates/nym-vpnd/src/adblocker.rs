@@ -189,10 +189,105 @@ async fn ensure_dnsmasq_confdir() -> Result<(), AdblockError> {
     Ok(())
 }
 
+/// Detect whether this is an fw4 (nftables) or fw3 (iptables) system.
+/// Mirrors the check in `nym-firewall/src/openwrt/detect.rs`.
+fn is_fw4() -> bool {
+    Path::new("/sbin/fw4").exists() || Path::new("/usr/sbin/fw4").exists()
+}
+
 /// Redirect all LAN DNS (port 53) to the router's dnsmasq so the blocklist
 /// is enforced even for clients with hardcoded DNS servers.
 async fn install_dns_redirect() -> Result<(), AdblockError> {
-    // Idempotent: check if rule already exists
+    if is_fw4() {
+        install_dns_redirect_nft().await
+    } else {
+        install_dns_redirect_ipt().await
+    }
+}
+
+/// Remove the DNS redirect rules.
+async fn remove_dns_redirect() -> Result<(), AdblockError> {
+    if is_fw4() {
+        remove_dns_redirect_nft().await
+    } else {
+        remove_dns_redirect_ipt().await
+    }
+}
+
+// --- nftables (fw4) implementation ---
+
+const NFT_TABLE: &str = "nym_adblock";
+
+async fn install_dns_redirect_nft() -> Result<(), AdblockError> {
+    // Idempotent: check if our table already exists
+    let check = Command::new("nft")
+        .args(["list", "table", "ip", NFT_TABLE])
+        .output()
+        .await
+        .map_err(|e| AdblockError::Io("nft check table", e))?;
+
+    if check.status.success() {
+        tracing::debug!("DNS redirect nft table already installed");
+        return Ok(());
+    }
+
+    tracing::info!("Installing nftables DNS redirect rules for ad-blocking");
+
+    let ruleset = format!(
+        "table ip {table} {{\n\
+         \tchain prerouting {{\n\
+         \t\ttype nat hook prerouting priority dstnat; policy accept;\n\
+         \t\tiifname \"br-lan\" udp dport 53 redirect to :53\n\
+         \t\tiifname \"br-lan\" tcp dport 53 redirect to :53\n\
+         \t}}\n\
+         }}",
+        table = NFT_TABLE,
+    );
+
+    let mut child = Command::new("nft")
+        .args(["-f", "-"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| AdblockError::Io("nft spawn", e))?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        use tokio::io::AsyncWriteExt;
+        stdin
+            .write_all(ruleset.as_bytes())
+            .await
+            .map_err(|e| AdblockError::Io("nft write stdin", e))?;
+    }
+
+    let output = child
+        .wait_with_output()
+        .await
+        .map_err(|e| AdblockError::Io("nft wait", e))?;
+
+    if !output.status.success() {
+        tracing::warn!(
+            "Failed to install nft DNS redirect: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    Ok(())
+}
+
+async fn remove_dns_redirect_nft() -> Result<(), AdblockError> {
+    tracing::info!("Removing nftables DNS redirect rules");
+    // Deleting the whole table is atomic and idempotent-safe
+    let _ = Command::new("nft")
+        .args(["delete", "table", "ip", NFT_TABLE])
+        .output()
+        .await;
+    Ok(())
+}
+
+// --- iptables (fw3) implementation ---
+
+async fn install_dns_redirect_ipt() -> Result<(), AdblockError> {
     let check = Command::new("iptables")
         .args([
             "-t", "nat", "-C", "PREROUTING",
@@ -208,7 +303,7 @@ async fn install_dns_redirect() -> Result<(), AdblockError> {
         return Ok(());
     }
 
-    tracing::info!("Installing DNS redirect rules for ad-blocking");
+    tracing::info!("Installing iptables DNS redirect rules for ad-blocking");
 
     for proto in &["udp", "tcp"] {
         let output = Command::new("iptables")
@@ -232,12 +327,10 @@ async fn install_dns_redirect() -> Result<(), AdblockError> {
     Ok(())
 }
 
-/// Remove the DNS redirect rules.
-async fn remove_dns_redirect() -> Result<(), AdblockError> {
-    tracing::info!("Removing DNS redirect rules");
+async fn remove_dns_redirect_ipt() -> Result<(), AdblockError> {
+    tracing::info!("Removing iptables DNS redirect rules");
 
     for proto in &["udp", "tcp"] {
-        // May fail if rules don't exist — that's fine
         let _ = Command::new("iptables")
             .args([
                 "-t", "nat", "-D", "PREROUTING",
