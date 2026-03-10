@@ -685,6 +685,60 @@ handle_lan_set() {
     json_dump
 }
 
+handle_dns_get() {
+    local result=$($VPNC dns get 2>&1)
+
+    json_init
+
+    if echo "$result" | grep -q "Enabled"; then
+        json_add_boolean "enabled" 1
+    else
+        json_add_boolean "enabled" 0
+    fi
+
+    # Extract servers from brackets: "Custom DNS: Enabled [1.1.1.1 8.8.8.8]"
+    local servers=$(echo "$result" | sed -n 's/.*\[\(.*\)\].*/\1/p')
+    json_add_string "servers" "$servers"
+    json_dump
+}
+
+handle_dns_set() {
+    read input
+    json_load "$input"
+    json_get_var enabled enabled
+    json_get_var servers servers
+
+    # Handle enable/disable
+    if [ "$enabled" = "1" -o "$enabled" = "true" ]; then
+        $VPNC dns enable >/dev/null 2>&1
+    elif [ "$enabled" = "0" -o "$enabled" = "false" ]; then
+        $VPNC dns disable >/dev/null 2>&1
+    fi
+
+    # Handle server list if provided
+    if [ -n "$servers" ]; then
+        # Validate each server is an IP address
+        local valid_servers=""
+        for s in $servers; do
+            if echo "$s" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' || echo "$s" | grep -qE '^[0-9a-fA-F:]+$'; then
+                valid_servers="$valid_servers $s"
+            fi
+        done
+        valid_servers=$(echo "$valid_servers" | sed 's/^[[:space:]]*//')
+        if [ -n "$valid_servers" ]; then
+            $VPNC dns set $valid_servers >/dev/null 2>&1
+        fi
+    elif [ "$servers" = "" ] && [ -n "$enabled" ]; then
+        # servers explicitly empty — clear them
+        $VPNC dns clear >/dev/null 2>&1
+    fi
+
+    json_init
+    json_add_boolean "success" 1
+    json_add_string "message" "DNS configuration updated"
+    json_dump
+}
+
 handle_ad_block_get() {
     local result=$($VPNC ad-block get 2>&1)
     local enabled="0"
@@ -734,6 +788,7 @@ handle_init() {
     local network_raw=$($VPNC network get 2>&1)
     local lan_raw=$($VPNC lan get 2>&1)
     local adblock_raw=$($VPNC ad-block get 2>&1)
+    local dns_raw=$($VPNC dns get 2>&1)
     local daemon_status=$(/etc/init.d/nym-vpnd status 2>&1)
 
     json_init
@@ -838,6 +893,17 @@ handle_init() {
     fi
     json_close_object
 
+    # Custom DNS
+    json_add_object "dns"
+    if echo "$dns_raw" | grep -q "Enabled"; then
+        json_add_boolean "enabled" 1
+    else
+        json_add_boolean "enabled" 0
+    fi
+    local dns_servers=$(echo "$dns_raw" | sed -n 's/.*\[\(.*\)\].*/\1/p')
+    json_add_string "servers" "$dns_servers"
+    json_close_object
+
     # Daemon status
     json_add_object "daemon"
     if [ "$daemon_status" = "running" ]; then
@@ -925,6 +991,8 @@ case "$1" in
     "network_set": { "network": "str" },
     "lan_get": {},
     "lan_set": { "policy": "str" },
+    "dns_get": {},
+    "dns_set": { "enabled": "bool", "servers": "str" },
     "ad_block_get": {},
     "ad_block_set": { "enabled": "bool" },
     "daemon_status": {},
@@ -954,6 +1022,8 @@ EOF
             network_set)             handle_network_set ;;
             lan_get)                 handle_lan_get ;;
             lan_set)                 handle_lan_set ;;
+            dns_get)                 handle_dns_get ;;
+            dns_set)                 handle_dns_set ;;
             ad_block_get)            handle_ad_block_get ;;
             ad_block_set)            handle_ad_block_set ;;
             daemon_status)           handle_daemon_status ;;

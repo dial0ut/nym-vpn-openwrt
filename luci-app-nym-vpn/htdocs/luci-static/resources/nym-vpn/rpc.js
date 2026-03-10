@@ -111,6 +111,18 @@ return baseclass.extend({
         params: ['policy']
     }),
 
+    dnsGet: rpc.declare({
+        object: 'nym-vpn',
+        method: 'dns_get',
+        params: []
+    }),
+
+    dnsSet: rpc.declare({
+        object: 'nym-vpn',
+        method: 'dns_set',
+        params: ['enabled', 'servers']
+    }),
+
     adBlockGet: rpc.declare({
         object: 'nym-vpn',
         method: 'ad_block_get',

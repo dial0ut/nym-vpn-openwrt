@@ -30,9 +30,15 @@ return view.extend({
         var lan_policy = data.lan || {};
         var daemon_status = data.daemon || {};
         var ad_block = data.ad_block || {};
+        var dns_config = data.dns || {};
 
         var self = this;
         var E = dom.create.bind(dom);
+        var svgIcon = function(svg) {
+            var el = E('div', { 'class': 'nym-card-icon' });
+            el.innerHTML = svg;
+            return el;
+        };
 
         // Initialize UI managers
         var modalManager = nymUI.createModalManager();
@@ -53,6 +59,7 @@ return view.extend({
         var entryGatewayContainer, exitGatewayContainer;
         var isTwoHopMode = tunnel_config.two_hop === 'on';
         var previousState = status.state || 'unknown';
+        var transitioning = false;
         var daemonStatusDisplay;
 
         // Uptime tracking
@@ -92,6 +99,16 @@ return view.extend({
                 if (!result) return;
 
                 var state = result.state || 'unknown';
+
+                // Clear transitioning flag once daemon reflects the new state
+                if (transitioning && (state === 'connecting' || state === 'disconnecting' || state === 'connected' || state === 'disconnected')) {
+                    if (state !== previousState) {
+                        transitioning = false;
+                    }
+                }
+
+                // Skip UI updates while transitioning and daemon hasn't caught up
+                if (transitioning) return;
 
                 if (statusHero) {
                     statusHero.className = 'nym-status-hero ' + state;
@@ -205,6 +222,7 @@ return view.extend({
 
         // Connection handlers
         var handleConnect = function() {
+            transitioning = true;
             if (statusHero) statusHero.className = 'nym-status-hero connecting';
             if (statusLabel) statusLabel.textContent = 'Connecting';
             if (actionBtn) {
@@ -245,9 +263,13 @@ return view.extend({
                 .then(function(result) {
                     if (!result || !result.success) {
                         showToast('Connection failed: ' + (result.error || 'Unknown error'), 'error');
+                        transitioning = false;
                         updateStatus();
                         return;
                     }
+
+                    // Daemon accepted the connect — clear transitioning so polls work normally
+                    transitioning = false;
 
                     var pollCount = 0;
                     var maxPolls = 60;
@@ -274,12 +296,14 @@ return view.extend({
 
                     setTimeout(pollStatus, 1000);
                 }).catch(function(err) {
+                    transitioning = false;
                     showToast('Connection error: ' + err.message, 'error');
                     updateStatus();
                 });
         };
 
         var handleCancel = function() {
+            transitioning = true;
             if (statusHero) statusHero.className = 'nym-status-hero disconnecting';
             if (statusLabel) statusLabel.textContent = 'Cancelling';
             if (actionBtn) {
@@ -288,6 +312,7 @@ return view.extend({
             }
 
             rpc.disconnect().then(function(result) {
+                transitioning = false;
                 if (result && result.success) {
                     showToast('Connection cancelled', 'warning');
                 } else {
@@ -295,17 +320,20 @@ return view.extend({
                 }
                 updateStatus();
             }).catch(function(err) {
+                transitioning = false;
                 showToast('Cancel error: ' + err.message, 'error');
                 updateStatus();
             });
         };
 
         var handleDisconnect = function() {
+            transitioning = true;
             if (statusHero) statusHero.className = 'nym-status-hero disconnecting';
             if (statusLabel) statusLabel.textContent = 'Disconnecting';
             if (actionBtn) actionBtn.disabled = true;
 
             rpc.disconnect().then(function(result) {
+                transitioning = false;
                 if (result && result.success) {
                     updateStatus();
                 } else {
@@ -313,6 +341,7 @@ return view.extend({
                     updateStatus();
                 }
             }).catch(function(err) {
+                transitioning = false;
                 showToast('Disconnect error: ' + err.message, 'error');
                 updateStatus();
             });
@@ -424,7 +453,7 @@ return view.extend({
                 'class': 'nym-select',
                 'name': name,
                 'change': onSelect
-            }, [E('option', { 'value': 'none' }, '— Loading countries... —')]);
+            }, [E('option', { 'value': 'none' }, '— Select Country —')]);
 
             // Lazy-load country list on first focus
             var loaded = false;
@@ -668,6 +697,41 @@ return view.extend({
             });
         };
 
+        // Custom DNS handler
+        var handleDnsToggle = function(enabled) {
+            var serversInput = document.getElementById('dns-servers-input');
+            var servers = serversInput ? serversInput.value.trim() : null;
+            rpc.dnsSet(enabled, servers || null).then(function(result) {
+                if (result && result.success) {
+                    showToast(enabled ? 'Custom DNS enabled' : 'Custom DNS disabled', 'success');
+                } else {
+                    showToast('Failed: ' + (result.error || 'Unknown'), 'error');
+                    var toggle = document.getElementById('dns-toggle');
+                    if (toggle) toggle.checked = !enabled;
+                }
+            }).catch(function(err) {
+                showToast('Error: ' + err.message, 'error');
+                var toggle = document.getElementById('dns-toggle');
+                if (toggle) toggle.checked = !enabled;
+            });
+        };
+
+        var handleDnsSave = function() {
+            var serversInput = document.getElementById('dns-servers-input');
+            var dnsToggle = document.getElementById('dns-toggle');
+            var servers = serversInput ? serversInput.value.trim() : '';
+            var enabled = dnsToggle ? dnsToggle.checked : false;
+            rpc.dnsSet(enabled, servers || null).then(function(result) {
+                if (result && result.success) {
+                    showToast('DNS servers updated', 'success');
+                } else {
+                    showToast('Failed: ' + (result.error || 'Unknown'), 'error');
+                }
+            }).catch(function(err) {
+                showToast('Error: ' + err.message, 'error');
+            });
+        };
+
         // Ad-blocking handler
         var handleAdBlock = function(enabled) {
             rpc.adBlockSet(enabled).then(function(result) {
@@ -692,7 +756,8 @@ return view.extend({
 
         // Check if logged in
         var identity = account_info.identity || '';
-        var state = account_info.state || '';
+        var rawState = account_info.state || '';
+        var state = rawState.replace(/([a-z])([A-Z])/g, '$1 $2');
         var invalidIdentities = ['', 'Not set', 'LoggedOut', 'unset', 'none'];
         var hasError = state.indexOf('Error') >= 0 || identity.indexOf('Error') >= 0;
         var isLoggedIn = identity && invalidIdentities.indexOf(identity) === -1 && !hasError;
@@ -789,7 +854,7 @@ return view.extend({
         var tunnelCard = E('div', { 'class': 'nym-card' }, [
             E('div', { 'class': 'nym-card-header', 'click': function() { toggleCard(tunnelCard); } }, [
                 E('div', { 'class': 'nym-card-title' }, [
-                    E('div', { 'class': 'nym-card-icon' }, '⚙'),
+                    svgIcon(assets.iconTunnel),
                     'Tunnel Settings'
                 ]),
                 E('div', { 'class': 'nym-card-chevron' }, '▼')
@@ -836,7 +901,7 @@ return view.extend({
         var lanCard = E('div', { 'class': 'nym-card' }, [
             E('div', { 'class': 'nym-card-header', 'click': function() { toggleCard(lanCard); } }, [
                 E('div', { 'class': 'nym-card-title' }, [
-                    E('div', { 'class': 'nym-card-icon' }, '🔒'),
+                    svgIcon(assets.iconNetwork),
                     'Local Network'
                 ]),
                 E('div', { 'class': 'nym-card-chevron' }, '▼')
@@ -864,17 +929,63 @@ return view.extend({
 
         // DNS & Ad Blocking Card
         var adBlockEnabled = ad_block.enabled ? true : false;
+        var dnsEnabled = dns_config.enabled ? true : false;
+        var dnsServers = dns_config.servers || '';
         var dnsCard = E('div', { 'class': 'nym-card' }, [
             E('div', { 'class': 'nym-card-header', 'click': function() { toggleCard(dnsCard); } }, [
                 E('div', { 'class': 'nym-card-title' }, [
-                    E('div', { 'class': 'nym-card-icon' }, '🛡'),
+                    svgIcon(assets.iconShield),
                     'DNS & Ad Blocking'
                 ]),
                 E('div', { 'class': 'nym-card-chevron' }, '▼')
             ]),
             E('div', { 'class': 'nym-card-body' }, [
                 E('div', { 'class': 'nym-card-description' },
-                    'Block ads and trackers at the DNS level using dnsmasq. Downloads a curated blocklist and applies it to all devices on the network.'),
+                    'Configure custom DNS servers and block ads at the DNS level.'),
+
+                // Custom DNS toggle
+                E('div', { 'class': 'nym-toggle-row' }, [
+                    E('div', { 'class': 'nym-toggle-info' }, [
+                        E('div', { 'class': 'nym-toggle-title' }, 'Custom DNS'),
+                        E('div', { 'class': 'nym-toggle-desc' }, 'Use custom DNS servers instead of the VPN defaults')
+                    ]),
+                    E('label', { 'class': 'nym-toggle' }, [
+                        E('input', {
+                            'type': 'checkbox',
+                            'id': 'dns-toggle',
+                            'checked': dnsEnabled ? 'checked' : null,
+                            'change': function(ev) {
+                                handleDnsToggle(ev.target.checked);
+                            }
+                        }),
+                        E('span', { 'class': 'nym-toggle-slider' })
+                    ])
+                ]),
+
+                // DNS servers input
+                E('div', { 'style': 'margin-top: 12px' }, [
+                    E('div', { 'class': 'nym-toggle-desc', 'style': 'margin-bottom: 8px' },
+                        'Space-separated IP addresses (e.g. 1.1.1.1 8.8.8.8)'),
+                    E('div', { 'style': 'display: flex; gap: 8px' }, [
+                        E('input', {
+                            'type': 'text',
+                            'id': 'dns-servers-input',
+                            'class': 'nym-input',
+                            'placeholder': '1.1.1.1 8.8.8.8',
+                            'value': dnsServers,
+                            'style': 'flex: 1'
+                        }),
+                        E('button', {
+                            'class': 'nym-btn nym-btn-primary nym-btn-small',
+                            'click': handleDnsSave
+                        }, 'Save')
+                    ])
+                ]),
+
+                // Divider
+                E('div', { 'style': 'border-top: 1px solid var(--border-color); margin: 16px 0' }),
+
+                // Ad Blocking toggle
                 E('div', { 'class': 'nym-toggle-row' }, [
                     E('div', { 'class': 'nym-toggle-info' }, [
                         E('div', { 'class': 'nym-toggle-title' }, 'Ad Blocking'),
@@ -891,10 +1002,6 @@ return view.extend({
                         }),
                         E('span', { 'class': 'nym-toggle-slider' })
                     ])
-                ]),
-                E('div', { 'class': 'nym-info-item', 'style': 'margin-top: 12px' }, [
-                    E('div', { 'class': 'nym-info-label' }, 'Status'),
-                    E('div', { 'class': 'nym-info-value', 'id': 'adblock-status-display' }, adBlockEnabled ? 'Enabled' : 'Disabled')
                 ])
             ])
         ]);
@@ -904,7 +1011,7 @@ return view.extend({
         var accountCard = E('div', { 'class': 'nym-card' }, [
             E('div', { 'class': 'nym-card-header', 'click': function() { toggleCard(accountCard); } }, [
                 E('div', { 'class': 'nym-card-title' }, [
-                    E('div', { 'class': 'nym-card-icon' }, '👤'),
+                    svgIcon(assets.iconUser),
                     'Account'
                 ]),
                 E('div', { 'class': 'nym-card-chevron' }, '▼')
@@ -1019,7 +1126,7 @@ return view.extend({
         var serviceCard = E('div', { 'class': 'nym-card' }, [
             E('div', { 'class': 'nym-card-header', 'click': function() { toggleCard(serviceCard); } }, [
                 E('div', { 'class': 'nym-card-title' }, [
-                    E('div', { 'class': 'nym-card-icon' }, '🔧'),
+                    svgIcon(assets.iconService),
                     'Service Management'
                 ]),
                 E('div', { 'class': 'nym-card-chevron' }, '▼')

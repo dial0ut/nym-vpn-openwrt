@@ -68,7 +68,8 @@ return baseclass.extend({
     .nym-gateway-ip { font-size: 10px; color: var(--text-muted); font-family: monospace; }\
     .nym-gateway-empty { font-size: 24px; color: var(--text-muted); }\
     .nym-action-buttons { display: flex; justify-content: center; gap: 16px; margin-top: 32px; }\
-    .nym-btn { padding: 14px 40px; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 2px; border: none; border-radius: 8px; cursor: pointer; transition: all 0.2s ease; font-family: inherit; outline: none !important; box-shadow: none; }\
+    .nym-action-buttons .nym-btn { flex: 1; max-width: 200px; text-align: center; }\
+    .nym-btn { padding: 14px 40px; font-size: 14px; font-weight: 600; letter-spacing: 0.3px; border: none; border-radius: 8px; cursor: pointer; transition: all 0.2s ease; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; outline: none !important; box-shadow: none; }\
     .nym-btn:focus, .nym-btn:active { outline: none !important; box-shadow: none !important; }\
     .nym-btn:disabled { opacity: 0.4; cursor: not-allowed; }\
     .nym-btn-primary { background: var(--nym-green) !important; color: var(--bg-primary) !important; }\
@@ -81,12 +82,13 @@ return baseclass.extend({
     .nym-btn-danger:active:not(:disabled) { background: var(--danger-dim) !important; transform: translateY(0); }\
     .nym-btn-secondary { background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color); }\
     .nym-btn-secondary:hover:not(:disabled) { border-color: var(--text-secondary); color: var(--text-primary); }\
-    .nym-btn-small { padding: 8px 16px; font-size: 11px; }\
+    .nym-btn-small { padding: 8px 16px; font-size: 13px; }\
     .nym-card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; margin-bottom: 16px; overflow: hidden; }\
     .nym-card-header { padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; transition: background 0.2s; user-select: none; }\
     .nym-card-header:hover { background: var(--bg-card-hover); }\
     .nym-card-title { display: flex; align-items: center; gap: 12px; font-size: 14px; font-weight: 500; color: var(--text-primary); }\
-    .nym-card-icon { width: 32px; height: 32px; background: var(--nym-green-dim); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; }\
+    .nym-card-icon { width: 32px; height: 32px; background: var(--nym-green-dim); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; color: var(--nym-green); }\
+    .nym-card-icon svg { width: 16px; height: 16px; }\
     .nym-card-chevron { color: var(--text-muted); transition: transform 0.3s ease; font-size: 12px; }\
     .nym-card.expanded .nym-card-chevron { transform: rotate(180deg); }\
     .nym-card-body { padding: 0 20px 20px; display: none; }\
@@ -108,7 +110,7 @@ return baseclass.extend({
     .nym-modal-title { color: var(--text-primary); font-size: 18px; font-weight: 600; margin-bottom: 8px; }\
     .nym-modal-message { color: var(--text-muted); font-size: 13px; line-height: 1.5; }\
     .nym-modal-buttons { display: flex; gap: 12px; justify-content: center; margin-top: 24px; }\
-    .nym-modal-buttons .nym-btn { padding: 10px 24px; font-size: 12px; min-width: 100px; white-space: nowrap; }\
+    .nym-modal-buttons .nym-btn { padding: 10px 24px; font-size: 14px; flex: 1; min-width: 100px; white-space: nowrap; text-align: center; }\
     .nym-modal-buttons .nym-btn-danger { background: transparent !important; background-color: transparent !important; background-image: none !important; color: var(--danger) !important; border: 1px solid var(--danger) !important; }\
     .nym-modal-buttons .nym-btn-danger:hover { background: var(--danger-dim) !important; background-color: var(--danger-dim) !important; box-shadow: 0 0 24px var(--danger-dim) !important; }\
     .nym-modal-buttons .nym-btn-primary { background: var(--nym-green) !important; background-color: var(--nym-green) !important; background-image: none !important; color: var(--bg-primary) !important; }\
@@ -174,8 +176,9 @@ return baseclass.extend({
     .nym-info-value.truncate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }\
     .nym-account-logged-in { text-align: center; padding: 20px 0; }\
     .nym-account-id { background: var(--bg-input); padding: 12px 16px; border-radius: 8px; font-size: 12px; color: var(--text-secondary); word-break: break-all; margin-bottom: 16px; border: 1px solid var(--border-color); }\
-    .nym-account-state { display: inline-block; padding: 6px 12px; background: var(--nym-green-dim); color: var(--nym-green); border-radius: 20px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 20px; }\
+    .nym-account-state { display: inline-block; padding: 6px 14px; background: var(--nym-green-dim); color: var(--nym-green); border-radius: 20px; font-size: 12px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; font-weight: 500; letter-spacing: 0.3px; margin-bottom: 20px; }\
     .nym-account-actions { display: flex; justify-content: center; gap: 12px; }\
+    .nym-account-actions .nym-btn { flex: 1; max-width: 200px; text-align: center; }\
     .nym-footer { text-align: center; padding: 24px 0; border-top: 1px solid var(--border-color); margin-top: 24px; }\
     .nym-footer-info { display: flex; justify-content: center; gap: 32px; font-size: 12px; color: var(--text-muted); }\
     .nym-footer-item span { color: var(--text-secondary); }\
@@ -211,7 +214,7 @@ return baseclass.extend({
     .nym-service-info { text-align: center; }\
     .nym-service-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 8px; }\
     .nym-service-value { font-size: 18px; color: var(--text-primary); font-variant-numeric: tabular-nums; }\
-    .nym-daemon-status { display: inline-block; padding: 6px 16px; border-radius: 20px; font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 1px; }\
+    .nym-daemon-status { display: inline-block; padding: 6px 16px; border-radius: 20px; font-size: 13px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; font-weight: 500; letter-spacing: 0.3px; }\
     .nym-daemon-status.running { background: var(--nym-green-dim); color: var(--nym-green); }\
     .nym-daemon-status.stopped { background: var(--danger-dim); color: var(--danger); }\
 '
