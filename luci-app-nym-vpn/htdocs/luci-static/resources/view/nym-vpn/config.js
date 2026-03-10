@@ -59,7 +59,7 @@ return view.extend({
         var entryGatewayContainer, exitGatewayContainer;
         var isTwoHopMode = tunnel_config.two_hop === 'on';
         var previousState = status.state || 'unknown';
-        var transitioning = false;
+        var actionInProgress = false;
         var daemonStatusDisplay;
 
         // Uptime tracking
@@ -95,20 +95,16 @@ return view.extend({
 
         // Update status display
         var updateStatus = function() {
+            // Block background polls while a connect/disconnect action owns the UI
+            if (actionInProgress) return Promise.resolve();
+
             return rpc.status().then(function(result) {
                 if (!result) return;
 
+                // Re-check after async gap — action may have started while request was in-flight
+                if (actionInProgress) return;
+
                 var state = result.state || 'unknown';
-
-                // Clear transitioning flag once daemon reflects the new state
-                if (transitioning && (state === 'connecting' || state === 'disconnecting' || state === 'connected' || state === 'disconnected')) {
-                    if (state !== previousState) {
-                        transitioning = false;
-                    }
-                }
-
-                // Skip UI updates while transitioning and daemon hasn't caught up
-                if (transitioning) return;
 
                 if (statusHero) {
                     statusHero.className = 'nym-status-hero ' + state;
@@ -222,7 +218,7 @@ return view.extend({
 
         // Connection handlers
         var handleConnect = function() {
-            transitioning = true;
+            actionInProgress = true;
             if (statusHero) statusHero.className = 'nym-status-hero connecting';
             if (statusLabel) statusLabel.textContent = 'Connecting';
             if (actionBtn) {
@@ -263,14 +259,12 @@ return view.extend({
                 .then(function(result) {
                     if (!result || !result.success) {
                         showToast('Connection failed: ' + (result.error || 'Unknown error'), 'error');
-                        transitioning = false;
+                        actionInProgress = false;
                         updateStatus();
                         return;
                     }
 
-                    // Daemon accepted the connect — clear transitioning so polls work normally
-                    transitioning = false;
-
+                    // Poll until daemon reaches connected state
                     var pollCount = 0;
                     var maxPolls = 60;
 
@@ -278,32 +272,37 @@ return view.extend({
                         pollCount++;
                         rpc.status().then(function(st) {
                             if (st && st.state === 'connected') {
+                                actionInProgress = false;
+                                previousState = 'connected';
                                 updateStatus();
                             } else if (st && st.state === 'connecting') {
                                 if (pollCount < maxPolls) {
                                     setTimeout(pollStatus, 1000);
                                 } else {
+                                    actionInProgress = false;
                                     updateStatus();
                                 }
                             } else {
+                                // Disconnected or error during connect
+                                actionInProgress = false;
                                 updateStatus();
                             }
                         }).catch(function() {
                             if (pollCount < maxPolls) setTimeout(pollStatus, 1000);
-                            else updateStatus();
+                            else { actionInProgress = false; updateStatus(); }
                         });
                     };
 
                     setTimeout(pollStatus, 1000);
                 }).catch(function(err) {
-                    transitioning = false;
+                    actionInProgress = false;
                     showToast('Connection error: ' + err.message, 'error');
                     updateStatus();
                 });
         };
 
         var handleCancel = function() {
-            transitioning = true;
+            actionInProgress = true;
             if (statusHero) statusHero.className = 'nym-status-hero disconnecting';
             if (statusLabel) statusLabel.textContent = 'Cancelling';
             if (actionBtn) {
@@ -312,36 +311,64 @@ return view.extend({
             }
 
             rpc.disconnect().then(function(result) {
-                transitioning = false;
+                actionInProgress = false;
                 if (result && result.success) {
                     showToast('Connection cancelled', 'warning');
                 } else {
                     showToast('Cancel failed: ' + (result.error || 'Unknown'), 'error');
                 }
+                previousState = 'disconnected';
                 updateStatus();
             }).catch(function(err) {
-                transitioning = false;
+                actionInProgress = false;
                 showToast('Cancel error: ' + err.message, 'error');
                 updateStatus();
             });
         };
 
         var handleDisconnect = function() {
-            transitioning = true;
+            actionInProgress = true;
             if (statusHero) statusHero.className = 'nym-status-hero disconnecting';
             if (statusLabel) statusLabel.textContent = 'Disconnecting';
-            if (actionBtn) actionBtn.disabled = true;
+            if (actionBtn) {
+                actionBtn.textContent = 'Disconnecting';
+                actionBtn.disabled = true;
+            }
 
             rpc.disconnect().then(function(result) {
-                transitioning = false;
-                if (result && result.success) {
+                if (!result || !result.success) {
+                    actionInProgress = false;
+                    showToast('Disconnect failed: ' + (result ? result.error : 'Unknown'), 'error');
                     updateStatus();
-                } else {
-                    showToast('Disconnect failed: ' + (result.error || 'Unknown'), 'error');
-                    updateStatus();
+                    return;
                 }
+
+                // Poll until daemon reaches disconnected state
+                var pollCount = 0;
+                var maxPolls = 60;
+
+                var pollDisconnect = function() {
+                    pollCount++;
+                    rpc.status().then(function(st) {
+                        if (st && st.state === 'disconnected') {
+                            actionInProgress = false;
+                            previousState = 'disconnected';
+                            updateStatus();
+                        } else if (pollCount < maxPolls) {
+                            setTimeout(pollDisconnect, 1000);
+                        } else {
+                            actionInProgress = false;
+                            updateStatus();
+                        }
+                    }).catch(function() {
+                        if (pollCount < maxPolls) setTimeout(pollDisconnect, 1000);
+                        else { actionInProgress = false; updateStatus(); }
+                    });
+                };
+
+                setTimeout(pollDisconnect, 500);
             }).catch(function(err) {
-                transitioning = false;
+                actionInProgress = false;
                 showToast('Disconnect error: ' + err.message, 'error');
                 updateStatus();
             });
