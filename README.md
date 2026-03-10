@@ -8,7 +8,7 @@
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-green.svg?style=flat-square)](LICENSE)
 [![OpenWrt](https://img.shields.io/badge/OpenWrt-18.06%2B-00B5E2?style=flat-square&logo=openwrt&logoColor=white)](https://openwrt.org/)
 [![Rust](https://img.shields.io/badge/Rust-1.88%2B-orange?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
-[![CI](https://img.shields.io/github/actions/workflow/status/dial0ut/nym-vpn-openwrt/release-musl.yml?branch=openwrt&event=release&style=flat-square&label=build)](https://github.com/dial0ut/nym-vpn-openwrt/actions)
+
 
 **Privacy-preserving VPN for OpenWrt routers**
 
