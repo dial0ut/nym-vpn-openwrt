@@ -1015,6 +1015,11 @@ impl TunnelMonitor {
         let conn_data = connected_tunnel.connection_data();
         let use_bridges = self.tunnel_parameters.tunnel_settings.bridges_enabled();
 
+        // Clean up any stale TUN devices from a previous crash/interrupted session.
+        // If they exist, the kernel auto-assigned names (tun0, tun1) would shift and
+        // the route manager's interface map would reference stale indices.
+        Self::cleanup_stale_tun_devices().await;
+
         // Prepare network environment for the wireguard connection to the entry gateway
         let entry_mtu = connected_tunnel.entry_mtu();
         let entry_tun = Self::create_wireguard_device(
@@ -1181,6 +1186,35 @@ impl TunnelMonitor {
         }
 
         Ok(tun_device)
+    }
+
+    /// Remove stale TUN devices (tun0, tun1) left behind by a previous
+    /// crash or interrupted shutdown. Silently succeeds if they don't exist.
+    async fn cleanup_stale_tun_devices() {
+        for name in &["tun0", "tun1"] {
+            let path = format!("/sys/class/net/{name}");
+            if tokio::fs::metadata(&path).await.is_ok() {
+                tracing::warn!("Found stale TUN device {name}, removing");
+                let result = tokio::process::Command::new("ip")
+                    .args(["link", "delete", name])
+                    .output()
+                    .await;
+                match result {
+                    Ok(output) if output.status.success() => {
+                        tracing::info!("Removed stale TUN device {name}");
+                    }
+                    Ok(output) => {
+                        tracing::warn!(
+                            "Failed to remove {name}: {}",
+                            String::from_utf8_lossy(&output.stderr)
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to run ip link delete {name}: {e}");
+                    }
+                }
+            }
+        }
     }
 
     fn enable_ipv6(&self) -> bool {

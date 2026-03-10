@@ -349,6 +349,29 @@ impl RouteManagerImpl {
             .map(|(idx, _name)| *idx)
     }
 
+    /// Like `find_iface_idx` but refreshes the interface map from the kernel
+    /// when the name isn't in the cache. This handles the race where a TUN
+    /// device was just created but the netlink NewLink event hasn't been
+    /// processed yet.
+    async fn find_iface_idx_or_refresh(&mut self, iface_name: &str) -> Option<u32> {
+        if let Some(idx) = self.find_iface_idx(iface_name) {
+            return Some(idx);
+        }
+
+        tracing::debug!(
+            "Interface {iface_name} not in cache, refreshing link map from kernel"
+        );
+        match Self::initialize_link_map(&self.handle).await {
+            Ok(new_map) => self.iface_map = new_map,
+            Err(e) => {
+                tracing::warn!("Failed to refresh link map: {e}");
+                return None;
+            }
+        }
+
+        self.find_iface_idx(iface_name)
+    }
+
     fn process_deleted_route(&mut self, route: &Route) -> Result<()> {
         self.added_routes.remove(route);
         Ok(())
@@ -678,7 +701,8 @@ impl RouteManagerImpl {
                 }
 
                 if let Some(interface_name) = route.node.get_device()
-                    && let Some(iface_idx) = self.find_iface_idx(interface_name)
+                    && let Some(iface_idx) =
+                        self.find_iface_idx_or_refresh(interface_name).await
                 {
                     message_builder = message_builder.output_interface(iface_idx);
                 }
@@ -698,7 +722,8 @@ impl RouteManagerImpl {
                 }
 
                 if let Some(interface_name) = route.node.get_device()
-                    && let Some(iface_idx) = self.find_iface_idx(interface_name)
+                    && let Some(iface_idx) =
+                        self.find_iface_idx_or_refresh(interface_name).await
                 {
                     message_builder = message_builder.output_interface(iface_idx);
                 }
