@@ -13,6 +13,7 @@ mod v4;
 mod v5;
 mod v6;
 mod v7;
+mod v8;
 
 #[cfg(test)]
 mod tests;
@@ -98,12 +99,13 @@ enum VpnServiceConfigVersion {
     V5,
     V6,
     V7,
+    V8,
 }
 
 impl VpnServiceConfigVersion {
     /// Returns the latest version of the config file.
     pub fn latest() -> Self {
-        VpnServiceConfigVersion::V7
+        VpnServiceConfigVersion::V8
     }
 }
 
@@ -117,6 +119,7 @@ impl fmt::Display for VpnServiceConfigVersion {
             VpnServiceConfigVersion::V5 => "v5",
             VpnServiceConfigVersion::V6 => "v6",
             VpnServiceConfigVersion::V7 => "v7",
+            VpnServiceConfigVersion::V8 => "v8",
         })
     }
 }
@@ -132,6 +135,7 @@ enum VpnServiceConfigExt {
     V5(v5::VpnServiceConfig),
     V6(v6::VpnServiceConfig),
     V7(v7::VpnServiceConfig),
+    V8(v8::VpnServiceConfig),
 }
 
 impl VpnServiceConfigExt {
@@ -144,6 +148,7 @@ impl VpnServiceConfigExt {
             VpnServiceConfigExt::V5(_) => VpnServiceConfigVersion::V5,
             VpnServiceConfigExt::V6(_) => VpnServiceConfigVersion::V6,
             VpnServiceConfigExt::V7(_) => VpnServiceConfigVersion::V7,
+            VpnServiceConfigExt::V8(_) => VpnServiceConfigVersion::V8,
         }
     }
 }
@@ -160,6 +165,7 @@ impl TryFrom<VpnServiceConfigExt> for nym_vpn_lib_types::VpnServiceConfig {
             VpnServiceConfigExt::V5(v5) => nym_vpn_lib_types::VpnServiceConfig::try_from(v5),
             VpnServiceConfigExt::V6(v6) => nym_vpn_lib_types::VpnServiceConfig::try_from(v6),
             VpnServiceConfigExt::V7(v7) => nym_vpn_lib_types::VpnServiceConfig::try_from(v7),
+            VpnServiceConfigExt::V8(v8) => nym_vpn_lib_types::VpnServiceConfig::try_from(v8),
         }
     }
 }
@@ -182,7 +188,7 @@ impl TryFrom<&nym_vpn_lib_types::VpnServiceConfig> for VpnServiceConfigExt {
 
         let network_stats = NetworkStatisticsConfig::from(&value.network_stats);
 
-        let v7 = v7::VpnServiceConfig {
+        let v8 = v8::VpnServiceConfig {
             entry_point,
             exit_point,
             allow_lan: value.allow_lan,
@@ -198,9 +204,10 @@ impl TryFrom<&nym_vpn_lib_types::VpnServiceConfig> for VpnServiceConfigExt {
             enable_ad_blocking: value.enable_ad_blocking,
             mixnet_traffic,
             network_stats,
+            killswitch: value.killswitch,
         };
 
-        Ok(VpnServiceConfigExt::V7(v7))
+        Ok(VpnServiceConfigExt::V8(v8))
     }
 }
 

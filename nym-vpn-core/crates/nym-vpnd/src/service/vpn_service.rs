@@ -68,6 +68,7 @@ pub enum VpnServiceCommand {
     SetEnableLewesProtocol(oneshot::Sender<()>, bool),
     SetNetstack(oneshot::Sender<()>, bool),
     SetAllowLan(oneshot::Sender<()>, bool),
+    SetKillswitch(oneshot::Sender<()>, bool),
     SetEnableBridges(oneshot::Sender<()>, bool),
     SetResidentialExit(oneshot::Sender<()>, bool),
     SetEnableCustomDns(oneshot::Sender<()>, bool),
@@ -799,6 +800,10 @@ impl NymVpnService {
                 self.handle_set_allow_lan(allow_lan).await;
                 let _ = tx.send(());
             }
+            VpnServiceCommand::SetKillswitch(tx, killswitch) => {
+                self.handle_set_killswitch(killswitch).await;
+                let _ = tx.send(());
+            }
             VpnServiceCommand::SetEnableBridges(tx, enable_bridges) => {
                 self.handle_set_enable_bridges(enable_bridges).await;
                 let _ = tx.send(());
@@ -1030,6 +1035,11 @@ impl NymVpnService {
 
     async fn handle_set_allow_lan(&mut self, allow_lan: bool) {
         self.config_manager.set_allow_lan(allow_lan).await;
+        self.update_tunnel_settings_with_throttle();
+    }
+
+    async fn handle_set_killswitch(&mut self, killswitch: bool) {
+        self.config_manager.set_killswitch(killswitch).await;
         self.update_tunnel_settings_with_throttle();
     }
 

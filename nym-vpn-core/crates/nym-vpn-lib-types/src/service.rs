@@ -41,6 +41,7 @@ pub struct VpnServiceConfig {
     pub enable_ad_blocking: bool,
     pub mixnet_traffic: MixnetTrafficConfig,
     pub network_stats: NetworkStatisticsConfig,
+    pub killswitch: bool,
 }
 
 impl fmt::Display for VpnServiceConfig {
@@ -76,6 +77,7 @@ impl fmt::Display for VpnServiceConfig {
                 .join(", ")
         )?;
         writeln!(f, "enable_ad_blocking: {}", self.enable_ad_blocking)?;
+        writeln!(f, "killswitch: {}", self.killswitch)?;
         writeln!(f, "mixnet traffic config: {}", self.mixnet_traffic)?;
         writeln!(f, "networks stats config: {}", self.network_stats)?;
 
@@ -105,6 +107,7 @@ impl Default for VpnServiceConfig {
             enable_ad_blocking: false,
             network_stats: Default::default(),
             mixnet_traffic: MixnetTrafficConfig::default(),
+            killswitch: true,
         }
     }
 }

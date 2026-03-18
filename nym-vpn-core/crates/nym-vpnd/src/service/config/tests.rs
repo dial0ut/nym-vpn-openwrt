@@ -963,6 +963,7 @@ async fn test_service_config_serialize_full() {
             enabled: true,
             allow_disconnected: false,
         },
+        killswitch: true,
     };
     run_serialize_test(config).await;
 }

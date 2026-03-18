@@ -71,8 +71,9 @@ impl RouteHandler {
         &mut self,
         routing_config: RoutingConfig,
         enable_ipv6: bool,
+        killswitch: bool,
     ) -> Result<()> {
-        let routes = Self::get_routes(routing_config, enable_ipv6);
+        let routes = Self::get_routes(routing_config, enable_ipv6, killswitch);
 
         self.route_manager.create_routing_rules(enable_ipv6).await?;
 
@@ -103,7 +104,11 @@ impl RouteHandler {
         self.route_manager.clone()
     }
 
-    fn get_routes(routing_config: RoutingConfig, enable_ipv6: bool) -> HashSet<RequiredRoute> {
+    fn get_routes(
+        routing_config: RoutingConfig,
+        enable_ipv6: bool,
+        killswitch: bool,
+    ) -> HashSet<RequiredRoute> {
         let mut routes = HashSet::new();
 
         match routing_config {
@@ -111,7 +116,13 @@ impl RouteHandler {
                 tun_name,
                 tun_mtu,
             } => {
-                routes.extend(Self::get_default_routes(tun_name, tun_mtu, enable_ipv6));
+                if killswitch {
+                    routes.extend(Self::get_default_routes(tun_name, tun_mtu, enable_ipv6));
+                } else {
+                    tracing::info!(
+                        "Kill-switch disabled: skipping default routes for PBR compatibility"
+                    );
+                }
             }
             RoutingConfig::Wireguard {
                 entry_tun_name,
@@ -131,11 +142,17 @@ impl RouteHandler {
                     entry_tun_name,
                     entry_tun_mtu,
                 ));
-                routes.extend(Self::get_default_routes(
-                    exit_tun_name,
-                    exit_tun_mtu,
-                    enable_ipv6,
-                ));
+                if killswitch {
+                    routes.extend(Self::get_default_routes(
+                        exit_tun_name,
+                        exit_tun_mtu,
+                        enable_ipv6,
+                    ));
+                } else {
+                    tracing::info!(
+                        "Kill-switch disabled: skipping default routes for PBR compatibility"
+                    );
+                }
             }
         }
 

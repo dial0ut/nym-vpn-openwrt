@@ -53,6 +53,7 @@ impl TryFrom<proto::VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
             enable_custom_dns: value.enable_custom_dns,
             custom_dns,
             enable_ad_blocking: value.enable_ad_blocking,
+            killswitch: value.killswitch,
             mixnet_traffic,
             network_stats,
         };
@@ -86,6 +87,7 @@ impl From<nym_vpn_lib_types::VpnServiceConfig> for proto::VpnServiceConfig {
             enable_custom_dns: value.enable_custom_dns,
             custom_dns,
             enable_ad_blocking: value.enable_ad_blocking,
+            killswitch: value.killswitch,
             mixnet_traffic,
             network_stats,
         }

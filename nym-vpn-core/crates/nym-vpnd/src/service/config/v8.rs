@@ -1,4 +1,4 @@
-// Copyright 2025 - Nym Technologies SA <contact@nymtech.net>
+// Copyright 2026 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::service::{
@@ -6,6 +6,8 @@ use crate::service::{
     config::{
         VpnServiceConfigExt,
         entry_exit::v2::{EntryPoint, ExitPoint},
+        mixnet_traffic::v5::MixnetTrafficConfig,
+        network_stats::v1::NetworkStatisticsConfig,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -15,23 +17,30 @@ use std::{net::IpAddr, str::FromStr};
 pub struct VpnServiceConfig {
     pub entry_point: EntryPoint,
     pub exit_point: ExitPoint,
-    pub dns: Option<String>,
     pub allow_lan: bool,
     pub disable_ipv6: bool,
     pub enable_two_hop: bool,
     pub enable_bridges: bool,
+    pub enable_lewes_protocol: bool,
     pub netstack: bool,
-    pub disable_poisson_rate: bool,
-    pub disable_background_cover_traffic: bool,
-    pub min_mixnode_performance: Option<u8>,
-    pub min_gateway_mixnet_performance: Option<u8>,
     pub min_gateway_vpn_performance: Option<u8>,
     pub residential_exit: bool,
+    pub enable_custom_dns: bool,
+    pub custom_dns: Vec<String>,
+    pub enable_ad_blocking: bool,
+    pub mixnet_traffic: MixnetTrafficConfig,
+    pub network_stats: NetworkStatisticsConfig,
+    #[serde(default = "default_killswitch")]
+    pub killswitch: bool,
+}
+
+fn default_killswitch() -> bool {
+    true
 }
 
 impl From<VpnServiceConfig> for VpnServiceConfigExt {
-    fn from(v2: VpnServiceConfig) -> Self {
-        VpnServiceConfigExt::V2(v2)
+    fn from(v8: VpnServiceConfig) -> Self {
+        VpnServiceConfigExt::V8(v8)
     }
 }
 
@@ -43,26 +52,18 @@ impl TryFrom<VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
 
         let exit_point = nym_vpn_lib_types::ExitPoint::try_from(value.exit_point)?;
 
-        let custom_dns = match value.dns {
-            Some(str) => {
-                let ip = IpAddr::from_str(&str)
-                    .map_err(|e| ConfigSetupError::IpAddress { error: Box::new(e) })?;
-                vec![ip]
-            }
-            None => vec![],
-        };
+        let custom_dns: Vec<IpAddr> = value
+            .custom_dns
+            .iter()
+            .map(|dns_str| {
+                IpAddr::from_str(dns_str)
+                    .map_err(|e| ConfigSetupError::IpAddress { error: Box::new(e) })
+            })
+            .collect::<Result<_, _>>()?;
 
-        let mixnet_traffic = nym_vpn_lib_types::MixnetTrafficConfig {
-            poisson_parameter_for_loop_cover_stream: None,
-            average_packet_delay: None,
-            message_sending_average_delay: None,
+        let mixnet_traffic = nym_vpn_lib_types::MixnetTrafficConfig::from(value.mixnet_traffic);
 
-            disable_poisson_rate: value.disable_poisson_rate,
-            disable_background_cover_traffic: value.disable_background_cover_traffic,
-
-            min_mixnode_performance: value.min_mixnode_performance,
-            min_gateway_mixnet_performance: value.min_gateway_mixnet_performance,
-        };
+        let network_stats = nym_vpn_lib_types::NetworkStatisticsConfig::from(value.network_stats);
 
         let config = nym_vpn_lib_types::VpnServiceConfig {
             entry_point,
@@ -71,15 +72,18 @@ impl TryFrom<VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
             disable_ipv6: value.disable_ipv6,
             enable_two_hop: value.enable_two_hop,
             enable_bridges: value.enable_bridges,
+            enable_lewes_protocol: value.enable_lewes_protocol,
             netstack: value.netstack,
             min_gateway_vpn_performance: value.min_gateway_vpn_performance,
             residential_exit: value.residential_exit,
-            enable_custom_dns: !custom_dns.is_empty(),
-            custom_dns,
             mixnet_traffic,
-            killswitch: true,
-            ..Default::default()
+            enable_custom_dns: value.enable_custom_dns,
+            custom_dns,
+            enable_ad_blocking: value.enable_ad_blocking,
+            network_stats,
+            killswitch: value.killswitch,
         };
+
         Ok(config)
     }
 }

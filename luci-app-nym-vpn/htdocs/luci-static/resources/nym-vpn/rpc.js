@@ -66,7 +66,7 @@ return baseclass.extend({
     tunnelSet: rpc.declare({
         object: 'nym-vpn',
         method: 'tunnel_set',
-        params: ['ipv6', 'two_hop']
+        params: ['ipv6', 'two_hop', 'killswitch']
     }),
 
     accountGet: rpc.declare({

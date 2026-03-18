@@ -1121,8 +1121,9 @@ impl TunnelMonitor {
     }
 
     async fn set_routes(&mut self, routing_config: RoutingConfig, enable_ipv6: bool) -> Result<()> {
+        let killswitch = self.tunnel_parameters.tunnel_settings.killswitch;
         self.route_handler
-            .add_routes(routing_config, enable_ipv6)
+            .add_routes(routing_config, enable_ipv6, killswitch)
             .await
             .map_err(Error::AddRoutes)?;
 

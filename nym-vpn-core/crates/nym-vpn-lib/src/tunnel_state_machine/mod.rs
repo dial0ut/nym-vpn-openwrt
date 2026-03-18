@@ -131,6 +131,10 @@ pub struct TunnelSettings {
 
     /// DNS configuration.
     pub dns: DnsOptions,
+
+    /// Kill-switch: enforce firewall rules and default route.
+    /// When disabled, firewall policy and default route are skipped (for PBR compatibility).
+    pub killswitch: bool,
 }
 
 impl TunnelSettings {
@@ -212,6 +216,9 @@ impl TunnelSettings {
         if self.dns != other.dns {
             diff.add(TunnelSettingsDiffFields::Dns);
         }
+        if self.killswitch != other.killswitch {
+            diff.add(TunnelSettingsDiffFields::Killswitch);
+        }
 
         if diff.is_empty() { None } else { Some(diff) }
     }
@@ -231,6 +238,7 @@ pub enum TunnelSettingsDiffFields {
     EntryPoint,
     ExitPoint,
     Dns,
+    Killswitch,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
@@ -611,6 +619,7 @@ impl TunnelStateMachine {
             allow_lan: tunnel_settings.allow_lan,
             initial_state: InitialFirewallState::None,
             fwmark: tunnel_constants.fwmark,
+            killswitch: tunnel_settings.killswitch,
         })
         .map_err(Error::CreateFirewall)?;
 

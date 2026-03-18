@@ -198,6 +198,19 @@ impl NymVpnService for CommandInterface {
         Ok(tonic::Response::new(()))
     }
 
+    async fn set_killswitch(&self, request: tonic::Request<bool>) -> Result<tonic::Response<()>> {
+        let killswitch = request.into_inner();
+
+        let _ = self
+            .send_and_wait(VpnServiceCommand::SetKillswitch, killswitch)
+            .await
+            .map_err(|e| {
+                tonic::Status::internal(format!("Failed to set killswitch: {e}"))
+            })?;
+
+        Ok(tonic::Response::new(()))
+    }
+
     async fn set_residential_exit(
         &self,
         request: tonic::Request<bool>,

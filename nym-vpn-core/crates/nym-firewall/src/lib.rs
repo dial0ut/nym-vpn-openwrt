@@ -321,6 +321,7 @@ fn display_ips(ips: &[IpAddr]) -> String {
 /// by manipulating the OS firewall and DNS settings.
 pub struct Firewall {
     inner: openwrt::Firewall,
+    killswitch: bool,
 }
 
 /// Arguments required when first initializing the firewall.
@@ -332,6 +333,8 @@ pub struct FirewallArguments {
     /// Specifies the firewall mark used to identify traffic that is allowed to be excluded from
     /// the tunnel and _leaked_ during blocked states.
     pub fwmark: u32,
+    /// When false, firewall policy application is skipped (for PBR compatibility).
+    pub killswitch: bool,
 }
 
 /// State to enter during firewall init.
@@ -345,8 +348,10 @@ pub enum InitialFirewallState {
 impl Firewall {
     /// Creates a firewall instance with the given arguments.
     pub fn from_args(args: FirewallArguments) -> Result<Self, Error> {
+        let killswitch = args.killswitch;
         Ok(Firewall {
             inner: openwrt::Firewall::from_args(args)?,
+            killswitch,
         })
     }
 
@@ -354,12 +359,19 @@ impl Firewall {
     pub fn new(fwmark: u32) -> Result<Self, Error> {
         Ok(Firewall {
             inner: openwrt::Firewall::new(fwmark)?,
+            killswitch: true,
         })
     }
 
     /// Applies and starts enforcing the given `FirewallPolicy` Makes sure it is being kept in place
     /// until this method is called again with another policy, or until `reset_policy` is called.
     pub fn apply_policy(&mut self, policy: FirewallPolicy) -> Result<(), Error> {
+        if !self.killswitch {
+            tracing::info!(
+                "Kill-switch disabled: skipping firewall policy for PBR compatibility"
+            );
+            return Ok(());
+        }
         tracing::info!("Applying firewall policy: {}", policy);
         self.inner.apply_policy(policy)
     }

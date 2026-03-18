@@ -80,6 +80,7 @@ impl TryFrom<VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
             mixnet_traffic,
             enable_custom_dns: !custom_dns.is_empty(),
             custom_dns,
+            killswitch: true,
             ..Default::default()
         };
 

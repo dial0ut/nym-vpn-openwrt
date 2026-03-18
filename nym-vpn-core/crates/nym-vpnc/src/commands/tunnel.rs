@@ -37,6 +37,11 @@ pub struct SetParams {
     #[arg(long, value_parser = clap::value_parser!(BooleanOption))]
     netstack: Option<BooleanOption>,
 
+    /// Enable or disable the kill-switch (firewall + default route).
+    /// Disable for PBR (Policy-Based Routing) compatibility.
+    #[arg(long, value_parser = clap::value_parser!(BooleanOption))]
+    killswitch: Option<BooleanOption>,
+
     /// Enable Circumvention Transport (CT) wrapping for the connection to the entry gateway in two hop wireguard mode.
     #[arg(long, alias = "ct", value_parser = clap::value_parser!(BooleanOption))]
     circumvention_transports: Option<BooleanOption>,
@@ -94,11 +99,16 @@ impl Command {
                     "Circumvention transports: {}",
                     display_on_off(config.enable_bridges)
                 );
+                println!("Kill-switch: {}", display_on_off(config.killswitch));
                 println!("Mixnet traffic configuration: {}", config.mixnet_traffic);
 
                 Ok(())
             }
             Command::Set(params) => {
+                if let Some(killswitch) = params.killswitch {
+                    rpc_client.set_killswitch(*killswitch).await?;
+                }
+
                 if let Some(two_hop) = params.two_hop {
                     rpc_client.set_enable_two_hop(*two_hop).await?;
                 }

@@ -140,6 +140,15 @@ impl RpcClient {
         Ok(())
     }
 
+    pub async fn set_killswitch(&mut self, killswitch: bool) -> Result<()> {
+        self.0
+            .set_killswitch(killswitch)
+            .await
+            .map_err(Error::Rpc)?
+            .into_inner();
+        Ok(())
+    }
+
     pub async fn set_enable_custom_dns(&mut self, enable: bool) -> Result<()> {
         self.0
             .set_enable_custom_dns(enable)

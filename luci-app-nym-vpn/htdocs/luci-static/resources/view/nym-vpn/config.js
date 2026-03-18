@@ -544,8 +544,9 @@ return view.extend({
             ev.preventDefault();
             var ipv6 = ev.target.querySelector('#ipv6-toggle').checked ? 'on' : 'off';
             var two_hop = ev.target.querySelector('#two-hop-toggle').checked ? 'on' : 'off';
+            var killswitch = ev.target.querySelector('#killswitch-toggle').checked ? 'on' : 'off';
 
-            rpc.tunnelSet(ipv6, two_hop).then(function(result) {
+            rpc.tunnelSet(ipv6, two_hop, killswitch).then(function(result) {
                 if (result && result.success) {
                     isTwoHopMode = (two_hop === 'on');
                     showToast('Tunnel settings saved', 'success');
@@ -912,6 +913,28 @@ return view.extend({
                                 'type': 'checkbox',
                                 'id': 'two-hop-toggle',
                                 'checked': tunnel_config.two_hop === 'on' ? 'checked' : null
+                            }),
+                            E('span', { 'class': 'nym-toggle-slider' })
+                        ])
+                    ]),
+                    E('div', { 'class': 'nym-toggle-row' }, [
+                        E('div', { 'class': 'nym-toggle-info' }, [
+                            E('div', { 'class': 'nym-toggle-title' }, 'Kill-Switch'),
+                            E('div', { 'class': 'nym-toggle-desc' }, 'Block traffic leaks when VPN is active. Disable for Policy-Based Routing (PBR) compatibility.'),
+                            E('div', {
+                                'class': 'nym-toggle-warning',
+                                'style': 'color: #e67e22; font-size: 11px; margin-top: 4px; display: ' + (tunnel_config.killswitch === 'on' ? 'none' : 'block')
+                            }, 'Warning: Traffic may leak outside the VPN when disabled. Requires reconnect.')
+                        ]),
+                        E('label', { 'class': 'nym-toggle' }, [
+                            E('input', {
+                                'type': 'checkbox',
+                                'id': 'killswitch-toggle',
+                                'checked': tunnel_config.killswitch !== 'off' ? 'checked' : null,
+                                'change': function(ev) {
+                                    var warn = ev.target.closest('.nym-toggle-row').querySelector('.nym-toggle-warning');
+                                    if (warn) warn.style.display = ev.target.checked ? 'none' : 'block';
+                                }
                             }),
                             E('span', { 'class': 'nym-toggle-slider' })
                         ])

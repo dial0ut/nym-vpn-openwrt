@@ -33,6 +33,7 @@ impl TryFrom<VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
         let config = nym_vpn_lib_types::VpnServiceConfig {
             entry_point,
             exit_point,
+            killswitch: true,
             ..Default::default()
         };
         Ok(config)

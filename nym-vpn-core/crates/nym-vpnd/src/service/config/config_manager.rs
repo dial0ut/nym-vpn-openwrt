@@ -161,6 +161,13 @@ impl VpnServiceConfigManager {
         }
     }
 
+    pub async fn set_killswitch(&mut self, killswitch: bool) {
+        if self.config.killswitch != killswitch {
+            self.config.killswitch = killswitch;
+            self.save_config_and_send_event().await;
+        }
+    }
+
     /// Enable or disable custom DNS servers
     ///
     /// Returns true if the setting has changed, otherwise false if it's the same
@@ -395,6 +402,7 @@ impl VpnServiceConfigManager {
             entry_point: Box::new(self.config.entry_point.clone()),
             exit_point: Box::new(self.config.exit_point.clone()),
             dns,
+            killswitch: self.config.killswitch,
         }
     }
 }
