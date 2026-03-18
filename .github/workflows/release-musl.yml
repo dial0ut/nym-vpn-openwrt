@@ -379,3 +379,65 @@ jobs:
             | `mips_siflower` | Siflower SF19A28 (GL.iNet SFT1200) |
 
             Check your architecture: `grep OPENWRT_ARCH /etc/os-release` or `opkg print-architecture | grep -v all`
+
+            ### Package Feed
+
+            Add the NymVPN package feed to receive updates via `opkg upgrade`:
+
+            ```bash
+            ARCH=$(grep OPENWRT_ARCH /etc/os-release | cut -d'"' -f2)
+            echo "src/gz nym-vpn https://packages.dial0ut.org/opkg/$ARCH" >> /etc/opkg/customfeeds.conf
+            opkg update
+            ```
+
+  publish-feed:
+    name: Publish package feed
+    needs: [package, release]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: pkg-*
+          merge-multiple: true
+
+      - name: List downloaded packages
+        run: ls -la artifacts/
+
+      - name: Generate opkg feed
+        run: |
+          mkdir -p feed/opkg
+          cp artifacts/*.ipk feed/opkg/ 2>/dev/null || true
+          bash scripts/feed/generate-feed.sh opkg feed/opkg
+
+      - name: Generate apk feed
+        run: |
+          mkdir -p feed/apk
+          cp artifacts/*.apk feed/apk/ 2>/dev/null || true
+          bash scripts/feed/generate-feed.sh apk feed/apk
+
+      - name: Upload opkg feed to Cloudflare R2
+        uses: ryand56/r2-upload-action@latest
+        with:
+          r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+          r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          r2-bucket: ${{ secrets.R2_BUCKET }}
+          source-dir: feed/opkg
+          destination-dir: opkg
+
+      - name: Upload apk feed to Cloudflare R2
+        uses: ryand56/r2-upload-action@latest
+        with:
+          r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+          r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          r2-bucket: ${{ secrets.R2_BUCKET }}
+          source-dir: feed/apk
+          destination-dir: apk

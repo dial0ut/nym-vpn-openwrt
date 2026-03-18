@@ -8,6 +8,34 @@
     chmod 0666 /dev/net/tun
 }
 
+# Register package feed for updates
+FEED_BASE="https://packages.dial0ut.org"
+
+# Detect architecture
+ARCH=""
+if [ -f /etc/os-release ]; then
+    ARCH=$(grep OPENWRT_ARCH /etc/os-release | cut -d'"' -f2)
+fi
+
+if [ -n "$ARCH" ]; then
+    if command -v apk >/dev/null 2>&1; then
+        # OpenWrt 24.10+ (apk package manager)
+        APK_REPO="/etc/apk/repositories.d/nym-vpn.list"
+        if ! grep -q "nym-vpn" "$APK_REPO" 2>/dev/null; then
+            mkdir -p /etc/apk/repositories.d
+            echo "${FEED_BASE}/apk/${ARCH}" > "$APK_REPO"
+            echo "Package feed registered: ${FEED_BASE}/apk/${ARCH}"
+        fi
+    elif [ -f /etc/opkg.conf ]; then
+        # OpenWrt <=23.05 (opkg package manager)
+        FEED_CONF="/etc/opkg/customfeeds.conf"
+        if ! grep -q "nym-vpn" "$FEED_CONF" 2>/dev/null; then
+            echo "src/gz nym-vpn ${FEED_BASE}/opkg/${ARCH}" >> "$FEED_CONF"
+            echo "Package feed registered: ${FEED_BASE}/opkg/${ARCH}"
+        fi
+    fi
+fi
+
 # Enable and start service
 /etc/init.d/nym-vpnd enable
 /etc/init.d/nym-vpnd start
@@ -19,8 +47,8 @@ echo ""
 echo "=============================================="
 echo "NymVPN installed successfully!"
 echo ""
-echo "On OpenWrt 23.05+, Amnezia-WireGuard will be"
-echo "installed on next reboot for obfuscation support."
+echo "Update with: opkg update && opkg upgrade nym-vpn"
+echo "         or: apk update && apk upgrade nym-vpn"
 echo "=============================================="
 
 exit 0
