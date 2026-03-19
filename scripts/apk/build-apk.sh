@@ -149,6 +149,14 @@ if [ -f "$FW_SCRIPTS_DIR/fw4-include.sh" ]; then
     chmod 755 "$DATA_DIR/usr/share/nym-vpn/fw4-include.sh"
 fi
 
+# === DATA: Feed signing public key ===
+echo "=== Adding feed signing key ==="
+FEED_KEY="$REPO_ROOT/scripts/feed/dial0ut.pub"
+if [ -f "$FEED_KEY" ]; then
+    mkdir -p "$DATA_DIR/etc/apk/keys"
+    cp "$FEED_KEY" "$DATA_DIR/etc/apk/keys/dial0ut.pub"
+fi
+
 # === METADATA: .PKGINFO ===
 echo "=== Generating .PKGINFO ==="
 

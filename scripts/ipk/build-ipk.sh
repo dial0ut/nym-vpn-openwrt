@@ -148,6 +148,16 @@ if [ -f "$FW_SCRIPTS_DIR/fw4-include.sh" ]; then
     chmod 755 "$BUILD_DIR/data/usr/share/nym-vpn/fw4-include.sh"
 fi
 
+# === DATA: Feed signing public key ===
+echo "=== Adding feed signing key ==="
+FEED_KEY="$REPO_ROOT/scripts/feed/dial0ut.pub"
+if [ -f "$FEED_KEY" ]; then
+    mkdir -p "$BUILD_DIR/data/etc/opkg/keys"
+    cp "$FEED_KEY" "$BUILD_DIR/data/etc/opkg/keys/dial0ut.pub"
+    mkdir -p "$BUILD_DIR/data/etc/apk/keys"
+    cp "$FEED_KEY" "$BUILD_DIR/data/etc/apk/keys/dial0ut.pub"
+fi
+
 # === CONTROL: Generate from template ===
 echo "=== Generating control file ==="
 INSTALLED_SIZE=$(du -sk "$BUILD_DIR/data" | cut -f1)

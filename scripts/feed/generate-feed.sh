@@ -4,25 +4,28 @@
 # Generates both opkg (Packages/Packages.gz) and apk (APKINDEX.tar.gz) feeds.
 # No external tools needed — indices are generated directly.
 #
-# Usage: generate-feed.sh <format> <packages_dir>
+# Usage: generate-feed.sh <format> <packages_dir> [signing_key]
 #
 # Arguments:
 #   format       - "opkg" or "apk"
 #   packages_dir - Directory containing .ipk or .apk files
+#   signing_key  - (optional) Path to RSA private key for signing
 #
 # Examples:
-#   generate-feed.sh opkg ./feed/opkg    # Process *.ipk files
-#   generate-feed.sh apk  ./feed/apk     # Process *.apk files
+#   generate-feed.sh opkg ./feed/opkg
+#   generate-feed.sh opkg ./feed/opkg /path/to/key.pem
+#   generate-feed.sh apk  ./feed/apk  /path/to/key.pem
 
 set -euo pipefail
 
 if [ $# -lt 2 ]; then
-    echo "Usage: $0 <opkg|apk> <packages_dir>"
+    echo "Usage: $0 <opkg|apk> <packages_dir> [signing_key]"
     exit 1
 fi
 
 FORMAT="$1"
 PACKAGES_DIR="$2"
+SIGNING_KEY="${3:-}"
 
 if [ ! -d "$PACKAGES_DIR" ]; then
     echo "Error: $PACKAGES_DIR is not a directory"
@@ -117,6 +120,12 @@ generate_opkg_feed() {
 
         gzip -k -f "$packages_file"
         echo "  Generated: $arch/Packages + Packages.gz"
+
+        # Sign the Packages file
+        if [ -n "$SIGNING_KEY" ]; then
+            openssl dgst -sha256 -sign "$SIGNING_KEY" -out "$arch_dir/Packages.sig" "$packages_file"
+            echo "  Signed: $arch/Packages.sig"
+        fi
     done
 }
 
@@ -196,10 +205,18 @@ generate_apk_feed() {
             echo "  Added: $pkg_name $pkg_version ($pkg_arch_val)"
         done
 
-        # Create APKINDEX.tar.gz (must contain APKINDEX file)
-        (cd "$arch_dir" && tar czf APKINDEX.tar.gz APKINDEX)
+        # Create APKINDEX.tar.gz
+        if [ -n "$SIGNING_KEY" ]; then
+            # Signed: signature goes inside the archive as .SIGN.RSA.<keyname>
+            openssl dgst -sha1 -sign "$SIGNING_KEY" -out "$arch_dir/.SIGN.RSA.dial0ut.pub" "$index_file"
+            (cd "$arch_dir" && tar czf APKINDEX.tar.gz .SIGN.RSA.dial0ut.pub APKINDEX)
+            rm -f "$arch_dir/.SIGN.RSA.dial0ut.pub"
+            echo "  Generated: $arch/APKINDEX.tar.gz (signed)"
+        else
+            (cd "$arch_dir" && tar czf APKINDEX.tar.gz APKINDEX)
+            echo "  Generated: $arch/APKINDEX.tar.gz"
+        fi
         rm -f "$index_file"
-        echo "  Generated: $arch/APKINDEX.tar.gz"
     done
 }
 
