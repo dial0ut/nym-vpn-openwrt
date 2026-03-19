@@ -1027,6 +1027,7 @@ impl TunnelMonitor {
             self.enable_ipv6().then_some(conn_data.entry.private_ipv6),
             None,
             entry_mtu,
+            "nym0",
         )?;
         let entry_tun_name = entry_tun
             .deref()
@@ -1052,6 +1053,7 @@ impl TunnelMonitor {
             // todo: this needs to be able to set both destinations?
             Some(conn_data.entry.private_ipv4.into()),
             exit_mtu,
+            "nym1",
         )?;
         let exit_tun_name = exit_tun
             .deref()
@@ -1138,7 +1140,11 @@ impl TunnelMonitor {
         let tun_device = {
             let mut tun_config = tun::Configuration::default();
 
-            tun_config.address(interface_ipv4).mtu(mtu).up();
+            tun_config
+                .name("nym0")
+                .address(interface_ipv4)
+                .mtu(mtu)
+                .up();
 
             tun::create_as_async(&tun_config).map_err(Error::CreateTunDevice)?
         };
@@ -1161,10 +1167,12 @@ impl TunnelMonitor {
         interface_ipv6: Option<Ipv6Addr>,
         destination: Option<IpAddr>,
         mtu: u16,
+        name: &str,
     ) -> Result<AsyncDevice> {
         let mut tun_config = tun::Configuration::default();
 
         tun_config
+            .name(name)
             .address(interface_ipv4)
             .netmask(Ipv4Addr::BROADCAST)
             .mtu(mtu)
@@ -1189,10 +1197,10 @@ impl TunnelMonitor {
         Ok(tun_device)
     }
 
-    /// Remove stale TUN devices (tun0, tun1) left behind by a previous
-    /// crash or interrupted shutdown. Silently succeeds if they don't exist.
+    /// Remove stale TUN devices left behind by a previous crash or
+    /// interrupted shutdown. Silently succeeds if they don't exist.
     async fn cleanup_stale_tun_devices() {
-        for name in &["tun0", "tun1"] {
+        for name in &["nym0", "nym1", "tun0", "tun1"] {
             let path = format!("/sys/class/net/{name}");
             if tokio::fs::metadata(&path).await.is_ok() {
                 tracing::warn!("Found stale TUN device {name}, removing");
