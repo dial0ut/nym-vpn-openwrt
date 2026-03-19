@@ -1,0 +1,82 @@
+site_name: NymVPN for OpenWrt
+site_description: Privacy-first VPN for OpenWrt routers, powered by the Nym mixnet
+site_url: https://docs.dial0ut.org
+repo_url: https://github.com/dial0ut/nym-vpn-openwrt
+repo_name: dial0ut/nym-vpn-openwrt
+edit_uri: edit/openwrt/docs/
+
+theme:
+  name: material
+  logo: assets/logo.svg
+  favicon: assets/favicon.svg
+  palette:
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+  icon:
+    repo: fontawesome/brands/github
+
+extra_css:
+  - stylesheets/extra.css
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: getting-started/installation.md
+      - Quick Start: getting-started/quickstart.md
+  - User Guide:
+      - LuCI Web Interface: guide/luci.md
+      - CLI Usage: guide/cli.md
+      - Configuration: guide/configuration.md
+  - Architecture:
+      - Overview: architecture/overview.md
+      - Gotatun WireGuard: architecture/gotatun.md
+      - Firewall Backends: architecture/firewall.md
+  - Development:
+      - Building from Source: development/building.md
+      - IPK Packaging: development/ipk.md
+      - CI/CD: development/ci.md
+  - Troubleshooting: troubleshooting.md
+  - Supported Devices: devices.md
