@@ -293,6 +293,57 @@ jobs:
         run: |
           echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Find previous tag
+          CURRENT_TAG="${GITHUB_REF#refs/tags/}"
+          PREV_TAG=$(git tag --sort=-v:refname | grep -A1 "^${CURRENT_TAG}$" | tail -1)
+
+          if [ -z "$PREV_TAG" ] || [ "$PREV_TAG" = "$CURRENT_TAG" ]; then
+            # First release or no previous tag
+            PREV_TAG=$(git rev-list --max-parents=0 HEAD)
+          fi
+
+          echo "Generating changelog from $PREV_TAG to $CURRENT_TAG"
+
+          # Build changelog grouped by type
+          {
+            echo "### What's New"
+            echo ""
+
+            # Features
+            FEATS=$(git log "${PREV_TAG}..${CURRENT_TAG}" --pretty=format:"%s" | grep -E "^feat" | sed 's/^feat(\([^)]*\)): /- **\1:** /' | sed 's/^feat: /- /' || true)
+            if [ -n "$FEATS" ]; then
+              echo "**Features**"
+              echo "$FEATS"
+              echo ""
+            fi
+
+            # Fixes
+            FIXES=$(git log "${PREV_TAG}..${CURRENT_TAG}" --pretty=format:"%s" | grep -E "^fix" | sed 's/^fix(\([^)]*\)): /- **\1:** /' | sed 's/^fix: /- /' || true)
+            if [ -n "$FIXES" ]; then
+              echo "**Bug Fixes**"
+              echo "$FIXES"
+              echo ""
+            fi
+
+            # Other changes (docs, chore, refactor, ci, etc.)
+            OTHER=$(git log "${PREV_TAG}..${CURRENT_TAG}" --pretty=format:"%s" | grep -vE "^(feat|fix)" | sed 's/^\([^(]*\)(\([^)]*\)): /- **\2:** /' | sed 's/^\([a-z]*\): /- /' || true)
+            if [ -n "$OTHER" ]; then
+              echo "**Other Changes**"
+              echo "$OTHER"
+              echo ""
+            fi
+          } > /tmp/changelog.md
+
+          # Store as multiline output
+          {
+            echo "changelog<<CHANGELOG_EOF"
+            cat /tmp/changelog.md
+            echo "CHANGELOG_EOF"
+          } >> $GITHUB_OUTPUT
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -319,6 +370,10 @@ jobs:
             artifacts/*.apk
           body: |
             ## Nym VPN ${{ steps.version.outputs.version }} - OpenWRT Edition
+
+            ${{ steps.changelog.outputs.changelog }}
+
+            ---
 
             Pre-built static binaries and packages (.apk + .ipk) for OpenWrt routers.
 
