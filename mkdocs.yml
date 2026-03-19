@@ -70,6 +70,7 @@ nav:
       - LuCI Web Interface: guide/luci.md
       - CLI Usage: guide/cli.md
       - Configuration: guide/configuration.md
+      - Split Tunneling: guide/split-tunneling.md
   - Architecture:
       - Overview: architecture/overview.md
       - Gotatun WireGuard: architecture/gotatun.md
