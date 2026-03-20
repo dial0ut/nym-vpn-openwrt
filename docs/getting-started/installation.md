@@ -5,49 +5,65 @@
 The fastest way to install on a running OpenWrt device:
 
 ```bash
-curl -sL https://github.com/dial0ut/nym-vpn-openwrt/releases/latest/download/install.sh | sh
+curl -fsSL https://packages.dial0ut.org/install.sh | sh
 ```
 
-The installer automatically:
+The installer detects your package manager (`opkg` or `apk`), queries it for your CPU architecture, downloads the matching package from the latest GitHub release, and installs it.
 
-- Detects your CPU architecture
-- Downloads the correct binaries
-- Creates `/dev/net/tun` if missing
-- Installs and enables the `nym-vpnd` service
-- Restarts `rpcd` for LuCI integration
-
-## Method 2: IPK Package
-
-Download the `.ipk` for your architecture from [GitHub Releases](https://github.com/dial0ut/nym-vpn-openwrt/releases).
+## Method 2: Manual Package Install
 
 ### Find Your Architecture
 
-```bash
-opkg print-architecture | grep -v all | tail -1 | awk '{print $2}'
-```
+=== "opkg (OpenWrt ≤24.10)"
 
-Common mappings:
+    ```bash
+    opkg print-architecture
+    ```
 
-| Router | Architecture |
-|--------|-------------|
-| x86_64 VMs, Proxmox | `x86_64` |
-| NanoPi R4S/R5S | `aarch64_generic` |
-| GL.iNet MT6000 | `aarch64_cortex-a53` |
-| Banana Pi R3 | `aarch64_cortex-a53` |
-| Linksys MX4200v2 | `arm_cortex-a7_neon-vfpv4` |
-| GL.iNet B1300 | `arm_cortex-a7_neon-vfpv4` |
-| ASUS RT-AC58U | `arm_cortex-a7_neon-vfpv4` |
-| GL.iNet GL-AR750S | `mips_24kc` |
+    The highest-priority line (largest number in the third column) is your architecture. For example:
 
-### Install
+    ```
+    arch all 1
+    arch noarch 1
+    arch aarch64_cortex-a53 10
+    ```
 
-```bash
-# Transfer to router
-scp nym-vpn_*.ipk root@192.168.1.1:/tmp/
+    Here the architecture is `aarch64_cortex-a53`.
 
-# Install on router
-opkg install /tmp/nym-vpn_*.ipk
-```
+=== "apk (OpenWrt 25.x+)"
+
+    ```bash
+    apk --print-arch
+    ```
+
+    This prints your architecture directly, e.g. `aarch64`.
+
+### Download and Install
+
+Download the `.ipk` or `.apk` for your architecture from [GitHub Releases](https://github.com/dial0ut/nym-vpn-openwrt/releases), then install:
+
+=== "opkg (OpenWrt ≤24.10)"
+
+    ```bash
+    # Transfer to router
+    scp nym-vpn_*.ipk root@192.168.1.1:/tmp/
+
+    # Install on router
+    opkg install /tmp/nym-vpn_*.ipk
+    ```
+
+=== "apk (OpenWrt 25.x+)"
+
+    ```bash
+    # Transfer to router
+    scp nym-vpn_*.apk root@192.168.1.1:/tmp/
+
+    # Install on router
+    apk add --allow-untrusted /tmp/nym-vpn_*.apk
+    ```
+
+!!! note "Architecture not available?"
+    If there is no package for your architecture, [open an issue on GitHub](https://github.com/dial0ut/nym-vpn-openwrt/issues) or post in the [forum thread](https://forum.nym.com/t/open-call-bring-nymvpn-to-openwrt/1945) with the architecture you need added.
 
 ## Post-Install
 
@@ -71,7 +87,7 @@ You need a Nym account credential to connect. See [Quick Start](quickstart.md) f
 
 ## Dependencies
 
-The IPK package declares these dependencies:
+The package declares these dependencies (installed automatically):
 
 | Package | Purpose |
 |---------|---------|
@@ -80,13 +96,19 @@ The IPK package declares these dependencies:
 | `luci-base` | LuCI web framework |
 | `rpcd` | RPC daemon for LuCI backend |
 
-These are installed automatically when using `opkg install`.
-
 ## Uninstall
 
-```bash
-opkg remove nym-vpn
-```
+=== "opkg (OpenWrt ≤24.10)"
+
+    ```bash
+    opkg remove nym-vpn
+    ```
+
+=== "apk (OpenWrt 25.x+)"
+
+    ```bash
+    apk del nym-vpn
+    ```
 
 Or manually:
 

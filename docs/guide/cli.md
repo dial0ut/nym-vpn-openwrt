@@ -66,19 +66,6 @@ nym-vpnc tunnel set --killswitch off
 nym-vpnc tunnel set --killswitch on
 ```
 
-### Kill-Switch
-
-The kill-switch controls two things:
-
-1. **Firewall rules** — blocks traffic that would bypass the VPN tunnel
-2. **Default route** — forces all traffic (0.0.0.0/0) through the tunnel
-
-When **on** (default), all traffic is forced through the VPN with leak protection. When **off**, the tunnel is active but only traffic explicitly routed to it (e.g., by PBR) goes through. This is required for compatibility with `luci-app-pbr` or manual policy-based routing.
-
-Changing the kill-switch requires a reconnect to take effect.
-
-> **Warning:** Disabling the kill-switch means traffic can leak outside the VPN. Only disable this if you are managing routing yourself.
-
 ## Network Settings
 
 ```bash

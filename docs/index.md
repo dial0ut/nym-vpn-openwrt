@@ -9,10 +9,10 @@ Unlike a traditional VPN, the Nym mixnet routes traffic through multiple hops so
 ## Quick install
 
 ```bash
-curl -sL https://github.com/dial0ut/nym-vpn-openwrt/releases/latest/download/install.sh | sh
+curl -fsSL https://packages.dial0ut.org/install.sh | sh
 ```
 
-Or grab the `.ipk` (or `.apk` for OpenWrt 24.10+) for your architecture from the [latest release](https://github.com/dial0ut/nym-vpn-openwrt/releases) and install manually.
+Or grab the `.ipk` (or `.apk` for OpenWrt 25.x+) for your architecture from the [latest release](https://github.com/dial0ut/nym-vpn-openwrt/releases) and install manually.
 
 ## Requirements
 

@@ -1,6 +1,6 @@
-# IPK Packaging
+# Packaging
 
-IPK is the package format used by OpenWrt's `opkg` package manager. APK packages for OpenWrt 24.10+ are also built using a similar process.
+NymVPN is distributed as `.ipk` packages for OpenWrt ≤24.10 (`opkg`), and `.apk` packages for OpenWrt 25.x+ (`apk`). Both are built using a similar process.
 
 ## Building an IPK
 
@@ -60,8 +60,8 @@ Runs after package installation and performs four steps:
 
 1. **TUN device creation** -- creates `/dev/net/tun` (major 10, minor 200) if it does not exist
 2. **Package feed registration** -- detects the package manager and adds the `packages.dial0ut.org` feed:
-    - OpenWrt 24.10+ (apk): writes to `/etc/apk/repositories.d/nym-vpn.list`
-    - OpenWrt 23.05 and earlier (opkg): appends to `/etc/opkg/customfeeds.conf`
+    - OpenWrt 25.x+ (apk): writes to `/etc/apk/repositories.d/nym-vpn.list`
+    - OpenWrt ≤24.10 (opkg): appends to `/etc/opkg/customfeeds.conf`
 3. **Service enablement** -- enables `nym-vpnd` for boot, starts it immediately, restarts `rpcd` to load new RPC ACL definitions
 4. **User notification** -- prints the appropriate upgrade command (`opkg upgrade` or `apk upgrade`)
 

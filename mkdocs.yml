@@ -77,7 +77,7 @@ nav:
       - Firewall Backends: architecture/firewall.md
   - Development:
       - Building from Source: development/building.md
-      - IPK Packaging: development/ipk.md
+      - Packaging: development/packaging.md
       - CI/CD: development/ci.md
   - Troubleshooting: troubleshooting.md
   - Supported Devices: devices.md

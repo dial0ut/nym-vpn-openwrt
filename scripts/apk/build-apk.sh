@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build APK package for OpenWrt 24.10+ (apk package manager)
+# Build APK package for OpenWrt 25.x+ (apk package manager)
 #
 # Usage: build-apk.sh <version> <openwrt_arch> <binary_dir> <luci_dir> [output_dir]
 #
@@ -217,5 +217,5 @@ echo ""
 echo "=== Build complete ==="
 ls -lh "$OUTPUT_FILE"
 echo ""
-echo "Install on OpenWrt 24.10+ with:"
+echo "Install on OpenWrt 25.x+ with:"
 echo "  apk add --allow-untrusted $OUTPUT_FILE"

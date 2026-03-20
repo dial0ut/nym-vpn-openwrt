@@ -240,7 +240,7 @@ jobs:
           cp artifacts/nym-vpnd-${{ matrix.arch }} binaries/nym-vpnd
           cp artifacts/nym-vpnc-${{ matrix.arch }} binaries/nym-vpnc
 
-      - name: Build IPK (for OpenWrt ≤23.05 with opkg)
+      - name: Build IPK (for OpenWrt ≤24.10 with opkg)
         run: |
           scripts/ipk/build-ipk.sh \
             "${{ steps.version.outputs.version }}" \
@@ -249,7 +249,7 @@ jobs:
             "luci" \
             "."
 
-      - name: Build APK (for OpenWrt ≥24.10 with apk)
+      - name: Build APK (for OpenWrt 25.x+ with apk)
         run: |
           scripts/apk/build-apk.sh \
             "${{ steps.version.outputs.version }}" \
@@ -381,11 +381,11 @@ jobs:
             ### Requirements
 
             - **Free space:** ~60MB minimum (see table below for exact sizes)
-            - **Package feeds:** Run `opkg update` (OpenWrt ≤23.05) or `apk update` (OpenWrt ≥24.10) before installing
+            - **Package feeds:** Run `opkg update` (OpenWrt ≤24.10) or `apk update` (OpenWrt 25.x+) before installing
 
             ### Installation
 
-            **OpenWrt 24.10+ (apk package manager):**
+            **OpenWrt 25.x+ (apk package manager):**
 
             ```bash
             cd /tmp
@@ -393,7 +393,7 @@ jobs:
             apk add --allow-untrusted ./nym-vpn_*.apk
             ```
 
-            **OpenWrt 23.05 and earlier (opkg package manager):**
+            **OpenWrt 24.10 and earlier (opkg package manager):**
 
             ```bash
             cd /tmp
@@ -488,22 +488,29 @@ jobs:
         if: always()
         run: rm -f /tmp/signing.pem
 
-      - name: Upload opkg feed to Cloudflare R2
-        uses: ryand56/r2-upload-action@latest
-        with:
-          r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
-          r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
-          r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          r2-bucket: ${{ secrets.R2_BUCKET }}
-          source-dir: feed/opkg
-          destination-dir: opkg
+      - name: Upload to Cloudflare R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+        run: |
+          # Upload install script
+          aws s3 cp scripts/install.sh s3://${{ secrets.R2_BUCKET }}/install.sh \
+            --endpoint-url "$R2_ENDPOINT"
 
-      - name: Upload apk feed to Cloudflare R2
-        uses: ryand56/r2-upload-action@latest
-        with:
-          r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
-          r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
-          r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          r2-bucket: ${{ secrets.R2_BUCKET }}
-          source-dir: feed/apk
-          destination-dir: apk
+          # Upload latest version marker
+          echo "${{ steps.version.outputs.version }}" > /tmp/latest
+          aws s3 cp /tmp/latest s3://${{ secrets.R2_BUCKET }}/latest \
+            --endpoint-url "$R2_ENDPOINT" \
+            --content-type "text/plain"
+
+          # Upload opkg feed
+          aws s3 sync feed/opkg/ s3://${{ secrets.R2_BUCKET }}/opkg/ \
+            --endpoint-url "$R2_ENDPOINT" \
+            --delete
+
+          # Upload apk feed
+          aws s3 sync feed/apk/ s3://${{ secrets.R2_BUCKET }}/apk/ \
+            --endpoint-url "$R2_ENDPOINT" \
+            --delete

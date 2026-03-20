@@ -8,7 +8,7 @@
 
 set -e
 
-REPO="dial0ut/nym-vpn-openwrt"
+FEED_URL="https://packages.dial0ut.org"
 
 # Colors (disabled if not tty)
 if [ -t 1 ]; then
@@ -81,9 +81,9 @@ get_version() {
 
     local version=""
     if command -v curl >/dev/null 2>&1; then
-        version=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+        version=$(curl -fsSL "${FEED_URL}/latest")
     elif command -v wget >/dev/null 2>&1; then
-        version=$(wget -qO- "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+        version=$(wget -qO- "${FEED_URL}/latest")
     fi
 
     [ -n "$version" ] || die "Failed to get latest version"
@@ -120,7 +120,12 @@ main() {
     esac
 
     local filename="nym-vpn_${ver_num}_${arch}.${ext}"
-    local url="https://github.com/${REPO}/releases/download/${version}/${filename}"
+    local feed_type
+    case "$pkg_mgr" in
+        opkg) feed_type="opkg" ;;
+        apk)  feed_type="apk" ;;
+    esac
+    local url="${FEED_URL}/${feed_type}/${arch}/${filename}"
 
     step "Downloading ${filename}..."
     download "$url" "/tmp/${filename}"
