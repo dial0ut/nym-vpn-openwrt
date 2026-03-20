@@ -12,20 +12,11 @@
 
 **Privacy-preserving VPN for OpenWrt routers**
 
-Built from the [nym-vpn-client](https://github.com/nymtech/nym-vpn-client) codebase, stripped to Linux-only, with a pure Rust userspace WireGuard backend and OpenWrt-native firewall integration.
+Built from the [nym-vpn-client](https://github.com/nymtech/nym-vpn-client) codebase with OpenWrt-native integrations.
 
 </div>
 
 ---
-
-## Features
-
-- **Pure Rust WireGuard** — Userspace tunnel via [gotatun](https://github.com/mullvad/gotatun), no kernel module needed (only `kmod-tun`)
-- **Amnezia obfuscation** — Full AmneziaWG protocol support at the UDP transport layer
-- **Dual firewall backends** — iptables (fw3) for OpenWrt 18.06–21.02, nftables (fw4) for 22.03+
-- **LuCI web interface** — Dark-themed dashboard with connection status, gateway selection, and account management
-- **Static MUSL binaries** — Single-binary deployment, no runtime dependencies beyond libc
-- **15 architecture variants** — Pre-built IPK packages for every major OpenWrt target
 
 ## Quick Start
 
