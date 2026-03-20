@@ -13,8 +13,8 @@ FEED_BASE="https://packages.dial0ut.org"
 
 # Detect architecture
 ARCH=""
-if [ -f /etc/os-release ]; then
-    ARCH=$(grep OPENWRT_ARCH /etc/os-release | cut -d'"' -f2)
+if [ -f /etc/openwrt_release ]; then
+    ARCH=$(. /etc/openwrt_release; echo "$DISTRIB_ARCH")
 fi
 
 if [ -n "$ARCH" ]; then

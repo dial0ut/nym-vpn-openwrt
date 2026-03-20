@@ -58,16 +58,24 @@ detect_arch() {
     local pkg_mgr="$1"
     local arch=""
 
-    case "$pkg_mgr" in
-        opkg)
-            # opkg print-architecture outputs lines like: arch aarch64_cortex-a53 10
-            # pick the most specific one (highest priority number)
-            arch=$(opkg print-architecture | awk '{print $2, $3}' | sort -k2 -n | tail -1 | awk '{print $1}')
-            ;;
-        apk)
-            arch=$(apk --print-arch)
-            ;;
-    esac
+    # Prefer DISTRIB_ARCH from OpenWrt release info — it has the specific
+    # variant (e.g., aarch64_generic) that matches our package names.
+    # apk --print-arch only returns the base arch (e.g., aarch64).
+    if [ -f /etc/openwrt_release ]; then
+        arch=$(. /etc/openwrt_release; echo "$DISTRIB_ARCH")
+    fi
+
+    # Fallback to package manager if DISTRIB_ARCH not available
+    if [ -z "$arch" ]; then
+        case "$pkg_mgr" in
+            opkg)
+                arch=$(opkg print-architecture | awk '{print $2, $3}' | sort -k2 -n | tail -1 | awk '{print $1}')
+                ;;
+            apk)
+                arch=$(apk --print-arch)
+                ;;
+        esac
+    fi
 
     [ -n "$arch" ] || die "Could not detect architecture"
     echo "$arch"

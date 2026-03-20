@@ -3,32 +3,13 @@
 #
 # Usage: build-apk.sh <version> <openwrt_arch> <binary_dir> <luci_dir> [output_dir]
 #
-# Arguments:
-#   version      - Package version (e.g., "1.23.2")
-#   openwrt_arch - OpenWrt architecture (e.g., "x86_64")
-#   binary_dir   - Directory containing nym-vpnd and nym-vpnc binaries
-#   luci_dir     - Path to LuCI app directory (luci-app-nym-vpn)
-#   output_dir   - Output directory for APK (default: current directory)
-#
-# APK format (Alpine/OpenWrt apk-tools):
-#   A gzipped tar containing:
-#     .PKGINFO       - Package metadata (key = value)
-#     .post-install  - Post-install script (optional)
-#     .pre-deinstall - Pre-removal script (optional)
-#     <data files>   - Files at their final install paths
+# Uses apk mkpkg from apk-tools 3.x (via Docker Alpine) to produce
+# properly formatted packages compatible with OpenWrt 25's apk-tools.
 
 set -euo pipefail
 
-# --- Argument parsing ---
 if [ $# -lt 4 ]; then
     echo "Usage: $0 <version> <openwrt_arch> <binary_dir> <luci_dir> [output_dir]"
-    echo ""
-    echo "Arguments:"
-    echo "  version      - Package version (e.g., '1.23.2')"
-    echo "  openwrt_arch - OpenWrt architecture (e.g., 'x86_64')"
-    echo "  binary_dir   - Directory containing nym-vpnd and nym-vpnc binaries"
-    echo "  luci_dir     - Path to LuCI app directory (luci-app-nym-vpn)"
-    echo "  output_dir   - Output directory for APK (default: current directory)"
     exit 1
 fi
 
@@ -73,12 +54,13 @@ echo "Binaries:     $BINARY_DIR"
 echo "LuCI:         $LUCI_DIR"
 echo "Output:       $OUTPUT_DIR"
 
-# --- Setup build directory ---
+# --- Setup build directories ---
 BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
 
-# APK packages have data files directly at their install paths (no nested data/ dir)
-DATA_DIR="$BUILD_DIR"
+DATA_DIR="$BUILD_DIR/data"
+SCRIPTS_DIR="$BUILD_DIR/scripts"
+mkdir -p "$DATA_DIR" "$SCRIPTS_DIR"
 
 # === DATA: Binaries ===
 echo "=== Adding binaries ==="
@@ -89,13 +71,10 @@ chmod 755 "$DATA_DIR/usr/sbin/nym-vpnd" "$DATA_DIR/usr/bin/nym-vpnc"
 
 # === DATA: LuCI frontend ===
 echo "=== Adding LuCI frontend ==="
-
-# View file
 mkdir -p "$DATA_DIR/www/luci-static/resources/view/nym-vpn"
 cp "$LUCI_DIR/htdocs/luci-static/resources/view/nym-vpn/"*.js \
    "$DATA_DIR/www/luci-static/resources/view/nym-vpn/"
 
-# Module files (rpc, ui, countries, assets, theme)
 mkdir -p "$DATA_DIR/www/luci-static/resources/nym-vpn"
 cp "$LUCI_DIR/htdocs/luci-static/resources/nym-vpn/"*.js \
    "$DATA_DIR/www/luci-static/resources/nym-vpn/"
@@ -129,7 +108,6 @@ mkdir -p "$DATA_DIR/var/lib/nym-vpn"
 
 cp "$IPK_SCRIPT_DIR/nym-vpn.conf" "$DATA_DIR/etc/config/nym-vpn"
 
-# LuCI UCI defaults (if present in LuCI repo)
 if [ -f "$LUCI_DIR/root/etc/uci-defaults/luci-app-nym-vpn" ]; then
     cp "$LUCI_DIR/root/etc/uci-defaults/luci-app-nym-vpn" "$DATA_DIR/etc/uci-defaults/"
     chmod 755 "$DATA_DIR/etc/uci-defaults/luci-app-nym-vpn"
@@ -157,61 +135,75 @@ if [ -f "$FEED_KEY" ]; then
     cp "$FEED_KEY" "$DATA_DIR/etc/apk/keys/dial0ut.pub"
 fi
 
-# === METADATA: .PKGINFO ===
-echo "=== Generating .PKGINFO ==="
+# === Install scripts ===
+echo "=== Preparing install scripts ==="
+cp "$IPK_SCRIPT_DIR/postinst" "$SCRIPTS_DIR/postinst"
+chmod 755 "$SCRIPTS_DIR/postinst"
+cp "$IPK_SCRIPT_DIR/prerm" "$SCRIPTS_DIR/prerm"
+chmod 755 "$SCRIPTS_DIR/prerm"
 
-# Calculate installed size in bytes
-INSTALLED_SIZE=$(du -sb "$DATA_DIR" | cut -f1)
-
-cat > "$BUILD_DIR/.PKGINFO" <<EOF
-pkgname = nym-vpn
-pkgver = ${VERSION}-r0
-pkgdesc = NymVPN for OpenWrt - Privacy VPN using the Nym mixnet
-url = https://github.com/dial0ut/nym-vpn-openwrt
-size = ${INSTALLED_SIZE}
-arch = ${OPENWRT_ARCH}
-license = GPL-3.0
-origin = nym-vpn
-maintainer = Nym Technologies <support@nymtech.net>
-depend = libc
-depend = kmod-tun
-depend = luci-base
-depend = rpcd
-EOF
-
-echo ".PKGINFO:"
-cat "$BUILD_DIR/.PKGINFO"
-
-# === SCRIPTS: .post-install ===
-echo "=== Adding install scripts ==="
-cp "$IPK_SCRIPT_DIR/postinst" "$BUILD_DIR/.post-install"
-chmod 755 "$BUILD_DIR/.post-install"
-
-# === SCRIPTS: .pre-deinstall ===
-cp "$IPK_SCRIPT_DIR/prerm" "$BUILD_DIR/.pre-deinstall"
-chmod 755 "$BUILD_DIR/.pre-deinstall"
-
-# === Build APK ===
+# === Build APK using apk mkpkg ===
 echo "=== Building APK ==="
 
 OUTPUT_FILE="$OUTPUT_DIR/nym-vpn_${VERSION}_${OPENWRT_ARCH}.apk"
 
-# APK format: gzipped tar with .PKGINFO first, then scripts, then data files
-# The order matters: metadata files must come before data files
-(
-    cd "$BUILD_DIR"
-    # Build file list: .PKGINFO first, then scripts, then all data
-    {
-        echo "./.PKGINFO"
-        [ -f ".post-install" ] && echo "./.post-install"
-        [ -f ".pre-deinstall" ] && echo "./.pre-deinstall"
-        find . -mindepth 1 \
-               -not -name '.PKGINFO' \
-               -not -name '.post-install' \
-               -not -name '.pre-deinstall' \
-               \( -type f -o -type l -o -type d \) | sort
-    } | tar -czf "$OUTPUT_FILE" --no-recursion -T -
+# Common metadata arguments for apk mkpkg
+MKPKG_INFO_ARGS=(
+    -I "name:nym-vpn"
+    -I "version:${VERSION}-r0"
+    -I "description:NymVPN for OpenWrt - Privacy VPN using the Nym mixnet"
+    -I "url:https://github.com/dial0ut/nym-vpn-openwrt"
+    -I "arch:${OPENWRT_ARCH}"
+    -I "license:GPL-3.0"
+    -I "origin:nym-vpn"
+    -I "maintainer:dial0ut"
+    -I "depends:libc"
+    -I "depends:kmod-tun"
+    -I "depends:luci-base"
+    -I "depends:rpcd"
 )
+
+if command -v apk >/dev/null 2>&1 && apk mkpkg --help >/dev/null 2>&1; then
+    # Native apk-tools 3.x available (e.g., Alpine build host or CI)
+    echo "Using native apk mkpkg"
+    apk mkpkg \
+        "${MKPKG_INFO_ARGS[@]}" \
+        -s "post-install:${SCRIPTS_DIR}/postinst" \
+        -s "pre-deinstall:${SCRIPTS_DIR}/prerm" \
+        -F "$DATA_DIR" \
+        -o "$OUTPUT_FILE"
+elif command -v docker >/dev/null 2>&1; then
+    # Use Docker Alpine container for apk mkpkg
+    echo "Using Docker Alpine for apk mkpkg"
+    docker run --rm \
+        -v "$DATA_DIR:/work/data:ro" \
+        -v "$SCRIPTS_DIR:/work/scripts:ro" \
+        -v "$OUTPUT_DIR:/work/out" \
+        alpine:latest \
+        apk mkpkg \
+            -I "name:nym-vpn" \
+            -I "version:${VERSION}-r0" \
+            -I "description:NymVPN for OpenWrt - Privacy VPN using the Nym mixnet" \
+            -I "url:https://github.com/dial0ut/nym-vpn-openwrt" \
+            -I "arch:${OPENWRT_ARCH}" \
+            -I "license:GPL-3.0" \
+            -I "origin:nym-vpn" \
+            -I "maintainer:dial0ut" \
+            -I "depends:libc" \
+            -I "depends:kmod-tun" \
+            -I "depends:luci-base" \
+            -I "depends:rpcd" \
+            -s "post-install:/work/scripts/postinst" \
+            -s "pre-deinstall:/work/scripts/prerm" \
+            -F /work/data \
+            -o /work/out/output.apk
+
+    mv "$OUTPUT_DIR/output.apk" "$OUTPUT_FILE"
+else
+    echo "Error: Neither apk mkpkg nor docker found."
+    echo "Install Docker or run on Alpine to build APK packages."
+    exit 1
+fi
 
 echo ""
 echo "=== Build complete ==="
