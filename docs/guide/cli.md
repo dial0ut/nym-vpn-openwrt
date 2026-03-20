@@ -129,3 +129,30 @@ nym-vpnc info
 /etc/init.d/nym-vpnd restart
 /etc/init.d/nym-vpnd status
 ```
+
+The service is managed by procd with automatic respawn (up to 5 times within a 3600s window). On stop, the init script calls `nym-vpnc disconnect` to clean up firewall rules and tunnels.
+
+```bash
+# Enable/disable auto-start on boot
+/etc/init.d/nym-vpnd enable
+/etc/init.d/nym-vpnd disable
+```
+
+## Configuration
+
+Settings are stored in `/etc/config/nym-vpn` (UCI format, preserved across firmware upgrades). Settings are managed through `nym-vpnc` or the LuCI interface — direct UCI editing is not recommended.
+
+```bash
+# View current config
+uci show nym-vpn
+```
+
+## Logs
+
+```bash
+# View daemon logs
+logread -e nym-vpnd
+
+# Follow logs in real time
+logread -e nym-vpnd -f
+```

@@ -62,26 +62,8 @@ By default, NymVPN auto-selects gateways. To pick a specific exit country:
     nym-vpnc gateway set --exit-country CH
     ```
 
-## Optional: Enable LAN Policy
-
-By default, all LAN clients are routed through NymVPN. To control which clients use the VPN:
-
-=== "LuCI"
-
-    Expand the **LAN Policy** card to configure per-client routing rules.
-
-=== "CLI"
-
-    ```bash
-    # Allow LAN access while connected
-    nym-vpnc lan set allow
-
-    # Or block LAN access for isolation
-    nym-vpnc lan set block
-    ```
-
 ## Next Steps
 
 - [CLI Reference](../guide/cli.md) — full command reference
-- [Configuration](../guide/configuration.md) — UCI config options
+- [Split Tunneling](../guide/split-tunneling.md) — selective routing with PBR
 - [Troubleshooting](../troubleshooting.md) — common issues and fixes
