@@ -5,7 +5,7 @@
 - Docker
 - Git
 
-All compilation happens inside Docker containers — no local Rust toolchain needed.
+All compilation happens inside Docker containers. No local Rust toolchain is needed.
 
 ## Tier 2 Targets (Stable)
 
@@ -14,14 +14,17 @@ Supported architectures: `x86_64`, `i686`, `aarch64`, `armv7`
 ### Using the Build Script
 
 ```bash
-# Build for a specific target
 ./scripts/build-musl.sh aarch64
-
-# Build for x86_64
-./scripts/build-musl.sh x86_64
 ```
 
-The script selects the correct Docker image and runs `cross-compile-musl.sh` inside the container.
+The dispatcher script (`build-musl.sh`) selects the correct Docker image and runs `cross-compile-musl.sh` inside the container.
+
+| Target | Docker Image |
+|--------|-------------|
+| aarch64 | `messense/rust-musl-cross:aarch64-musl` |
+| x86_64 | `messense/rust-musl-cross:x86_64-musl` |
+| i686 | `messense/rust-musl-cross:i686-musl` |
+| armv7 | `messense/rust-musl-cross:armv7-musleabihf` |
 
 ### Manual Docker Build
 
@@ -33,28 +36,38 @@ docker run --rm -v "$(pwd):/home/rust/src" \
 
 ### What the Build Does
 
-`cross-compile-musl.sh` (runs inside Docker):
+`cross-compile-musl.sh` runs inside Docker and performs the following:
 
-1. Auto-detects target architecture from the available compiler
-2. Builds `libmnl-1.0.4` and `libnftnl-1.2.1` from source (for nftables support)
-3. Compiles `nym-vpnd` and `nym-vpnc` with `--release`
-4. Verifies static linking (`ldd` check)
+1. Auto-detects the target architecture from the available cross-compiler
+2. Validates Rust version (requires 1.85+ for edition 2024)
+3. Installs system dependencies: `pkg-config`, `curl`, `protoc` 30.2
+4. Builds `libmnl-1.0.4` and `libnftnl-1.2.1` from source with `--enable-static --disable-shared`
+5. Compiles `nym-vpnd` and `nym-vpnc` with `--release`
+6. Verifies static linking with `ldd`
 
-Output binaries are placed in `target/<triple>/release/`.
+**Target-specific compiler flags:**
+
+| Target | Extra Flags | Reason |
+|--------|-------------|--------|
+| ARM (soft-float) | `-msoft-float -mfloat-abi=soft` | ring library workaround |
+| ARM (hard-float) | `-C link-arg=-lgcc` | Atomic operations |
+| aarch64 | `-mno-outline-atomics` | GCC 10+ outline atomics break static MUSL builds |
+
+Output binaries land in `nym-vpn-core/target/<triple>/release/`.
 
 ## Tier 3 Targets (Nightly)
 
 Supported architectures: `mips`, `mipsel`, `riscv64`, `armv5te`
 
-These require nightly Rust and `-Z build-std` for targets without prebuilt `std`.
+These require nightly Rust and `-Z build-std` because there are no prebuilt `std` libraries for these targets.
 
 ### Build Infrastructure
 
 Located in `docker/tier3-musl/`:
 
-- Custom Dockerfiles per target
-- GCC wrapper scripts for fixing CRT paths
-- Patches for `schemars`, `coarsetime`, `prometheus` (portable-atomic)
+- Custom Dockerfiles per target with musl.cc toolchains
+- GCC wrapper scripts that fix CRT object paths for static linking
+- Patch scripts for crates that lack `portable-atomic` support on 32-bit targets
 
 ### Building
 
@@ -63,11 +76,31 @@ cd docker/tier3-musl
 ./build-tier3.sh mips
 ```
 
-The script:
+### What the Tier 3 Build Does
 
-1. Builds the Docker image if needed
-2. Applies crate patches for 32-bit targets
-3. Compiles with nightly + `-Z build-std`
+`build-tier3.sh` solves a specific problem: autocfg probes fail on Docker volume mounts due to missing extended file attributes, causing crates to compile in `no_std` mode incorrectly. The script works around this by copying the source to a local filesystem inside the container.
+
+1. Auto-detects the target and compiler triplet from available GCC commands
+2. Switches to nightly Rust and installs `rust-src`
+3. Copies the source tree to `/tmp/nym-build`
+4. Builds `libmnl` and `libnftnl` with target-specific CFLAGS
+5. Applies crate patches via `patch-crates.sh`:
+    - `schemars`: Uses `BTreeMap` instead of `IndexMap`
+    - `coarsetime`: Uses `portable-atomic` for `AtomicU64`
+    - `prometheus`: Uses `portable-atomic` for `AtomicU64`/`AtomicI64`
+6. Builds with `cargo build --release -Z build-std=std,panic_abort`
+7. Strips binaries with the target-specific `strip`
+8. Copies binaries back to the mounted volume
+
+**Target-specific RUSTFLAGS:**
+
+| Target | Key Flags |
+|--------|-----------|
+| MIPS | `+mips32r2,+soft-float`, circular linker group for `libgcc_eh` + `libc` |
+| RISC-V | `+crt-static`, uses lld due to outdated binutils |
+| ARMv5TE | `-C link-arg=-lgcc_eh` for exception handling |
+
+**Build profile tuning:** Tier 3 uses `thin` LTO (full LTO causes OOM), 16 codegen units, and `panic=abort` to reduce binary size.
 
 ## Build Output
 
@@ -76,4 +109,4 @@ The script:
 | `nym-vpnd` | ~57 MB | VPN daemon |
 | `nym-vpnc` | ~5 MB | CLI client |
 
-Both are statically linked MUSL binaries with no runtime dependencies.
+Both are statically linked MUSL binaries with no runtime dependencies beyond the kernel.

@@ -43,7 +43,7 @@ NymVPN can be used with `luci-app-pbr` or other policy-based routing tools to se
 
 ### Important notes
 
-- The tunnel interface names are kernel-assigned (`tun0`, `tun1`). Check `nym-vpnc status` after connecting to see the current names.
+- The tunnel interfaces use fixed names: `nym0` (entry tunnel) and `nym1` (exit tunnel in 2-hop mode).
 - With the kill-switch off, traffic **will leak** outside the VPN unless PBR rules are configured.
 - Changing the kill-switch setting requires a reconnect.
 

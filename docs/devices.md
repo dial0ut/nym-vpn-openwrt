@@ -14,8 +14,6 @@
 
 ## Tested Devices
 
-### Tested Devices
-
 | Device | Architecture | RAM | Notes |
 |--------|-------------|-----|-------|
 | x86_64 VM / Proxmox | x86_64 | varies | Best for testing |

@@ -368,6 +368,7 @@ jobs:
             artifacts/*.sha256
             artifacts/*.ipk
             artifacts/*.apk
+            scripts/install.sh
           body: |
             ## Nym VPN ${{ steps.version.outputs.version }} - OpenWRT Edition
 

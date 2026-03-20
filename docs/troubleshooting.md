@@ -6,7 +6,7 @@ NymVPN binaries are ~57MB (nym-vpnd) + ~5MB (nym-vpnc). Devices with
 small `/tmp` (tmpfs backed by RAM) may not have room.
 
 **Check available space:**
-```
+```bash
 df -h
 ```
 
@@ -14,13 +14,13 @@ df -h
 
 Most OpenWrt devices have a writable overlay partition with more space
 than tmpfs:
-```
+```bash
 mkdir -p /overlay/tmp
 # copy or install binaries to /overlay/tmp/
 ```
 
 **Free up space:**
-```
+```bash
 # Remove opkg package lists (can be re-fetched with opkg update)
 rm -rf /tmp/opkg-lists
 
@@ -35,7 +35,7 @@ less may hit out-of-memory errors, especially when both WireGuard
 tunnels start.
 
 **Symptoms:**
-```
+```text
 memory allocation of 26214400 bytes failed
 Aborted
 ```
@@ -51,7 +51,7 @@ opkg install zram-swap
 ```
 
 Verify it's working:
-```
+```bash
 free -m
 ```
 You should see a Swap line with non-zero total.
@@ -60,7 +60,7 @@ You should see a Swap line with non-zero total.
 
 zram-swap starts automatically via its init script after installation.
 Verify with:
-```
+```bash
 /etc/init.d/zram enabled && echo "enabled" || echo "disabled"
 ```
 
@@ -101,7 +101,7 @@ nft delete table inet nym 2>/dev/null
 ## Gateway Timeout on Connect
 
 **Symptoms:**
-```
+```text
 timeout waiting for connect response from exit gateway (authenticator)
 ```
 
@@ -116,7 +116,7 @@ nym-vpnc connect
 ## WireGuard Handshake Timeout
 
 **Symptoms:**
-```
+```text
 HANDSHAKE(REKEY_TIMEOUT)
 ```
 
@@ -128,7 +128,7 @@ gateways.
 ## UDP GRO Warnings
 
 **Symptoms:**
-```
+```text
 Failed to enable UDP GRO for IPv4 socket: Protocol not available (os error 99)
 ```
 
