@@ -73,11 +73,13 @@ generate_opkg_feed() {
             local md5sum=$(md5 "$pkg")
 
             # Extract control from IPK (gzipped tar of control.tar.gz + data.tar.gz)
+            local abs_pkg
+            abs_pkg="$(cd "$(dirname "$pkg")" && pwd)/$(basename "$pkg")"
             local tmpdir=$(mktemp -d)
             (
                 cd "$tmpdir"
-                tar xzf "$pkg" 2>/dev/null || gzip -dc "$pkg" | tar xf -
-                [ -f control.tar.gz ] && (tar xzf control.tar.gz 2>/dev/null || gzip -dc control.tar.gz | tar xf -)
+                tar xzf "$abs_pkg"
+                [ -f control.tar.gz ] && tar xzf control.tar.gz
             )
 
             if [ ! -f "$tmpdir/control" ]; then
