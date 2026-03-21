@@ -50,20 +50,24 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --de
     rustup component add rust-src
 
 # Install protoc
-RUN curl -LO "https://github.com/protocolbuffers/protobuf/releases/download/v30.2/protoc-30.2-linux-x86_64.zip" && \
-    unzip -q protoc-30.2-linux-x86_64.zip -d /usr/local && \
-    rm protoc-30.2-linux-x86_64.zip
+ARG PROTOC_VERSION=30.2
+RUN curl -LO "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip" && \
+    unzip -q "protoc-${PROTOC_VERSION}-linux-x86_64.zip" -d /usr/local && \
+    rm "protoc-${PROTOC_VERSION}-linux-x86_64.zip"
 
 # Create empty libunwind.a stub (satisfies -lunwind when using panic=abort)
 RUN mipsel-unknown-linux-musl-ar rcs /usr/local/musl/mipsel-unknown-linux-musl/lib/libunwind.a
 
 # Copy and install the GCC wrapper script (fixes CRT paths for +crt-static)
-COPY mipsel-gcc-wrapper.sh /usr/local/bin/mipsel-gcc-wrapper
+COPY gcc-wrapper.sh /usr/local/bin/mipsel-gcc-wrapper
 RUN chmod +x /usr/local/bin/mipsel-gcc-wrapper
 
 # Set environment
 ENV TARGET=mipsel-unknown-linux-musl
 ENV CARGO_TARGET_MIPSEL_UNKNOWN_LINUX_MUSL_LINKER=/usr/local/bin/mipsel-gcc-wrapper
+ENV GCC_WRAPPER_MUSL_LIB=/opt/cross/mipsel-linux-muslsf/lib
+ENV GCC_WRAPPER_GCC_LIB=/opt/cross/lib/gcc/mipsel-linux-muslsf/11.2.1
+ENV GCC_WRAPPER_CC=mipsel-unknown-linux-musl-gcc
 ENV CC_mipsel_unknown_linux_musl=mipsel-unknown-linux-musl-gcc
 ENV AR_mipsel_unknown_linux_musl=mipsel-unknown-linux-musl-ar
 

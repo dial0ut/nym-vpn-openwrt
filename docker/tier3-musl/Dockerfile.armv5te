@@ -19,10 +19,11 @@ RUN rustup self uninstall -y 2>/dev/null || true && \
     rustup component add rust-src
 
 # Install protoc and rsync
+ARG PROTOC_VERSION=30.2
 RUN apt-get update -qq && apt-get install -y -qq unzip pkg-config curl wget rsync && \
-    curl -LO "https://github.com/protocolbuffers/protobuf/releases/download/v30.2/protoc-30.2-linux-x86_64.zip" && \
-    unzip -q protoc-30.2-linux-x86_64.zip -d /usr/local && \
-    rm protoc-30.2-linux-x86_64.zip
+    curl -LO "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip" && \
+    unzip -q "protoc-${PROTOC_VERSION}-linux-x86_64.zip" -d /usr/local && \
+    rm "protoc-${PROTOC_VERSION}-linux-x86_64.zip"
 
 # Fix linker search paths for ARMv5TE musl toolchain
 # Problem: Rust passes -nostartfiles then bare crt*.o filenames that linker can't find
@@ -30,12 +31,15 @@ RUN apt-get update -qq && apt-get install -y -qq unzip pkg-config curl wget rsyn
 RUN armv5te-unknown-linux-musleabi-ar rcs /usr/local/musl/armv5te-unknown-linux-musleabi/lib/libunwind.a
 
 # Copy and install the GCC wrapper script
-COPY armv5te-gcc-wrapper.sh /usr/local/bin/armv5te-gcc-wrapper
+COPY gcc-wrapper.sh /usr/local/bin/armv5te-gcc-wrapper
 RUN chmod +x /usr/local/bin/armv5te-gcc-wrapper
 
 # Set environment - use wrapper as linker
 ENV TARGET=armv5te-unknown-linux-musleabi
 ENV CARGO_TARGET_ARMV5TE_UNKNOWN_LINUX_MUSLEABI_LINKER=/usr/local/bin/armv5te-gcc-wrapper
+ENV GCC_WRAPPER_MUSL_LIB=/usr/local/musl/armv5te-unknown-linux-musleabi/lib
+ENV GCC_WRAPPER_GCC_LIB=/usr/local/musl/lib/gcc/armv5te-unknown-linux-musleabi/11.2.0
+ENV GCC_WRAPPER_CC=armv5te-unknown-linux-musleabi-gcc
 ENV CC_armv5te_unknown_linux_musleabi=armv5te-unknown-linux-musleabi-gcc
 ENV AR_armv5te_unknown_linux_musleabi=armv5te-unknown-linux-musleabi-ar
 

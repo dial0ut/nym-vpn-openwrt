@@ -50,20 +50,24 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --de
     rustup component add rust-src
 
 # Install protoc
-RUN curl -LO "https://github.com/protocolbuffers/protobuf/releases/download/v30.2/protoc-30.2-linux-x86_64.zip" && \
-    unzip -q protoc-30.2-linux-x86_64.zip -d /usr/local && \
-    rm protoc-30.2-linux-x86_64.zip
+ARG PROTOC_VERSION=30.2
+RUN curl -LO "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip" && \
+    unzip -q "protoc-${PROTOC_VERSION}-linux-x86_64.zip" -d /usr/local && \
+    rm "protoc-${PROTOC_VERSION}-linux-x86_64.zip"
 
 # Create empty libunwind.a stub (satisfies -lunwind when using panic=abort)
 RUN mips-unknown-linux-musl-ar rcs /usr/local/musl/mips-unknown-linux-musl/lib/libunwind.a
 
 # Copy and install the GCC wrapper script (fixes CRT paths for +crt-static)
-COPY mips-gcc-wrapper.sh /usr/local/bin/mips-gcc-wrapper
+COPY gcc-wrapper.sh /usr/local/bin/mips-gcc-wrapper
 RUN chmod +x /usr/local/bin/mips-gcc-wrapper
 
 # Set environment
 ENV TARGET=mips-unknown-linux-musl
 ENV CARGO_TARGET_MIPS_UNKNOWN_LINUX_MUSL_LINKER=/usr/local/bin/mips-gcc-wrapper
+ENV GCC_WRAPPER_MUSL_LIB=/opt/cross/mips-linux-muslsf/lib
+ENV GCC_WRAPPER_GCC_LIB=/opt/cross/lib/gcc/mips-linux-muslsf/11.2.1
+ENV GCC_WRAPPER_CC=mips-unknown-linux-musl-gcc
 ENV CC_mips_unknown_linux_musl=mips-unknown-linux-musl-gcc
 ENV AR_mips_unknown_linux_musl=mips-unknown-linux-musl-ar
 

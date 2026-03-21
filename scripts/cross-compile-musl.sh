@@ -27,11 +27,9 @@
 
 set -euo pipefail
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/log.sh"
+source "$SCRIPT_DIR/versions.sh"
 
 # Configuration - auto-detect target from available compiler
 # NOTE: mips, mipsel, riscv64 are Rust Tier 3 targets requiring nightly + build-std
@@ -52,21 +50,7 @@ if [ -z "${TARGET:-}" ]; then
     fi
 fi
 MUSL_PREFIX="/usr/local/musl/${TARGET}"
-LIBMNL_VERSION="1.0.4"
-LIBNFTNL_VERSION="1.2.1"
 BUILD_DIR="/tmp/musl-build"
-
-log_info() {
-    echo -e "${GREEN}[INFO]${NC} $1"
-}
-
-log_warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
-}
-
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
 
 check_arch() {
     local arch=$(uname -m)
@@ -112,11 +96,11 @@ install_system_deps() {
 
     # Install protoc from pre-compiled binary (apt version too old for proto3 optional)
     if ! command -v protoc &> /dev/null; then
-        log_info "Installing protoc 30.2..."
+        log_info "Installing protoc ${PROTOC_VERSION}..."
         PB_REL="https://github.com/protocolbuffers/protobuf/releases"
-        curl -LO "$PB_REL/download/v30.2/protoc-30.2-linux-x86_64.zip"
-        unzip -q protoc-30.2-linux-x86_64.zip -d "$HOME/.local"
-        rm protoc-30.2-linux-x86_64.zip
+        curl -LO "$PB_REL/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip"
+        unzip -q "protoc-${PROTOC_VERSION}-linux-x86_64.zip" -d "$HOME/.local"
+        rm "protoc-${PROTOC_VERSION}-linux-x86_64.zip"
     fi
     # Always ensure protoc is in PATH (may have been installed in previous run)
     export PATH="$PATH:$HOME/.local/bin"

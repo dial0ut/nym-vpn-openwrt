@@ -86,10 +86,7 @@ docker/tier3-musl/
 ├── Dockerfile.riscv64        # RISC-V 64-bit image
 ├── Dockerfile.armv5te        # ARMv5TE image
 ├── build-tier3.sh            # Main build script (copied into images)
-├── mips-gcc-wrapper.sh       # Linker wrapper for MIPS
-├── mipsel-gcc-wrapper.sh     # Linker wrapper for MIPSEL
-├── riscv64-gcc-wrapper.sh    # Linker wrapper for RISC-V
-├── armv5te-gcc-wrapper.sh    # Linker wrapper for ARMv5TE
+├── gcc-wrapper.sh            # Unified linker wrapper (parameterized via env vars)
 ├── patches/                  # Patched crates for Tier 3 compatibility
 │   ├── schemars-0.8.22/      # Uses BTreeMap instead of IndexMap
 │   ├── coarsetime-0.1.36/    # Uses portable-atomic for AtomicU64

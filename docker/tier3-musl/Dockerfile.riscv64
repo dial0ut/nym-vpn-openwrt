@@ -23,7 +23,7 @@ RUN apt-get update -qq && apt-get install -y -qq unzip pkg-config curl wget rsyn
 
 # Install newer protoc (apt version is too old, doesn't support proto3 optional fields)
 # protoc 3.12+ supports --experimental_allow_proto3_optional, 3.15+ has it enabled by default
-ARG PROTOC_VERSION=25.1
+ARG PROTOC_VERSION=30.2
 RUN ARCH=$(uname -m) && \
     if [ "$ARCH" = "x86_64" ]; then PROTOC_ARCH="linux-x86_64"; \
     elif [ "$ARCH" = "aarch64" ]; then PROTOC_ARCH="linux-aarch_64"; \
@@ -47,7 +47,7 @@ RUN cd /tmp && \
 RUN riscv64-unknown-linux-musl-ar rcs /usr/local/musl/riscv64-unknown-linux-musl/lib/libunwind.a
 
 # Copy and install the GCC wrapper script (fixes CRT paths for lld)
-COPY riscv64-gcc-wrapper.sh /usr/local/bin/riscv64-gcc-wrapper
+COPY gcc-wrapper.sh /usr/local/bin/riscv64-gcc-wrapper
 RUN chmod +x /usr/local/bin/riscv64-gcc-wrapper
 
 # Set environment
@@ -55,6 +55,9 @@ RUN chmod +x /usr/local/bin/riscv64-gcc-wrapper
 # Use the wrapper as linker to fix CRT paths when +crt-static is used
 ENV TARGET=riscv64gc-unknown-linux-musl
 ENV CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_LINKER=/usr/local/bin/riscv64-gcc-wrapper
+ENV GCC_WRAPPER_MUSL_LIB=/usr/local/musl/riscv64-unknown-linux-musl/lib
+ENV GCC_WRAPPER_GCC_LIB=/usr/local/musl/lib/gcc/riscv64-unknown-linux-musl/11.2.0
+ENV GCC_WRAPPER_CC=riscv64-unknown-linux-musl-gcc
 ENV CC_riscv64gc_unknown_linux_musl=riscv64-unknown-linux-musl-gcc
 ENV AR_riscv64gc_unknown_linux_musl=riscv64-unknown-linux-musl-ar
 
