@@ -1,5 +1,18 @@
 # Troubleshooting
 
+## "No related RPC reply" on GL.iNet Devices
+
+GL.iNet routers run their own admin panel on port 80, which conflicts with LuCI's session handling. Move LuCI to port 8080:
+
+```bash
+uci set uhttpd.main.listen_http='0.0.0.0:8080'
+uci set uhttpd.main.listen_https='0.0.0.0:8443'
+uci commit uhttpd
+/etc/init.d/uhttpd restart
+```
+
+Then access LuCI at `http://192.168.8.1:8080`.
+
 ## Not Enough Disk Space
 
 NymVPN binaries are ~57MB (nym-vpnd) + ~5MB (nym-vpnc). Devices with

@@ -62,9 +62,6 @@ Download the `.ipk` or `.apk` for your architecture from [GitHub Releases](https
     apk add --allow-untrusted /tmp/nym-vpn_*.apk
     ```
 
-!!! note "Architecture not available?"
-    If there is no package for your architecture, [open an issue on GitHub](https://github.com/dial0ut/nym-vpn-openwrt/issues) or post in the [forum thread](https://forum.nym.com/t/open-call-bring-nymvpn-to-openwrt/1945) with the architecture you need added.
-
 ## Post-Install
 
 ### Verify Installation

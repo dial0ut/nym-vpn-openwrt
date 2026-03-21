@@ -1,140 +1,52 @@
-# Firewall Backends
+# Firewall Integration
 
-## Overview
+## Supporting the Entire OpenWrt Ecosystem
 
-NymVPN automatically manages firewall rules to route LAN traffic through the VPN tunnels and prevent DNS leaks. It supports both OpenWrt firewall frameworks.
+OpenWrt migrated from iptables to nftables in version 22.03. Devices running older firmware use fw3, the iptables-based firewall framework. Devices on current firmware use fw4, which wraps nftables. Both frameworks are actively deployed across the router ecosystem.
 
-**Location:** `nym-vpn-core/crates/nym-firewall/src/openwrt/`
+NymVPN supports both backends rather than requiring a minimum OpenWrt version. This was a deliberate choice to maximize device coverage. Many routers run stable older firmware that their owners have no reason to upgrade, and forcing a firmware upgrade as a prerequisite for a VPN package would exclude a significant portion of the target audience.
 
-| File | Lines | Purpose |
-|------|-------|---------|
-| `mod.rs` | 120 | Public API and unified dispatcher |
-| `detect.rs` | 139 | fw3 vs fw4 detection with `OnceLock` caching |
-| `common.rs` | 114 | Shared constants, IPv6 detection, mwan3 integration |
-| `fw3.rs` | 792 | iptables backend for OpenWrt 18.06-21.02 |
-| `fw4.rs` | 607 | nftables backend for OpenWrt 22.03+ |
+## Kill-Switch Design
 
-## Public API
+A single binary runs across OpenWrt versions, so the firewall backend is detected at startup: a three-step probe (binary exists, tool works, framework active) checks for fw4 first, then fw3. Both backends apply rules atomically (fw3 via `iptables-restore --noflush -w`, fw4 via `nft -f`) to avoid xtables lock contention with mwan3 and to prevent windows where the ruleset is only partially applied.
 
-Both backends implement the same interface through enum dispatch:
+### Rule Ordering and DNS
 
-```rust
-pub fn apply_policy(&mut self, policy: FirewallPolicy) -> Result<()>
-pub fn reset_policy(&mut self) -> Result<()>
-pub fn install_include_scripts() -> Result<()>
-```
-
-The `fwmark` parameter accepted by `new()` is unused on OpenWrt routers. It exists for API compatibility with other platforms.
-
-When `apply_policy()` is called during the `Connecting` state with no peer endpoints, the firewall skips rule installation to avoid triggering mwan3 WAN-down cascades.
-
-## Detection
-
-The firewall backend is auto-detected at runtime and cached with `OnceLock` so detection runs only once per process.
-
-**fw4 detection (checked first):**
-
-1. `/sbin/fw4` or `/usr/sbin/fw4` exists
-2. `nft --version` succeeds
-3. `nft list table inet fw4` confirms fw4 is active
-
-**fw3 detection (fallback):**
-
-1. `/sbin/fw3` or `/usr/sbin/fw3` exists
-2. `iptables --version` succeeds
-3. `iptables -L input_rule -n` confirms fw3's hook chain exists
-
-Falls back to `Unknown` if neither is found. OpenWrt version is parsed from `/etc/openwrt_release`.
-
-## Kill-Switch Rule Ordering
-
-Rule ordering is critical for correct DNS handling. Rules are applied in this order:
+The kill-switch must allow VPN tunnel traffic while blocking DNS leaks. The critical constraint is that tunnel interface rules must appear before the DNS port 53 reject rule.
 
 ```text
 1. ct state established,related accept
 2. Allow DNS to VPN's DNS servers
-3. Allow traffic TO tunnel interface      <-- BEFORE DNS block
-4. Allow traffic FROM tunnel interface    <-- BEFORE DNS block
-5. Block DNS port 53 (reject)            <-- Catches leaks only
+3. Allow traffic TO tunnel interface
+4. Allow traffic FROM tunnel interface
+5. Block DNS port 53 (reject)
 6. Allow LAN traffic (RFC1918)
 7. Final reject (catch-all)
 ```
 
-!!! warning "Critical"
-    Tunnel interface rules MUST come before the DNS block. Otherwise, LAN clients' DNS queries routed through the VPN tunnel get incorrectly rejected by rule 5.
+> **Warning:** If rules 3 and 4 come after rule 5, DNS fails silently for all LAN clients. From the router's perspective, a DNS query from a LAN client routed through the VPN tunnel arrives on the tunnel interface destined for port 53. A blanket DNS reject at rule 5 catches it before the tunnel allow rule has a chance to pass it through.
 
-## Base Rules
+The correct ordering allows tunnel traffic first, then blocks only non-tunnel DNS. This ensures LAN clients' DNS queries travel through the VPN while preventing any DNS from leaking to non-VPN destinations.
 
-Both backends share the same base rule set applied before policy-specific rules:
+### Deferred Application During Connection
 
-- Accept loopback traffic
-- Accept established/related connections
-- Accept DHCP (ports 67/68 bidirectional)
-- Accept DHCPv6 (ports 546/547 bidirectional, when IPv6 enabled)
-- Accept ICMPv6 Neighbor Discovery (router-advert, neighbor-solicit, neighbor-advert)
-- Allow mwan3 tracking pings to avoid false WAN-down detection
+During the initial `Connecting` state, gateway endpoints are not yet resolved. Applying the kill-switch at this point would block all outbound traffic, including the connection setup itself. The daemon would be unable to reach the gateways it needs to establish the tunnel.
 
-### LAN Networks
+The firewall skips rule installation until peer endpoints are known. Once the connection is established and the daemon has real gateway addresses, the full kill-switch is applied.
 
-Traffic to RFC1918 private ranges is allowed when LAN policy permits:
+## Surviving Firewall Reloads
 
-- IPv4: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`
-- IPv6: `fe80::/10`, `fc00::/7`
+OpenWrt rebuilds all firewall rules from scratch on every reload event. Reloads happen frequently: network reconfiguration, DHCP changes, dnsmasq restarts, and manual `fw3 reload` or `fw4 reload` commands all trigger a full rebuild.
 
-### IPv6 Support
+Without special handling, the kill-switch rules would be wiped on any of these events. Both backends install UCI include scripts that OpenWrt's firewall framework calls during its reload cycle. fw3 uses a UCI section with `type=include` and `reload=1`, which tells fw3 to execute the script on every reload. fw4 uses `fw4_compatible=1` for the same purpose.
 
-IPv6 rules are only installed when `/proc/sys/net/ipv6/conf/all/disable_ipv6` is `0` and `ip6tables` is available.
+This is the standard OpenWrt mechanism for third-party firewall integration. The scripts re-apply the saved rules from temporary files, so the kill-switch is restored automatically after every firewall reload.
 
-### mwan3 Compatibility
+## mwan3 Compatibility
 
-The firewall reads mwan3 tracking IPs from UCI (`mwan3.*.track_ip`) and adds explicit allow rules for ICMP to those addresses. This prevents the kill-switch from blocking mwan3's health-check pings, which would cause it to mark WAN interfaces as down.
+mwan3 is an OpenWrt package for multi-WAN load balancing and failover. It continuously pings tracking IPs to determine whether each WAN interface is alive. Several supported devices, particularly GL.iNet routers, ship with mwan3 pre-installed and enabled even on single-WAN configurations.
 
-## fw3 (iptables)
+The kill-switch blocks all traffic that does not go through the VPN tunnel. Without an exception, it would block mwan3's health-check pings. mwan3 would then declare the WAN interface down and trigger a failover cascade, even though the WAN is working fine.
 
-Creates three custom chains: `NYM_INPUT`, `NYM_OUTPUT`, `NYM_FORWARD`.
+The firewall reads mwan3's tracking IPs from UCI configuration at rule-build time and adds explicit ICMP allow rules for those addresses. If mwan3 is not installed, no tracking IPs are found and no extra rules are added. This makes the compatibility a no-op on devices without mwan3.
 
-**Rule application:**
-
-- Builds rules in `iptables-restore` format and writes to `/tmp/nym-firewall-v4.rules`
-- Applies atomically with `iptables-restore --noflush -w` (preserves existing rules, waits for xtables lock)
-- Inserts jump rules into fw3's hook chains: `input_rule`, `output_rule`, `forwarding_rule`
-- Adds masquerade rules in the NAT table for tunnel interfaces via individual `iptables -t nat` commands
-- When IPv6 is enabled, repeats the process with `ip6tables-restore` using `/tmp/nym-firewall-v6.rules`
-
-**Rule cleanup:**
-
-- Scans POSTROUTING with `--line-numbers` and deletes masquerade rules in reverse order
-- Flushes and removes custom chains
-- Removes temporary rules files
-
-**Firewall persistence:**
-
-- Installs a UCI include script at `/usr/share/nym-vpn/fw3-include.sh`
-- Adds a `firewall.nym_vpn` UCI section with `type=include`, `reload=1`, `enabled=1`
-- Rules survive `fw3 reload` via the include mechanism
-
-## fw4 (nftables)
-
-Creates a separate `inet nym` table at priority `filter - 10`, running before fw4's default priority of 0.
-
-**Rule application:**
-
-- Builds a complete nftables script and writes to `/tmp/nym-firewall.nft`
-- Applies atomically with `nft -f /tmp/nym-firewall.nft`
-- Creates three chains: `input`, `output`, `forward` (all at priority -10)
-- Integrates with fw4's `srcnat` and `forward_lan` chains for masquerade and forwarding
-
-**Rule cleanup:**
-
-- Removes fw4 integration rules
-- Deletes the entire `inet nym` table with `nft delete table inet nym`
-- Removes the temporary rules file
-
-**Firewall persistence:**
-
-- Installs a UCI include script at `/usr/share/nym-vpn/fw4-include.sh`
-- Adds a `firewall.nym_vpn` UCI section with `fw4_compatible=1`, `enabled=1`
-
-## Known Issues
-
-On very old kernels (4.14.90), the nftables netlink API may be broken, and iptables can have xtables lock contention with fw3. See `PROBLEM.md` for details.

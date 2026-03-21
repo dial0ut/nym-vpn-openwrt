@@ -72,7 +72,7 @@ nav:
       - Split Tunneling: guide/split-tunneling.md
   - Architecture:
       - Overview: architecture/overview.md
-      - Gotatun WireGuard: architecture/gotatun.md
+      - WireGuard: architecture/wireguard.md
       - Firewall Backends: architecture/firewall.md
   - Development:
       - Building from Source: development/building.md

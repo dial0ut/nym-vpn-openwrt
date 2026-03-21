@@ -14,6 +14,9 @@ curl -fsSL https://packages.dial0ut.org/install.sh | sh
 
 Or grab the `.ipk` (or `.apk` for OpenWrt 25.x+) for your architecture from the [latest release](https://github.com/dial0ut/nym-vpn-openwrt/releases) and install manually.
 
+!!! note "Architecture not available?"
+    If there is no package for your architecture, [open an issue on GitHub](https://github.com/dial0ut/nym-vpn-openwrt/issues) or post in the [forum thread](https://forum.nym.com/t/open-call-bring-nymvpn-to-openwrt/1945) with the architecture you need added.
+
 ## Requirements
 
 | | Minimum |
