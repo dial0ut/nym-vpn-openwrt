@@ -463,6 +463,10 @@ jobs:
           pattern: pkg-*
           merge-multiple: true
 
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
       - name: List downloaded packages
         run: ls -la artifacts/
 
