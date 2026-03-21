@@ -2,7 +2,7 @@
 
 <img src=".github/assets/nymwrt.svg" alt="NymVPN for OpenWrt" width="400">
 
-# NymVPN for OpenWrt
+# NymVPN | OpenWrt
 
 [![GitHub Release](https://img.shields.io/github/v/release/dial0ut/nym-vpn-openwrt?style=flat-square&color=blue)](https://github.com/dial0ut/nym-vpn-openwrt/releases)
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-green.svg?style=flat-square)](LICENSE)
@@ -14,87 +14,40 @@
 
 Built from the [nym-vpn-client](https://github.com/nymtech/nym-vpn-client) codebase with OpenWrt-native integrations.
 
+[Documentation](https://docs.dial0ut.org)
+
 </div>
 
 ---
 
-## Quick Start
-
-### Install from IPK
-
-Pre-built `.ipk` packages are available on the [Releases](https://github.com/dial0ut/nym-vpn-openwrt/releases) page.
+## Install
 
 ```sh
-# Download the IPK for your architecture (example: aarch64_generic)
-wget https://github.com/dial0ut/nym-vpn-openwrt/releases/latest/download/nym-vpn_aarch64_generic.ipk
-
-# Install
-opkg install nym-vpn_aarch64_generic.ipk
+curl -fsSL https://packages.dial0ut.org/install.sh | sh
 ```
 
-> **Dependencies:** `libc`, `kmod-tun`, `luci-base`, `rpcd`
+Detects your package manager (`opkg` or `apk`) and architecture, downloads the latest release, and installs it.
 
-### Build from Source
+Or grab the `.ipk` / `.apk` for your architecture from the [Releases](https://github.com/dial0ut/nym-vpn-openwrt/releases) page.
+
+## Build from Source
 
 ```sh
-# Clone
 git clone https://github.com/dial0ut/nym-vpn-openwrt.git
 cd nym-vpn-openwrt
 
 # Build for a target architecture (aarch64, armv7, x86_64, i686)
 ./scripts/build-musl.sh aarch64
-
-# Package as IPK
-./scripts/ipk/build-ipk.sh aarch64
 ```
 
-This runs a Docker container with `messense/rust-musl-cross`, cross-compiles `nym-vpnd` and `nym-vpnc` as fully static MUSL binaries, and builds `libmnl` + `libnftnl` from source for nftables support.
-
-Output binaries land in `nym-vpn-core/target/<triple>/release/`.
-
-## Package Contents
-
-| Path | Description |
-|------|-------------|
-| `/usr/sbin/nym-vpnd` | VPN daemon |
-| `/usr/bin/nym-vpnc` | CLI client |
-| `/www/luci-static/resources/view/nym-vpn/` | LuCI frontend |
-| `/usr/libexec/rpcd/nym-vpn` | RPC backend (21 methods) |
-| `/etc/init.d/nym-vpnd` | procd init script |
-| `/etc/config/nym-vpn` | UCI configuration |
-
-## Service Management
-
-```sh
-# Start/stop/restart the daemon
-/etc/init.d/nym-vpnd start
-/etc/init.d/nym-vpnd stop
-/etc/init.d/nym-vpnd restart
-
-# Enable/disable on boot
-/etc/init.d/nym-vpnd enable
-/etc/init.d/nym-vpnd disable
-```
+Cross-compiles `nym-vpnd` and `nym-vpnc` as fully static MUSL binaries inside Docker. Output lands in `nym-vpn-core/target/<triple>/release/`.
 
 ## Supported Architectures
 
-| Tier | Architectures | Status |
-|------|--------------|--------|
-| **Tier 2** | x86_64, aarch64, armv7, i686 | Active — CI builds on every release |
-| **Tier 3** | mips, mipsel, riscv64, armv5te | Infrastructure preserved, not actively built |
-
-Tier 2 targets use pre-built `messense/rust-musl-cross` Docker images. Tier 3 targets require custom Docker images with nightly Rust and `-Z build-std`.
-
-## Project Structure
-
-```
-nym-vpn-openwrt/
-├── nym-vpn-core/              # Rust workspace — VPN daemon, CLI, firewall, WireGuard
-├── luci-app-nym-vpn/          # LuCI web frontend
-├── scripts/                   # Build, packaging, and install scripts
-├── docker/                    # Cross-compilation Docker images (Tier 3)
-└── .github/workflows/         # CI — release builds + firmware images
-```
+| Tier | Architectures |
+|------|--------------|
+| **Tier 2** | x86_64, aarch64, armv7, i686 |
+| **Tier 3** | mips, mipsel |
 
 ## License
 
