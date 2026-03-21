@@ -223,17 +223,6 @@ jobs:
           echo "version=${VERSION#v}" >> $GITHUB_OUTPUT
           echo "tag=${VERSION}" >> $GITHUB_OUTPUT
 
-      - name: Clone LuCI package
-        run: |
-          # Try to clone the matching release tag, fall back to main branch
-          if git clone --depth 1 --branch "v${{ steps.version.outputs.version }}" \
-               https://github.com/dial0ut/nym-vpn-luci.git luci 2>/dev/null; then
-            echo "Cloned LuCI repo at tag v${{ steps.version.outputs.version }}"
-          else
-            echo "Tag not found, cloning main branch"
-            git clone --depth 1 https://github.com/dial0ut/nym-vpn-luci.git luci
-          fi
-
       - name: Prepare binaries
         run: |
           mkdir -p binaries
@@ -246,7 +235,7 @@ jobs:
             "${{ steps.version.outputs.version }}" \
             "${{ matrix.openwrt_arch }}" \
             "binaries" \
-            "luci" \
+            "luci-app-nym-vpn" \
             "."
 
       - name: Build APK (for OpenWrt 25.x+ with apk)
@@ -255,7 +244,7 @@ jobs:
             "${{ steps.version.outputs.version }}" \
             "${{ matrix.openwrt_arch }}" \
             "binaries" \
-            "luci" \
+            "luci-app-nym-vpn" \
             "."
 
       - name: Upload package artifacts
