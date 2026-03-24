@@ -37,7 +37,7 @@ use crate::service::config::{
 };
 use std::os::unix::fs::PermissionsExt;
 
-const DEFAULT_DATA_DIR: &str = "/var/lib/nym-vpnd";
+const DEFAULT_DATA_DIR: &str = "/etc/nym/data";
 const DEFAULT_LOG_DIR: &str = "/var/log/nym-vpnd";
 const DEFAULT_CONFIG_DIR: &str = "/etc/nym";
 pub const DEFAULT_CONFIG_FILE_TOML: &str = "nym-vpnd.toml";
