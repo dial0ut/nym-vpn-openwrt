@@ -114,11 +114,18 @@ cp "$LUCI_DIR/root/usr/share/luci/menu.d/luci-app-nym-vpn.json" \
 cp "$LUCI_DIR/root/usr/share/rpcd/acl.d/luci-app-nym-vpn.json" \
    "$BUILD_DIR/data/usr/share/rpcd/acl.d/"
 
-# === DATA: Init script ===
-echo "=== Adding init script ==="
+# === DATA: Init scripts ===
+echo "=== Adding init scripts ==="
 mkdir -p "$BUILD_DIR/data/etc/init.d"
 cp "$LUCI_DIR/root/etc/init.d/nym-vpnd" "$BUILD_DIR/data/etc/init.d/"
 chmod 755 "$BUILD_DIR/data/etc/init.d/nym-vpnd"
+cp "$LUCI_DIR/root/etc/init.d/nym-vpn-watchdog" "$BUILD_DIR/data/etc/init.d/"
+chmod 755 "$BUILD_DIR/data/etc/init.d/nym-vpn-watchdog"
+
+# === DATA: Watchdog script ===
+echo "=== Adding watchdog script ==="
+cp "$SCRIPT_DIR/nym-vpn-watchdog" "$BUILD_DIR/data/usr/sbin/"
+chmod 755 "$BUILD_DIR/data/usr/sbin/nym-vpn-watchdog"
 
 # === DATA: Config and UCI defaults ===
 echo "=== Adding config and UCI defaults ==="

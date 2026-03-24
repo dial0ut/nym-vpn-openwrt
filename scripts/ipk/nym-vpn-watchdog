@@ -1,0 +1,214 @@
+#!/bin/sh
+# Copyright 2025 - Nym Technologies SA <contact@nymtech.net>
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# NymVPN Always-On Watchdog
+#
+# Polls the tunnel state and automatically reconnects when the VPN drops.
+# Uses escalating recovery: soft reconnect → hard recovery (daemon restart).
+# Managed by procd as a standalone service. Controlled via UCI config.
+
+VPNC="/usr/bin/nym-vpnc"
+UCI_SECTION="nym-vpn.settings"
+LOGPREFIX="nym-watchdog"
+STATEFILE="/tmp/nym-watchdog.state"
+
+# Default values (overridden by UCI)
+DEFAULT_INTERVAL=30
+DEFAULT_MAX_RETRIES=3
+MAX_BACKOFF=300
+
+log_info() {
+    logger -t "$LOGPREFIX" "$1"
+}
+
+log_warn() {
+    logger -t "$LOGPREFIX" -p user.warn "$1"
+}
+
+log_err() {
+    logger -t "$LOGPREFIX" -p user.err "$1"
+}
+
+# Read a UCI option with a default fallback
+uci_get() {
+    local val
+    val=$(uci -q get "$1" 2>/dev/null)
+    echo "${val:-$2}"
+}
+
+# Write state to a file so RPC/LuCI can read it
+write_state() {
+    local state="$1"
+    local failures="$2"
+    local last_action="$3"
+    cat > "$STATEFILE" <<-STATE
+state=$state
+failures=$failures
+last_action=$last_action
+timestamp=$(date +%s)
+STATE
+}
+
+# Check if always_on is enabled
+is_enabled() {
+    local enabled
+    enabled=$(uci_get "${UCI_SECTION}.always_on" "0")
+    [ "$enabled" = "1" ]
+}
+
+# Check if the VPN daemon is running
+daemon_running() {
+    /etc/init.d/nym-vpnd status 2>&1 | grep -q "running"
+}
+
+# Get the current tunnel state from nym-vpnc
+get_tunnel_state() {
+    local raw
+    raw=$($VPNC status 2>&1)
+
+    if echo "$raw" | grep -q "State: Connected"; then
+        echo "connected"
+    elif echo "$raw" | grep -q "State: Connecting"; then
+        echo "connecting"
+    elif echo "$raw" | grep -q "State: Disconnecting"; then
+        echo "disconnecting"
+    elif echo "$raw" | grep -q "State: Disconnected"; then
+        echo "disconnected"
+    else
+        echo "error"
+    fi
+}
+
+# Soft reconnect: just issue connect
+soft_reconnect() {
+    log_info "Attempting soft reconnect"
+    $VPNC connect-v2 2>&1
+}
+
+# Hard recovery: disconnect → restart daemon → reconnect
+hard_recovery() {
+    log_warn "Performing hard recovery (daemon restart)"
+    $VPNC disconnect 2>/dev/null
+    sleep 2
+    /etc/init.d/nym-vpnd restart >/dev/null 2>&1
+    sleep 5
+
+    # Wait for daemon to come up
+    local tries=0
+    while [ $tries -lt 6 ]; do
+        if daemon_running; then
+            break
+        fi
+        tries=$((tries + 1))
+        sleep 2
+    done
+
+    if ! daemon_running; then
+        log_err "Daemon failed to start after hard recovery"
+        return 1
+    fi
+
+    $VPNC connect-v2 2>&1
+}
+
+#-------------------------------------------------------------------------------
+# Main loop
+#-------------------------------------------------------------------------------
+
+log_info "Watchdog started"
+write_state "started" 0 "none"
+
+failures=0
+connecting_ticks=0
+
+while true; do
+    interval=$(uci_get "${UCI_SECTION}.watchdog_interval" "$DEFAULT_INTERVAL")
+    max_retries=$(uci_get "${UCI_SECTION}.watchdog_max_retries" "$DEFAULT_MAX_RETRIES")
+    sleep "$interval"
+
+    # Re-check on each iteration — user can toggle at runtime
+    if ! is_enabled; then
+        if [ $failures -gt 0 ]; then
+            log_info "Always-on disabled, resetting state"
+            failures=0
+            connecting_ticks=0
+        fi
+        write_state "disabled" 0 "none"
+        continue
+    fi
+
+    # Ensure daemon is running
+    if ! daemon_running; then
+        log_warn "Daemon not running, starting"
+        /etc/init.d/nym-vpnd start >/dev/null 2>&1
+        sleep 5
+        if ! daemon_running; then
+            log_err "Failed to start daemon"
+            failures=$((failures + 1))
+            write_state "error" "$failures" "daemon_start_failed"
+            continue
+        fi
+    fi
+
+    state=$(get_tunnel_state)
+
+    case "$state" in
+        connected)
+            if [ $failures -gt 0 ]; then
+                log_info "Tunnel recovered after $failures attempts"
+            fi
+            failures=0
+            connecting_ticks=0
+            write_state "connected" 0 "none"
+            ;;
+
+        connecting)
+            # Allow some time for connection to establish
+            # After ~3 minutes of stuck connecting, treat as failure
+            connecting_ticks=$((connecting_ticks + 1))
+            max_connecting_ticks=$(( 180 / interval ))
+            [ $max_connecting_ticks -lt 3 ] && max_connecting_ticks=3
+
+            if [ $connecting_ticks -ge $max_connecting_ticks ]; then
+                log_warn "Stuck in connecting state for too long"
+                connecting_ticks=0
+                failures=$((failures + 1))
+                write_state "recovering" "$failures" "stuck_connecting"
+                hard_recovery
+            else
+                write_state "connecting" "$failures" "waiting"
+            fi
+            ;;
+
+        disconnecting)
+            # Briefly wait — might be a user-initiated disconnect
+            write_state "disconnecting" "$failures" "waiting"
+            ;;
+
+        disconnected|error)
+            failures=$((failures + 1))
+            connecting_ticks=0
+
+            if [ $failures -le "$max_retries" ]; then
+                # Soft retry
+                log_info "Tunnel down ($state), soft reconnect (attempt $failures/$max_retries)"
+                write_state "recovering" "$failures" "soft_reconnect"
+                soft_reconnect
+            else
+                # Hard recovery with backoff
+                hard_failures=$((failures - max_retries))
+                backoff=$((interval * hard_failures))
+                [ $backoff -gt $MAX_BACKOFF ] && backoff=$MAX_BACKOFF
+
+                log_warn "Tunnel down ($state), hard recovery (attempt $failures, backoff ${backoff}s)"
+                write_state "recovering" "$failures" "hard_recovery"
+                hard_recovery
+
+                if [ $backoff -gt 0 ]; then
+                    sleep "$backoff"
+                fi
+            fi
+            ;;
+    esac
+done

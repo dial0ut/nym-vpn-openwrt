@@ -1,7 +1,9 @@
 #!/bin/sh
 # Pre-removal script for nym-vpn IPK package
 
-# Stop and disable the service before removal
+# Stop and disable services before removal
+/etc/init.d/nym-vpn-watchdog stop 2>/dev/null
+/etc/init.d/nym-vpn-watchdog disable 2>/dev/null
 /etc/init.d/nym-vpnd stop 2>/dev/null
 /etc/init.d/nym-vpnd disable 2>/dev/null
 
@@ -45,6 +47,7 @@ uci commit firewall 2>/dev/null
 rm -f /tmp/nym-firewall-v4.rules /tmp/nym-firewall-v6.rules /tmp/nym-firewall.nft 2>/dev/null
 rm -f /tmp/dnsmasq.d/nym-adblock.conf 2>/dev/null
 rm -f /tmp/nym-dns-backup /tmp/resolv.conf.nymbackup 2>/dev/null
+rm -f /tmp/nym-watchdog.state 2>/dev/null
 
 # Only do destructive cleanup on full removal, not upgrades.
 # opkg sets PKG_UPGRADE=1 when upgrading.

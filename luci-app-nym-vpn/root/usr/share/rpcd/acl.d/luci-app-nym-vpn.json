@@ -17,7 +17,8 @@
           "lan_get",
           "ad_block_get",
           "dns_get",
-          "daemon_status"
+          "daemon_status",
+          "watchdog_get"
         ],
         "service": [
           "list"
@@ -41,7 +42,8 @@
           "lan_set",
           "ad_block_set",
           "dns_set",
-          "daemon_restart"
+          "daemon_restart",
+          "watchdog_set"
         ],
         "service": [
           "start",

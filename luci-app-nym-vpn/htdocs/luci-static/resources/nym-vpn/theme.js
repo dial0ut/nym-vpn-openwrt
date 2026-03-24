@@ -185,6 +185,10 @@ return baseclass.extend({
     .nym-tooltip { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; background: var(--border-color); border-radius: 50%; font-size: 10px; color: var(--text-muted); cursor: help; margin-left: 8px; }\
     .nym-tooltip::after { content: attr(data-tip); position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); padding: 8px 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; font-size: 11px; color: var(--text-secondary); white-space: nowrap; opacity: 0; visibility: hidden; transition: all 0.2s; z-index: 100; margin-bottom: 8px; }\
     .nym-tooltip:hover::after { opacity: 1; visibility: visible; }\
+    .nym-pill-group { display: flex; gap: 6px; }\
+    .nym-pill { padding: 5px 12px; font-size: 12px; font-weight: 500; border: 1px solid var(--border-color); border-radius: 16px; background: transparent; color: var(--text-secondary); cursor: pointer; transition: all 0.2s ease; font-family: inherit; }\
+    .nym-pill:hover { border-color: var(--text-secondary); color: var(--text-primary); }\
+    .nym-pill.active { background: var(--nym-green-dim); border-color: var(--nym-green); color: var(--nym-green); }\
     .nym-divider { height: 1px; background: var(--border-color); margin: 20px 0; }\
     .nym-text-center { text-align: center; }\
     .nym-text-muted { color: var(--text-muted); }\

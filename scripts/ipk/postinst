@@ -40,6 +40,12 @@ fi
 /etc/init.d/nym-vpnd enable
 /etc/init.d/nym-vpnd start
 
+# Enable watchdog if always_on was previously set (e.g. upgrade)
+if [ "$(uci -q get nym-vpn.settings.always_on)" = "1" ]; then
+    /etc/init.d/nym-vpn-watchdog enable
+    /etc/init.d/nym-vpn-watchdog start
+fi
+
 # Restart rpcd to pick up new ACLs
 /etc/init.d/rpcd restart
 

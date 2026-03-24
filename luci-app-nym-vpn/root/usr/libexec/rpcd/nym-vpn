@@ -927,6 +927,115 @@ handle_init() {
     fi
     json_close_object
 
+    # Watchdog / Always-on
+    json_add_object "watchdog"
+    local wd_always_on=$(uci -q get nym-vpn.settings.always_on 2>/dev/null)
+    local wd_interval=$(uci -q get nym-vpn.settings.watchdog_interval 2>/dev/null)
+    json_add_boolean "always_on" "${wd_always_on:-0}"
+    json_add_int "interval" "${wd_interval:-30}"
+    local wd_service=$(/etc/init.d/nym-vpn-watchdog status 2>&1)
+    if [ "$wd_service" = "running" ]; then
+        json_add_string "service" "running"
+    else
+        json_add_string "service" "stopped"
+    fi
+    if [ -f /tmp/nym-watchdog.state ]; then
+        . /tmp/nym-watchdog.state
+        json_add_string "state" "${state:-unknown}"
+        json_add_int "failures" "${failures:-0}"
+    else
+        json_add_string "state" "inactive"
+        json_add_int "failures" 0
+    fi
+    json_close_object
+
+    json_dump
+}
+
+handle_watchdog_get() {
+    json_init
+
+    local always_on=$(uci -q get nym-vpn.settings.always_on 2>/dev/null)
+    local interval=$(uci -q get nym-vpn.settings.watchdog_interval 2>/dev/null)
+    local max_retries=$(uci -q get nym-vpn.settings.watchdog_max_retries 2>/dev/null)
+    local service_status=$(/etc/init.d/nym-vpn-watchdog status 2>&1)
+
+    json_add_boolean "always_on" "${always_on:-0}"
+    json_add_int "interval" "${interval:-30}"
+    json_add_int "max_retries" "${max_retries:-3}"
+
+    if [ "$service_status" = "running" ]; then
+        json_add_string "service" "running"
+    else
+        json_add_string "service" "stopped"
+    fi
+
+    # Read watchdog state file if present
+    if [ -f /tmp/nym-watchdog.state ]; then
+        . /tmp/nym-watchdog.state
+        json_add_string "state" "${state:-unknown}"
+        json_add_int "failures" "${failures:-0}"
+        json_add_string "last_action" "${last_action:-none}"
+        json_add_int "timestamp" "${timestamp:-0}"
+    else
+        json_add_string "state" "inactive"
+        json_add_int "failures" 0
+        json_add_string "last_action" "none"
+        json_add_int "timestamp" 0
+    fi
+
+    json_dump
+}
+
+handle_watchdog_set() {
+    read -r input
+    json_load "$input"
+
+    local always_on interval
+    json_get_var always_on "always_on"
+    json_get_var interval "interval"
+
+    json_init
+
+    # Validate always_on
+    case "$always_on" in
+        0|1) ;;
+        *)
+            json_add_boolean "success" 0
+            json_add_string "error" "Invalid value (must be 0 or 1)"
+            json_dump
+            return
+            ;;
+    esac
+
+    # Validate interval if provided
+    if [ -n "$interval" ]; then
+        case "$interval" in
+            1|5|15|30|60|120) ;;
+            *)
+                json_add_boolean "success" 0
+                json_add_string "error" "Invalid interval (must be 1, 5, 15, 30, 60, or 120)"
+                json_dump
+                return
+                ;;
+        esac
+        uci set nym-vpn.settings.watchdog_interval="$interval"
+    fi
+
+    uci set nym-vpn.settings.always_on="$always_on"
+    uci commit nym-vpn
+
+    if [ "$always_on" = "1" ]; then
+        /etc/init.d/nym-vpn-watchdog enable 2>/dev/null
+        /etc/init.d/nym-vpn-watchdog start 2>/dev/null
+    else
+        /etc/init.d/nym-vpn-watchdog stop 2>/dev/null
+        /etc/init.d/nym-vpn-watchdog disable 2>/dev/null
+        rm -f /tmp/nym-watchdog.state
+    fi
+
+    json_add_boolean "success" 1
+    json_add_string "message" "Always-on $([ "$always_on" = "1" ] && echo "enabled" || echo "disabled")"
     json_dump
 }
 
@@ -1008,7 +1117,9 @@ case "$1" in
     "ad_block_get": {},
     "ad_block_set": { "enabled": "bool" },
     "daemon_status": {},
-    "daemon_restart": {}
+    "daemon_restart": {},
+    "watchdog_get": {},
+    "watchdog_set": { "always_on": "bool", "interval": "int" }
 }
 EOF
         ;;
@@ -1040,6 +1151,8 @@ EOF
             ad_block_set)            handle_ad_block_set ;;
             daemon_status)           handle_daemon_status ;;
             daemon_restart)          handle_daemon_restart ;;
+            watchdog_get)            handle_watchdog_get ;;
+            watchdog_set)            handle_watchdog_set ;;
             *)
                 json_init
                 json_add_boolean "success" 0

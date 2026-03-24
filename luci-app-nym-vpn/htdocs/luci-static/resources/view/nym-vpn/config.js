@@ -27,10 +27,10 @@ return view.extend({
         var tunnel_config = data.tunnel_config || {};
         var account_info = data.account || {};
         var network = data.network || {};
-        var lan_policy = data.lan || {};
         var daemon_status = data.daemon || {};
         var ad_block = data.ad_block || {};
         var dns_config = data.dns || {};
+        var watchdog = data.watchdog || {};
 
         var self = this;
         var E = dom.create.bind(dom);
@@ -539,12 +539,16 @@ return view.extend({
                 });
         };
 
-        // Tunnel update handler
-        var handleTunnelUpdate = function(ev) {
-            ev.preventDefault();
-            var ipv6 = ev.target.querySelector('#ipv6-toggle').checked ? 'on' : 'off';
-            var two_hop = ev.target.querySelector('#two-hop-toggle').checked ? 'on' : 'off';
-            var killswitch = ev.target.querySelector('#killswitch-toggle').checked ? 'on' : 'off';
+        // Save all tunnel toggles immediately
+        var saveTunnelSettings = function() {
+            var ipv6El = document.getElementById('ipv6-toggle');
+            var twoHopEl = document.getElementById('two-hop-toggle');
+            var killswitchEl = document.getElementById('killswitch-toggle');
+            if (!ipv6El || !twoHopEl || !killswitchEl) return;
+
+            var ipv6 = ipv6El.checked ? 'on' : 'off';
+            var two_hop = twoHopEl.checked ? 'on' : 'off';
+            var killswitch = killswitchEl.checked ? 'on' : 'off';
 
             rpc.tunnelSet(ipv6, two_hop, killswitch).then(function(result) {
                 if (result && result.success) {
@@ -707,21 +711,6 @@ return view.extend({
                     hideModal();
                     showToast('Error: ' + err.message, 'error');
                 });
-            });
-        };
-
-        // LAN policy handler
-        var handleLanPolicy = function(policy) {
-            rpc.lanSet(policy).then(function(result) {
-                if (result && result.success) {
-                    showToast('LAN policy set to: ' + policy, 'success');
-                    var display = document.getElementById('lan-policy-display');
-                    if (display) display.textContent = policy;
-                } else {
-                    showToast('Failed: ' + (result.error || 'Unknown'), 'error');
-                }
-            }).catch(function(err) {
-                showToast('Error: ' + err.message, 'error');
             });
         };
 
@@ -888,7 +877,7 @@ return view.extend({
                 E('div', { 'class': 'nym-card-chevron' }, '▼')
             ]),
             E('div', { 'class': 'nym-card-body' }, [
-                E('form', { 'submit': handleTunnelUpdate }, [
+                E('div', {}, [
                     E('div', { 'class': 'nym-toggle-row' }, [
                         E('div', { 'class': 'nym-toggle-info' }, [
                             E('div', { 'class': 'nym-toggle-title' }, 'IPv6'),
@@ -898,7 +887,8 @@ return view.extend({
                             E('input', {
                                 'type': 'checkbox',
                                 'id': 'ipv6-toggle',
-                                'checked': tunnel_config.ipv6 === 'on' ? 'checked' : null
+                                'checked': tunnel_config.ipv6 === 'on' ? 'checked' : null,
+                                'change': saveTunnelSettings
                             }),
                             E('span', { 'class': 'nym-toggle-slider' })
                         ])
@@ -912,10 +902,98 @@ return view.extend({
                             E('input', {
                                 'type': 'checkbox',
                                 'id': 'two-hop-toggle',
-                                'checked': tunnel_config.two_hop === 'on' ? 'checked' : null
+                                'checked': tunnel_config.two_hop === 'on' ? 'checked' : null,
+                                'change': saveTunnelSettings
                             }),
                             E('span', { 'class': 'nym-toggle-slider' })
                         ])
+                    ]),
+                    E('div', { 'class': 'nym-toggle-row', 'style': 'flex-wrap: wrap' }, [
+                        E('div', { 'class': 'nym-toggle-info' }, [
+                            E('div', { 'class': 'nym-toggle-title' }, 'Always On'),
+                            E('div', { 'class': 'nym-toggle-desc' }, 'Automatically reconnect when the VPN tunnel drops. Uses escalating recovery with daemon restart as fallback.'),
+                            E('div', {
+                                'class': 'nym-toggle-status',
+                                'id': 'always-on-status',
+                                'style': 'font-size: 11px; margin-top: 4px; color: ' + (watchdog.always_on ? '#27ae60' : '#888')
+                            }, watchdog.always_on ? 'Watchdog active' + (watchdog.failures > 0 ? ' (' + watchdog.failures + ' recovery attempts)' : '') : 'Disabled')
+                        ]),
+                        E('label', { 'class': 'nym-toggle' }, [
+                            E('input', {
+                                'type': 'checkbox',
+                                'id': 'always-on-toggle',
+                                'checked': watchdog.always_on ? 'checked' : null,
+                                'change': function(ev) {
+                                    var enabled = ev.target.checked;
+                                    var statusEl = document.getElementById('always-on-status');
+                                    var intervalRow = document.getElementById('watchdog-interval-row');
+                                    ev.target.disabled = true;
+
+                                    var currentInterval = null;
+                                    var activeBtn = intervalRow ? intervalRow.querySelector('.nym-pill.active') : null;
+                                    if (activeBtn) currentInterval = parseInt(activeBtn.dataset.value);
+
+                                    rpc.watchdogSet(enabled ? 1 : 0, currentInterval).then(function(result) {
+                                        ev.target.disabled = false;
+                                        if (result && result.success) {
+                                            showToast('Always-on ' + (enabled ? 'enabled' : 'disabled'), 'success');
+                                            if (statusEl) {
+                                                statusEl.textContent = enabled ? 'Watchdog active' : 'Disabled';
+                                                statusEl.style.color = enabled ? '#27ae60' : '#888';
+                                            }
+                                            if (intervalRow) intervalRow.style.display = enabled ? 'flex' : 'none';
+                                        } else {
+                                            ev.target.checked = !enabled;
+                                            showToast('Failed: ' + (result.error || 'Unknown'), 'error');
+                                        }
+                                    }).catch(function(err) {
+                                        ev.target.disabled = false;
+                                        ev.target.checked = !enabled;
+                                        showToast('Error: ' + err.message, 'error');
+                                    });
+                                }
+                            }),
+                            E('span', { 'class': 'nym-toggle-slider' })
+                        ]),
+                        (function() {
+                            var currentInterval = (watchdog.interval || 30).toString();
+                            var intervals = [
+                                { value: '1', label: '1s' },
+                                { value: '5', label: '5s' },
+                                { value: '15', label: '15s' },
+                                { value: '30', label: '30s' },
+                                { value: '60', label: '60s' },
+                                { value: '120', label: '2m' }
+                            ];
+                            var pills = intervals.map(function(opt) {
+                                return E('button', {
+                                    'class': 'nym-pill' + (opt.value === currentInterval ? ' active' : ''),
+                                    'data-value': opt.value,
+                                    'click': function(ev) {
+                                        ev.preventDefault();
+                                        var row = ev.target.closest('#watchdog-interval-row');
+                                        row.querySelectorAll('.nym-pill').forEach(function(p) { p.classList.remove('active'); });
+                                        ev.target.classList.add('active');
+                                        var isEnabled = document.getElementById('always-on-toggle').checked;
+                                        rpc.watchdogSet(isEnabled ? 1 : 0, parseInt(opt.value)).then(function(result) {
+                                            if (result && result.success) {
+                                                showToast('Check interval set to ' + opt.label, 'success');
+                                            } else {
+                                                showToast('Failed: ' + (result.error || 'Unknown'), 'error');
+                                            }
+                                        });
+                                    }
+                                }, opt.label);
+                            });
+                            return E('div', {
+                                'id': 'watchdog-interval-row',
+                                'class': 'nym-interval-row',
+                                'style': 'display: ' + (watchdog.always_on ? 'flex' : 'none') + '; width: 100%; align-items: center; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color)'
+                            }, [
+                                E('span', { 'style': 'font-size: 12px; color: var(--text-muted)' }, 'Check every:'),
+                                E('div', { 'class': 'nym-pill-group' }, pills)
+                            ]);
+                        })()
                     ]),
                     E('div', { 'class': 'nym-toggle-row' }, [
                         E('div', { 'class': 'nym-toggle-info' }, [
@@ -934,48 +1012,16 @@ return view.extend({
                                 'change': function(ev) {
                                     var warn = ev.target.closest('.nym-toggle-row').querySelector('.nym-toggle-warning');
                                     if (warn) warn.style.display = ev.target.checked ? 'none' : 'block';
+                                    saveTunnelSettings();
                                 }
                             }),
                             E('span', { 'class': 'nym-toggle-slider' })
                         ])
-                    ]),
-                    E('div', { 'class': 'nym-text-center nym-mt-16' }, [
-                        E('button', { 'class': 'nym-btn nym-btn-primary', 'type': 'submit' }, 'Save Tunnel Settings')
                     ])
-                ])
+                ]),
             ])
         ]);
         container.appendChild(tunnelCard);
-
-        // Local Network Card
-        var lanCard = E('div', { 'class': 'nym-card' }, [
-            E('div', { 'class': 'nym-card-header', 'click': function() { toggleCard(lanCard); } }, [
-                E('div', { 'class': 'nym-card-title' }, [
-                    svgIcon(assets.iconNetwork),
-                    'Local Network'
-                ]),
-                E('div', { 'class': 'nym-card-chevron' }, '▼')
-            ]),
-            E('div', { 'class': 'nym-card-body' }, [
-                E('div', { 'class': 'nym-card-description' },
-                    'Control whether local network devices can be accessed while connected to the VPN.'),
-                E('div', { 'class': 'nym-info-item', 'style': 'margin-bottom: 16px' }, [
-                    E('div', { 'class': 'nym-info-label' }, 'Current Policy'),
-                    E('div', { 'class': 'nym-info-value', 'id': 'lan-policy-display' }, lan_policy.policy || 'Not set')
-                ]),
-                E('div', { 'style': 'display: flex; gap: 12px; justify-content: center' }, [
-                    E('button', {
-                        'class': 'nym-btn nym-btn-primary',
-                        'click': function() { handleLanPolicy('allow'); }
-                    }, 'Allow LAN'),
-                    E('button', {
-                        'class': 'nym-btn nym-btn-danger',
-                        'click': function() { handleLanPolicy('block'); }
-                    }, 'Block LAN')
-                ])
-            ])
-        ]);
-        container.appendChild(lanCard);
 
         // DNS & Ad Blocking Card
         var adBlockEnabled = ad_block.enabled ? true : false;
