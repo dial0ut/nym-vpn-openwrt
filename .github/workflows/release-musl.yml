@@ -97,6 +97,12 @@ jobs:
           - target: mips-unknown-linux-musl
             arch: mips
             dockerfile: Dockerfile.mips
+          - target: riscv64gc-unknown-linux-musl
+            arch: riscv64
+            dockerfile: Dockerfile.riscv64
+          - target: armv5te-unknown-linux-musleabi
+            arch: armv5te
+            dockerfile: Dockerfile.armv5te
 
     steps:
       - name: Checkout
@@ -165,6 +171,12 @@ jobs:
             openwrt_arch: mips_24kc
           - arch: mipsel
             openwrt_arch: mips_siflower
+          # riscv64
+          - arch: riscv64
+            openwrt_arch: riscv64_riscv64
+          # armv5te
+          - arch: armv5te
+            openwrt_arch: arm_arm926ej-s
           # aarch64
           - arch: aarch64
             openwrt_arch: aarch64_generic
@@ -267,6 +279,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -347,65 +362,58 @@ jobs:
             artifacts/nym-vpnd-armv7
             artifacts/nym-vpnd-mipsel
             artifacts/nym-vpnd-mips
+            artifacts/nym-vpnd-riscv64
+            artifacts/nym-vpnd-armv5te
             artifacts/nym-vpnc-x86_64
             artifacts/nym-vpnc-i686
             artifacts/nym-vpnc-aarch64
             artifacts/nym-vpnc-armv7
             artifacts/nym-vpnc-mipsel
             artifacts/nym-vpnc-mips
+            artifacts/nym-vpnc-riscv64
+            artifacts/nym-vpnc-armv5te
             artifacts/*.tar.gz
             artifacts/*.sha256
             artifacts/*.ipk
             artifacts/*.apk
             scripts/install.sh
           body: |
-            ## Nym VPN ${{ steps.version.outputs.version }} - OpenWRT Edition
+            ## Nym VPN ${{ steps.version.outputs.version }} for OpenWrt
 
             ${{ steps.changelog.outputs.changelog }}
 
             ---
 
-            Pre-built static binaries and packages (.apk + .ipk) for OpenWrt routers.
-
-            ### Requirements
-
-            - **Free space:** ~60MB minimum (see table below for exact sizes)
-            - **Package feeds:** Run `opkg update` (OpenWrt ≤24.10) or `apk update` (OpenWrt 25.x+) before installing
-
-            ### Installation
-
-            **OpenWrt 25.x+ (apk package manager):**
+            ### Quick Install
 
             ```bash
-            cd /tmp
-            wget <APK_URL>
+            curl -fsSL https://packages.dial0ut.org/install.sh | sh
+            ```
+
+            Auto-detects your architecture and package manager (`opkg` or `apk`), downloads the latest release, and installs everything.
+
+            ### Manual Install
+
+            Download the `.ipk` (OpenWrt ≤24.10) or `.apk` (OpenWrt 25.x+) for your architecture from the assets below, then:
+
+            ```bash
+            # opkg (OpenWrt ≤24.10)
+            opkg update && opkg install ./nym-vpn_*.ipk
+
+            # apk (OpenWrt 25.x+)
             apk add --allow-untrusted ./nym-vpn_*.apk
             ```
 
-            **OpenWrt 24.10 and earlier (opkg package manager):**
-
-            ```bash
-            cd /tmp
-            opkg update
-            wget <IPK_URL>
-            opkg install ./nym-vpn_*.ipk
-            ```
-
-            > **Which package format?** Check with `which apk && echo "Use .apk" || echo "Use .ipk"`
-
-            Dependencies (kmod-tun, luci-base) are installed automatically. Uses pure Rust userspace WireGuard (gotatun) — no kernel WireGuard module needed.
+            Dependencies (`kmod-tun`, `luci-base`) are installed automatically. Uses pure Rust userspace WireGuard — no kernel WireGuard module needed.
 
             ### After Installation
 
-            Access the Nym VPN interface at: **LuCI → VPN → Nym VPN**
+            Access the web interface at: **LuCI → VPN → Nym VPN**
 
             ### Supported Architectures
 
             | Architecture | Example Devices |
             |--------------|-----------------|
-            | `x86_64` | x86 VMs, PC Engines APU |
-            | `i386_pentium4` | Older x86 devices |
-            | `i386_pentium-mmx` | Legacy x86 devices |
             | `aarch64_generic` | Raspberry Pi 3/4, modern ARM64 routers |
             | `aarch64_cortex-a53` | MediaTek, Qualcomm ARM64 routers |
             | `aarch64_cortex-a53_neon-vfpv4` | ARM64 Cortex-A53 with NEON/VFPv4 |
@@ -419,20 +427,29 @@ jobs:
             | `arm_cortex-a9_neon` | Zyxel NBG6817, some Marvell |
             | `arm_cortex-a9_vfpv3-d16` | Linksys WRT, Netgear R7800 |
             | `arm_cortex-a15_neon-vfpv4` | TI OMAP5, Samsung Exynos |
+            | `arm_arm926ej-s` | Marvell Kirkwood (Linksys EA3500, Seagate GoFlex) |
+            | `x86_64` | x86 VMs, PC Engines APU |
+            | `i386_pentium4` | Older x86 devices |
+            | `i386_pentium-mmx` | Legacy x86 devices |
             | `mipsel_24kc` | MediaTek MT7621 routers (GL.iNet, Xiaomi) |
             | `mips_24kc` | Atheros/Qualcomm routers (AR71xx, QCA9xxx) |
             | `mips_siflower` | Siflower SF19A28 (GL.iNet SFT1200) |
+            | `riscv64_riscv64` | SiFive, StarFive VisionFive |
 
             Check your architecture: `grep OPENWRT_ARCH /etc/os-release` or `opkg print-architecture | grep -v all`
 
-            ### Package Feed
+            ### Package Feed (automatic updates)
 
-            Add the NymVPN package feed to receive updates via `opkg upgrade`:
+            The install script registers the feed automatically. To add it manually:
 
             ```bash
             ARCH=$(grep OPENWRT_ARCH /etc/os-release | cut -d'"' -f2)
+
+            # opkg
             echo "src/gz nym-vpn https://packages.dial0ut.org/opkg/$ARCH" >> /etc/opkg/customfeeds.conf
-            opkg update
+
+            # apk
+            echo "https://packages.dial0ut.org/apk/$ARCH" > /etc/apk/repositories.d/nym-vpn.list
             ```
 
   publish-feed:
