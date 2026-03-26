@@ -12,28 +12,9 @@
 !!! note
     Devices with 128 MB RAM should enable [zram swap](troubleshooting.md#not-enough-ram-oom-crash) for stable operation.
 
-## Tested Devices
+## Supported Architectures
 
-| Device | Architecture | RAM | Notes |
-|--------|-------------|-----|-------|
-| x86_64 VM / Proxmox | x86_64 | varies | Best for testing |
-| FriendlyARM NanoPi R4S | aarch64_generic | 1 GB / 4 GB | Popular travel router |
-| FriendlyARM NanoPi R5S | aarch64_generic | 2 GB / 4 GB | Powerful home router |
-| GL.iNet MT6000 (Flint 2) | aarch64_cortex-a53 | 1 GB | WiFi 6, good performance |
-| Banana Pi BPI-R3 | aarch64_cortex-a53 | 2 GB | Development board |
-| Linksys MX4200v2 (Atlas 6) | arm_cortex-a7_neon-vfpv4 | 512 MB | WiFi 6 mesh |
-| GL.iNet B1300 | arm_cortex-a7_neon-vfpv4 | 256 MB | Compact, affordable |
-| ASUS RT-AC58U | arm_cortex-a7_neon-vfpv4 | 128 MB | Needs zram swap |
-| Linksys WRT1900ACS | arm_cortex-a9 | 512 MB | Classic hackable router |
-| Turris Omnia | arm_cortex-a9 | 1 GB / 2 GB | Open-source router |
-| Netgear R7000 | arm_cortex-a9 | 256 MB | Broadcom, widely available |
-| ASUS RT-AC68U | arm_cortex-a9 | 256 MB | Broadcom, popular |
-| GL.iNet GL-AR750S (Slate) | mips_24kc | 128 MB | Travel router, needs zram |
-| GL.iNet GL-MT1300 (Beryl) | mipsel_24kc | 256 MB | Travel router |
-
-### IPK Architectures Available
-
-Any OpenWrt device matching a supported architecture can install via `.ipk`. Binary packages are built for 19 architecture variants:
+Any OpenWrt device matching a supported architecture can install via `.ipk`. Binary packages are built for 21 architecture variants:
 
 **Stable (Tier 2):**
 
@@ -48,6 +29,8 @@ Any OpenWrt device matching a supported architecture can install via `.ipk`. Bin
 
 - `mips_24kc`, `mips_siflower`
 - `mipsel_24kc`
+- `riscv64_riscv64`
+- `arm_arm926ej-s`
 
 ## Choosing a Device
 
