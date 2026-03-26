@@ -131,7 +131,7 @@ chmod 755 "$BUILD_DIR/data/usr/sbin/nym-vpn-watchdog"
 echo "=== Adding config and UCI defaults ==="
 mkdir -p "$BUILD_DIR/data/etc/config"
 mkdir -p "$BUILD_DIR/data/etc/uci-defaults"
-mkdir -p "$BUILD_DIR/data/var/lib/nym-vpn"
+mkdir -p "$BUILD_DIR/data/etc/nym/data"
 
 cp "$SCRIPT_DIR/nym-vpn.conf" "$BUILD_DIR/data/etc/config/nym-vpn"
 

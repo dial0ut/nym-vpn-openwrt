@@ -52,7 +52,6 @@ rm -f /tmp/nym-watchdog.state 2>/dev/null
 # Only do destructive cleanup on full removal, not upgrades.
 # opkg sets PKG_UPGRADE=1 when upgrading.
 if [ "$PKG_UPGRADE" != "1" ]; then
-    rm -rf /var/lib/nym-vpnd 2>/dev/null
     rm -rf /etc/nym 2>/dev/null
     rm -rf /var/log/nym-vpnd 2>/dev/null
 
