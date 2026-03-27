@@ -481,8 +481,8 @@ jobs:
 
       - name: Write signing keys
         run: |
-          echo "${{ secrets.DIAL0UT_OPKG }}" > /tmp/opkg.key
-          chmod 600 /tmp/opkg.key
+          echo "${{ secrets.DIAL0UT_OPKG }}" > /tmp/opkg.sec
+          chmod 600 /tmp/opkg.sec
           echo "${{ secrets.DIAL0UT_APK }}" > /tmp/apk.pem
           chmod 600 /tmp/apk.pem
 
@@ -490,7 +490,7 @@ jobs:
         run: |
           mkdir -p feed/opkg
           cp artifacts/*.ipk feed/opkg/ 2>/dev/null || true
-          bash scripts/feed/generate-feed.sh opkg feed/opkg /tmp/opkg.key
+          bash scripts/feed/generate-feed.sh opkg feed/opkg /tmp/opkg.sec
 
       - name: Generate apk feed
         run: |
@@ -500,7 +500,7 @@ jobs:
 
       - name: Clean up signing keys
         if: always()
-        run: rm -f /tmp/opkg.key /tmp/apk.pem
+        run: rm -f /tmp/opkg.sec /tmp/apk.pem
 
       - name: Upload to Cloudflare R2
         env:
