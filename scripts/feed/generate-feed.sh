@@ -120,13 +120,22 @@ generate_opkg_feed() {
             echo "  Added: $pkg_name $pkg_version ($pkg_arch)"
         done
 
-        gzip -k -f "$packages_file"
-        echo "  Generated: $arch/Packages + Packages.gz"
+        echo "  Generated: $arch/Packages"
 
-        # Sign the Packages file
+        # Sign with usign/signify (Ed25519, opkg-compatible)
         if [ -n "$SIGNING_KEY" ]; then
-            openssl dgst -sha256 -sign "$SIGNING_KEY" -out "$arch_dir/Packages.sig" "$packages_file"
-            echo "  Signed: $arch/Packages.sig"
+            if command -v usign >/dev/null 2>&1; then
+                usign -S -m "$packages_file" -s "$SIGNING_KEY"
+            elif command -v signify-openbsd >/dev/null 2>&1; then
+                signify-openbsd -S -s "$SIGNING_KEY" -m "$packages_file"
+            elif command -v signify >/dev/null 2>&1; then
+                signify -S -s "$SIGNING_KEY" -m "$packages_file"
+            else
+                echo "  Warning: No usign/signify found, skipping signature"
+            fi
+            if [ -f "$packages_file.sig" ]; then
+                echo "  Signed: $arch/Packages.sig"
+            fi
         fi
     done
 }

@@ -159,8 +159,11 @@ fi
 echo "=== Adding feed signing key ==="
 FEED_KEY="$REPO_ROOT/scripts/feed/dial0ut.pub"
 if [ -f "$FEED_KEY" ]; then
+    # opkg requires the key filename to be the fingerprint
+    # Extract fingerprint from usign public key (second line, base64 decoded, bytes 2-9 as hex)
+    FINGERPRINT=$(awk 'NR==2' "$FEED_KEY" | base64 -d | od -A n -t x1 -N 10 | tr -d ' ' | cut -c5-20)
     mkdir -p "$BUILD_DIR/data/etc/opkg/keys"
-    cp "$FEED_KEY" "$BUILD_DIR/data/etc/opkg/keys/dial0ut.pub"
+    cp "$FEED_KEY" "$BUILD_DIR/data/etc/opkg/keys/$FINGERPRINT"
     mkdir -p "$BUILD_DIR/data/etc/apk/keys"
     cp "$FEED_KEY" "$BUILD_DIR/data/etc/apk/keys/dial0ut.pub"
 fi

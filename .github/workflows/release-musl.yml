@@ -476,27 +476,31 @@ jobs:
       - name: List downloaded packages
         run: ls -la artifacts/
 
-      - name: Write signing key
+      - name: Install signify
+        run: sudo apt-get install -y -qq signify-openbsd
+
+      - name: Write signing keys
         run: |
-          echo "${{ secrets.FEED_SIGNING_KEY }}" > /tmp/signing.pem
-          chmod 600 /tmp/signing.pem
+          echo "${{ secrets.DIAL0UT_OPKG }}" > /tmp/opkg.key
+          chmod 600 /tmp/opkg.key
+          echo "${{ secrets.DIAL0UT_APK }}" > /tmp/apk.pem
+          chmod 600 /tmp/apk.pem
 
       - name: Generate opkg feed
         run: |
           mkdir -p feed/opkg
           cp artifacts/*.ipk feed/opkg/ 2>/dev/null || true
-          cp scripts/feed/dial0ut.pub feed/opkg/
-          bash scripts/feed/generate-feed.sh opkg feed/opkg /tmp/signing.pem
+          bash scripts/feed/generate-feed.sh opkg feed/opkg /tmp/opkg.key
 
       - name: Generate apk feed
         run: |
           mkdir -p feed/apk
           cp artifacts/*.apk feed/apk/ 2>/dev/null || true
-          bash scripts/feed/generate-feed.sh apk feed/apk /tmp/signing.pem
+          bash scripts/feed/generate-feed.sh apk feed/apk /tmp/apk.pem
 
-      - name: Clean up signing key
+      - name: Clean up signing keys
         if: always()
-        run: rm -f /tmp/signing.pem
+        run: rm -f /tmp/opkg.key /tmp/apk.pem
 
       - name: Upload to Cloudflare R2
         env:
