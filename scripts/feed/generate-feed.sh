@@ -120,7 +120,8 @@ generate_opkg_feed() {
             echo "  Added: $pkg_name $pkg_version ($pkg_arch)"
         done
 
-        echo "  Generated: $arch/Packages"
+        gzip -k -f "$packages_file"
+        echo "  Generated: $arch/Packages + Packages.gz"
 
         # Sign with usign/signify (Ed25519, opkg-compatible)
         if [ -n "$SIGNING_KEY" ]; then
