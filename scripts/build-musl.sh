@@ -12,7 +12,12 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 usage() {
-    echo "Usage: $0 <target>"
+    echo "Usage: $0 [--dynamic] <target>"
+    echo ""
+    echo "Options:"
+    echo "  --dynamic  - Build dynamically linked binaries (default: static)"
+    echo "               Produces smaller binaries but requires libmnl and"
+    echo "               libnftnl on the target device (standard on OpenWrt)."
     echo ""
     echo "Tier 2 targets (standard images):"
     echo "  aarch64    - ARM 64-bit (Raspberry Pi 3+, modern routers)"
@@ -26,11 +31,25 @@ usage() {
     echo "  riscv64    - RISC-V 64-bit"
     echo "  armv5te    - ARMv5 (legacy devices)"
     echo ""
-    echo "Example:"
+    echo "Examples:"
     echo "  $0 aarch64"
+    echo "  $0 --dynamic aarch64"
     echo "  $0 mipsel"
     exit 1
 }
+
+if [ $# -eq 0 ]; then
+    usage
+fi
+
+# Parse options
+DYNAMIC=false
+while [[ "${1:-}" == --* ]]; do
+    case "$1" in
+        --dynamic) DYNAMIC=true; shift ;;
+        *) echo -e "${RED}Error: Unknown option '$1'${NC}"; usage ;;
+    esac
+done
 
 if [ $# -eq 0 ]; then
     usage
@@ -81,7 +100,12 @@ case "$TARGET_ARCH" in
         ;;
 esac
 
-echo -e "${GREEN}Building nym-vpn-core binaries for ${TARGET_ARCH} using kernel WireGuard${NC}"
+LINK_MODE="static"
+if $DYNAMIC; then
+    LINK_MODE="dynamic"
+fi
+
+echo -e "${GREEN}Building nym-vpn-core binaries for ${TARGET_ARCH} (${LINK_MODE} linking)${NC}"
 echo -e "${YELLOW}Docker image: ${DOCKER_IMAGE}${NC}"
 if $TIER3; then
     echo -e "${YELLOW}Tier 3 target - using custom Docker image and build-std${NC}"
@@ -115,16 +139,34 @@ fi
 echo -e "${GREEN}Starting Docker container...${NC}"
 echo ""
 
+# Use -it for interactive terminals, just -t otherwise (e.g. when backgrounded)
+DOCKER_TTY="-it"
+if [ ! -t 0 ] || [ -n "${BENCH_MODE:-}" ]; then
+    DOCKER_TTY="-t"
+fi
+
 # Run the cross-compilation inside Docker
-if $TIER3; then
-    # Tier 3: use build-tier3.sh (handles build-std, patches, etc.)
-    docker run --rm -it \
+if $TIER3 && $DYNAMIC; then
+    # Tier 3 dynamic: use build-tier3-dynamic.sh
+    docker run --rm $DOCKER_TTY \
+        -v "${PROJECT_ROOT}:/home/rust/src" \
+        "${DOCKER_IMAGE}" \
+        bash /home/rust/src/docker/tier3-musl/build-tier3-dynamic.sh
+elif $TIER3; then
+    # Tier 3 static: use build-tier3.sh (baked into Docker image)
+    docker run --rm $DOCKER_TTY \
         -v "${PROJECT_ROOT}:/home/rust/src" \
         "${DOCKER_IMAGE}" \
         /opt/build-tier3.sh
+elif $DYNAMIC; then
+    # Tier 2 dynamic: use cross-compile-dynamic.sh
+    docker run --rm $DOCKER_TTY \
+        -v "${PROJECT_ROOT}:/home/rust/src" \
+        "${DOCKER_IMAGE}" \
+        bash /home/rust/src/scripts/cross-compile-dynamic.sh
 else
-    # Tier 2: use cross-compile-musl.sh
-    docker run --rm -it \
+    # Tier 2 static: use cross-compile-musl.sh
+    docker run --rm $DOCKER_TTY \
         -v "${PROJECT_ROOT}:/home/rust/src" \
         "${DOCKER_IMAGE}" \
         bash /home/rust/src/scripts/cross-compile-musl.sh
