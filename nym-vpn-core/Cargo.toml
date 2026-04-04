@@ -35,7 +35,7 @@ default-members = [
 ]
 
 [workspace.package]
-version = "1.26.1"
+version = "1.26.2"
 authors = ["dial0ut"]
 repository = "https://github.com/dial0ut/nym-vpn-openwrt"
 homepage = "https://nymtech.net"
@@ -49,7 +49,7 @@ lto = true
 strip = true
 codegen-units = 1
 panic = "abort"
-opt-level = "z"
+opt-level = 2
 
 [workspace.lints.clippy]
 large_futures = "warn"

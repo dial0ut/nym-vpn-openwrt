@@ -11,13 +11,16 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
+ALL_TARGETS=(aarch64 x86_64 i686 armv7 mips mipsel riscv64 armv5te)
+
 usage() {
-    echo "Usage: $0 [--dynamic] <target>"
+    echo "Usage: $0 [--dynamic] <target|--all>"
     echo ""
     echo "Options:"
     echo "  --dynamic  - Build dynamically linked binaries (default: static)"
     echo "               Produces smaller binaries but requires libmnl and"
     echo "               libnftnl on the target device (standard on OpenWrt)."
+    echo "  --all      - Build all targets concurrently"
     echo ""
     echo "Tier 2 targets (standard images):"
     echo "  aarch64    - ARM 64-bit (Raspberry Pi 3+, modern routers)"
@@ -34,6 +37,7 @@ usage() {
     echo "Examples:"
     echo "  $0 aarch64"
     echo "  $0 --dynamic aarch64"
+    echo "  $0 --dynamic --all"
     echo "  $0 mipsel"
     exit 1
 }
@@ -44,15 +48,58 @@ fi
 
 # Parse options
 DYNAMIC=false
+BUILD_ALL=false
 while [[ "${1:-}" == --* ]]; do
     case "$1" in
         --dynamic) DYNAMIC=true; shift ;;
+        --all) BUILD_ALL=true; shift ;;
         *) echo -e "${RED}Error: Unknown option '$1'${NC}"; usage ;;
     esac
 done
 
-if [ $# -eq 0 ]; then
+if ! $BUILD_ALL && [ $# -eq 0 ]; then
     usage
+fi
+
+# Handle --all: launch one build per target concurrently
+if $BUILD_ALL; then
+    echo -e "${GREEN}Building ALL targets concurrently...${NC}"
+    PIDS=()
+    TARGETS=()
+    LOG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/build-logs"
+    mkdir -p "$LOG_DIR"
+
+    SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+    BUILD_FLAGS=""
+    $DYNAMIC && BUILD_FLAGS="--dynamic"
+
+    for t in "${ALL_TARGETS[@]}"; do
+        echo -e "${GREEN}Starting build: ${t}${NC} (log: build-logs/${t}.log)"
+        $SELF $BUILD_FLAGS "$t" > "${LOG_DIR}/${t}.log" 2>&1 &
+        PIDS+=($!)
+        TARGETS+=("$t")
+    done
+
+    echo ""
+    echo -e "${YELLOW}Waiting for ${#PIDS[@]} builds...${NC}"
+    FAILED=()
+    for i in "${!PIDS[@]}"; do
+        if wait "${PIDS[$i]}"; then
+            echo -e "${GREEN}  ✓ ${TARGETS[$i]}${NC}"
+        else
+            echo -e "${RED}  ✗ ${TARGETS[$i]} (see build-logs/${TARGETS[$i]}.log)${NC}"
+            FAILED+=("${TARGETS[$i]}")
+        fi
+    done
+
+    echo ""
+    if [ ${#FAILED[@]} -eq 0 ]; then
+        echo -e "${GREEN}All ${#TARGETS[@]} builds succeeded!${NC}"
+    else
+        echo -e "${RED}${#FAILED[@]} build(s) failed: ${FAILED[*]}${NC}"
+        exit 1
+    fi
+    exit 0
 fi
 
 TARGET_ARCH="$1"

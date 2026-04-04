@@ -98,9 +98,9 @@ install_system_deps() {
     if ! command -v protoc &> /dev/null; then
         log_info "Installing protoc ${PROTOC_VERSION}..."
         PB_REL="https://github.com/protocolbuffers/protobuf/releases"
-        curl -LO "$PB_REL/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip"
-        unzip -q "protoc-${PROTOC_VERSION}-linux-x86_64.zip" -d "$HOME/.local"
-        rm "protoc-${PROTOC_VERSION}-linux-x86_64.zip"
+        curl -Lo "/tmp/protoc.zip" "$PB_REL/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip"
+        unzip -q "/tmp/protoc.zip" -d "$HOME/.local"
+        rm "/tmp/protoc.zip"
     fi
     # Always ensure protoc is in PATH (may have been installed in previous run)
     export PATH="$PATH:$HOME/.local/bin"
