@@ -75,7 +75,7 @@ ENV AR_mipsel_unknown_linux_musl=mipsel-unknown-linux-musl-ar
 ENV PKG_CONFIG_PATH=/usr/local/musl/mipsel-unknown-linux-musl/lib/pkgconfig
 ENV PKG_CONFIG_ALLOW_CROSS=1
 
-COPY build-tier3.sh /opt/build-tier3.sh
-RUN chmod +x /opt/build-tier3.sh
+COPY build-tier3-dynamic.sh /opt/build-tier3-dynamic.sh
+RUN chmod +x /opt/build-tier3-dynamic.sh
 
 WORKDIR /home/rust/src

@@ -14,12 +14,9 @@ NC='\033[0m'
 ALL_TARGETS=(aarch64 x86_64 i686 armv7 mips mipsel riscv64 armv5te)
 
 usage() {
-    echo "Usage: $0 [--dynamic] <target|--all>"
+    echo "Usage: $0 [--all] <target>"
     echo ""
     echo "Options:"
-    echo "  --dynamic  - Build dynamically linked binaries (default: static)"
-    echo "               Produces smaller binaries but requires libmnl and"
-    echo "               libnftnl on the target device (standard on OpenWrt)."
     echo "  --all      - Build all targets concurrently"
     echo ""
     echo "Tier 2 targets (standard images):"
@@ -36,8 +33,7 @@ usage() {
     echo ""
     echo "Examples:"
     echo "  $0 aarch64"
-    echo "  $0 --dynamic aarch64"
-    echo "  $0 --dynamic --all"
+    echo "  $0 --all"
     echo "  $0 mipsel"
     exit 1
 }
@@ -47,11 +43,9 @@ if [ $# -eq 0 ]; then
 fi
 
 # Parse options
-DYNAMIC=false
 BUILD_ALL=false
 while [[ "${1:-}" == --* ]]; do
     case "$1" in
-        --dynamic) DYNAMIC=true; shift ;;
         --all) BUILD_ALL=true; shift ;;
         *) echo -e "${RED}Error: Unknown option '$1'${NC}"; usage ;;
     esac
@@ -70,12 +64,10 @@ if $BUILD_ALL; then
     mkdir -p "$LOG_DIR"
 
     SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
-    BUILD_FLAGS=""
-    $DYNAMIC && BUILD_FLAGS="--dynamic"
 
     for t in "${ALL_TARGETS[@]}"; do
         echo -e "${GREEN}Starting build: ${t}${NC} (log: build-logs/${t}.log)"
-        $SELF $BUILD_FLAGS "$t" > "${LOG_DIR}/${t}.log" 2>&1 &
+        $SELF "$t" > "${LOG_DIR}/${t}.log" 2>&1 &
         PIDS+=($!)
         TARGETS+=("$t")
     done
@@ -147,12 +139,7 @@ case "$TARGET_ARCH" in
         ;;
 esac
 
-LINK_MODE="static"
-if $DYNAMIC; then
-    LINK_MODE="dynamic"
-fi
-
-echo -e "${GREEN}Building nym-vpn-core binaries for ${TARGET_ARCH} (${LINK_MODE} linking)${NC}"
+echo -e "${GREEN}Building nym-vpn-core binaries for ${TARGET_ARCH} (dynamic linking)${NC}"
 echo -e "${YELLOW}Docker image: ${DOCKER_IMAGE}${NC}"
 if $TIER3; then
     echo -e "${YELLOW}Tier 3 target - using custom Docker image and build-std${NC}"
@@ -193,30 +180,16 @@ if [ ! -t 0 ] || [ -n "${BENCH_MODE:-}" ]; then
 fi
 
 # Run the cross-compilation inside Docker
-if $TIER3 && $DYNAMIC; then
-    # Tier 3 dynamic: use build-tier3-dynamic.sh
+if $TIER3; then
     docker run --rm $DOCKER_TTY \
         -v "${PROJECT_ROOT}:/home/rust/src" \
         "${DOCKER_IMAGE}" \
-        bash /home/rust/src/docker/tier3-musl/build-tier3-dynamic.sh
-elif $TIER3; then
-    # Tier 3 static: use build-tier3.sh (baked into Docker image)
-    docker run --rm $DOCKER_TTY \
-        -v "${PROJECT_ROOT}:/home/rust/src" \
-        "${DOCKER_IMAGE}" \
-        /opt/build-tier3.sh
-elif $DYNAMIC; then
-    # Tier 2 dynamic: use cross-compile-dynamic.sh
+        /opt/build-tier3-dynamic.sh
+else
     docker run --rm $DOCKER_TTY \
         -v "${PROJECT_ROOT}:/home/rust/src" \
         "${DOCKER_IMAGE}" \
         bash /home/rust/src/scripts/cross-compile-dynamic.sh
-else
-    # Tier 2 static: use cross-compile-musl.sh
-    docker run --rm $DOCKER_TTY \
-        -v "${PROJECT_ROOT}:/home/rust/src" \
-        "${DOCKER_IMAGE}" \
-        bash /home/rust/src/scripts/cross-compile-musl.sh
 fi
 
 echo ""

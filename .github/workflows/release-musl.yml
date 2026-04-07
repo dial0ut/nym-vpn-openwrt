@@ -60,7 +60,7 @@ jobs:
             -v "${{ github.workspace }}:/home/rust/src" \
             -e TARGET=${{ matrix.target }} \
             ${{ matrix.docker_image }} \
-            bash /home/rust/src/scripts/cross-compile-musl.sh
+            bash /home/rust/src/scripts/cross-compile-dynamic.sh
 
       - name: Prepare artifacts
         run: |
@@ -132,7 +132,7 @@ jobs:
           docker run --rm \
             -v "${{ github.workspace }}:/home/rust/src" \
             nym-musl-cross:${{ matrix.arch }}-musl \
-            /opt/build-tier3.sh
+            /opt/build-tier3-dynamic.sh
 
       - name: Prepare artifacts
         run: |

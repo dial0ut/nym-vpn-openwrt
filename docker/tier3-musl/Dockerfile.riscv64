@@ -61,7 +61,7 @@ ENV GCC_WRAPPER_CC=riscv64-unknown-linux-musl-gcc
 ENV CC_riscv64gc_unknown_linux_musl=riscv64-unknown-linux-musl-gcc
 ENV AR_riscv64gc_unknown_linux_musl=riscv64-unknown-linux-musl-ar
 
-COPY build-tier3.sh /opt/build-tier3.sh
-RUN chmod +x /opt/build-tier3.sh
+COPY build-tier3-dynamic.sh /opt/build-tier3-dynamic.sh
+RUN chmod +x /opt/build-tier3-dynamic.sh
 
 WORKDIR /home/rust/src

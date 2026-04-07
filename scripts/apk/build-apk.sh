@@ -159,6 +159,8 @@ MKPKG_INFO_ARGS=(
     -I "maintainer:dial0ut"
     -I "depends:libc"
     -I "depends:kmod-tun"
+    -I "depends:libmnl"
+    -I "depends:libnftnl"
     -I "depends:luci-base"
     -I "depends:rpcd"
 )
@@ -191,6 +193,8 @@ elif command -v docker >/dev/null 2>&1; then
             -I "maintainer:dial0ut" \
             -I "depends:libc" \
             -I "depends:kmod-tun" \
+            -I "depends:libmnl" \
+            -I "depends:libnftnl" \
             -I "depends:luci-base" \
             -I "depends:rpcd" \
             -s "post-install:/work/scripts/postinst" \
