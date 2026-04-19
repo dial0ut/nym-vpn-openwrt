@@ -107,6 +107,51 @@ lookup_gateway_country() {
     echo "$country"
 }
 
+# Emit error_reason / error_message fields into the current JSON object when
+# the account controller is in a state that blocks connect. Callers should
+# only invoke this when the tunnel itself isn't in Connected state.
+emit_account_error() {
+    local info
+    info=$($VPNC account get 2>&1)
+    local acct_state
+    acct_state=$(echo "$info" | grep "Account state:" | sed 's/Account state: //')
+
+    local reason=""
+    local message=""
+
+    case "$acct_state" in
+        "LoggedOut")
+            reason="logged_out"
+            message="No NymVPN account is configured on this device."
+            ;;
+        "Error(DeviceTimeDesynced)")
+            reason="device_time_desynced"
+            ;;
+        "Error(InactiveSubscription)")
+            reason="inactive_subscription"
+            ;;
+        "Error(MaxDeviceReached)")
+            reason="max_device_reached"
+            ;;
+        "Error(BandwidthExceeded"*)
+            reason="bandwidth_exceeded"
+            ;;
+        "Error(AccountStatusNotActive"*)
+            reason="account_status_not_active"
+            message=$(echo "$acct_state" | sed -n 's/.*status: "\([^"]*\)".*/\1/p')
+            ;;
+        "Error(ApiFailure"*|"Error(Storage"*|"Error(Internal"*)
+            reason="api_failure"
+            message=$(echo "$acct_state" | sed -n 's/.*details: "\([^"]*\)".*/\1/p')
+            ;;
+    esac
+
+    if [ -n "$reason" ]; then
+        json_add_string "error_reason" "$reason"
+        [ -n "$message" ] && json_add_string "error_message" "$message"
+    fi
+}
+
 handle_status() {
     local state=$($VPNC status 2>&1)
 
@@ -174,17 +219,21 @@ handle_status() {
     elif echo "$state" | grep -q "State: Disconnected"; then
         json_add_string "state" "disconnected"
         json_add_boolean "connected" 0
+        emit_account_error
     elif echo "$state" | grep -q "State: Connecting"; then
         json_add_string "state" "connecting"
         json_add_boolean "connected" 0
         json_add_string "raw_state" "$state"
+        emit_account_error
     elif echo "$state" | grep -q "State: Disconnecting"; then
         json_add_string "state" "disconnecting"
         json_add_boolean "connected" 0
+        emit_account_error
     else
         json_add_string "state" "unknown"
         json_add_boolean "connected" 0
         json_add_string "raw_state" "$state"
+        emit_account_error
     fi
 
     json_dump

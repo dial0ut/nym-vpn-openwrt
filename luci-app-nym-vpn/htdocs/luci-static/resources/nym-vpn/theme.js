@@ -221,5 +221,19 @@ return baseclass.extend({
     .nym-daemon-status { display: inline-block; padding: 6px 16px; border-radius: 20px; font-size: 13px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; font-weight: 500; letter-spacing: 0.3px; }\
     .nym-daemon-status.running { background: var(--nym-green-dim); color: var(--nym-green); }\
     .nym-daemon-status.stopped { background: var(--danger-dim); color: var(--danger); }\
+    /* Error strip inside the status hero */\
+    .nym-error-strip { display: flex; align-items: center; gap: 14px; padding: 14px 18px; margin: 20px 0 0; border: 1px solid var(--danger); border-left-width: 3px; background: var(--danger-dim); border-radius: 8px; box-shadow: 0 0 24px rgba(255, 71, 87, 0.12); animation: errorSlide 240ms ease; text-align: left; }\
+    .nym-error-strip.warning { border-color: var(--warning); background: var(--warning-dim); box-shadow: 0 0 24px rgba(255, 165, 2, 0.12); }\
+    .nym-error-icon { font-size: 18px; color: var(--danger); flex-shrink: 0; line-height: 1; }\
+    .nym-error-strip.warning .nym-error-icon { color: var(--warning); }\
+    .nym-error-body { flex: 1; min-width: 0; }\
+    .nym-error-heading { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--danger); font-weight: 600; margin-bottom: 4px; }\
+    .nym-error-strip.warning .nym-error-heading { color: var(--warning); }\
+    .nym-error-detail { font-size: 12px; color: var(--text-primary); line-height: 1.5; }\
+    .nym-error-action { flex-shrink: 0; }\
+    @keyframes errorSlide { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }\
+    .nym-status-hero.error .nym-status-ring-outer { border-color: var(--danger); border-style: solid; animation: none; box-shadow: 0 0 20px rgba(255, 71, 87, 0.3); }\
+    .nym-status-hero.error .nym-status-ring-inner { background: var(--danger-dim); }\
+    .nym-status-hero.error .nym-status-label { color: var(--danger); }\
 '
 });
