@@ -57,6 +57,7 @@ return view.extend({
         var entryGatewayDisplay, exitGatewayDisplay, connectionChain, modeLabel;
         var entryCountrySelect, exitCountrySelect;
         var entryGatewayContainer, exitGatewayContainer;
+        var errorStrip, errorIcon, errorHeading, errorDetail, errorAction;
         var isTwoHopMode = tunnel_config.two_hop === 'on';
         var previousState = status.state || 'unknown';
         var actionInProgress = false;
@@ -93,6 +94,62 @@ return view.extend({
             if (uptimeDisplay) uptimeDisplay.textContent = '--:--';
         };
 
+        // Error reason → (severity, heading, detail, target card). Keys match
+        // rpcd/nym-vpn:emit_account_error(). Missing 'detail' falls back to
+        // result.error_message from the RPC.
+        var ERROR_COPY = {
+            device_time_desynced:      { sev: 'warning', heading: 'CLOCK DESYNC',           detail: 'Router time is off by more than 60 seconds. Ensure NTP is running.', target: null },
+            inactive_subscription:     { sev: 'error',   heading: 'NO ACTIVE SUBSCRIPTION', detail: 'Renew at nymvpn.com to resume service.',                               target: 'account' },
+            max_device_reached:        { sev: 'error',   heading: 'DEVICE LIMIT REACHED',   detail: 'This device isn\'t registered. Remove one at nymvpn.com.',             target: 'account' },
+            bandwidth_exceeded:        { sev: 'error',   heading: 'DATA LIMIT REACHED',     detail: 'Fair-usage depleted. Resets on billing cycle.',                        target: 'account' },
+            account_status_not_active: { sev: 'error',   heading: 'ACCOUNT NOT ACTIVE',     detail: null,                                                                   target: 'account' },
+            api_failure:               { sev: 'warning', heading: 'NYM API UNREACHABLE',    detail: null,                                                                   target: null },
+            logged_out:                { sev: 'error',   heading: 'NO ACCOUNT CONFIGURED',  detail: 'Add your NymVPN mnemonic in the Account card.',                        target: 'account' }
+        };
+
+        var renderErrorStrip = function(result, state) {
+            if (!errorStrip) return;
+
+            var reason = result && result.error_reason;
+            var copy = reason ? ERROR_COPY[reason] : null;
+
+            if (!copy) {
+                errorStrip.style.display = 'none';
+                if (statusHero) statusHero.classList.remove('error');
+                return;
+            }
+
+            errorStrip.className = 'nym-error-strip ' + copy.sev;
+            errorStrip.style.display = 'flex';
+            if (errorIcon) errorIcon.textContent = copy.sev === 'warning' ? '⚠' : '⛔';
+            if (errorHeading) errorHeading.textContent = copy.heading;
+            if (errorDetail) errorDetail.textContent = copy.detail || result.error_message || '';
+
+            if (errorAction) {
+                if (copy.target) {
+                    var targetId = 'nym-card-' + copy.target;
+                    errorAction.style.display = 'inline-block';
+                    errorAction.onclick = function() {
+                        var el = document.getElementById(targetId);
+                        if (!el) return;
+                        el.classList.add('expanded');
+                        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    };
+                } else {
+                    errorAction.style.display = 'none';
+                    errorAction.onclick = null;
+                }
+            }
+
+            // When a disconnect is hanging on an account error, mark the hero
+            // as errored so the ring turns red and the label reads "Halted"
+            // instead of the stuck "Disconnecting" spinner.
+            if (statusHero) {
+                if (state === 'disconnecting') statusHero.classList.add('error');
+                else statusHero.classList.remove('error');
+            }
+        };
+
         // Update status display
         var updateStatus = function() {
             // Block background polls while a connect/disconnect action owns the UI
@@ -120,12 +177,17 @@ return view.extend({
                         statusLabel.textContent = 'Connecting';
                         stopUptimeTimer();
                     } else if (state === 'disconnecting') {
-                        statusLabel.textContent = 'Disconnecting';
+                        // An account-level error often strands the tunnel in
+                        // Disconnecting; the error strip shows why, so the
+                        // label switches to Halted to stop implying progress.
+                        statusLabel.textContent = result.error_reason ? 'Halted' : 'Disconnecting';
                     } else {
                         statusLabel.textContent = 'Disconnected';
                         stopUptimeTimer();
                     }
                 }
+
+                renderErrorStrip(result, state);
 
                 if (actionBtn) {
                     if (state === 'connected') {
@@ -838,6 +900,24 @@ return view.extend({
                     ])
                 ]),
 
+                // Error strip — hidden until status reports an error_reason
+                errorStrip = E('div', {
+                    'class': 'nym-error-strip',
+                    'role': 'alert',
+                    'aria-live': 'assertive',
+                    'style': 'display: none'
+                }, [
+                    errorIcon = E('div', { 'class': 'nym-error-icon' }, '⛔'),
+                    E('div', { 'class': 'nym-error-body' }, [
+                        errorHeading = E('div', { 'class': 'nym-error-heading' }, ''),
+                        errorDetail  = E('div', { 'class': 'nym-error-detail' }, '')
+                    ]),
+                    errorAction = E('button', {
+                        'class': 'nym-btn nym-btn-secondary nym-btn-small nym-error-action',
+                        'style': 'display: none'
+                    }, 'Open Account')
+                ]),
+
                 // Gateway info display (shown when connected)
                 E('div', { 'class': 'nym-gateway-display' }, [
                     E('div', { 'class': 'nym-gateway-item' }, [
@@ -1104,7 +1184,7 @@ return view.extend({
         container.appendChild(dnsCard);
 
         // Account Card
-        var accountCard = E('div', { 'class': 'nym-card' }, [
+        var accountCard = E('div', { 'class': 'nym-card', 'id': 'nym-card-account' }, [
             E('div', { 'class': 'nym-card-header', 'click': function() { toggleCard(accountCard); } }, [
                 E('div', { 'class': 'nym-card-title' }, [
                     svgIcon(assets.iconUser),
