@@ -135,6 +135,7 @@ impl BlockedPolicyParameters {
         FirewallPolicy::Blocked {
             allow_lan: self.allow_lan,
             allowed_endpoints: Vec::new(),
+            dns_servers: Vec::new(),
         }
     }
 }

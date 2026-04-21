@@ -55,9 +55,14 @@ impl DisconnectedState {
                 )
             })
             .collect();
+        // DNS must stay open to resolve API hostnames; resolver overrides are
+        // cleared on DisconnectedState entry so the account controller falls
+        // back to system DNS.
+        let dns_servers = shared_state.tunnel_settings.default_dns_ips();
         let policy = FirewallPolicy::Blocked {
             allow_lan: shared_state.tunnel_settings.allow_lan,
             allowed_endpoints,
+            dns_servers,
         };
         if let Err(e) = shared_state.firewall.apply_policy(policy) {
             trace_err_chain!(e, "Failed to apply disconnected kill-switch policy");

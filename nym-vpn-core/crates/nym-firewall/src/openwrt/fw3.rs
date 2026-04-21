@@ -440,13 +440,19 @@ impl Fw3Firewall {
             FirewallPolicy::Blocked {
                 allow_lan,
                 allowed_endpoints,
+                dns_servers,
             } => {
                 // Allow specific endpoints
                 for endpoint in allowed_endpoints {
                     self.add_endpoint_rules(rules, endpoint, is_ipv6);
                 }
 
-                // Block all DNS
+                // Allow DNS to specific resolvers (if any) before blocking the rest
+                for dns in dns_servers {
+                    self.add_dns_rules(rules, *dns, None, is_ipv6);
+                }
+
+                // Block remaining DNS
                 self.add_block_dns_rules(rules, is_ipv6);
 
                 *allow_lan
