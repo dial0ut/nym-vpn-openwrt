@@ -510,6 +510,11 @@ pub struct SharedState {
     wg_keys_db: WireguardKeysDb,
     user_agent: UserAgent,
     blacklisted_entry_gateways: BlacklistedGateways,
+    /// Nym VPN API socket addresses resolved during the most recent Connecting
+    /// state. Used by DisconnectedState to build a kill-switch Blocked policy
+    /// that still permits traffic to the API so the account controller can
+    /// sync between tunnel sessions.
+    api_endpoints: Vec<SocketAddr>,
 }
 
 impl SharedState {
@@ -641,6 +646,7 @@ impl TunnelStateMachine {
             wg_keys_db,
             user_agent,
             blacklisted_entry_gateways: BlacklistedGateways::new(),
+            api_endpoints: Vec::new(),
         };
 
         let (current_state_handler, _) = if shared_state
