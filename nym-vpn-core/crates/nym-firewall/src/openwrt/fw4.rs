@@ -258,8 +258,11 @@ impl Fw4Firewall {
                 }
             }
 
-            FirewallPolicy::Blocked { allow_lan, allowed_endpoints } => {
+            FirewallPolicy::Blocked { allow_lan, allowed_endpoints, dns_servers } => {
                 self.add_endpoint_input_rules(rules, allowed_endpoints);
+                for dns in dns_servers {
+                    self.add_dns_input_rules(rules, *dns);
+                }
                 if *allow_lan {
                     self.add_lan_input_rules(rules);
                 }
@@ -332,8 +335,11 @@ impl Fw4Firewall {
                 }
             }
 
-            FirewallPolicy::Blocked { allow_lan, allowed_endpoints } => {
+            FirewallPolicy::Blocked { allow_lan, allowed_endpoints, dns_servers } => {
                 self.add_endpoint_output_rules(rules, allowed_endpoints);
+                for dns in dns_servers {
+                    self.add_dns_output_rules(rules, *dns);
+                }
                 self.add_block_dns_rules(rules);
                 if *allow_lan {
                     self.add_lan_output_rules(rules);

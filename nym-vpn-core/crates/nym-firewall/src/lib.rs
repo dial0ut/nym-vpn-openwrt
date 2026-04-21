@@ -95,6 +95,10 @@ pub enum FirewallPolicy {
         allow_lan: bool,
         /// Hosts that should be reachable while in the blocked state.
         allowed_endpoints: Vec<AllowedEndpoint>,
+        /// DNS resolvers reachable from the host while in the blocked state.
+        /// Empty = full DNS lockdown; non-empty = allow DNS queries to these
+        /// servers so allowed-endpoint hostnames can still resolve.
+        dns_servers: Vec<IpAddr>,
     },
 }
 
@@ -234,12 +238,21 @@ impl fmt::Display for FirewallPolicy {
             FirewallPolicy::Blocked {
                 allow_lan,
                 allowed_endpoints,
-                ..
+                dns_servers,
             } => write!(
                 f,
-                "Blocked. {} LAN. Allowing endpoints: {}",
+                "Blocked. {} LAN. Allowing endpoints: {}. Allowing DNS: {}",
                 if *allow_lan { "Allowing" } else { "Blocking" },
                 display_allowed_endpoints(allowed_endpoints),
+                if dns_servers.is_empty() {
+                    "none".to_owned()
+                } else {
+                    dns_servers
+                        .iter()
+                        .map(|ip| ip.to_string())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                },
             ),
         }
     }
