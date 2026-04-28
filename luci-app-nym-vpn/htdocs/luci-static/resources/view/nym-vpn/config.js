@@ -57,7 +57,6 @@ return view.extend({
         var entryGatewayDisplay, exitGatewayDisplay, connectionChain, modeLabel;
         var entryCountrySelect, exitCountrySelect;
         var entryGatewayContainer, exitGatewayContainer;
-        var errorStrip, errorIcon, errorHeading, errorDetail, errorAction;
         var isTwoHopMode = tunnel_config.two_hop === 'on';
         var previousState = status.state || 'unknown';
         var actionInProgress = false;
@@ -107,47 +106,19 @@ return view.extend({
             logged_out:                { sev: 'error',   heading: 'NO ACCOUNT CONFIGURED',  detail: 'Add your NymVPN mnemonic in the Account card.',                        target: 'account' }
         };
 
-        var renderErrorStrip = function(result, state) {
-            if (!errorStrip) return;
-
+        // Build a toast message for an account error from ERROR_COPY +
+        // optional rpcd-supplied error_message.
+        var accountErrorToast = function(result) {
             var reason = result && result.error_reason;
-            var copy = reason ? ERROR_COPY[reason] : null;
-
-            if (!copy) {
-                errorStrip.style.display = 'none';
-                if (statusHero) statusHero.classList.remove('error');
-                return;
+            if (!reason) return false;
+            var copy = ERROR_COPY[reason];
+            if (copy) {
+                var detail = copy.detail || result.error_message || '';
+                showToast(detail ? copy.heading + ' — ' + detail : copy.heading, copy.sev);
+            } else {
+                showToast('Account error: ' + reason, 'error');
             }
-
-            errorStrip.className = 'nym-error-strip ' + copy.sev;
-            errorStrip.style.display = 'flex';
-            if (errorIcon) errorIcon.textContent = copy.sev === 'warning' ? '⚠' : '⛔';
-            if (errorHeading) errorHeading.textContent = copy.heading;
-            if (errorDetail) errorDetail.textContent = copy.detail || result.error_message || '';
-
-            if (errorAction) {
-                if (copy.target) {
-                    var targetId = 'nym-card-' + copy.target;
-                    errorAction.style.display = 'inline-block';
-                    errorAction.onclick = function() {
-                        var el = document.getElementById(targetId);
-                        if (!el) return;
-                        el.classList.add('expanded');
-                        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    };
-                } else {
-                    errorAction.style.display = 'none';
-                    errorAction.onclick = null;
-                }
-            }
-
-            // When a disconnect is hanging on an account error, mark the hero
-            // as errored so the ring turns red and the label reads "Halted"
-            // instead of the stuck "Disconnecting" spinner.
-            if (statusHero) {
-                if (state === 'disconnecting') statusHero.classList.add('error');
-                else statusHero.classList.remove('error');
-            }
+            return true;
         };
 
         // Update status display
@@ -187,7 +158,6 @@ return view.extend({
                     }
                 }
 
-                renderErrorStrip(result, state);
 
                 if (actionBtn) {
                     if (state === 'connected') {
@@ -333,11 +303,25 @@ return view.extend({
                     var pollStatus = function() {
                         pollCount++;
                         rpc.status().then(function(st) {
+                            // Account-controller error during a connect attempt:
+                            // surface it, then ensure the daemon comes back to
+                            // a clean disconnected state instead of spinning.
+                            if (st && st.error_reason) {
+                                accountErrorToast(st);
+                                rpc.disconnect().then(function() {
+                                    actionInProgress = false;
+                                    updateStatus();
+                                }).catch(function() {
+                                    actionInProgress = false;
+                                    updateStatus();
+                                });
+                                return;
+                            }
                             if (st && st.state === 'connected') {
                                 actionInProgress = false;
                                 previousState = 'connected';
                                 updateStatus();
-                            } else if (st && st.state === 'connecting') {
+                            } else if (st && (st.state === 'connecting' || st.state === 'disconnecting')) {
                                 if (pollCount < maxPolls) {
                                     setTimeout(pollStatus, 1000);
                                 } else {
@@ -345,7 +329,7 @@ return view.extend({
                                     updateStatus();
                                 }
                             } else {
-                                // Disconnected or error during connect
+                                // Disconnected or unknown — give up cleanly
                                 actionInProgress = false;
                                 updateStatus();
                             }
@@ -898,24 +882,6 @@ return view.extend({
                         exitGatewayContainer = E('div', { 'class': 'nym-form-group', 'style': 'margin-bottom: 0' },
                             E('div', { 'class': 'nym-gateway-loading' }, 'Select a country'))
                     ])
-                ]),
-
-                // Error strip — hidden until status reports an error_reason
-                errorStrip = E('div', {
-                    'class': 'nym-error-strip',
-                    'role': 'alert',
-                    'aria-live': 'assertive',
-                    'style': 'display: none'
-                }, [
-                    errorIcon = E('div', { 'class': 'nym-error-icon' }, '⛔'),
-                    E('div', { 'class': 'nym-error-body' }, [
-                        errorHeading = E('div', { 'class': 'nym-error-heading' }, ''),
-                        errorDetail  = E('div', { 'class': 'nym-error-detail' }, '')
-                    ]),
-                    errorAction = E('button', {
-                        'class': 'nym-btn nym-btn-secondary nym-btn-small nym-error-action',
-                        'style': 'display: none'
-                    }, 'Open Account')
                 ]),
 
                 // Gateway info display (shown when connected)
