@@ -111,8 +111,7 @@ lookup_gateway_country() {
 # the account controller is in a state that blocks connect. Callers should
 # only invoke this when the tunnel itself isn't in Connected state.
 emit_account_error() {
-    local info
-    info=$($VPNC account get 2>&1)
+    local info="${1:-$($VPNC account get 2>&1)}"
     local acct_state
     acct_state=$(echo "$info" | grep "Account state:" | sed 's/Account state: //')
 
@@ -228,6 +227,13 @@ handle_status() {
     elif echo "$state" | grep -q "State: Disconnecting"; then
         json_add_string "state" "disconnecting"
         json_add_boolean "connected" 0
+        emit_account_error
+    elif echo "$state" | grep -q "State: Error"; then
+        # Tunnel state machine in Error — surface as disconnected so the
+        # Connect button stays enabled; the error strip explains why.
+        json_add_string "state" "disconnected"
+        json_add_boolean "connected" 0
+        json_add_string "raw_state" "$state"
         emit_account_error
     else
         json_add_string "state" "unknown"
@@ -882,15 +888,24 @@ handle_init() {
     elif echo "$status_raw" | grep -q "State: Connecting"; then
         json_add_string "state" "connecting"
         json_add_boolean "connected" 0
+        emit_account_error "$account_raw"
     elif echo "$status_raw" | grep -q "State: Disconnecting"; then
         json_add_string "state" "disconnecting"
         json_add_boolean "connected" 0
+        emit_account_error "$account_raw"
     elif echo "$status_raw" | grep -q "State: Disconnected"; then
         json_add_string "state" "disconnected"
         json_add_boolean "connected" 0
+        emit_account_error "$account_raw"
+    elif echo "$status_raw" | grep -q "State: Error"; then
+        json_add_string "state" "disconnected"
+        json_add_boolean "connected" 0
+        json_add_string "raw_state" "$status_raw"
+        emit_account_error "$account_raw"
     else
         json_add_string "state" "unknown"
         json_add_boolean "connected" 0
+        emit_account_error "$account_raw"
     fi
     json_close_object
 
