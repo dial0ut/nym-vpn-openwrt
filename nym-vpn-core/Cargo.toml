@@ -35,7 +35,7 @@ default-members = [
 ]
 
 [workspace.package]
-version = "1.26.2"
+version = "1.26.3"
 authors = ["dial0ut"]
 repository = "https://github.com/dial0ut/nym-vpn-openwrt"
 homepage = "https://nymtech.net"
