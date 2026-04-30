@@ -4511,7 +4511,7 @@ dependencies = [
 
 [[package]]
 name = "nym-common"
-version = "1.26.2"
+version = "1.26.3"
 dependencies = [
  "tracing",
  "tracing-test",
@@ -4557,7 +4557,7 @@ dependencies = [
 
 [[package]]
 name = "nym-connection-monitor"
-version = "1.26.2"
+version = "1.26.3"
 dependencies = [
  "async-trait",
  "futures",
@@ -4726,7 +4726,7 @@ dependencies = [
 
 [[package]]
 name = "nym-dbus"
-version = "1.26.2"
+version = "1.26.3"
 dependencies = [
  "dbus",
  "libc",
@@ -4737,7 +4737,7 @@ dependencies = [
 
 [[package]]
 name = "nym-diagnostic"
-version = "1.26.2"
+version = "1.26.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4780,7 +4780,7 @@ dependencies = [
 
 [[package]]
 name = "nym-dns"
-version = "1.26.2"
+version = "1.26.3"
 dependencies = [
  "duct",
  "futures",
@@ -4850,7 +4850,7 @@ dependencies = [
 
 [[package]]
 name = "nym-firewall"
-version = "1.26.2"
+version = "1.26.3"
 dependencies = [
  "ipnetwork",
  "iptables",
@@ -4866,7 +4866,7 @@ dependencies = [
 
 [[package]]
 name = "nym-firewall-config"
-version = "1.26.2"
+version = "1.26.3"
 dependencies = [
  "ipnetwork",
 ]
@@ -4912,7 +4912,7 @@ dependencies = [
 
 [[package]]
 name = "nym-gateway-directory"
-version = "1.26.2"
+version = "1.26.3"
 dependencies = [
  "anyhow",
  "itertools 0.14.0",
@@ -5082,7 +5082,7 @@ dependencies = [
 
 [[package]]
 name = "nym-ipc"
-version = "1.26.2"
+version = "1.26.3"
 dependencies = [
  "hyper-util",
  "tokio",
@@ -5316,7 +5316,7 @@ dependencies = [
 
 [[package]]
 name = "nym-offline-monitor"
-version = "1.26.2"
+version = "1.26.3"
 dependencies = [
  "async-trait",
  "nym-common",
@@ -5380,7 +5380,7 @@ dependencies = [
 
 [[package]]
 name = "nym-platform-metadata"
-version = "1.26.2"
+version = "1.26.3"
 dependencies = [
  "nym-dbus",
  "rs-release",
@@ -5435,7 +5435,7 @@ dependencies = [
 
 [[package]]
 name = "nym-routing"
-version = "1.26.2"
+version = "1.26.3"
 dependencies = [
  "futures",
  "ipnetwork",
@@ -5787,7 +5787,7 @@ dependencies = [
 
 [[package]]
 name = "nym-statistics"
-version = "1.26.2"
+version = "1.26.3"
 dependencies = [
  "futures",
  "nym-bin-common",
@@ -5811,7 +5811,7 @@ dependencies = [
 
 [[package]]
 name = "nym-statistics-api-client"
-version = "1.26.2"
+version = "1.26.3"
 dependencies = [
  "nym-http-api-client",
  "nym-statistics-common",
@@ -5979,7 +5979,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpn-account-controller"
-version = "1.26.2"
+version = "1.26.3"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -6031,7 +6031,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpn-api-client"
-version = "1.26.2"
+version = "1.26.3"
 dependencies = [
  "backon",
  "base64-url",
@@ -6064,7 +6064,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpn-lib"
-version = "1.26.2"
+version = "1.26.3"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -6134,7 +6134,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpn-lib-types"
-version = "1.26.2"
+version = "1.26.3"
 dependencies = [
  "ipnetwork",
  "nym-bandwidth-controller",
@@ -6157,7 +6157,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpn-network-config"
-version = "1.26.2"
+version = "1.26.3"
 dependencies = [
  "futures-util",
  "itertools 0.14.0",
@@ -6183,7 +6183,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpn-proto"
-version = "1.26.2"
+version = "1.26.3"
 dependencies = [
  "nym-ipc",
  "nym-vpn-lib-types",
@@ -6201,7 +6201,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpn-store"
-version = "1.26.2"
+version = "1.26.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6223,7 +6223,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpnc"
-version = "1.26.2"
+version = "1.26.3"
 dependencies = [
  "anyhow",
  "celes",
@@ -6239,7 +6239,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpnd"
-version = "1.26.2"
+version = "1.26.3"
 dependencies = [
  "anyhow",
  "bip39",
@@ -6312,7 +6312,7 @@ dependencies = [
 
 [[package]]
 name = "nym-wg-gotatun"
-version = "1.26.2"
+version = "1.26.3"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -6328,7 +6328,7 @@ dependencies = [
 
 [[package]]
 name = "nym-wg-metadata-client"
-version = "1.26.2"
+version = "1.26.3"
 dependencies = [
  "nym-credentials-interface",
  "nym-gateway-directory",
