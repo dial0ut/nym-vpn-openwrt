@@ -491,10 +491,13 @@ impl Fw4Firewall {
     }
 
     fn add_lan_forward_rules(&self, rules: &mut String) {
+        // Only accept forwarded traffic *destined* for LAN. The corresponding
+        // saddr-LAN rule was a leak: in Blocked / between sessions it allowed
+        // any LAN client to forward straight out the WAN interface, defeating
+        // the kill-switch. Return traffic for tunnel-bound flows is handled
+        // by the ct state established,related rule at the top of the chain.
         writeln!(rules, "        ip daddr {{ 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 }} accept").unwrap();
-        writeln!(rules, "        ip saddr {{ 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 }} accept").unwrap();
         writeln!(rules, "        ip6 daddr {{ fe80::/10, fc00::/7 }} accept").unwrap();
-        writeln!(rules, "        ip6 saddr {{ fe80::/10, fc00::/7 }} accept").unwrap();
     }
 
     fn apply_nft(&self) -> Result<()> {

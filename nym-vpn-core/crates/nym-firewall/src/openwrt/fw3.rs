@@ -662,9 +662,11 @@ impl Fw3Firewall {
             writeln!(rules, "-A {} -d {} -j ACCEPT", NYM_OUTPUT, net).unwrap();
             // Allow input from LAN
             writeln!(rules, "-A {} -s {} -j ACCEPT", NYM_INPUT, net).unwrap();
-            // Allow forward to/from LAN
+            // Allow forward *into* LAN only. The corresponding -s LAN rule was
+            // a leak: in Blocked / between sessions it allowed LAN clients to
+            // forward straight out WAN, defeating the kill-switch. Return
+            // traffic is covered by the ESTABLISHED,RELATED rule at the top.
             writeln!(rules, "-A {} -d {} -j ACCEPT", NYM_FORWARD, net).unwrap();
-            writeln!(rules, "-A {} -s {} -j ACCEPT", NYM_FORWARD, net).unwrap();
         }
 
         // Multicast
