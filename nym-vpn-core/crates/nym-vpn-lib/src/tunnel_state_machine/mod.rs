@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 mod account;
+pub(crate) mod api_endpoints_cache;
 mod dns_handler;
 mod gateway_ext;
 mod ipv6_availability;
@@ -628,6 +629,14 @@ impl TunnelStateMachine {
         })
         .map_err(Error::CreateFirewall)?;
 
+        // Restore the previously-resolved API allow-list so DisconnectedState
+        // can apply the kill-switch Blocked policy immediately on cold boot.
+        // A fresh resolution still happens on every Connecting attempt via
+        // ConnectingState::handle_resolved_gateway_config; the on-disk cache
+        // only covers the gap before that runs.
+        let api_endpoints =
+            api_endpoints_cache::load(nym_config.data_path.as_deref());
+
         let mut shared_state = SharedState {
             route_handler,
             firewall,
@@ -646,7 +655,7 @@ impl TunnelStateMachine {
             wg_keys_db,
             user_agent,
             blacklisted_entry_gateways: BlacklistedGateways::new(),
-            api_endpoints: Vec::new(),
+            api_endpoints,
         };
 
         let (current_state_handler, _) = if shared_state

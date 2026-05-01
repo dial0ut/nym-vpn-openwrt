@@ -240,6 +240,10 @@ impl ConnectingState {
 
         self.firewall_policy_params.api_endpoints = resolved_gateway_config.all_socket_addrs();
         shared_state.api_endpoints = resolved_gateway_config.all_socket_addrs();
+        crate::tunnel_state_machine::api_endpoints_cache::save(
+            shared_state.nym_config.data_path.as_deref(),
+            &shared_state.api_endpoints,
+        );
         if let Err(err) = Self::set_firewall_policy(shared_state, &self.firewall_policy_params) {
             trace_err_chain!(err, "failed to set firewall policy");
             return NextTunnelState::NewState(
