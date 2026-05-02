@@ -140,20 +140,8 @@ main() {
 
     step "Installing..."
     case "$pkg_mgr" in
-        opkg)
-            if opkg list-installed | grep -q '^nym-vpn '; then
-                opkg upgrade "/tmp/${filename}"
-            else
-                opkg install "/tmp/${filename}"
-            fi
-            ;;
-        apk)
-            if apk info -e nym-vpn >/dev/null 2>&1; then
-                apk upgrade --allow-untrusted "/tmp/${filename}"
-            else
-                apk add --allow-untrusted "/tmp/${filename}"
-            fi
-            ;;
+        opkg) opkg install "/tmp/${filename}" ;;
+        apk)  apk add --allow-untrusted "/tmp/${filename}" ;;
     esac
 
     rm -f "/tmp/${filename}"
