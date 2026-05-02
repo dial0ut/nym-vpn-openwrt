@@ -1044,7 +1044,7 @@ return view.extend({
                     E('div', { 'class': 'nym-toggle-row' }, [
                         E('div', { 'class': 'nym-toggle-info' }, [
                             E('div', { 'class': 'nym-toggle-title' }, 'Kill-Switch'),
-                            E('div', { 'class': 'nym-toggle-desc' }, 'Block traffic leaks when VPN is active. Disable for Policy-Based Routing (PBR) compatibility.'),
+                            E('div', { 'class': 'nym-toggle-desc' }, 'Block LAN clients from reaching the internet unless the VPN is connected.'),
                             E('div', {
                                 'class': 'nym-toggle-warning',
                                 'style': 'color: #e67e22; font-size: 11px; margin-top: 4px; display: ' + (tunnel_config.killswitch === 'on' ? 'none' : 'block')
