@@ -160,7 +160,11 @@ handle_status() {
         json_add_string "state" "connected"
         json_add_boolean "connected" 1
 
-        # Detect mode and parse connection info
+        # Detect mode and parse connection info. The chosen list types must
+        # match the connection mode — in wg/fast mode the gateway IDs are not
+        # in `mixnet-{entry,exit}` (e.g. exits that only advertise wg).
+        entry_list_type="mixnet-entry"
+        exit_list_type="mixnet-exit"
         if echo "$state" | grep -q "Connected mix"; then
             json_add_string "mode" "mixnet"
             entry_part=$(echo "$state" | sed -n 's/.*Connected mix to \([^→]*\)→.*/\1/p')
@@ -172,6 +176,8 @@ handle_status() {
             exit_id=$(echo "$exit_part" | sed -n 's/.*\[\([^]]*\)\].*/\1/p')
         elif echo "$state" | grep -q "Connected wg"; then
             json_add_string "mode" "wireguard"
+            entry_list_type="wg"
+            exit_list_type="wg"
             entry_part=$(echo "$state" | sed -n 's/.*Connected wg to \([^→]*\)→.*/\1/p')
             exit_part=$(echo "$state" | sed -n 's/.*→ \(.*\)/\1/p')
 
@@ -188,15 +194,15 @@ handle_status() {
 
         # Look up gateway names and countries from ID
         if [ -n "$entry_id" ]; then
-            entry_name=$(lookup_gateway_name "$entry_id" "mixnet-entry")
+            entry_name=$(lookup_gateway_name "$entry_id" "$entry_list_type")
             [ -n "$entry_name" ] && json_add_string "entry_name" "$entry_name"
-            entry_country=$(lookup_gateway_country "$entry_id" "mixnet-entry")
+            entry_country=$(lookup_gateway_country "$entry_id" "$entry_list_type")
             [ -n "$entry_country" ] && json_add_string "entry_country" "$entry_country"
         fi
         if [ -n "$exit_id" ]; then
-            exit_name=$(lookup_gateway_name "$exit_id" "mixnet-exit")
+            exit_name=$(lookup_gateway_name "$exit_id" "$exit_list_type")
             [ -n "$exit_name" ] && json_add_string "exit_name" "$exit_name"
-            exit_country=$(lookup_gateway_country "$exit_id" "mixnet-exit")
+            exit_country=$(lookup_gateway_country "$exit_id" "$exit_list_type")
             [ -n "$exit_country" ] && json_add_string "exit_country" "$exit_country"
         fi
 
