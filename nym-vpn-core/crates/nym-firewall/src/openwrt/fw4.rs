@@ -19,6 +19,13 @@ use super::{Error, Result};
 use crate::net::{AllowedEndpoint, TransportProtocol};
 use crate::FirewallPolicy;
 
+/// Name of the regular chain we own in `inet fw4`, jumped to from fw4's
+/// `srcnat` chain to host our masquerade rules.
+const NYM_FW4_NAT_CHAIN: &str = "nym_postrouting";
+/// Name of the regular chain we own in `inet fw4`, jumped to from fw4's
+/// `forward_lan` chain to host our LAN↔tunnel forwarding accepts.
+const NYM_FW4_FORWARD_CHAIN: &str = "nym_forward_lan";
+
 /// fw4/nftables firewall backend.
 pub struct Fw4Firewall;
 
@@ -34,7 +41,10 @@ impl Fw4Firewall {
         fs::write(RULES_NFT_PATH, &rules)?;
         self.apply_nft()?;
 
-        // Add fw4 integration rules for tunnel interfaces
+        // Populate our owned chains and ensure fw4 jumps to them. Both
+        // operations are structurally idempotent (chains are flushed before
+        // repopulating; jumps are added only if absent), so repeated
+        // apply_policy calls cannot accumulate duplicates.
         self.add_fw4_tunnel_rules(&policy)?;
 
         tracing::debug!("Firewall policy applied successfully");
@@ -514,12 +524,19 @@ impl Fw4Firewall {
         Ok(())
     }
 
-    /// Add rules to fw4's chains to integrate tunnel interfaces.
+    /// Integrate tunnel interfaces with fw4 using owned chains.
     ///
-    /// fw4 uses zone-based forwarding and doesn't know about our tunnel interfaces.
-    /// We need to add:
-    /// 1. Masquerade rules to srcnat for tunnel interfaces
-    /// 2. Forward rules to forward_lan to allow LAN<->tunnel traffic
+    /// fw4 uses zone-based forwarding and doesn't know about our tunnel
+    /// interfaces, so we have to inject:
+    /// 1. Masquerade rules so LAN client traffic gets NATed out the tunnel.
+    /// 2. Forward accepts so fw4 forwards traffic between LAN and tunnel.
+    ///
+    /// Rather than scribbling these rules directly into fw4's `srcnat` and
+    /// `forward_lan` chains and then hunting for them by comment when we
+    /// need to clean up, we own two regular chains (`nym_postrouting` and
+    /// `nym_forward_lan`) and have fw4 jump into them once. To repopulate:
+    /// flush our chains and add fresh rules — atomic, no chance of touching
+    /// rules outside our chains.
     fn add_fw4_tunnel_rules(&self, policy: &FirewallPolicy) -> Result<()> {
         let interfaces = match policy {
             FirewallPolicy::Connecting { tunnel, .. } => {
@@ -533,65 +550,109 @@ impl Fw4Firewall {
             FirewallPolicy::Blocked { .. } => Vec::new(),
         };
 
-        for iface in &interfaces {
-            // Add masquerade for tunnel interface
-            // This NATs LAN client traffic going through the tunnel
+        // Ensure our chains exist (idempotent — silently no-ops if present).
+        for chain in [NYM_FW4_NAT_CHAIN, NYM_FW4_FORWARD_CHAIN] {
             let _ = Command::new("nft")
-                .args([
-                    "add", "rule", "inet", "fw4", "srcnat",
-                    "oifname", iface,
-                    "counter", "masquerade",
-                    "comment", "\"nym-vpn: masquerade tunnel traffic\""
-                ])
+                .args(["add", "chain", "inet", "fw4", chain])
                 .output();
-
-            // Add forward rules for LAN <-> tunnel
-            // This allows fw4 to forward traffic between LAN zone and tunnel
-            let _ = Command::new("nft")
-                .args([
-                    "add", "rule", "inet", "fw4", "forward_lan",
-                    "oifname", iface, "accept",
-                    "comment", "\"nym-vpn: forward LAN to tunnel\""
-                ])
-                .output();
-
-            let _ = Command::new("nft")
-                .args([
-                    "add", "rule", "inet", "fw4", "forward_lan",
-                    "iifname", iface, "accept",
-                    "comment", "\"nym-vpn: forward tunnel to LAN\""
-                ])
-                .output();
-
-            tracing::debug!("Added fw4 integration rules for interface {}", iface);
         }
+
+        // Flush our chains so the next step starts from a clean slate. fw4's
+        // own chains are not touched.
+        for chain in [NYM_FW4_NAT_CHAIN, NYM_FW4_FORWARD_CHAIN] {
+            let _ = Command::new("nft")
+                .args(["flush", "chain", "inet", "fw4", chain])
+                .output();
+        }
+
+        // Populate.
+        for iface in &interfaces {
+            let _ = Command::new("nft")
+                .args([
+                    "add", "rule", "inet", "fw4", NYM_FW4_NAT_CHAIN,
+                    "oifname", iface, "counter", "masquerade",
+                ])
+                .output();
+            let _ = Command::new("nft")
+                .args([
+                    "add", "rule", "inet", "fw4", NYM_FW4_FORWARD_CHAIN,
+                    "oifname", iface, "accept",
+                ])
+                .output();
+            let _ = Command::new("nft")
+                .args([
+                    "add", "rule", "inet", "fw4", NYM_FW4_FORWARD_CHAIN,
+                    "iifname", iface, "accept",
+                ])
+                .output();
+
+            tracing::debug!("Populated fw4 nym chains for interface {}", iface);
+        }
+
+        // Wire jumps from fw4's chains into ours (only if not already present).
+        Self::ensure_jump("srcnat", NYM_FW4_NAT_CHAIN);
+        Self::ensure_jump("forward_lan", NYM_FW4_FORWARD_CHAIN);
 
         Ok(())
     }
 
-    /// Remove tunnel rules from fw4's chains.
+    /// Tear down our chain-and-jump integration. Order matters: jumps must
+    /// be removed before the target chains can be deleted.
     fn remove_fw4_tunnel_rules(&self) {
-        // Remove rules with our comment from fw4 chains
-        // We use nft -a to get handles, then delete by handle
-        for chain in ["srcnat", "forward_lan"] {
-            if let Ok(output) = Command::new("nft")
-                .args(["-a", "list", "chain", "inet", "fw4", chain])
-                .output()
-            {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                // Find lines with our comment and extract handles
-                for line in stdout.lines() {
-                    if line.contains("nym-vpn:") {
-                        // Extract handle number from line like "... # handle 123"
-                        if let Some(handle) = line.split("# handle ").last() {
-                            let handle = handle.trim();
-                            let _ = Command::new("nft")
-                                .args(["delete", "rule", "inet", "fw4", chain, "handle", handle])
-                                .output();
-                        }
-                    }
-                }
+        Self::remove_jump("srcnat", NYM_FW4_NAT_CHAIN);
+        Self::remove_jump("forward_lan", NYM_FW4_FORWARD_CHAIN);
+
+        for chain in [NYM_FW4_NAT_CHAIN, NYM_FW4_FORWARD_CHAIN] {
+            let _ = Command::new("nft")
+                .args(["delete", "chain", "inet", "fw4", chain])
+                .output();
+        }
+    }
+
+    /// Add a `jump <target>` rule to a fw4 chain unless one already exists.
+    /// Matched structurally (`jump <name>`) rather than by comment, so a
+    /// user rule with our name in its comment can never collide with ours.
+    fn ensure_jump(parent_chain: &str, target_chain: &str) {
+        let listing = match Command::new("nft")
+            .args(["list", "chain", "inet", "fw4", parent_chain])
+            .output()
+        {
+            Ok(o) => o,
+            Err(_) => return,
+        };
+        let needle = format!("jump {}", target_chain);
+        if String::from_utf8_lossy(&listing.stdout).contains(&needle) {
+            return;
+        }
+        let _ = Command::new("nft")
+            .args([
+                "add", "rule", "inet", "fw4", parent_chain,
+                "jump", target_chain,
+            ])
+            .output();
+    }
+
+    /// Remove every `jump <target>` rule from a fw4 chain.
+    fn remove_jump(parent_chain: &str, target_chain: &str) {
+        let listing = match Command::new("nft")
+            .args(["-a", "list", "chain", "inet", "fw4", parent_chain])
+            .output()
+        {
+            Ok(o) => o,
+            Err(_) => return,
+        };
+        let needle = format!("jump {}", target_chain);
+        for line in String::from_utf8_lossy(&listing.stdout).lines() {
+            if !line.contains(&needle) {
+                continue;
             }
+            let Some(handle) = line.split("# handle ").last() else { continue };
+            let _ = Command::new("nft")
+                .args([
+                    "delete", "rule", "inet", "fw4", parent_chain,
+                    "handle", handle.trim(),
+                ])
+                .output();
         }
     }
 }

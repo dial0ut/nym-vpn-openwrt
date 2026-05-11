@@ -29,6 +29,11 @@ use crate::net::{AllowedEndpoint, TransportProtocol, TunnelMetadata};
 use crate::FirewallPolicy;
 
 /// fw3/iptables firewall backend.
+/// Name of the user-defined chain we own in iptables' `nat` table. fw3's
+/// `POSTROUTING` jumps to this chain so we can flush it on every apply
+/// without touching anyone else's NAT rules.
+const NYM_NAT_CHAIN: &str = "NYM_POSTROUTING";
+
 pub struct Fw3Firewall;
 
 impl Fw3Firewall {
@@ -58,7 +63,10 @@ impl Fw3Firewall {
             remove_file_if_exists(RULES_V6_PATH)?;
         }
 
-        // Add masquerade rules for tunnel interfaces
+        // Masquerade rules live in fw3's NAT table, which iptables-restore
+        // doesn't touch. We host them in our own user-defined chain (jumped
+        // to from POSTROUTING) so re-applies are structurally idempotent:
+        // the chain is flushed and repopulated, jumps are check-then-add.
         self.add_masquerade_rules(&policy)?;
 
         tracing::debug!("Firewall policy applied successfully");
@@ -700,6 +708,8 @@ impl Fw3Firewall {
     ///
     /// This NATs LAN client traffic going through the tunnel so that
     /// return traffic can find its way back.
+    /// Integrate tunnel interfaces with fw3's NAT path using a user-defined
+    /// chain we own (`NYM_POSTROUTING`), jumped to from `POSTROUTING`.
     fn add_masquerade_rules(&self, policy: &FirewallPolicy) -> Result<()> {
         let interfaces = match policy {
             FirewallPolicy::Connecting { tunnel, .. } => {
@@ -713,55 +723,70 @@ impl Fw3Firewall {
             FirewallPolicy::Blocked { .. } => Vec::new(),
         };
 
+        // Ensure our chain exists. `-N` errors with "Chain already exists"
+        // when re-running; ignore so the call is idempotent.
+        let _ = Command::new("iptables")
+            .args(["-w", "-t", "nat", "-N", NYM_NAT_CHAIN])
+            .output();
+
+        // Flush our chain so we start from a clean slate. POSTROUTING is
+        // never touched.
+        let _ = Command::new("iptables")
+            .args(["-w", "-t", "nat", "-F", NYM_NAT_CHAIN])
+            .output();
+
+        // Populate.
         for iface in &interfaces {
-            // Add masquerade rule for this interface
-            // iptables -t nat -A POSTROUTING -o <iface> -m comment --comment "nym-vpn" -j MASQUERADE
             let _ = Command::new("iptables")
                 .args([
-                    "-w",
-                    "-t", "nat",
-                    "-A", "POSTROUTING",
+                    "-w", "-t", "nat",
+                    "-A", NYM_NAT_CHAIN,
                     "-o", iface,
-                    "-m", "comment", "--comment", "nym-vpn",
-                    "-j", "MASQUERADE"
+                    "-j", "MASQUERADE",
                 ])
                 .output();
+            tracing::debug!("Populated {} for interface {}", NYM_NAT_CHAIN, iface);
+        }
 
-            tracing::debug!("Added masquerade rule for interface {}", iface);
+        // Wire the jump from POSTROUTING into our chain if not already there.
+        // `-C` returns 0 when the rule exists, non-zero otherwise — exactly
+        // the existence check we need; no parsing required.
+        let jump_present = Command::new("iptables")
+            .args(["-w", "-t", "nat", "-C", "POSTROUTING", "-j", NYM_NAT_CHAIN])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !jump_present {
+            let _ = Command::new("iptables")
+                .args(["-w", "-t", "nat", "-A", "POSTROUTING", "-j", NYM_NAT_CHAIN])
+                .output();
         }
 
         Ok(())
     }
 
-    /// Remove masquerade rules for tunnel interfaces.
+    /// Tear down the chain+jump integration. Order matters: the jump must
+    /// be removed before the target chain can be deleted.
     fn remove_masquerade_rules(&self) {
-        // List NAT POSTROUTING rules and remove ones with our comment
-        if let Ok(output) = Command::new("iptables")
-            .args(["-w", "-t", "nat", "-L", "POSTROUTING", "-n", "--line-numbers", "-v"])
-            .output()
-        {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            // Collect line numbers to delete (in reverse order to avoid index shifting)
-            let mut to_delete: Vec<u32> = Vec::new();
-            for line in stdout.lines() {
-                if line.contains("nym-vpn") {
-                    // Line format: "1    ... /* nym-vpn */"
-                    if let Some(num_str) = line.split_whitespace().next() {
-                        if let Ok(num) = num_str.parse::<u32>() {
-                            to_delete.push(num);
-                        }
-                    }
-                }
-            }
-            // Delete in reverse order
-            to_delete.sort();
-            to_delete.reverse();
-            for num in to_delete {
-                let _ = Command::new("iptables")
-                    .args(["-w", "-t", "nat", "-D", "POSTROUTING", &num.to_string()])
-                    .output();
+        // Remove jump(s). `-D` only removes one matching rule per call;
+        // loop until it stops succeeding in case stale duplicates exist.
+        loop {
+            let removed = Command::new("iptables")
+                .args(["-w", "-t", "nat", "-D", "POSTROUTING", "-j", NYM_NAT_CHAIN])
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
+            if !removed {
+                break;
             }
         }
+        // Flush then delete our chain.
+        let _ = Command::new("iptables")
+            .args(["-w", "-t", "nat", "-F", NYM_NAT_CHAIN])
+            .output();
+        let _ = Command::new("iptables")
+            .args(["-w", "-t", "nat", "-X", NYM_NAT_CHAIN])
+            .output();
     }
 }
 
