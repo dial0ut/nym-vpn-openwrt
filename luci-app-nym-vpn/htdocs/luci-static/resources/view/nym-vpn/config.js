@@ -250,16 +250,6 @@ return view.extend({
 
         // Connection handlers
         var handleConnect = function() {
-            actionInProgress = true;
-            if (statusHero) statusHero.className = 'nym-status-hero connecting';
-            if (statusLabel) statusLabel.textContent = 'Connecting';
-            if (actionBtn) {
-                actionBtn.textContent = 'Cancel';
-                actionBtn.className = 'nym-btn nym-btn-danger';
-                actionBtn.disabled = false;
-                actionBtn.onclick = handleCancel;
-            }
-
             // Get selected gateway settings
             var entry_country = entryCountrySelect ? entryCountrySelect.value : 'none';
             var exit_country = exitCountrySelect ? exitCountrySelect.value : 'none';
@@ -269,6 +259,30 @@ return view.extend({
             var exitRadio = exitGatewayContainer ? exitGatewayContainer.querySelector('input[name="exit_gateway_id"]:checked') : null;
             var entry_id = entryRadio ? entryRadio.value : null;
             var exit_id = exitRadio ? exitRadio.value : null;
+
+            // Require an explicit choice for both entry and exit. 'none' means
+            // the user has not picked anything, and we must not silently fall
+            // back to whatever was last saved on the daemon.
+            var entryMissing = (entry_country === 'none') && !entry_id;
+            var exitMissing = (exit_country === 'none') && !exit_id;
+            if (entryMissing || exitMissing) {
+                var which;
+                if (entryMissing && exitMissing) which = 'entry and exit';
+                else if (entryMissing) which = 'entry';
+                else which = 'exit';
+                showToast('Please select a country for ' + which + ' before connecting.', 'error');
+                return;
+            }
+
+            actionInProgress = true;
+            if (statusHero) statusHero.className = 'nym-status-hero connecting';
+            if (statusLabel) statusLabel.textContent = 'Connecting';
+            if (actionBtn) {
+                actionBtn.textContent = 'Cancel';
+                actionBtn.className = 'nym-btn nym-btn-danger';
+                actionBtn.disabled = false;
+                actionBtn.onclick = handleCancel;
+            }
 
             var entry_random = false;
             var exit_random = false;
@@ -433,7 +447,7 @@ return view.extend({
             }
 
             if (country === 'random') {
-                dom.content(container, E('div', { 'class': 'nym-gateway-loading' }, '🌐 Random gateway will be selected'));
+                dom.content(container, '');
                 return;
             }
 
@@ -1177,8 +1191,12 @@ return view.extend({
                         E('label', { 'class': 'nym-form-label' }, 'Recovery Phrase'),
                         E('input', {
                             'class': 'nym-input',
-                            'type': 'password',
+                            'type': 'text',
                             'name': 'mnemonic',
+                            'autocomplete': 'off',
+                            'autocapitalize': 'off',
+                            'autocorrect': 'off',
+                            'spellcheck': 'false',
                             'placeholder': 'Enter your recovery phrase...'
                         })
                     ]),
