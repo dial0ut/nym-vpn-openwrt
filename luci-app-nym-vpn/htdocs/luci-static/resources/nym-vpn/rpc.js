@@ -157,5 +157,11 @@ return baseclass.extend({
         object: 'nym-vpn',
         method: 'watchdog_set',
         params: ['always_on', 'interval']
+    }),
+
+    logsGet: rpc.declare({
+        object: 'nym-vpn',
+        method: 'logs_get',
+        params: ['lines']
     })
 });

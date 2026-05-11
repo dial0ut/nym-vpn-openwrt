@@ -237,5 +237,22 @@ return baseclass.extend({
     .nym-status-hero.error .nym-status-ring-outer { border-color: var(--danger); border-style: solid; animation: none; box-shadow: 0 0 20px rgba(255, 71, 87, 0.3); }\
     .nym-status-hero.error .nym-status-ring-inner { background: var(--danger-dim); }\
     .nym-status-hero.error .nym-status-label { color: var(--danger); }\
+    .nym-log-controls { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }\
+    .nym-log-controls .nym-select { width: auto; flex: 0 0 auto; height: 36px; line-height: 36px; padding: 0 32px 0 14px; font-size: 12px; text-align: center; text-align-last: center; background-position: right 12px center; }\
+    .nym-log-controls .nym-btn { height: 36px; padding: 0 14px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }\
+    .nym-log-controls .nym-btn-icon { padding: 0; width: 36px; flex: 0 0 36px; }\
+    .nym-log-controls .nym-btn-icon svg { display: block; }\
+    .nym-log-status { font-size: 11px; color: var(--text-muted); margin-left: auto; font-family: monospace; }\
+    .nym-log-status.live::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--nym-green); margin-right: 6px; vertical-align: middle; box-shadow: 0 0 6px var(--nym-green-glow); animation: pulse-ring 2s ease-out infinite; }\
+    .nym-log-status.paused::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); margin-right: 6px; vertical-align: middle; }\
+    .nym-log-viewer { background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px; max-height: 360px; overflow: auto; font-family: "SF Mono", "Fira Code", "JetBrains Mono", Consolas, monospace; font-size: 11px; line-height: 1.5; color: var(--text-primary); white-space: pre-wrap; word-break: break-all; }\
+    .nym-log-viewer.empty { color: var(--text-muted); font-style: italic; }\
+    .nym-log-viewer .nym-log-info { color: var(--nym-green); }\
+    .nym-log-viewer .nym-log-warn { color: var(--warning); }\
+    .nym-log-viewer .nym-log-error { color: var(--danger); }\
+    .nym-log-viewer .nym-log-debug { color: var(--text-muted); }\
+    .nym-log-viewer .nym-log-trace { color: var(--text-muted); opacity: 0.7; }\
+    .nym-btn-secondary { background: transparent !important; color: var(--text-secondary) !important; border: 1px solid var(--border-color) !important; padding: 8px 16px; font-size: 12px; }\
+    .nym-btn-secondary:hover:not(:disabled) { background: var(--bg-card-hover) !important; color: var(--text-primary) !important; border-color: var(--border-accent) !important; }\
 '
 });

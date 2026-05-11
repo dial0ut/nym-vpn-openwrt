@@ -18,7 +18,8 @@
           "ad_block_get",
           "dns_get",
           "daemon_status",
-          "watchdog_get"
+          "watchdog_get",
+          "logs_get"
         ],
         "service": [
           "list"

@@ -1109,6 +1109,36 @@ handle_watchdog_set() {
     json_dump
 }
 
+handle_logs_get() {
+    read input
+    json_load "$input"
+
+    local lines
+    json_get_var lines lines
+
+    case "$lines" in
+        ''|*[!0-9]*) lines=200 ;;
+    esac
+    [ "$lines" -lt 10 ]   && lines=10
+    [ "$lines" -gt 2000 ] && lines=2000
+
+    # logread's `-l N` clips the scan window, not the filtered output, so
+    # `-l N -e pat` can return fewer than N matches when noise is high.
+    # Filter the full buffer with `-e`, then take the last N filtered lines.
+    # Also strip ANSI color escapes emitted by the tracing crate — LuCI's
+    # RPC pipeline doesn't preserve raw 0x1b control bytes cleanly.
+    local esc
+    esc=$(printf '\033')
+    local output
+    output=$(logread -e nym-vpn 2>/dev/null | tail -n "$lines" | sed "s/${esc}\[[0-9;]*m//g")
+
+    json_init
+    json_add_boolean "success" 1
+    json_add_string "logs" "$output"
+    json_add_int "lines" "$lines"
+    json_dump
+}
+
 handle_daemon_status() {
     json_init
 
@@ -1188,6 +1218,7 @@ case "$1" in
     "ad_block_set": { "enabled": "bool" },
     "daemon_status": {},
     "daemon_restart": {},
+    "logs_get": { "lines": "int" },
     "watchdog_get": {},
     "watchdog_set": { "always_on": "bool", "interval": "int" }
 }
@@ -1221,6 +1252,7 @@ EOF
             ad_block_set)            handle_ad_block_set ;;
             daemon_status)           handle_daemon_status ;;
             daemon_restart)          handle_daemon_restart ;;
+            logs_get)                handle_logs_get ;;
             watchdog_get)            handle_watchdog_get ;;
             watchdog_set)            handle_watchdog_set ;;
             *)

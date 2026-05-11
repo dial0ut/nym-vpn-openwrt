@@ -1312,6 +1312,201 @@ return view.extend({
         ]);
         container.appendChild(serviceCard);
 
+        // Logs Card — tail of `logread -e nym-vpn`. Auto-refreshes every 5s
+        // while the card is expanded and not paused by the user.
+        var logViewer = E('div', { 'class': 'nym-log-viewer empty' }, 'Expand to load logs.');
+        var logLinesSelect = E('select', { 'class': 'nym-select' }, [
+            E('option', { 'value': '100' }, '100 lines'),
+            E('option', { 'value': '200', 'selected': 'selected' }, '200 lines'),
+            E('option', { 'value': '500' }, '500 lines'),
+            E('option', { 'value': '1000' }, '1000 lines')
+        ]);
+        var logIntervalSelect = E('select', { 'class': 'nym-select' }, [
+            E('option', { 'value': '2' }, 'Every 2s'),
+            E('option', { 'value': '5', 'selected': 'selected' }, 'Every 5s'),
+            E('option', { 'value': '10' }, 'Every 10s'),
+            E('option', { 'value': '30' }, 'Every 30s')
+        ]);
+        var logStatus = E('span', { 'class': 'nym-log-status paused' }, 'paused');
+        var logPauseBtn = E('button', { 'class': 'nym-btn nym-btn-secondary nym-btn-icon', 'type': 'button', 'title': 'Play' });
+        logPauseBtn.innerHTML = assets.iconPlay;
+        var logCopyBtn = E('button', { 'class': 'nym-btn nym-btn-secondary nym-btn-icon', 'type': 'button', 'title': 'Copy to clipboard' });
+        logCopyBtn.innerHTML = assets.iconClipboard;
+
+        var logsExpanded = false;
+        var logsPaused = true;
+        var logsFetching = false;
+        var lastLogsClean = '';
+        var logTimer = null;
+
+        var setLogStatus = function(text, cls) {
+            logStatus.textContent = text;
+            logStatus.className = 'nym-log-status ' + cls;
+        };
+
+        // ANSI escape stripping (server already does this, kept as a safety net).
+        var ansiRe = /\x1b\[[0-9;]*m/g;
+        var escapeHtml = function(s) {
+            return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        };
+        // Match the tracing level keyword that follows an ISO-8601 timestamp.
+        // Anchoring on the timestamp keeps us from accidentally coloring the
+        // word "INFO" / "ERROR" if it happens to appear inside a message body.
+        var levelRe = /(\d{4}-\d{2}-\d{2}T[\d:.]+Z\s+)(INFO|WARN|WARNING|ERROR|DEBUG|TRACE)\b/;
+        var levelClass = { INFO: 'info', WARN: 'warn', WARNING: 'warn', ERROR: 'error', DEBUG: 'debug', TRACE: 'trace' };
+        var renderColoredLogs = function(cleaned) {
+            var parts = cleaned.split('\n');
+            var out = '';
+            for (var i = 0; i < parts.length; i++) {
+                var safe = escapeHtml(parts[i]);
+                var m = safe.match(levelRe);
+                if (m) {
+                    var cls = levelClass[m[2]];
+                    var idx = m.index + m[1].length;
+                    safe = safe.slice(0, idx) +
+                           '<span class="nym-log-' + cls + '">' + m[2] + '</span>' +
+                           safe.slice(idx + m[2].length);
+                }
+                out += safe;
+                if (i < parts.length - 1) out += '\n';
+            }
+            return out;
+        };
+
+        var fetchLogs = function() {
+            if (logsFetching) return;
+            logsFetching = true;
+            var lines = parseInt(logLinesSelect.value, 10) || 200;
+            rpc.logsGet(lines).then(function(result) {
+                logsFetching = false;
+                if (!result || result.success !== true) {
+                    logViewer.className = 'nym-log-viewer empty';
+                    logViewer.textContent = (result && result.error) || 'Failed to read logs.';
+                    return;
+                }
+                var raw = result.logs || '';
+                var cleaned = raw.replace(ansiRe, '');
+                lastLogsClean = cleaned;
+                var shouldAutoscroll = (logViewer.scrollTop + logViewer.clientHeight) >= (logViewer.scrollHeight - 8);
+                if (cleaned.length === 0) {
+                    logViewer.className = 'nym-log-viewer empty';
+                    logViewer.textContent = 'No nym-vpn log entries in the system buffer.';
+                } else {
+                    logViewer.className = 'nym-log-viewer';
+                    logViewer.innerHTML = renderColoredLogs(cleaned);
+                    if (shouldAutoscroll) logViewer.scrollTop = logViewer.scrollHeight;
+                }
+            }).catch(function(err) {
+                logsFetching = false;
+                logViewer.className = 'nym-log-viewer empty';
+                logViewer.textContent = 'Log fetch error: ' + (err && err.message ? err.message : err);
+            });
+        };
+
+        var copyLogs = function() {
+            var text = lastLogsClean || '';
+            if (!text) {
+                showToast('No logs to copy', 'warning');
+                return;
+            }
+            var done = function(ok) {
+                showToast(ok ? 'Logs copied to clipboard' : 'Copy failed', ok ? 'success' : 'error');
+            };
+            // Prefer the async clipboard API (HTTPS / localhost). Fall back to
+            // the legacy textarea + execCommand path for plain-HTTP LuCI.
+            if (navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) {
+                navigator.clipboard.writeText(text).then(function() { done(true); })
+                    .catch(function() { done(legacyCopy(text)); });
+                return;
+            }
+            done(legacyCopy(text));
+        };
+        var legacyCopy = function(text) {
+            var ta = document.createElement('textarea');
+            ta.value = text;
+            ta.setAttribute('readonly', '');
+            ta.style.position = 'fixed';
+            ta.style.top = '0';
+            ta.style.left = '0';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.focus();
+            ta.select();
+            var ok = false;
+            try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+            document.body.removeChild(ta);
+            return ok;
+        };
+
+        var startLogTimer = function() {
+            stopLogTimer();
+            var seconds = parseInt(logIntervalSelect.value, 10) || 5;
+            logTimer = setInterval(function() {
+                if (logsExpanded && !logsPaused) fetchLogs();
+            }, seconds * 1000);
+        };
+        var stopLogTimer = function() {
+            if (logTimer) { clearInterval(logTimer); logTimer = null; }
+        };
+        var setPlayPauseUi = function() {
+            if (logsPaused) {
+                logPauseBtn.innerHTML = assets.iconPlay;
+                logPauseBtn.setAttribute('title', 'Play');
+                setLogStatus('paused', 'paused');
+            } else {
+                logPauseBtn.innerHTML = assets.iconPause;
+                logPauseBtn.setAttribute('title', 'Pause');
+                setLogStatus('live', 'live');
+            }
+        };
+
+        logCopyBtn.onclick = copyLogs;
+        logPauseBtn.onclick = function() {
+            logsPaused = !logsPaused;
+            setPlayPauseUi();
+            if (!logsPaused) { fetchLogs(); startLogTimer(); }
+            else { stopLogTimer(); }
+        };
+        logLinesSelect.addEventListener('change', function() { if (!logsPaused) fetchLogs(); });
+        logIntervalSelect.addEventListener('change', function() { if (!logsPaused) startLogTimer(); });
+
+        var logsCard = E('div', { 'class': 'nym-card' }, [
+            E('div', { 'class': 'nym-card-header', 'click': function() {
+                toggleCard(logsCard);
+                logsExpanded = logsCard.classList.contains('expanded');
+                if (logsExpanded) {
+                    // Start live by default when the user opens the card.
+                    logsPaused = false;
+                    setPlayPauseUi();
+                    fetchLogs();
+                    startLogTimer();
+                } else {
+                    logsPaused = true;
+                    setPlayPauseUi();
+                    stopLogTimer();
+                }
+            } }, [
+                E('div', { 'class': 'nym-card-title' }, [
+                    svgIcon(assets.iconLogs),
+                    'Daemon Logs'
+                ]),
+                E('div', { 'class': 'nym-card-chevron' }, '▼')
+            ]),
+            E('div', { 'class': 'nym-card-body' }, [
+                E('div', { 'class': 'nym-card-description' },
+                    'Live tail of nym-vpnd log entries from the system log.'),
+                E('div', { 'class': 'nym-log-controls' }, [
+                    logLinesSelect,
+                    logIntervalSelect,
+                    logPauseBtn,
+                    logCopyBtn,
+                    logStatus
+                ]),
+                logViewer
+            ])
+        ]);
+        container.appendChild(logsCard);
+
         // Footer
         var footer = E('div', { 'class': 'nym-footer' }, [
             E('div', { 'class': 'nym-footer-info' }, [
