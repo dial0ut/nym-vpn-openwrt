@@ -179,6 +179,8 @@ return baseclass.extend({
     .nym-account-state { display: inline-block; padding: 6px 14px; background: var(--nym-green-dim); color: var(--nym-green); border-radius: 20px; font-size: 12px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; font-weight: 500; letter-spacing: 0.3px; margin-bottom: 20px; }\
     .nym-account-actions { display: flex; justify-content: center; gap: 12px; }\
     .nym-account-actions .nym-btn { flex: 1; max-width: 200px; text-align: center; }\
+    .nym-account-actions-stacked { flex-direction: column; align-items: center; max-width: 280px; margin: 0 auto; gap: 10px; }\
+    .nym-account-actions-stacked .nym-btn { flex: 0 0 auto; width: 100%; max-width: 100%; }\
     .nym-footer { text-align: center; padding: 24px 0; border-top: 1px solid var(--border-color); margin-top: 24px; }\
     .nym-footer-info { display: flex; justify-content: center; gap: 32px; font-size: 12px; color: var(--text-muted); }\
     .nym-footer-item span { color: var(--text-secondary); }\

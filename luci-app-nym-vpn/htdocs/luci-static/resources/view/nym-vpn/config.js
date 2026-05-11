@@ -1174,9 +1174,9 @@ return view.extend({
             ]),
             E('div', { 'class': 'nym-card-body' }, [
                 isLoggedIn ? E('div', { 'class': 'nym-account-logged-in' }, [
-                    E('div', { 'class': 'nym-account-id' }, identity),
                     E('div', { 'class': 'nym-account-state' }, state),
-                    E('div', { 'class': 'nym-account-actions' }, [
+                    E('div', { 'class': 'nym-account-id' }, identity),
+                    E('div', { 'class': 'nym-account-actions nym-account-actions-stacked' }, [
                         E('button', { 'class': 'nym-btn nym-btn-secondary nym-btn-small', 'click': handleRotateKeys }, 'Rotate Keys'),
                         E('button', { 'class': 'nym-btn nym-btn-danger nym-btn-small', 'click': handleAccountLogout }, 'Logout')
                     ])
