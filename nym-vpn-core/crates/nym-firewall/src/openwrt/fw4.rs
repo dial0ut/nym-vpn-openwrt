@@ -351,6 +351,12 @@ impl Fw4Firewall {
                     self.add_dns_output_rules(rules, *dns);
                 }
                 self.add_block_dns_rules(rules);
+                // Rate-limited NTP escape hatch: a clockless router cold-boots
+                // with a stale clock and would otherwise deadlock here, since
+                // TLS to api.nymvpn.com fails cert validity until sysntpd can
+                // sync. 12/min with burst 8 covers sysntpd's parallel startup
+                // round and caps any exfil at ~500 B/min.
+                writeln!(rules, "        udp dport 123 limit rate 12/minute burst 8 packets accept").unwrap();
                 if *allow_lan {
                     self.add_lan_output_rules(rules);
                 }

@@ -463,6 +463,17 @@ impl Fw3Firewall {
                 // Block remaining DNS
                 self.add_block_dns_rules(rules, is_ipv6);
 
+                // Rate-limited NTP escape hatch: a clockless router cold-boots
+                // with a stale clock and would otherwise deadlock here, since
+                // TLS to api.nymvpn.com fails cert validity until sysntpd can
+                // sync. 12/min with burst 8 covers sysntpd's parallel startup
+                // round and caps any exfil at ~500 B/min.
+                writeln!(
+                    rules,
+                    "-A {} -p udp --dport 123 -m limit --limit 12/minute --limit-burst 8 -j ACCEPT",
+                    NYM_OUTPUT
+                ).unwrap();
+
                 *allow_lan
             }
         };
