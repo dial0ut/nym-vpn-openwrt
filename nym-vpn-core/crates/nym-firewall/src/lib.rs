@@ -368,10 +368,12 @@ impl Firewall {
         })
     }
 
-    /// Creates a new firewall instance.
-    pub fn new(fwmark: u32) -> Result<Self, Error> {
+    /// Creates a new firewall instance. `fwmark` is accepted for API
+    /// compatibility but unused on OpenWrt — routers don't do split tunneling
+    /// or fwmark-based filtering.
+    pub fn new(_fwmark: u32) -> Result<Self, Error> {
         Ok(Firewall {
-            inner: openwrt::Firewall::new(fwmark)?,
+            inner: openwrt::Firewall::new()?,
             killswitch: true,
         })
     }
