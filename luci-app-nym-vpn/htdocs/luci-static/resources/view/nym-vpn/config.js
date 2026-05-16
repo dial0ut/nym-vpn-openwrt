@@ -61,7 +61,11 @@ return view.extend({
         var isTwoHopMode = tunnel_config.two_hop === 'on';
         var previousState = status.state || 'unknown';
         var actionInProgress = false;
-        var daemonStatusDisplay;
+        var daemonStatusBadge;
+        var daemonStatusBadgeText;
+        var serviceInfoFrame;
+        var daemonStartBtn;
+        var daemonStopBtn;
 
         // Uptime tracking
         var connectionStartTime = null;
@@ -775,6 +779,29 @@ return view.extend({
             });
         };
 
+        var copyIdentity = function(text, btn) {
+            if (!text) return;
+            var flash = function() {
+                if (!btn) return;
+                btn.classList.add('copied');
+                setTimeout(function() { btn.classList.remove('copied'); }, 1400);
+            };
+            var done = function(ok) {
+                if (ok) {
+                    flash();
+                    showToast('Device identity copied', 'success');
+                } else {
+                    showToast('Copy failed', 'error');
+                }
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) {
+                navigator.clipboard.writeText(text).then(function() { done(true); })
+                    .catch(function() { done(legacyCopy(text)); });
+                return;
+            }
+            done(legacyCopy(text));
+        };
+
         // Custom DNS handler
         var handleDnsToggle = function(enabled) {
             var serversInput = document.getElementById('dns-servers-input');
@@ -1220,7 +1247,7 @@ return view.extend({
         var inboundCard = E('div', { 'class': 'nym-card' }, [
             E('div', { 'class': 'nym-card-header', 'click': function() { toggleCard(inboundCard); } }, [
                 E('div', { 'class': 'nym-card-title' }, [
-                    svgIcon(assets.iconShield),
+                    svgIcon(assets.iconServer),
                     'Inbound Services'
                 ]),
                 E('div', { 'class': 'nym-card-chevron' }, '▼')
@@ -1356,6 +1383,56 @@ return view.extend({
         container.appendChild(dnsCard);
 
         // Account Card
+        var accountStatusLabel = (state || '').trim() || 'Active';
+        var loggedInBody = null;
+        if (isLoggedIn) {
+            var copyBtn = E('button', {
+                'class': 'nym-identity-copy',
+                'type': 'button',
+                'title': 'Copy device identity'
+            });
+            copyBtn.innerHTML = assets.iconCopy;
+            copyBtn.addEventListener('click', function(ev) {
+                ev.preventDefault();
+                copyIdentity(identity, copyBtn);
+            });
+
+            var rotateBtn = E('button', {
+                'class': 'nym-card-action rotate',
+                'type': 'button',
+                'click': handleRotateKeys
+            });
+            rotateBtn.innerHTML = assets.iconRefresh + '<span>Rotate keys</span>';
+
+            var signOutBtn = E('button', {
+                'class': 'nym-card-action danger',
+                'type': 'button',
+                'click': handleAccountLogout
+            });
+            signOutBtn.innerHTML = assets.iconPower + '<span>Sign out</span>';
+
+            loggedInBody = E('div', { 'class': 'nym-account-panel' }, [
+                E('div', { 'class': 'nym-info-frame' }, [
+                    E('div', { 'class': 'nym-info-frame-label' }, 'Device Identity'),
+                    E('div', { 'class': 'nym-info-frame-main' }, [
+                        E('div', { 'class': 'nym-info-frame-id-row' }, [
+                            E('div', { 'class': 'nym-info-frame-value' }, identity),
+                            copyBtn
+                        ]),
+                        E('div', { 'class': 'nym-card-status' }, [
+                            E('span', { 'class': 'nym-card-status-indicator' }),
+                            E('span', { 'class': 'nym-card-status-text' }, accountStatusLabel)
+                        ])
+                    ])
+                ]),
+                E('div', { 'class': 'nym-card-actions-bar' }, [
+                    rotateBtn,
+                    E('div', { 'class': 'nym-card-action-divider' }),
+                    signOutBtn
+                ])
+            ]);
+        }
+
         var accountCard = E('div', { 'class': 'nym-card', 'id': 'nym-card-account' }, [
             E('div', { 'class': 'nym-card-header', 'click': function() { toggleCard(accountCard); } }, [
                 E('div', { 'class': 'nym-card-title' }, [
@@ -1365,14 +1442,7 @@ return view.extend({
                 E('div', { 'class': 'nym-card-chevron' }, '▼')
             ]),
             E('div', { 'class': 'nym-card-body' }, [
-                isLoggedIn ? E('div', { 'class': 'nym-account-logged-in' }, [
-                    E('div', { 'class': 'nym-account-state' }, state),
-                    E('div', { 'class': 'nym-account-id' }, identity),
-                    E('div', { 'class': 'nym-account-actions nym-account-actions-stacked' }, [
-                        E('button', { 'class': 'nym-btn nym-btn-secondary nym-btn-small', 'click': handleRotateKeys }, 'Rotate Keys'),
-                        E('button', { 'class': 'nym-btn nym-btn-danger nym-btn-small', 'click': handleAccountLogout }, 'Logout')
-                    ])
-                ]) : hasError ? E('div', { 'class': 'nym-account-logged-in' }, [
+                isLoggedIn ? loggedInBody : hasError ? E('div', { 'class': 'nym-account-logged-in' }, [
                     E('div', { 'class': 'nym-account-state', 'style': 'background: var(--danger-dim); color: var(--danger)' }, state || identity),
                     E('div', { 'class': 'nym-card-description', 'style': 'margin: 16px 0' }, 'There is an issue with the account. You may need to logout and try again.'),
                     E('button', { 'class': 'nym-btn nym-btn-danger', 'style': 'width: 100%', 'click': handleAccountLogout }, 'Logout')
@@ -1398,29 +1468,42 @@ return view.extend({
         ]);
         container.appendChild(accountCard);
 
-        // Daemon restart handler
-        var handleDaemonRestart = function() {
-            var doRestart = function() {
-                showModal('Restarting Daemon', 'Please wait...');
+        // Daemon action helpers
+        var refreshDaemonUi = function(running) {
+            if (daemonStatusBadge) {
+                daemonStatusBadge.className = 'nym-card-status' + (running ? '' : ' stopped');
+            }
+            if (daemonStatusBadgeText) {
+                daemonStatusBadgeText.textContent = running ? 'Running' : 'Stopped';
+            }
+            if (serviceInfoFrame) {
+                serviceInfoFrame.className = 'nym-info-frame' + (running ? '' : ' stopped');
+            }
+            if (daemonStartBtn) daemonStartBtn.disabled = running;
+            if (daemonStopBtn)  daemonStopBtn.disabled  = !running;
+        };
 
-                rpc.daemonRestart().then(function(result) {
+        var DAEMON_ACTIONS = {
+            'start':   { label: 'Start',   verb: 'Starting',   pastTense: 'started',   rpcCall: function() { return rpc.daemonStart(); },   needsDisconnect: false },
+            'stop':    { label: 'Stop',    verb: 'Stopping',   pastTense: 'stopped',   rpcCall: function() { return rpc.daemonStop(); },    needsDisconnect: true  },
+            'restart': { label: 'Restart', verb: 'Restarting', pastTense: 'restarted', rpcCall: function() { return rpc.daemonRestart(); }, needsDisconnect: true  }
+        };
+
+        var runDaemonAction = function(action) {
+            var info = DAEMON_ACTIONS[action];
+            if (!info) return;
+
+            var execute = function() {
+                showModal(info.verb + ' Daemon', 'Please wait...');
+                info.rpcCall().then(function(result) {
+                    var running = result && result.status === 'running';
+                    refreshDaemonUi(running);
                     if (result && result.success) {
-                        setModalSuccess('Done', 'Daemon restarted', '✓');
-                        // Update daemon status display
-                        if (daemonStatusDisplay) {
-                            daemonStatusDisplay.textContent = 'Running';
-                            daemonStatusDisplay.className = 'nym-daemon-status running';
-                        }
-                        setTimeout(function() {
-                            fadeOutModal();
-                        }, 1500);
+                        setModalSuccess('Done', 'Daemon ' + info.pastTense, '✓');
+                        setTimeout(fadeOutModal, 1500);
                     } else {
                         hideModal();
-                        showToast('Restart failed: ' + (result.error || 'Unknown'), 'error');
-                        if (daemonStatusDisplay) {
-                            daemonStatusDisplay.textContent = 'Stopped';
-                            daemonStatusDisplay.className = 'nym-daemon-status stopped';
-                        }
+                        showToast(info.label + ' failed: ' + ((result && result.error) || 'Unknown'), 'error');
                     }
                 }).catch(function(err) {
                     hideModal();
@@ -1428,53 +1511,87 @@ return view.extend({
                 });
             };
 
-            // Check if VPN is connected - warn user
+            if (!info.needsDisconnect) {
+                execute();
+                return;
+            }
+
             rpc.status().then(function(st) {
                 if (st && (st.state === 'connected' || st.state === 'connecting')) {
                     confirmModal(
-                        'Restart Daemon',
-                        'The VPN is currently connected. Restarting the daemon will disconnect you.',
+                        info.label + ' Daemon',
+                        'The VPN is currently connected. ' + info.verb + ' the daemon will disconnect you.',
                         '⚠',
                         function() {
-                            // User confirmed - disconnect first, then restart
                             showModal('Disconnecting', 'Please wait...');
                             rpc.disconnect().then(function() {
-                                updateModal('Restarting daemon...');
-                                setTimeout(doRestart, 1000);
-                            }).catch(function() {
-                                doRestart(); // Try restart anyway
-                            });
+                                updateModal(info.verb + ' daemon...');
+                                setTimeout(execute, 1000);
+                            }).catch(execute);
                         },
                         null,
-                        'Restart'
+                        info.label
                     );
                 } else {
-                    // Not connected - just show spinner modal and restart
-                    doRestart();
+                    execute();
                 }
-            }).catch(function() {
-                doRestart();
-            });
+            }).catch(execute);
         };
 
-        // Update daemon status display
+        // Update daemon status display (called by status poller)
         var updateDaemonStatus = function() {
             return rpc.daemonStatus().then(function(result) {
-                if (!result || !daemonStatusDisplay) return;
-
-                if (result.running) {
-                    daemonStatusDisplay.textContent = 'Running';
-                    daemonStatusDisplay.className = 'nym-daemon-status running';
-                } else {
-                    daemonStatusDisplay.textContent = 'Stopped';
-                    daemonStatusDisplay.className = 'nym-daemon-status stopped';
-                }
+                if (!result) return;
+                refreshDaemonUi(!!result.running);
             }).catch(function(err) {
                 console.error('Daemon status update failed:', err);
             });
         };
 
         // Service Management Card
+        var initialDaemonRunning = !!daemon_status.running;
+
+        daemonStartBtn = E('button', {
+            'class': 'nym-card-action success',
+            'type': 'button',
+            'click': function() { runDaemonAction('start'); }
+        });
+        daemonStartBtn.innerHTML = assets.iconStart + '<span>Start</span>';
+        daemonStartBtn.disabled = initialDaemonRunning;
+
+        var daemonRestartBtn = E('button', {
+            'class': 'nym-card-action rotate',
+            'type': 'button',
+            'click': function() { runDaemonAction('restart'); }
+        });
+        daemonRestartBtn.innerHTML = assets.iconRefresh + '<span>Restart</span>';
+
+        daemonStopBtn = E('button', {
+            'class': 'nym-card-action danger',
+            'type': 'button',
+            'click': function() { runDaemonAction('stop'); }
+        });
+        daemonStopBtn.innerHTML = assets.iconStop + '<span>Stop</span>';
+        daemonStopBtn.disabled = !initialDaemonRunning;
+
+        daemonStatusBadgeText = E('span', { 'class': 'nym-card-status-text' }, initialDaemonRunning ? 'Running' : 'Stopped');
+        daemonStatusBadge = E('div', {
+            'class': 'nym-card-status' + (initialDaemonRunning ? '' : ' stopped')
+        }, [
+            E('span', { 'class': 'nym-card-status-indicator' }),
+            daemonStatusBadgeText
+        ]);
+
+        serviceInfoFrame = E('div', {
+            'class': 'nym-info-frame' + (initialDaemonRunning ? '' : ' stopped')
+        }, [
+            E('div', { 'class': 'nym-info-frame-label' }, 'Daemon'),
+            E('div', { 'class': 'nym-info-frame-main' }, [
+                E('div', { 'class': 'nym-info-frame-value' }, 'nym-vpnd'),
+                daemonStatusBadge
+            ])
+        ]);
+
         var serviceCard = E('div', { 'class': 'nym-card' }, [
             E('div', { 'class': 'nym-card-header', 'click': function() { toggleCard(serviceCard); } }, [
                 E('div', { 'class': 'nym-card-title' }, [
@@ -1484,21 +1601,15 @@ return view.extend({
                 E('div', { 'class': 'nym-card-chevron' }, '▼')
             ]),
             E('div', { 'class': 'nym-card-body' }, [
-                E('div', { 'class': 'nym-card-description' },
-                    'Manage the Nym VPN daemon service running on this router.'),
-                E('div', { 'class': 'nym-service-status-row' }, [
-                    E('div', { 'class': 'nym-service-info' }, [
-                        E('div', { 'class': 'nym-service-label' }, 'Daemon Status'),
-                        daemonStatusDisplay = E('div', {
-                            'class': 'nym-daemon-status ' + (daemon_status.running ? 'running' : 'stopped')
-                        }, daemon_status.running ? 'Running' : 'Stopped')
+                E('div', { 'class': 'nym-account-panel' }, [
+                    serviceInfoFrame,
+                    E('div', { 'class': 'nym-card-actions-bar' }, [
+                        daemonStartBtn,
+                        E('div', { 'class': 'nym-card-action-divider' }),
+                        daemonRestartBtn,
+                        E('div', { 'class': 'nym-card-action-divider' }),
+                        daemonStopBtn
                     ])
-                ]),
-                E('div', { 'class': 'nym-text-center nym-mt-16' }, [
-                    E('button', {
-                        'class': 'nym-btn nym-btn-danger',
-                        'click': handleDaemonRestart
-                    }, 'Restart Daemon')
                 ])
             ])
         ]);

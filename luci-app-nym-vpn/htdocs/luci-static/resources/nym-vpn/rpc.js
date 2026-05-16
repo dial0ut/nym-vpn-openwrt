@@ -165,6 +165,18 @@ return baseclass.extend({
         params: []
     }),
 
+    daemonStart: rpc.declare({
+        object: 'nym-vpn',
+        method: 'daemon_start',
+        params: []
+    }),
+
+    daemonStop: rpc.declare({
+        object: 'nym-vpn',
+        method: 'daemon_stop',
+        params: []
+    }),
+
     watchdogGet: rpc.declare({
         object: 'nym-vpn',
         method: 'watchdog_get',

@@ -1351,6 +1351,48 @@ handle_daemon_restart() {
     json_dump
 }
 
+handle_daemon_start() {
+    json_init
+
+    /etc/init.d/nym-vpnd start >/dev/null 2>&1
+    sleep 2
+
+    local status=$(/etc/init.d/nym-vpnd status 2>&1)
+
+    if [ "$status" = "running" ]; then
+        json_add_boolean "success" 1
+        json_add_string "message" "Daemon started"
+        json_add_string "status" "running"
+    else
+        json_add_boolean "success" 0
+        json_add_string "error" "Daemon failed to start"
+        json_add_string "status" "stopped"
+    fi
+
+    json_dump
+}
+
+handle_daemon_stop() {
+    json_init
+
+    /etc/init.d/nym-vpnd stop >/dev/null 2>&1
+    sleep 1
+
+    local status=$(/etc/init.d/nym-vpnd status 2>&1)
+
+    if [ "$status" = "running" ]; then
+        json_add_boolean "success" 0
+        json_add_string "error" "Daemon failed to stop"
+        json_add_string "status" "running"
+    else
+        json_add_boolean "success" 1
+        json_add_string "message" "Daemon stopped"
+        json_add_string "status" "stopped"
+    fi
+
+    json_dump
+}
+
 #-------------------------------------------------------------------------------
 # Main entry point
 #-------------------------------------------------------------------------------
@@ -1396,6 +1438,8 @@ case "$1" in
     "ad_block_set": { "enabled": "bool" },
     "daemon_status": {},
     "daemon_restart": {},
+    "daemon_start": {},
+    "daemon_stop": {},
     "logs_get": { "lines": "int" },
     "watchdog_get": {},
     "watchdog_set": { "always_on": "bool", "interval": "int" }
@@ -1433,6 +1477,8 @@ EOF
             ad_block_set)            handle_ad_block_set ;;
             daemon_status)           handle_daemon_status ;;
             daemon_restart)          handle_daemon_restart ;;
+            daemon_start)            handle_daemon_start ;;
+            daemon_stop)             handle_daemon_stop ;;
             logs_get)                handle_logs_get ;;
             watchdog_get)            handle_watchdog_get ;;
             watchdog_set)            handle_watchdog_set ;;

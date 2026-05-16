@@ -177,10 +177,47 @@ return baseclass.extend({
     .nym-account-logged-in { text-align: center; padding: 20px 0; }\
     .nym-account-id { background: var(--bg-input); padding: 12px 16px; border-radius: 8px; font-size: 12px; color: var(--text-secondary); word-break: break-all; margin-bottom: 16px; border: 1px solid var(--border-color); }\
     .nym-account-state { display: inline-block; padding: 6px 14px; background: var(--nym-green-dim); color: var(--nym-green); border-radius: 20px; font-size: 12px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; font-weight: 500; letter-spacing: 0.3px; margin-bottom: 20px; }\
-    .nym-account-actions { display: flex; justify-content: center; gap: 12px; }\
-    .nym-account-actions .nym-btn { flex: 1; max-width: 200px; text-align: center; }\
-    .nym-account-actions-stacked { flex-direction: column; align-items: center; max-width: 280px; margin: 0 auto; gap: 10px; }\
-    .nym-account-actions-stacked .nym-btn { flex: 0 0 auto; width: 100%; max-width: 100%; }\
+    /* Card meta: header status badge + framed info panel + footer action bar.\
+       Used by Account (passport) and Service (daemon) cards. */\
+    .nym-card-header-meta { display: flex; align-items: center; gap: 16px; }\
+    .nym-card-status { display: inline-flex; align-items: center; gap: 10px; font-size: 10px; text-transform: uppercase; letter-spacing: 2px; color: var(--nym-green); font-weight: 500; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding-left: 4px; min-width: 0; flex-shrink: 0; }\
+    .nym-card-status.stopped { color: var(--danger); }\
+    .nym-card-status-text { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\
+    .nym-card-status-indicator { position: relative; width: 8px; height: 8px; flex-shrink: 0; }\
+    .nym-card-status-indicator::before { content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--nym-green); box-shadow: 0 0 8px var(--nym-green-glow); }\
+    .nym-card-status-indicator::after { content: ""; position: absolute; inset: -3px; border-radius: 50%; border: 1px solid var(--nym-green); animation: pulse-ring 2.4s ease-out infinite; }\
+    .nym-card-status.stopped .nym-card-status-indicator::before { background: var(--danger); box-shadow: 0 0 8px rgba(255, 71, 87, 0.4); }\
+    .nym-card-status.stopped .nym-card-status-indicator::after { border-color: var(--danger); animation: none; opacity: 0.5; }\
+    .nym-account-panel { padding: 4px 0 0; }\
+    .nym-info-frame { position: relative; background: linear-gradient(135deg, rgba(0, 255, 148, 0.04), transparent 55%), var(--bg-input); border: 1px solid var(--border-color); border-radius: 10px; padding: 18px 22px; overflow: hidden; }\
+    .nym-info-frame::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: linear-gradient(180deg, var(--nym-green), transparent); opacity: 0.5; }\
+    .nym-info-frame-main { display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; }\
+    .nym-info-frame-id-row { display: inline-flex; align-items: center; gap: 12px; min-width: 0; }\
+    .nym-info-frame-id-row .nym-info-frame-value { min-width: 0; }\
+    .nym-info-frame-main > .nym-info-frame-value { min-width: 0; }\
+    .nym-info-frame.stopped { background: linear-gradient(135deg, rgba(255, 71, 87, 0.04), transparent 55%), var(--bg-input); }\
+    .nym-info-frame.stopped::before { background: linear-gradient(180deg, var(--danger), transparent); }\
+    .nym-info-frame-label { font-size: 10px; text-transform: uppercase; letter-spacing: 2.5px; color: var(--nym-green); opacity: 0.85; margin-bottom: 10px; font-weight: 500; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; align-items: center; gap: 8px; }\
+    .nym-info-frame-label::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, var(--border-color), transparent); margin-left: 4px; }\
+    .nym-info-frame.stopped .nym-info-frame-label { color: var(--danger); }\
+    .nym-info-frame-value { font-family: "SF Mono", "Fira Code", "JetBrains Mono", "Consolas", monospace; font-size: 13px; line-height: 1.75; color: var(--text-primary); word-break: break-all; letter-spacing: 0.5px; user-select: all; }\
+    .nym-identity-copy { width: 32px; height: 32px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-muted); cursor: pointer; padding: 0; transition: all 0.15s ease; }\
+    .nym-identity-copy:hover { color: var(--nym-green); border-color: var(--nym-green); background: var(--nym-green-dim); box-shadow: 0 0 16px var(--nym-green-dim); }\
+    .nym-identity-copy:active { transform: scale(0.96); }\
+    .nym-identity-copy svg { width: 14px; height: 14px; display: block; }\
+    .nym-identity-copy.copied { color: var(--nym-green); border-color: var(--nym-green); background: var(--nym-green-dim); }\
+    .nym-card-actions-bar { display: flex; align-items: stretch; margin: 20px -20px -20px; border-top: 1px solid var(--border-color); }\
+    .nym-card-action { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 10px; padding: 14px 12px; background: transparent; border: none; color: var(--text-secondary); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 13px; font-weight: 500; letter-spacing: 0.4px; cursor: pointer; transition: color 0.15s ease, background 0.15s ease; border-radius: 0; outline: none; }\
+    .nym-card-action:first-child { border-bottom-left-radius: 12px; }\
+    .nym-card-action:last-child { border-bottom-right-radius: 12px; }\
+    .nym-card-action:hover:not(:disabled) { color: var(--text-primary); background: var(--bg-card-hover); }\
+    .nym-card-action:focus, .nym-card-action:active { outline: none; box-shadow: none; }\
+    .nym-card-action:disabled { color: var(--text-muted); opacity: 0.4; cursor: not-allowed; }\
+    .nym-card-action svg { width: 14px; height: 14px; display: block; transition: transform 0.4s ease; }\
+    .nym-card-action.success:hover:not(:disabled) { color: var(--nym-green); background: var(--nym-green-dim); }\
+    .nym-card-action.danger:hover:not(:disabled) { color: var(--danger); background: var(--danger-dim); }\
+    .nym-card-action.rotate:hover:not(:disabled) svg { transform: rotate(-180deg); }\
+    .nym-card-action-divider { width: 1px; background: var(--border-color); margin: 10px 0; }\
     .nym-footer { text-align: center; padding: 24px 0; border-top: 1px solid var(--border-color); margin-top: 24px; }\
     .nym-footer-info { display: flex; justify-content: center; gap: 32px; font-size: 12px; color: var(--text-muted); }\
     .nym-footer-item span { color: var(--text-secondary); }\
@@ -208,6 +245,8 @@ return baseclass.extend({
     .nym-exemption-delete:hover { color: var(--danger); background: var(--danger-dim); }\
     .nym-exemption-empty { font-size: 13px; color: var(--text-muted); font-style: italic; padding: 12px; text-align: center; }\
     .nym-exemption-addrow { display: grid; grid-template-columns: 96px 110px 1fr auto; gap: 10px; align-items: center; }\
+    .nym-exemption-addrow .nym-select { height: 44px; line-height: 44px; padding: 0 28px 0 16px; text-align: center; text-align-last: center; background-position: right 12px center; }\
+    .nym-exemption-addrow .nym-input { height: 44px; padding-top: 0; padding-bottom: 0; }\
     .nym-btn-spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; vertical-align: -2px; margin-right: 6px; animation: rotate-ring 0.8s linear infinite; }\
     @media (max-width: 600px) {\
         .nym-exemption-header { display: none; }\
@@ -244,14 +283,6 @@ return baseclass.extend({
     .nym-hero-center .nym-status-ring { margin-bottom: 24px; }\
     .nym-hero-center .nym-uptime { margin-top: 8px; }\
     @media (max-width: 700px) { .nym-hero-gateway-row { flex-direction: column; align-items: center; } .nym-hero-gateway-panel { flex: 0 0 auto; max-width: 320px; width: 100%; } .nym-hero-center { order: -1; margin-bottom: 24px; } }\
-    /* Service Management */\
-    .nym-service-status-row { display: flex; gap: 24px; justify-content: center; margin-bottom: 16px; }\
-    .nym-service-info { text-align: center; }\
-    .nym-service-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 8px; }\
-    .nym-service-value { font-size: 18px; color: var(--text-primary); font-variant-numeric: tabular-nums; }\
-    .nym-daemon-status { display: inline-block; padding: 6px 16px; border-radius: 20px; font-size: 13px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; font-weight: 500; letter-spacing: 0.3px; }\
-    .nym-daemon-status.running { background: var(--nym-green-dim); color: var(--nym-green); }\
-    .nym-daemon-status.stopped { background: var(--danger-dim); color: var(--danger); }\
     /* Error strip inside the status hero */\
     .nym-error-strip { display: flex; align-items: center; gap: 14px; padding: 14px 18px; margin: 20px 0 0; border: 1px solid var(--danger); border-left-width: 3px; background: var(--danger-dim); border-radius: 8px; box-shadow: 0 0 24px rgba(255, 71, 87, 0.12); animation: errorSlide 240ms ease; text-align: left; }\
     .nym-error-strip.warning { border-color: var(--warning); background: var(--warning-dim); box-shadow: 0 0 24px rgba(255, 165, 2, 0.12); }\

@@ -47,6 +47,8 @@
           "ad_block_set",
           "dns_set",
           "daemon_restart",
+          "daemon_start",
+          "daemon_stop",
           "watchdog_set"
         ],
         "service": [
