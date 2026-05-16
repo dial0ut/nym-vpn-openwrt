@@ -207,11 +207,60 @@ impl TunnelStateHandler for ConnectedState {
                             return NextTunnelState::SameState(self);
                         };
 
+                        // Hot-apply path: mutate firewall_policy_params for every
+                        // field we can re-apply in place, then call set_firewall_policy
+                        // exactly once. After that, surgically update the exempt
+                        // routing rule when the inbound-exemption set transitions
+                        // between empty and non-empty.
+                        let had_exemptions = !shared_state.tunnel_settings.inbound_exemptions.is_empty();
+                        let has_exemptions = !tunnel_settings.inbound_exemptions.is_empty();
+                        let exempt_rule_transition = match (had_exemptions, has_exemptions) {
+                            (false, true) => Some(true),    // 0 -> N: install rule
+                            (true, false) => Some(false),   // N -> 0: remove rule
+                            _ => None,                       // no transition
+                        };
+
                         if diff.allow_lan_changed() {
                             self.firewall_policy_params.allow_lan = tunnel_settings.allow_lan;
+                        }
+                        if diff.inbound_exemptions_changed() {
+                            self.firewall_policy_params.inbound_exemptions =
+                                tunnel_settings.inbound_exemptions.clone();
+                        }
 
+                        // Order is load-bearing:
+                        // - 0 -> N: install rule first, then re-apply firewall.
+                        //   If rule install fails, no mark-set rules exist yet and we
+                        //   leave clean.
+                        // - N -> 0 or N -> M: re-apply firewall first (drops the
+                        //   mangle/mark rules in the 0-case), then remove the routing
+                        //   rule. Removing the routing rule before the firewall would
+                        //   leave a brief window where marked replies have no route
+                        //   to main and would fall into the tunnel rule (functional
+                        //   bug, not a leak).
+                        if exempt_rule_transition == Some(true) {
+                            if let Err(e) = shared_state.route_handler
+                                .set_exempt_rule(true, shared_state.tunnel_settings.enable_ipv6)
+                                .await
+                            {
+                                trace_err_chain!(e, "failed to install exempt routing rule");
+                                return NextTunnelState::NewState(ErrorState::enter(ErrorStateReason::SetFirewallPolicy, shared_state).await);
+                            }
+                        }
+
+                        if diff.allow_lan_changed() || diff.inbound_exemptions_changed() {
                             if let Err(e) = Self::set_firewall_policy(shared_state, &self.firewall_policy_params) {
                                 trace_err_chain!(e, "failed to set firewall policy");
+                                return NextTunnelState::NewState(ErrorState::enter(ErrorStateReason::SetFirewallPolicy, shared_state).await);
+                            }
+                        }
+
+                        if exempt_rule_transition == Some(false) {
+                            if let Err(e) = shared_state.route_handler
+                                .set_exempt_rule(false, shared_state.tunnel_settings.enable_ipv6)
+                                .await
+                            {
+                                trace_err_chain!(e, "failed to remove exempt routing rule");
                                 return NextTunnelState::NewState(ErrorState::enter(ErrorStateReason::SetFirewallPolicy, shared_state).await);
                             }
                         }
@@ -219,7 +268,7 @@ impl TunnelStateHandler for ConnectedState {
                         shared_state.tunnel_settings = tunnel_settings;
 
                         // Not all changes require the tunnel to be reconnected
-                        if diff.only_allow_lan_changed() || (diff.only_mixnet_performance_options_changed() && shared_state.tunnel_settings.tunnel_type == TunnelType::Wireguard) {
+                        if diff.only_hot_appliable_changed() || (diff.only_mixnet_performance_options_changed() && shared_state.tunnel_settings.tunnel_type == TunnelType::Wireguard) {
                             NextTunnelState::SameState(self)
                         } else {
                             self.disconnect(PrivateActionAfterDisconnect::Reconnect, shared_state).await

@@ -50,6 +50,10 @@ pub(crate) enum RouteManagerCommand {
     /// `(enable_ipv6, enable_exempt, sender)` — `enable_exempt` installs the
     /// fwmark→main routing rule used by the inbound-service exemption feature.
     CreateRoutingRules(bool, bool, oneshot::Sender<Result<(), PlatformError>>),
+    /// Surgical install/remove of just the exempt fwmark rule (pri 90).
+    /// `(enable, enable_ipv6, sender)`. Used for hot-applying inbound-exemption
+    /// changes without disturbing the tunnel default-route rule (pri 200).
+    SetExemptRule(bool, bool, oneshot::Sender<Result<(), PlatformError>>),
     ClearRoutingRules(oneshot::Sender<Result<(), PlatformError>>),
     NewChangeListener(oneshot::Sender<mpsc::UnboundedReceiver<CallbackMessage>>),
     GetMtuForRoute(IpAddr, oneshot::Sender<Result<u16, PlatformError>>),
@@ -128,6 +132,28 @@ impl RouteManagerHandle {
             .send(RouteManagerCommand::CreateRoutingRules(
                 enable_ipv6,
                 enable_exempt,
+                response_tx,
+            ))
+            .map_err(|_| Error::RouteManagerDown)?;
+        response_rx
+            .await
+            .map_err(|_| Error::ManagerChannelDown)?
+            .map_err(Error::PlatformError)
+    }
+
+    /// Install or remove the exempt fwmark→main rule (pri 90) without
+    /// touching the suppress (100) or tunnel-fwmark (200) rules.
+    /// Idempotent; safe to call regardless of current rule state.
+    pub async fn set_exempt_rule(
+        &self,
+        enable: bool,
+        enable_ipv6: bool,
+    ) -> Result<(), Error> {
+        let (response_tx, response_rx) = oneshot::channel();
+        self.tx
+            .send(RouteManagerCommand::SetExemptRule(
+                enable,
+                enable_ipv6,
                 response_tx,
             ))
             .map_err(|_| Error::RouteManagerDown)?;

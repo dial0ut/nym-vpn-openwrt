@@ -85,6 +85,17 @@ impl RouteHandler {
         Ok(())
     }
 
+    /// Install or remove the exempt-fwmark routing rule without disturbing
+    /// the suppress or tunnel-default rules. Used to hot-apply changes to
+    /// the inbound-exemption list without dropping the tunnel.
+    pub async fn set_exempt_rule(
+        &mut self,
+        enable: bool,
+        enable_ipv6: bool,
+    ) -> Result<()> {
+        Ok(self.route_manager.set_exempt_rule(enable, enable_ipv6).await?)
+    }
+
     pub async fn remove_routes(&mut self) {
         if let Err(e) = self.route_manager.clear_routes() {
             trace_err_chain!(e, "Failed to remove routes");

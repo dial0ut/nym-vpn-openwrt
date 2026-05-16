@@ -311,6 +311,60 @@ impl RouteManagerImpl {
         Ok(())
     }
 
+    /// Surgical install or removal of the exempt fwmark rule (pri 90).
+    /// Idempotent and **does not touch** the suppress rule (pri 100) or
+    /// the tunnel fwmark rule (pri 200), so it never opens a leak window
+    /// where router-originated outbound could fall through to the main
+    /// table while the tunnel rule is missing.
+    async fn set_exempt_rule(&mut self, enable: bool, enable_ipv6: bool) -> Result<()> {
+        let rules = [exempt_rule_v4(), exempt_rule_v6()]
+            .into_iter()
+            .filter(|r| r.header.family == AddressFamily::Inet || enable_ipv6);
+
+        if enable {
+            for rule in rules {
+                let mut req = NetlinkMessage::from(RouteNetlinkMessage::NewRule(rule));
+                req.header.flags = NLM_F_REQUEST | NLM_F_ACK | NLM_F_CREATE | NLM_F_REPLACE;
+                let mut response = self.handle.request(req).map_err(Error::Netlink)?;
+                while let Some(message) = response.next().await {
+                    if let NetlinkPayload::Error(error) = message.payload {
+                        return Err(Error::Netlink(rtnetlink::Error::NetlinkError(error)));
+                    }
+                }
+            }
+        } else {
+            // Walk the live rule table once, find any matching exempt rules
+            // we previously installed, delete them. Tolerant of absence.
+            let live = self.get_rules().await?;
+            for target in rules {
+                let mut matching = None;
+                for found in &live {
+                    if found.header.family != target.header.family {
+                        continue;
+                    }
+                    if found.header.action != target.header.action {
+                        continue;
+                    }
+                    let mut all_nlas_present = true;
+                    for nla in &target.attributes {
+                        if !found.attributes.contains(nla) {
+                            all_nlas_present = false;
+                            break;
+                        }
+                    }
+                    if all_nlas_present {
+                        matching = Some(found);
+                        break;
+                    }
+                }
+                if let Some(rule) = matching {
+                    self.delete_rule_if_exists((*rule).clone()).await?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     async fn get_rules(&mut self) -> Result<Vec<RuleMessage>> {
         let mut req = NetlinkMessage::from(RouteNetlinkMessage::GetRule(RuleMessage::default()));
         req.header.flags = NLM_F_REQUEST | NLM_F_ACK | NLM_F_DUMP;
@@ -468,6 +522,9 @@ impl RouteManagerImpl {
                 let _ = result_tx.send(
                     self.create_routing_rules(enable_ipv6, enable_exempt).await,
                 );
+            }
+            Some(RouteManagerCommand::SetExemptRule(enable, enable_ipv6, result_tx)) => {
+                let _ = result_tx.send(self.set_exempt_rule(enable, enable_ipv6).await);
             }
             Some(RouteManagerCommand::ClearRoutingRules(result_tx)) => {
                 let _ = result_tx.send(self.clear_routing_rules().await);

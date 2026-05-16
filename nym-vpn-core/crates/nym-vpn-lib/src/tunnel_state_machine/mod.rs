@@ -283,6 +283,28 @@ impl TunnelSettingsDiff {
         self.only_field_changed(&TunnelSettingsDiffFields::AllowLan)
     }
 
+    pub fn inbound_exemptions_changed(&self) -> bool {
+        self.is_field_changed(&TunnelSettingsDiffFields::InboundExemptions)
+    }
+
+    pub fn only_inbound_exemptions_changed(&self) -> bool {
+        self.only_field_changed(&TunnelSettingsDiffFields::InboundExemptions)
+    }
+
+    /// True when the diff is a non-empty subset of fields the state machine
+    /// can re-apply in place (firewall ± exempt routing rule) without
+    /// disconnecting the tunnel. Use to decide whether a `SetTunnelSettings`
+    /// can stay in the current state vs. force a reconnect.
+    pub fn only_hot_appliable_changed(&self) -> bool {
+        if self.0.is_empty() {
+            return false;
+        }
+        self.0.iter().all(|f| matches!(
+            f,
+            TunnelSettingsDiffFields::AllowLan | TunnelSettingsDiffFields::InboundExemptions
+        ))
+    }
+
     pub fn entry_point_changed(&self) -> bool {
         self.is_field_changed(&TunnelSettingsDiffFields::EntryPoint)
     }
