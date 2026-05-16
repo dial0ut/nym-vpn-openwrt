@@ -24,6 +24,16 @@ Configure tunnel behavior:
 - **Two-Hop Mode** — toggle between 2-hop (faster) and 5-hop mixnet routing (on/off)
 - **Kill-Switch** — enforce firewall rules and default route (on/off). Disable for Policy-Based Routing (PBR) compatibility. Shows a warning when disabled. Requires reconnect to take effect.
 
+### Inbound Services
+
+Declare port-forwarded services that bypass the tunnel for reply traffic, so a router-hosted (LuCI, SSH) or LAN-hosted (Jellyfin, NAS) service stays reachable from the WAN while the kill-switch is on.
+
+- Pick `TCP` or `UDP`, type the port, optionally a label, **Save** (or `Enter`).
+- Rows show `● Active` when the kill-switch is on, `● Inert` when off (exemptions only matter while the tunnel default route is enforcing).
+- `×` removes an entry.
+
+For LAN-hosted services, set up the OpenWrt port forward in **Network → Firewall → Port Forwards** first, then add the exemption here using the **WAN-side** port. See [Inbound Services](inbound-services.md) for the full mechanism and recipes.
+
 ### Local Network
 
 Control LAN device access while connected to the VPN:

@@ -42,6 +42,41 @@ pub struct VpnServiceConfig {
     pub mixnet_traffic: MixnetTrafficConfig,
     pub network_stats: NetworkStatisticsConfig,
     pub killswitch: bool,
+    pub inbound_exemptions: Vec<InboundExemption>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum InboundExemptionProtocol {
+    Tcp,
+    Udp,
+}
+
+impl fmt::Display for InboundExemptionProtocol {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            InboundExemptionProtocol::Tcp => "tcp".fmt(f),
+            InboundExemptionProtocol::Udp => "udp".fmt(f),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct InboundExemption {
+    pub proto: InboundExemptionProtocol,
+    pub dport: u16,
+    pub label: Option<String>,
+}
+
+impl fmt::Display for InboundExemption {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}/{}", self.proto, self.dport)?;
+        if let Some(label) = &self.label {
+            write!(f, " ({label})")?;
+        }
+        Ok(())
+    }
 }
 
 impl fmt::Display for VpnServiceConfig {
@@ -108,6 +143,7 @@ impl Default for VpnServiceConfig {
             network_stats: Default::default(),
             mixnet_traffic: MixnetTrafficConfig::default(),
             killswitch: true,
+            inbound_exemptions: Vec::new(),
         }
     }
 }

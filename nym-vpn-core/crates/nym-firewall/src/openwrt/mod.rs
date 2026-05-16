@@ -108,8 +108,8 @@ mod e2e_tests {
     use super::render_iptables::AddrFamily;
     use super::*;
     use crate::net::{
-        AllowedClients, AllowedEndpoint, Endpoint, TransportProtocol, TunnelInterface,
-        TunnelMetadata,
+        AllowedClients, AllowedEndpoint, Endpoint, InboundExemption, TransportProtocol,
+        TunnelInterface, TunnelMetadata,
     };
 
     fn ep(ip: [u8; 4], port: u16) -> AllowedEndpoint {
@@ -152,6 +152,8 @@ mod e2e_tests {
                 &["10.64.0.1".parse().unwrap()],
                 &["1.1.1.1".parse().unwrap()],
             ),
+            allowed_endpoints: vec![],
+            inbound_exemptions: vec![],
         }
     }
 
@@ -234,6 +236,60 @@ mod e2e_tests {
     }
 
     #[test]
+    fn smoke_render_with_exemptions_prints_output() {
+        // Run with: cargo test -p nym-firewall smoke_render -- --nocapture
+        let policy = FirewallPolicy::Connected {
+            peer_endpoints: vec![ep([1, 2, 3, 4], 51820)],
+            tunnel: tunnel("nym0", [10, 64, 0, 2]),
+            allow_lan: true,
+            dns_config: dns(
+                &["10.64.0.1".parse().unwrap()],
+                &["1.1.1.1".parse().unwrap()],
+            ),
+            allowed_endpoints: vec![ep([198, 41, 192, 167], 7844)],
+            inbound_exemptions: vec![
+                InboundExemption::new(TransportProtocol::Tcp, 443)
+                    .with_label("HTTPS reverse proxy"),
+                InboundExemption::new(TransportProtocol::Udp, 51820),
+            ],
+        };
+
+        let rs = policy::compile(&policy);
+        let nft = render_nft::render(&rs);
+        let v4 = render_iptables::render(&rs, render_iptables::AddrFamily::V4);
+
+        // Also dump to /tmp for offline kernel-syntax validation against the
+        // host's nft binary.
+        let _ = std::fs::write("/tmp/nym_smoke.nft", &nft);
+        let _ = std::fs::write("/tmp/nym_smoke.v4.rules", &v4);
+
+        println!("\n--- POLICY DISPLAY ---\n{policy}");
+        println!("\n--- NFT (inet nym) ---\n{nft}");
+        println!("\n--- IPTABLES v4 ---\n{v4}");
+
+        // Filter invariants: mark accept present in all chains before reject.
+        // Mangle invariants depend on WAN detection (uci/ip route) which is
+        // absent in CI — skip those here and verify only the filter side.
+        assert!(nft.contains("meta mark 0x14e accept"));
+        assert!(v4.contains("-m mark --mark 0x14e -j ACCEPT"));
+        // CF edge endpoint from allowed_endpoints flows into Connected — the
+        // test helper builds UDP endpoints, so we assert the UDP variant.
+        assert!(nft.contains("ip daddr 198.41.192.167 udp dport 7844 accept"));
+        // Mangle priority + chain ordering checks.
+        assert!(nft.contains("type filter hook prerouting priority mangle - 10"));
+        assert!(nft.contains("type filter hook output priority mangle - 10"));
+        // mark restore precedes mark set in prerouting
+        let pre_chain = nft
+            .split("chain mangle_prerouting")
+            .nth(1)
+            .and_then(|s| s.split('}').next())
+            .unwrap_or("");
+        let restore_pos = pre_chain.find("meta mark set ct mark").unwrap();
+        let set_pos = pre_chain.find("ct mark set 0x14e").unwrap();
+        assert!(restore_pos < set_pos, "restore must come before set in mangle_prerouting");
+    }
+
+    #[test]
     fn drop_verdicts_only_appear_in_cve_protection() {
         // The only `drop` rules our policy emits are the CVE-2019-14899
         // guards: traffic to a tunnel IP from a non-tunnel interface.
@@ -241,11 +297,12 @@ mod e2e_tests {
         // `reject` so clients get a clean refusal.
         let rs = policy::compile(&connected_lan());
         let all_rules = rs
+            .filter
             .input
             .rules
             .iter()
-            .chain(rs.output.rules.iter())
-            .chain(rs.forward.rules.iter());
+            .chain(rs.filter.output.rules.iter())
+            .chain(rs.filter.forward.rules.iter());
         for rule in all_rules {
             if rule.verdict != rules::Verdict::Drop {
                 continue;

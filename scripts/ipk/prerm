@@ -27,10 +27,17 @@ else
             $ipt -D "$hook" -j NYM_OUTPUT 2>/dev/null
             $ipt -D "$hook" -j NYM_FORWARD 2>/dev/null
         done
-        # Flush and delete our chains
+        # Remove jump rules from mangle table built-ins (inbound exemption)
+        $ipt -t mangle -D PREROUTING -j NYM_MANGLE_PREROUTING 2>/dev/null
+        $ipt -t mangle -D OUTPUT -j NYM_MANGLE_OUTPUT 2>/dev/null
+        # Flush and delete our chains in filter + mangle
         for chain in NYM_INPUT NYM_OUTPUT NYM_FORWARD; do
             $ipt -F "$chain" 2>/dev/null
             $ipt -X "$chain" 2>/dev/null
+        done
+        for chain in NYM_MANGLE_PREROUTING NYM_MANGLE_OUTPUT; do
+            $ipt -t mangle -F "$chain" 2>/dev/null
+            $ipt -t mangle -X "$chain" 2>/dev/null
         done
     done
     # Remove masquerade rules from NAT table
@@ -38,6 +45,15 @@ else
         iptables -t nat -D POSTROUTING "$num" 2>/dev/null
     done
 fi
+
+# Defensive: flush any stray ip rule entries our daemon may have installed.
+# These are normally cleared by the daemon's clear_routing_rules() on stop,
+# but a crashed daemon can leave them behind. Match by our specific fwmark
+# values rather than priority to avoid touching unrelated rules.
+for ip_cmd in "ip" "ip -6"; do
+    while $ip_cmd rule del fwmark 0x14d lookup 333 2>/dev/null; do :; done
+    while $ip_cmd rule del fwmark 0x14e lookup main 2>/dev/null; do :; done
+done
 
 # Remove UCI firewall include config
 uci delete firewall.nym_vpn 2>/dev/null

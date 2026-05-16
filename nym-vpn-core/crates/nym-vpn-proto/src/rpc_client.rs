@@ -149,6 +149,66 @@ impl RpcClient {
         Ok(())
     }
 
+    pub async fn set_inbound_exemptions(
+        &mut self,
+        exemptions: Vec<nym_vpn_lib_types::InboundExemption>,
+    ) -> Result<()> {
+        let request = proto::InboundExemptionList {
+            exemptions: exemptions
+                .into_iter()
+                .map(|e| proto::InboundExemption {
+                    proto: match e.proto {
+                        nym_vpn_lib_types::InboundExemptionProtocol::Tcp => {
+                            proto::InboundExemptionProtocol::Tcp as i32
+                        }
+                        nym_vpn_lib_types::InboundExemptionProtocol::Udp => {
+                            proto::InboundExemptionProtocol::Udp as i32
+                        }
+                    },
+                    dport: e.dport as u32,
+                    label: e.label,
+                })
+                .collect(),
+        };
+        self.0
+            .set_inbound_exemptions(request)
+            .await
+            .map_err(Error::Rpc)?
+            .into_inner();
+        Ok(())
+    }
+
+    pub async fn get_inbound_exemptions(
+        &mut self,
+    ) -> Result<Vec<nym_vpn_lib_types::InboundExemption>> {
+        let list = self
+            .0
+            .get_inbound_exemptions(())
+            .await
+            .map_err(Error::Rpc)?
+            .into_inner();
+        Ok(list
+            .exemptions
+            .into_iter()
+            .filter_map(|e| {
+                let proto = match proto::InboundExemptionProtocol::try_from(e.proto).ok()? {
+                    proto::InboundExemptionProtocol::Tcp => {
+                        nym_vpn_lib_types::InboundExemptionProtocol::Tcp
+                    }
+                    proto::InboundExemptionProtocol::Udp => {
+                        nym_vpn_lib_types::InboundExemptionProtocol::Udp
+                    }
+                    proto::InboundExemptionProtocol::Unspecified => return None,
+                };
+                Some(nym_vpn_lib_types::InboundExemption {
+                    proto,
+                    dport: e.dport as u16,
+                    label: e.label,
+                })
+            })
+            .collect())
+    }
+
     pub async fn set_enable_custom_dns(&mut self, enable: bool) -> Result<()> {
         self.0
             .set_enable_custom_dns(enable)

@@ -2,6 +2,9 @@
 
 NymVPN supports split tunneling through OpenWrt's Policy-Based Routing (PBR) package. This lets you choose which traffic goes through the VPN and which goes direct.
 
+!!! note "Looking to expose a service to the WAN?"
+    PBR handles **outbound** traffic exclusions — routing selected LAN clients or destinations around the VPN. If you want a **port-forwarded service** (LuCI, SSH, a self-hosted website) to remain reachable from the WAN while the kill-switch is on, see [Inbound Services](inbound-services.md) instead. It's a separate, simpler mechanism that does not require disabling the kill-switch.
+
 **Common use cases:**
 
 - Route only specific devices through the VPN

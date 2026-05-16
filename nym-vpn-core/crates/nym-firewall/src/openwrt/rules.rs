@@ -27,6 +27,13 @@ pub enum Verdict {
     Accept,
     Drop,
     Reject,
+    /// Non-terminal: set the conntrack mark. Used by the inbound-exemption
+    /// path in the mangle prerouting chain.
+    SetCtMark(u32),
+    /// Non-terminal: copy `ct mark` onto the packet mark so it can be used
+    /// for `ip rule fwmark` routing decisions. Used in mangle prerouting
+    /// (forwarded replies) and mangle output (router-originated replies).
+    RestoreMark,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,6 +47,9 @@ pub enum Proto {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CtState {
     EstablishedRelated,
+    /// New connection. Used to gate `ct mark set` on the very first packet
+    /// of an inbound-exempted flow, so subsequent packets don't redo the work.
+    New,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,6 +108,8 @@ pub struct Match {
     pub icmpv4_type: Option<IcmpV4Type>,
     pub icmpv6_type: Option<IcmpV6Type>,
     pub rate_limit: Option<RateLimit>,
+    /// Match on packet (meta) mark. nft: `meta mark <N>`; iptables: `-m mark --mark <N>`.
+    pub mark: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -162,6 +174,22 @@ impl Rule {
         self.matches.ct_state = Some(CtState::EstablishedRelated);
         self
     }
+    pub fn ct_new(mut self) -> Self {
+        self.matches.ct_state = Some(CtState::New);
+        self
+    }
+    pub fn mark_eq(mut self, mark: u32) -> Self {
+        self.matches.mark = Some(mark);
+        self
+    }
+    /// Build a non-terminal `ct mark set <N>` rule (mangle prerouting).
+    pub fn set_ct_mark(family: Family, mark: u32) -> Self {
+        Self::new(family, Verdict::SetCtMark(mark))
+    }
+    /// Build a non-terminal `meta mark set ct mark` rule (mangle prerouting/output).
+    pub fn restore_mark(family: Family) -> Self {
+        Self::new(family, Verdict::RestoreMark)
+    }
     pub fn icmpv4_type(mut self, t: IcmpV4Type) -> Self {
         self.matches.icmpv4_type = Some(t);
         self
@@ -186,15 +214,43 @@ impl Chain {
     pub fn push(&mut self, rule: Rule) {
         self.rules.push(rule);
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.rules.is_empty()
+    }
 }
 
-/// The full compiled policy: three filter chains plus the list of tunnel
-/// interfaces that need backend-specific NAT/forward integration.
+/// Filter-table chains: kill-switch policy with terminal accept/reject/drop
+/// verdicts.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct RuleSet {
+pub struct FilterRules {
     pub input: Chain,
     pub output: Chain,
     pub forward: Chain,
+}
+
+/// Mangle-table chains: mark setting and conntrack-mark restoration. Renderers
+/// emit nothing when both chains are empty, so existing all-filter policies
+/// produce byte-identical output.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MangleRules {
+    pub prerouting: Chain,
+    pub output: Chain,
+}
+
+impl MangleRules {
+    pub fn is_empty(&self) -> bool {
+        self.prerouting.is_empty() && self.output.is_empty()
+    }
+}
+
+/// The full compiled policy: filter chains, mangle chains (for inbound
+/// service exemption), and the list of tunnel interfaces that need
+/// backend-specific NAT/forward integration.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RuleSet {
+    pub filter: FilterRules,
+    pub mangle: MangleRules,
     /// Tunnel interfaces that need masquerade (fw3 + fw4) and forward_lan
     /// integration (fw4). Empty in `Blocked` policies.
     pub tunnel_interfaces: Vec<String>,
@@ -207,7 +263,7 @@ impl RuleSet {
     #[cfg(test)]
     pub fn output_terminates_in_block(&self) -> bool {
         matches!(
-            self.output.rules.last().map(|r| r.verdict),
+            self.filter.output.rules.last().map(|r| r.verdict),
             Some(Verdict::Reject) | Some(Verdict::Drop)
         )
     }
@@ -215,7 +271,7 @@ impl RuleSet {
     #[cfg(test)]
     pub fn forward_terminates_in_block(&self) -> bool {
         matches!(
-            self.forward.rules.last().map(|r| r.verdict),
+            self.filter.forward.rules.last().map(|r| r.verdict),
             Some(Verdict::Reject) | Some(Verdict::Drop)
         )
     }

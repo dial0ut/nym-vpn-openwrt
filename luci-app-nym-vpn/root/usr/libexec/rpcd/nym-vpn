@@ -63,6 +63,31 @@ validate_input() {
                 on|off) echo "$input" ;;
             esac
             ;;
+        proto)
+            # tcp or udp only
+            case "$input" in
+                tcp|udp) echo "$input" ;;
+            esac
+            ;;
+        port)
+            # 1-65535
+            case "$input" in
+                ''|*[!0-9]*) ;;
+                *)
+                    if [ "$input" -ge 1 ] && [ "$input" -le 65535 ]; then
+                        echo "$input"
+                    fi
+                    ;;
+            esac
+            ;;
+        label)
+            # Free-text label, but reject control chars and quotes for safety.
+            # Max 64 chars.
+            local len=${#input}
+            if [ "$len" -le 64 ]; then
+                echo "$input" | grep -qE '^[A-Za-z0-9 ._/+:()-]*$' && echo "$input"
+            fi
+            ;;
         policy)
             # Only allow/block
             case "$input" in
@@ -712,6 +737,135 @@ handle_network_set() {
     json_dump
 }
 
+handle_inbound_list() {
+    # Output format from `nym-vpnc inbound list`:
+    #   No inbound exemptions configured.
+    # OR one per line:
+    #   tcp/443 — HTTPS reverse proxy
+    #   udp/51820
+    local output=$($VPNC inbound list 2>&1)
+
+    json_init
+    json_add_array "exemptions"
+
+    if ! echo "$output" | grep -q "^No inbound"; then
+        # NOTE: heredoc keeps the while loop in the same shell as json_*
+        # functions so they mutate the parent's JSON state. Using
+        # `echo "$output" | while` would run the loop in a subshell and
+        # silently drop every json_add_object call.
+        while IFS= read -r line; do
+            local proto=$(echo "$line" | sed -n 's|^\([a-z]\+\)/[0-9]\+.*|\1|p')
+            local dport=$(echo "$line" | sed -n 's|^[a-z]\+/\([0-9]\+\).*|\1|p')
+            [ -z "$proto" ] && continue
+            [ -z "$dport" ] && continue
+            local label=$(echo "$line" | sed -n 's|^[a-z]\+/[0-9]\+ — \(.*\)$|\1|p')
+            json_add_object ""
+            json_add_string "proto" "$proto"
+            json_add_int "dport" "$dport"
+            [ -n "$label" ] && json_add_string "label" "$label"
+            json_close_object
+        done <<EOF
+$output
+EOF
+    fi
+
+    json_close_array
+    json_dump
+}
+
+handle_inbound_add() {
+    read input
+    json_load "$input"
+    json_get_var proto proto
+    json_get_var dport dport
+    json_get_var label label
+
+    proto=$(validate_input "$proto" proto)
+    if [ -z "$proto" ]; then
+        json_init
+        json_add_boolean "success" 0
+        json_add_string "error" "Invalid protocol (must be tcp or udp)"
+        json_dump
+        return
+    fi
+
+    dport=$(validate_input "$dport" port)
+    if [ -z "$dport" ]; then
+        json_init
+        json_add_boolean "success" 0
+        json_add_string "error" "Invalid port (must be 1-65535)"
+        json_dump
+        return
+    fi
+
+    local args="$proto:$dport"
+    if [ -n "$label" ]; then
+        label=$(validate_input "$label" label)
+        if [ -z "$label" ]; then
+            json_init
+            json_add_boolean "success" 0
+            json_add_string "error" "Invalid label (max 64 chars, safe chars only)"
+            json_dump
+            return
+        fi
+    fi
+
+    if [ -n "$label" ]; then
+        result=$($VPNC inbound add "$args" --label "$label" 2>&1)
+    else
+        result=$($VPNC inbound add "$args" 2>&1)
+    fi
+    ret=$?
+
+    json_init
+    if [ $ret -eq 0 ]; then
+        json_add_boolean "success" 1
+        json_add_string "message" "Added $args"
+    else
+        json_add_boolean "success" 0
+        json_add_string "error" "$result"
+    fi
+    json_dump
+}
+
+handle_inbound_del() {
+    read input
+    json_load "$input"
+    json_get_var proto proto
+    json_get_var dport dport
+
+    proto=$(validate_input "$proto" proto)
+    if [ -z "$proto" ]; then
+        json_init
+        json_add_boolean "success" 0
+        json_add_string "error" "Invalid protocol (must be tcp or udp)"
+        json_dump
+        return
+    fi
+
+    dport=$(validate_input "$dport" port)
+    if [ -z "$dport" ]; then
+        json_init
+        json_add_boolean "success" 0
+        json_add_string "error" "Invalid port (must be 1-65535)"
+        json_dump
+        return
+    fi
+
+    result=$($VPNC inbound del "$proto:$dport" 2>&1)
+    ret=$?
+
+    json_init
+    if [ $ret -eq 0 ]; then
+        json_add_boolean "success" 1
+        json_add_string "message" "Removed $proto:$dport"
+    else
+        json_add_boolean "success" 0
+        json_add_string "error" "$result"
+    fi
+    json_dump
+}
+
 handle_lan_get() {
     local policy=$($VPNC lan get 2>&1)
 
@@ -858,6 +1012,7 @@ handle_init() {
     local account_raw=$($VPNC account get 2>&1)
     local network_raw=$($VPNC network get 2>&1)
     local lan_raw=$($VPNC lan get 2>&1)
+    local inbound_raw=$($VPNC inbound list 2>&1)
     local adblock_raw=$($VPNC ad-block get 2>&1)
     local dns_raw=$($VPNC dns get 2>&1)
     local daemon_status=$(/etc/init.d/nym-vpnd status 2>&1)
@@ -965,6 +1120,26 @@ handle_init() {
     json_add_object "lan"
     json_add_string "policy" "$lan_raw"
     json_close_object
+
+    # Inbound exemptions — see note in handle_inbound_list re: subshell.
+    json_add_array "inbound_exemptions"
+    if ! echo "$inbound_raw" | grep -q "^No inbound"; then
+        while IFS= read -r line; do
+            local proto=$(echo "$line" | sed -n 's|^\([a-z]\+\)/[0-9]\+.*|\1|p')
+            local dport=$(echo "$line" | sed -n 's|^[a-z]\+/\([0-9]\+\).*|\1|p')
+            [ -z "$proto" ] && continue
+            [ -z "$dport" ] && continue
+            local label=$(echo "$line" | sed -n 's|^[a-z]\+/[0-9]\+ — \(.*\)$|\1|p')
+            json_add_object ""
+            json_add_string "proto" "$proto"
+            json_add_int "dport" "$dport"
+            [ -n "$label" ] && json_add_string "label" "$label"
+            json_close_object
+        done <<EOF
+$inbound_raw
+EOF
+    fi
+    json_close_array
 
     # Ad-block
     json_add_object "ad_block"
@@ -1212,6 +1387,9 @@ case "$1" in
     "network_set": { "network": "str" },
     "lan_get": {},
     "lan_set": { "policy": "str" },
+    "inbound_list": {},
+    "inbound_add": { "proto": "str", "dport": "int", "label": "str" },
+    "inbound_del": { "proto": "str", "dport": "int" },
     "dns_get": {},
     "dns_set": { "enabled": "bool", "servers": "str" },
     "ad_block_get": {},
@@ -1246,6 +1424,9 @@ EOF
             network_set)             handle_network_set ;;
             lan_get)                 handle_lan_get ;;
             lan_set)                 handle_lan_set ;;
+            inbound_list)            handle_inbound_list ;;
+            inbound_add)             handle_inbound_add ;;
+            inbound_del)             handle_inbound_del ;;
             dns_get)                 handle_dns_get ;;
             dns_set)                 handle_dns_set ;;
             ad_block_get)            handle_ad_block_get ;;

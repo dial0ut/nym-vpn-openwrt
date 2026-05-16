@@ -47,7 +47,9 @@ pub(crate) enum RouteManagerCommand {
     ),
     ClearRoutes,
     Shutdown(oneshot::Sender<()>),
-    CreateRoutingRules(bool, oneshot::Sender<Result<(), PlatformError>>),
+    /// `(enable_ipv6, enable_exempt, sender)` — `enable_exempt` installs the
+    /// fwmark→main routing rule used by the inbound-service exemption feature.
+    CreateRoutingRules(bool, bool, oneshot::Sender<Result<(), PlatformError>>),
     ClearRoutingRules(oneshot::Sender<Result<(), PlatformError>>),
     NewChangeListener(oneshot::Sender<mpsc::UnboundedReceiver<CallbackMessage>>),
     GetMtuForRoute(IpAddr, oneshot::Sender<Result<u16, PlatformError>>),
@@ -112,11 +114,20 @@ impl RouteManagerHandle {
     }
 
     /// Ensure that packets are routed using the correct tables.
-    pub async fn create_routing_rules(&self, enable_ipv6: bool) -> Result<(), Error> {
+    ///
+    /// `enable_exempt` adds an extra `ip rule fwmark 0x14e lookup main pref 90`
+    /// so traffic marked by the inbound-service-exemption firewall path exits
+    /// via the real WAN instead of the tunnel.
+    pub async fn create_routing_rules(
+        &self,
+        enable_ipv6: bool,
+        enable_exempt: bool,
+    ) -> Result<(), Error> {
         let (response_tx, response_rx) = oneshot::channel();
         self.tx
             .send(RouteManagerCommand::CreateRoutingRules(
                 enable_ipv6,
+                enable_exempt,
                 response_tx,
             ))
             .map_err(|_| Error::RouteManagerDown)?;

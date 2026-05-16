@@ -31,6 +31,7 @@ return view.extend({
         var ad_block = data.ad_block || {};
         var dns_config = data.dns || {};
         var watchdog = data.watchdog || {};
+        var inbound_exemptions = data.inbound_exemptions || [];
 
         var self = this;
         var E = dom.create.bind(dom);
@@ -1082,6 +1083,197 @@ return view.extend({
             ])
         ]);
         container.appendChild(tunnelCard);
+
+        // Inbound Services Card
+        var inboundState = inbound_exemptions.slice();
+
+        var renderExemptionRow = function(ex) {
+            var killswitchOn = tunnel_config.killswitch !== 'off';
+            var statusClass = killswitchOn ? '' : 'inert';
+            var statusText = killswitchOn ? 'Active' : 'Inert';
+            return E('div', {
+                'class': 'nym-exemption-row',
+                'data-proto': ex.proto,
+                'data-dport': String(ex.dport)
+            }, [
+                E('div', { 'class': 'nym-exemption-proto' }, ex.proto.toUpperCase()),
+                E('div', { 'class': 'nym-exemption-port' }, String(ex.dport)),
+                E('div', { 'class': 'nym-exemption-label' }, ex.label || '—'),
+                E('div', { 'class': 'nym-exemption-status ' + statusClass }, statusText),
+                E('div', {
+                    'class': 'nym-exemption-delete',
+                    'title': 'Remove',
+                    'click': function() { deleteExemption(ex); }
+                }, '×')
+            ]);
+        };
+
+        var inboundListEl = E('div', { 'class': 'nym-exemption-table' });
+
+        var redrawInboundList = function() {
+            inboundListEl.innerHTML = '';
+            if (inboundState.length === 0) {
+                inboundListEl.appendChild(E('div', { 'class': 'nym-exemption-empty' },
+                    'No exemptions configured. Add one below.'));
+                return;
+            }
+            inboundListEl.appendChild(E('div', { 'class': 'nym-exemption-header' }, [
+                E('div', {}, 'Proto'),
+                E('div', {}, 'Port'),
+                E('div', {}, 'Label'),
+                E('div', {}, 'Status'),
+                E('div', {}, '')
+            ]));
+            inboundState.forEach(function(ex) {
+                inboundListEl.appendChild(renderExemptionRow(ex));
+            });
+        };
+
+        var onAddRowKeydown = function(ev) {
+            if (ev.key === 'Enter') { ev.preventDefault(); addInbound(); }
+        };
+
+        var addInbound = function() {
+            var protoSel = document.getElementById('nym-inbound-proto');
+            var portInp = document.getElementById('nym-inbound-port');
+            var labelInp = document.getElementById('nym-inbound-label');
+            var saveBtn = document.getElementById('nym-inbound-save');
+            if (!protoSel || !portInp || !saveBtn) return;
+
+            var proto = protoSel.value;
+            var dportRaw = (portInp.value || '').trim();
+            var label = (labelInp && labelInp.value || '').trim();
+
+            if (!dportRaw) {
+                showToast('Port is required', 'error');
+                return;
+            }
+            var dport = parseInt(dportRaw, 10);
+            if (isNaN(dport) || dport < 1 || dport > 65535) {
+                showToast('Port must be between 1 and 65535', 'error');
+                return;
+            }
+            if (inboundState.some(function(e) { return e.proto === proto && e.dport === dport; })) {
+                showToast(proto.toUpperCase() + '/' + dport + ' is already exempted', 'error');
+                return;
+            }
+            if (label.length > 64) {
+                showToast('Label too long (max 64 characters)', 'error');
+                return;
+            }
+
+            var pending = { proto: proto, dport: dport };
+            if (label) pending.label = label;
+
+            var pendingRow = renderExemptionRow(pending);
+            pendingRow.classList.add('pending');
+            if (inboundState.length === 0) inboundListEl.innerHTML = '';
+            inboundListEl.appendChild(pendingRow);
+            saveBtn.disabled = true;
+            saveBtn.innerHTML = '<span class="nym-btn-spinner"></span>Saving';
+
+            rpc.inboundAdd(proto, dport, label || '').then(function(result) {
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Save';
+                if (result && result.success) {
+                    inboundState.push(pending);
+                    redrawInboundList();
+                    portInp.value = '';
+                    if (labelInp) labelInp.value = '';
+                    showToast('Added ' + proto.toUpperCase() + '/' + dport, 'success');
+                } else {
+                    pendingRow.parentNode && pendingRow.parentNode.removeChild(pendingRow);
+                    if (inboundState.length === 0) redrawInboundList();
+                    showToast((result && result.error) || 'Failed to add exemption', 'error');
+                }
+            }).catch(function(err) {
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Save';
+                pendingRow.parentNode && pendingRow.parentNode.removeChild(pendingRow);
+                if (inboundState.length === 0) redrawInboundList();
+                showToast('Failed: ' + (err && err.message ? err.message : err), 'error');
+            });
+        };
+
+        var deleteExemption = function(ex) {
+            var row = inboundListEl.querySelector(
+                '.nym-exemption-row[data-proto="' + ex.proto + '"][data-dport="' + ex.dport + '"]');
+            if (row) row.classList.add('removing');
+
+            rpc.inboundDel(ex.proto, ex.dport).then(function(result) {
+                if (result && result.success) {
+                    inboundState = inboundState.filter(function(e) {
+                        return !(e.proto === ex.proto && e.dport === ex.dport);
+                    });
+                    redrawInboundList();
+                    showToast('Removed ' + ex.proto.toUpperCase() + '/' + ex.dport, 'success');
+                } else {
+                    if (row) row.classList.remove('removing');
+                    showToast((result && result.error) || 'Failed to delete', 'error');
+                }
+            }).catch(function(err) {
+                if (row) row.classList.remove('removing');
+                showToast('Failed: ' + (err && err.message ? err.message : err), 'error');
+            });
+        };
+
+        var inboundCard = E('div', { 'class': 'nym-card' }, [
+            E('div', { 'class': 'nym-card-header', 'click': function() { toggleCard(inboundCard); } }, [
+                E('div', { 'class': 'nym-card-title' }, [
+                    svgIcon(assets.iconShield),
+                    'Inbound Services'
+                ]),
+                E('div', { 'class': 'nym-card-chevron' }, '▼')
+            ]),
+            E('div', { 'class': 'nym-card-body' }, [
+                E('div', { 'class': 'nym-card-description' },
+                    'Declare ports that bypass the tunnel for reply traffic. Useful for ' +
+                    'hosted services (HTTPS, WireGuard, SSH) reached from the WAN while ' +
+                    'the kill-switch is on. For LAN-hosted services, set up the port ' +
+                    'forward in Network → Firewall → Port Forwards first, then add ' +
+                    'the matching port here.'),
+                (tunnel_config.killswitch === 'off') ? E('div', { 'class': 'nym-error-strip warning' }, [
+                    E('div', { 'class': 'nym-error-icon' }, '⚠'),
+                    E('div', { 'class': 'nym-error-body' }, [
+                        E('div', { 'class': 'nym-error-heading' }, 'Kill-switch is off'),
+                        E('div', {}, 'Exemptions are inert. Services are already reachable directly via WAN.')
+                    ])
+                ]) : E('div', { 'style': 'display:none' }),
+                inboundListEl,
+                E('div', { 'class': 'nym-divider' }),
+                E('div', { 'class': 'nym-form-label' }, 'Add Exemption'),
+                E('div', { 'class': 'nym-exemption-addrow' }, [
+                    E('select', { 'class': 'nym-select', 'id': 'nym-inbound-proto' }, [
+                        E('option', { 'value': 'tcp' }, 'TCP'),
+                        E('option', { 'value': 'udp' }, 'UDP')
+                    ]),
+                    E('input', {
+                        'type': 'text',
+                        'class': 'nym-input',
+                        'id': 'nym-inbound-port',
+                        'placeholder': '1–65535',
+                        'inputmode': 'numeric',
+                        'maxlength': '5',
+                        'keydown': onAddRowKeydown
+                    }),
+                    E('input', {
+                        'type': 'text',
+                        'class': 'nym-input',
+                        'id': 'nym-inbound-label',
+                        'placeholder': 'Label (optional)',
+                        'maxlength': '64',
+                        'keydown': onAddRowKeydown
+                    }),
+                    E('button', {
+                        'class': 'nym-btn nym-btn-primary nym-btn-small',
+                        'id': 'nym-inbound-save',
+                        'click': addInbound
+                    }, 'Save')
+                ])
+            ])
+        ]);
+        redrawInboundList();
+        container.appendChild(inboundCard);
 
         // DNS & Ad Blocking Card
         var adBlockEnabled = ad_block.enabled ? true : false;

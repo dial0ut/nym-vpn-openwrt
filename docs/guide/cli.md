@@ -50,6 +50,20 @@ nym-vpnc account forget
 nym-vpnc account rotate-keys
 ```
 
+## Inbound Services
+
+Expose port-forwarded services to the WAN while the kill-switch is on. See the [Inbound Services guide](inbound-services.md) for the full mechanism and recipes.
+
+```bash
+# List, add, delete
+nym-vpnc inbound list
+nym-vpnc inbound add tcp:443 --label "HTTPS"
+nym-vpnc inbound add udp:51820
+nym-vpnc inbound del tcp:443
+```
+
+The exemption uses the **WAN-side port**. For LAN-hosted services you also need a port forward in `Network → Firewall → Port Forwards`.
+
 ## Tunnel Settings
 
 ```bash

@@ -39,6 +39,15 @@ use rtnetlink::{
 use std::sync::LazyLock;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
+/// Priority for the inbound-exemption rule. Marked reply traffic
+/// (`fwmark 0x14e`) is sent to the main table so it egresses via the real WAN.
+/// Must be evaluated BEFORE the suppress rule and the tunnel rule.
+const EXEMPT_RULE_PRIORITY: u32 = 90;
+
+/// Firewall mark used for inbound-exemption reply pinning. Must match
+/// `nym_firewall::openwrt::EXEMPT_FWMARK`. Distinct from `TUNNEL_FWMARK`.
+const EXEMPT_FWMARK: u32 = 0x14e;
+
 /// Priority for the suppress_prefixlength rule.
 /// This rule checks if the main table has a non-default route for the destination.
 /// It must be evaluated BEFORE the tunnel routing table rule to preserve LAN connectivity.
@@ -69,13 +78,18 @@ static SUPPRESS_RULE_V6: LazyLock<RuleMessage> = LazyLock::new(|| {
     v6_rule
 });
 
-fn all_rules(fwmark: u32, table: u32) -> [RuleMessage; 4] {
-    [
+fn all_rules(fwmark: u32, table: u32, enable_exempt: bool) -> Vec<RuleMessage> {
+    let mut rules = vec![
         no_fwmark_rule_v4(fwmark, table),
         no_fwmark_rule_v6(fwmark, table),
         SUPPRESS_RULE_V4.clone(),
         SUPPRESS_RULE_V6.clone(),
-    ]
+    ];
+    if enable_exempt {
+        rules.push(exempt_rule_v4());
+        rules.push(exempt_rule_v6());
+    }
+    rules
 }
 
 fn no_fwmark_rule_v4(fwmark: u32, table: u32) -> RuleMessage {
@@ -96,6 +110,31 @@ fn no_fwmark_rule_v4(fwmark: u32, table: u32) -> RuleMessage {
 
 fn no_fwmark_rule_v6(fwmark: u32, table: u32) -> RuleMessage {
     let mut v6_rule = no_fwmark_rule_v4(fwmark, table);
+    v6_rule.header.family = AddressFamily::Inet6;
+    v6_rule
+}
+
+/// Routing rule: packets with the exempt fwmark go to the main routing table.
+/// Positive match (no `Invert` flag). Priority 90 sits before suppress (100)
+/// and before the no-fwmark tunnel rule (200), so a marked reply packet
+/// short-circuits the entire tunnel-routing chain and exits the real WAN.
+fn exempt_rule_v4() -> RuleMessage {
+    let mut rule = RuleMessage::default();
+    rule.header = RuleHeader {
+        family: AddressFamily::Inet,
+        action: RuleAction::ToTable,
+        ..RuleHeader::default()
+    };
+    rule.attributes = vec![
+        RuleAttribute::Priority(EXEMPT_RULE_PRIORITY),
+        RuleAttribute::FwMark(EXEMPT_FWMARK),
+        RuleAttribute::Table(RouteHeader::RT_TABLE_MAIN as u32),
+    ];
+    rule
+}
+
+fn exempt_rule_v6() -> RuleMessage {
+    let mut v6_rule = exempt_rule_v4();
     v6_rule.header.family = AddressFamily::Inet6;
     v6_rule
 }
@@ -200,10 +239,14 @@ impl RouteManagerImpl {
         Ok(monitor)
     }
 
-    async fn create_routing_rules(&mut self, enable_ipv6: bool) -> Result<()> {
+    async fn create_routing_rules(
+        &mut self,
+        enable_ipv6: bool,
+        enable_exempt: bool,
+    ) -> Result<()> {
         self.clear_routing_rules().await?;
 
-        for rule in all_rules(self.fwmark, self.table_id)
+        for rule in all_rules(self.fwmark, self.table_id, enable_exempt)
             .into_iter()
             .filter(|rule| rule.header.family == AddressFamily::Inet || enable_ipv6)
         {
@@ -223,7 +266,10 @@ impl RouteManagerImpl {
 
     async fn clear_routing_rules(&mut self) -> Result<()> {
         let rules = self.get_rules().await?;
-        for rule in all_rules(self.fwmark, self.table_id) {
+        // Clear every rule we might ever have installed — including the
+        // optional exempt rules — so a config flip from "exempt on" to
+        // "exempt off" cleans up properly.
+        for rule in all_rules(self.fwmark, self.table_id, true) {
             let mut matching_rule = None;
 
             // `RTM_DELRULE` is way too picky about which rules are considered the same.
@@ -418,8 +464,10 @@ impl RouteManagerImpl {
                 tracing::debug!("Adding routes: {:?}", routes);
                 let _ = result_tx.send(self.add_required_routes(routes.clone()).await);
             }
-            Some(RouteManagerCommand::CreateRoutingRules(enable_ipv6, result_tx)) => {
-                let _ = result_tx.send(self.create_routing_rules(enable_ipv6).await);
+            Some(RouteManagerCommand::CreateRoutingRules(enable_ipv6, enable_exempt, result_tx)) => {
+                let _ = result_tx.send(
+                    self.create_routing_rules(enable_ipv6, enable_exempt).await,
+                );
             }
             Some(RouteManagerCommand::ClearRoutingRules(result_tx)) => {
                 let _ = result_tx.send(self.clear_routing_rules().await);

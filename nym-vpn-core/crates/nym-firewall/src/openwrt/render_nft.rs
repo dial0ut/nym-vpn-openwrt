@@ -6,9 +6,14 @@ use std::fmt::Write;
 
 use super::rules::*;
 
-/// Priority of our chains relative to fw4's: we run first so blocks are
-/// final and fw4 never sees that traffic.
-const PRIORITY_OFFSET: i32 = -10;
+/// Priority of our filter chains relative to fw4's: we run first so blocks
+/// are final and fw4 never sees that traffic.
+const FILTER_PRIORITY_OFFSET: i32 = -10;
+
+/// Priority of our mangle chains. Sits at `mangle - 10` so it runs before
+/// any other mangle hook (and crucially before fw4's dstnat at `dstnat`).
+/// `mangle` is -150 in nftables, so this resolves to -160.
+const MANGLE_PRIORITY_OFFSET: i32 = -10;
 
 /// Render the [`RuleSet`] as an `nft -f` script.
 pub fn render(rs: &RuleSet) -> String {
@@ -22,9 +27,13 @@ pub fn render(rs: &RuleSet) -> String {
     writeln!(out).unwrap();
     writeln!(out, "table inet nym {{").unwrap();
 
-    render_chain(&mut out, "input", "input", &rs.input);
-    render_chain(&mut out, "output", "output", &rs.output);
-    render_chain(&mut out, "forward", "forward", &rs.forward);
+    if !rs.mangle.is_empty() {
+        render_mangle_chain(&mut out, "mangle_prerouting", "prerouting", &rs.mangle.prerouting);
+        render_mangle_chain(&mut out, "mangle_output", "output", &rs.mangle.output);
+    }
+    render_chain(&mut out, "input", "input", &rs.filter.input);
+    render_chain(&mut out, "output", "output", &rs.filter.output);
+    render_chain(&mut out, "forward", "forward", &rs.filter.forward);
 
     writeln!(out, "}}").unwrap();
     out
@@ -35,8 +44,23 @@ fn render_chain(out: &mut String, chain_name: &str, hook: &str, chain: &Chain) {
     writeln!(
         out,
         "        type filter hook {hook} priority filter {sign} {abs}; policy accept;",
-        sign = if PRIORITY_OFFSET < 0 { "-" } else { "+" },
-        abs = PRIORITY_OFFSET.unsigned_abs(),
+        sign = if FILTER_PRIORITY_OFFSET < 0 { "-" } else { "+" },
+        abs = FILTER_PRIORITY_OFFSET.unsigned_abs(),
+    )
+    .unwrap();
+    for rule in &chain.rules {
+        writeln!(out, "        {}", render_rule(rule)).unwrap();
+    }
+    writeln!(out, "    }}").unwrap();
+}
+
+fn render_mangle_chain(out: &mut String, chain_name: &str, hook: &str, chain: &Chain) {
+    writeln!(out, "    chain {chain_name} {{").unwrap();
+    writeln!(
+        out,
+        "        type filter hook {hook} priority mangle {sign} {abs};",
+        sign = if MANGLE_PRIORITY_OFFSET < 0 { "-" } else { "+" },
+        abs = MANGLE_PRIORITY_OFFSET.unsigned_abs(),
     )
     .unwrap();
     for rule in &chain.rules {
@@ -61,7 +85,11 @@ fn render_rule(rule: &Rule) -> String {
     if let Some(ct) = m.ct_state {
         match ct {
             CtState::EstablishedRelated => parts.push("ct state established,related".into()),
+            CtState::New => parts.push("ct state new".into()),
         }
+    }
+    if let Some(mark) = m.mark {
+        parts.push(format!("meta mark {mark:#x}"));
     }
     if let Some(saddr) = &m.saddr {
         parts.push(format!("{} saddr {}", addr_family(rule.family), render_addr(saddr)));
@@ -108,12 +136,14 @@ fn render_rule(rule: &Rule) -> String {
         ));
     }
 
-    let verdict = match rule.verdict {
-        Verdict::Accept => "accept",
-        Verdict::Drop => "drop",
-        Verdict::Reject => "reject",
+    let verdict: String = match rule.verdict {
+        Verdict::Accept => "accept".into(),
+        Verdict::Drop => "drop".into(),
+        Verdict::Reject => "reject".into(),
+        Verdict::SetCtMark(n) => format!("ct mark set {n:#x}"),
+        Verdict::RestoreMark => "meta mark set ct mark".into(),
     };
-    parts.push(verdict.into());
+    parts.push(verdict);
     parts.join(" ")
 }
 
@@ -226,17 +256,77 @@ mod tests {
     }
 
     #[test]
+    fn renders_set_ct_mark_on_new_inbound() {
+        let rule = Rule::set_ct_mark(Family::Inet, 0x14e)
+            .iif("wan")
+            .proto(Proto::Tcp)
+            .dport(443)
+            .ct_new();
+        assert_eq!(
+            render_rule(&rule),
+            "iifname \"wan\" ct state new tcp dport 443 ct mark set 0x14e"
+        );
+    }
+
+    #[test]
+    fn renders_restore_mark() {
+        let rule = Rule::restore_mark(Family::Inet);
+        assert_eq!(render_rule(&rule), "meta mark set ct mark");
+    }
+
+    #[test]
+    fn renders_meta_mark_match_accept() {
+        let rule = Rule::accept(Family::Inet).mark_eq(0x14e);
+        assert_eq!(render_rule(&rule), "meta mark 0x14e accept");
+    }
+
+    #[test]
     fn renders_icmpv6_nd() {
         let rule = Rule::accept(Family::V6).icmpv6_type(IcmpV6Type::RouterAdvert);
         assert_eq!(render_rule(&rule), "icmpv6 type nd-router-advert accept");
     }
 
     #[test]
+    fn render_omits_mangle_chains_when_empty() {
+        let mut rs = RuleSet::default();
+        rs.filter.input.push(Rule::accept(Family::Inet).iif("lo"));
+        rs.filter.output.push(Rule::reject(Family::Inet));
+        rs.filter.forward.push(Rule::reject(Family::Inet));
+        let script = render(&rs);
+        assert!(!script.contains("mangle_prerouting"));
+        assert!(!script.contains("mangle_output"));
+        assert!(!script.contains("priority mangle"));
+    }
+
+    #[test]
+    fn render_emits_mangle_chains_when_non_empty() {
+        let mut rs = RuleSet::default();
+        rs.mangle.prerouting.push(Rule::restore_mark(Family::Inet));
+        rs.mangle.prerouting.push(
+            Rule::set_ct_mark(Family::Inet, 0x14e)
+                .iif("wan")
+                .proto(Proto::Tcp)
+                .dport(443)
+                .ct_new(),
+        );
+        rs.mangle.output.push(Rule::restore_mark(Family::Inet));
+        rs.filter.output.push(Rule::reject(Family::Inet));
+        rs.filter.forward.push(Rule::reject(Family::Inet));
+        let script = render(&rs);
+        assert!(script.contains("chain mangle_prerouting"));
+        assert!(script.contains("chain mangle_output"));
+        assert!(script.contains("type filter hook prerouting priority mangle - 10"));
+        assert!(script.contains("type filter hook output priority mangle - 10"));
+        assert!(script.contains("meta mark set ct mark"));
+        assert!(script.contains("iifname \"wan\" ct state new tcp dport 443 ct mark set 0x14e"));
+    }
+
+    #[test]
     fn render_emits_full_table() {
         let mut rs = RuleSet::default();
-        rs.input.push(Rule::accept(Family::Inet).iif("lo"));
-        rs.output.push(Rule::reject(Family::Inet));
-        rs.forward.push(Rule::reject(Family::Inet));
+        rs.filter.input.push(Rule::accept(Family::Inet).iif("lo"));
+        rs.filter.output.push(Rule::reject(Family::Inet));
+        rs.filter.forward.push(Rule::reject(Family::Inet));
         let script = render(&rs);
         assert!(script.contains("table inet nym"));
         assert!(script.contains("chain input"));

@@ -39,6 +39,27 @@ impl TryFrom<proto::VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
             ))?
             .into();
 
+        let inbound_exemptions = value
+            .inbound_exemptions
+            .into_iter()
+            .filter_map(|e| {
+                let proto = match proto::InboundExemptionProtocol::try_from(e.proto).ok()? {
+                    proto::InboundExemptionProtocol::Tcp => {
+                        nym_vpn_lib_types::InboundExemptionProtocol::Tcp
+                    }
+                    proto::InboundExemptionProtocol::Udp => {
+                        nym_vpn_lib_types::InboundExemptionProtocol::Udp
+                    }
+                    proto::InboundExemptionProtocol::Unspecified => return None,
+                };
+                Some(nym_vpn_lib_types::InboundExemption {
+                    proto,
+                    dport: e.dport as u16,
+                    label: e.label,
+                })
+            })
+            .collect();
+
         let config = nym_vpn_lib_types::VpnServiceConfig {
             entry_point,
             exit_point,
@@ -56,6 +77,7 @@ impl TryFrom<proto::VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
             killswitch: value.killswitch,
             mixnet_traffic,
             network_stats,
+            inbound_exemptions,
         };
         Ok(config)
     }
@@ -72,6 +94,23 @@ impl From<nym_vpn_lib_types::VpnServiceConfig> for proto::VpnServiceConfig {
         let mixnet_traffic = Some(proto::MixnetTrafficConfig::from(value.mixnet_traffic));
 
         let network_stats = Some(proto::NetworkStatsConfig::from(value.network_stats));
+
+        let inbound_exemptions = value
+            .inbound_exemptions
+            .into_iter()
+            .map(|e| proto::InboundExemption {
+                proto: match e.proto {
+                    nym_vpn_lib_types::InboundExemptionProtocol::Tcp => {
+                        proto::InboundExemptionProtocol::Tcp as i32
+                    }
+                    nym_vpn_lib_types::InboundExemptionProtocol::Udp => {
+                        proto::InboundExemptionProtocol::Udp as i32
+                    }
+                },
+                dport: e.dport as u32,
+                label: e.label,
+            })
+            .collect();
 
         proto::VpnServiceConfig {
             entry_point,
@@ -90,6 +129,7 @@ impl From<nym_vpn_lib_types::VpnServiceConfig> for proto::VpnServiceConfig {
             killswitch: value.killswitch,
             mixnet_traffic,
             network_stats,
+            inbound_exemptions,
         }
     }
 }

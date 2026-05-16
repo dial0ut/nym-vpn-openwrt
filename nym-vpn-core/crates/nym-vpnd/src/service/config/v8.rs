@@ -32,10 +32,27 @@ pub struct VpnServiceConfig {
     pub network_stats: NetworkStatisticsConfig,
     #[serde(default = "default_killswitch")]
     pub killswitch: bool,
+    #[serde(default)]
+    pub inbound_exemptions: Vec<InboundExemption>,
 }
 
 fn default_killswitch() -> bool {
     true
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Hash)]
+pub struct InboundExemption {
+    pub proto: InboundExemptionProtocol,
+    pub dport: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum InboundExemptionProtocol {
+    Tcp,
+    Udp,
 }
 
 impl From<VpnServiceConfig> for VpnServiceConfigExt {
@@ -82,6 +99,22 @@ impl TryFrom<VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
             enable_ad_blocking: value.enable_ad_blocking,
             network_stats,
             killswitch: value.killswitch,
+            inbound_exemptions: value
+                .inbound_exemptions
+                .into_iter()
+                .map(|e| nym_vpn_lib_types::InboundExemption {
+                    proto: match e.proto {
+                        InboundExemptionProtocol::Tcp => {
+                            nym_vpn_lib_types::InboundExemptionProtocol::Tcp
+                        }
+                        InboundExemptionProtocol::Udp => {
+                            nym_vpn_lib_types::InboundExemptionProtocol::Udp
+                        }
+                    },
+                    dport: e.dport,
+                    label: e.label,
+                })
+                .collect(),
         };
 
         Ok(config)

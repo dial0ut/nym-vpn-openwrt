@@ -168,6 +168,20 @@ impl VpnServiceConfigManager {
         }
     }
 
+    pub async fn set_inbound_exemptions(
+        &mut self,
+        exemptions: Vec<nym_vpn_lib_types::InboundExemption>,
+    ) {
+        if self.config.inbound_exemptions != exemptions {
+            self.config.inbound_exemptions = exemptions;
+            self.save_config_and_send_event().await;
+        }
+    }
+
+    pub fn inbound_exemptions(&self) -> &[nym_vpn_lib_types::InboundExemption] {
+        &self.config.inbound_exemptions
+    }
+
     /// Enable or disable custom DNS servers
     ///
     /// Returns true if the setting has changed, otherwise false if it's the same
@@ -403,6 +417,26 @@ impl VpnServiceConfigManager {
             exit_point: Box::new(self.config.exit_point.clone()),
             dns,
             killswitch: self.config.killswitch,
+            inbound_exemptions: self
+                .config
+                .inbound_exemptions
+                .iter()
+                .map(|e| {
+                    let proto = match e.proto {
+                        nym_vpn_lib_types::InboundExemptionProtocol::Tcp => {
+                            nym_firewall::TransportProtocol::Tcp
+                        }
+                        nym_vpn_lib_types::InboundExemptionProtocol::Udp => {
+                            nym_firewall::TransportProtocol::Udp
+                        }
+                    };
+                    let mut ex = nym_firewall::InboundExemption::new(proto, e.dport);
+                    if let Some(label) = &e.label {
+                        ex = ex.with_label(label);
+                    }
+                    ex
+                })
+                .collect(),
         }
     }
 }

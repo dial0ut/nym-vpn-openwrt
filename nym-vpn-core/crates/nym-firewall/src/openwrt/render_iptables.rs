@@ -16,24 +16,37 @@ pub enum AddrFamily {
 pub const CHAIN_INPUT: &str = "NYM_INPUT";
 pub const CHAIN_OUTPUT: &str = "NYM_OUTPUT";
 pub const CHAIN_FORWARD: &str = "NYM_FORWARD";
+pub const CHAIN_MANGLE_PREROUTING: &str = "NYM_MANGLE_PREROUTING";
+pub const CHAIN_MANGLE_OUTPUT: &str = "NYM_MANGLE_OUTPUT";
 
 /// Render the [`RuleSet`] for one address family as an iptables-restore
-/// script body.
+/// script body. When `rs.mangle` is non-empty, a `*mangle` table block is
+/// emitted before `*filter`.
 pub fn render(rs: &RuleSet, family: AddrFamily) -> String {
     let mut out = String::new();
+
+    if !rs.mangle.is_empty() {
+        writeln!(out, "*mangle").unwrap();
+        writeln!(out, ":{CHAIN_MANGLE_PREROUTING} - [0:0]").unwrap();
+        writeln!(out, ":{CHAIN_MANGLE_OUTPUT} - [0:0]").unwrap();
+        writeln!(out, "-F {CHAIN_MANGLE_PREROUTING}").unwrap();
+        writeln!(out, "-F {CHAIN_MANGLE_OUTPUT}").unwrap();
+        render_chain(&mut out, CHAIN_MANGLE_PREROUTING, &rs.mangle.prerouting, family);
+        render_chain(&mut out, CHAIN_MANGLE_OUTPUT, &rs.mangle.output, family);
+        writeln!(out, "COMMIT").unwrap();
+    }
+
     writeln!(out, "*filter").unwrap();
-    // Declare our chains (create-if-missing with zeroed counters).
     writeln!(out, ":{CHAIN_INPUT} - [0:0]").unwrap();
     writeln!(out, ":{CHAIN_OUTPUT} - [0:0]").unwrap();
     writeln!(out, ":{CHAIN_FORWARD} - [0:0]").unwrap();
-    // Flush so a re-apply starts from a known state.
     writeln!(out, "-F {CHAIN_INPUT}").unwrap();
     writeln!(out, "-F {CHAIN_OUTPUT}").unwrap();
     writeln!(out, "-F {CHAIN_FORWARD}").unwrap();
 
-    render_chain(&mut out, CHAIN_INPUT, &rs.input, family);
-    render_chain(&mut out, CHAIN_OUTPUT, &rs.output, family);
-    render_chain(&mut out, CHAIN_FORWARD, &rs.forward, family);
+    render_chain(&mut out, CHAIN_INPUT, &rs.filter.input, family);
+    render_chain(&mut out, CHAIN_OUTPUT, &rs.filter.output, family);
+    render_chain(&mut out, CHAIN_FORWARD, &rs.filter.forward, family);
 
     writeln!(out, "COMMIT").unwrap();
     out
@@ -94,7 +107,11 @@ fn render_rule(rule: &Rule, family: AddrFamily) -> String {
             CtState::EstablishedRelated => {
                 parts.push("-m conntrack --ctstate ESTABLISHED,RELATED".into())
             }
+            CtState::New => parts.push("-m conntrack --ctstate NEW".into()),
         }
+    }
+    if let Some(mark) = m.mark {
+        parts.push(format!("-m mark --mark {mark:#x}"));
     }
     if let Some(rl) = m.rate_limit {
         parts.push(format!(
@@ -107,6 +124,8 @@ fn render_rule(rule: &Rule, family: AddrFamily) -> String {
         Verdict::Accept => parts.push("-j ACCEPT".into()),
         Verdict::Drop => parts.push("-j DROP".into()),
         Verdict::Reject => parts.push(format!("-j REJECT --reject-with {}", reject_with(rule, family))),
+        Verdict::SetCtMark(n) => parts.push(format!("-j CONNMARK --set-mark {n:#x}")),
+        Verdict::RestoreMark => parts.push("-j CONNMARK --restore-mark".into()),
     }
     parts.join(" ")
 }
@@ -240,12 +259,40 @@ mod tests {
     }
 
     #[test]
+    fn renders_set_ct_mark_on_new_inbound_v4() {
+        let rule = Rule::set_ct_mark(Family::V4, 0x14e)
+            .iif("wan")
+            .proto(Proto::Tcp)
+            .dport(443)
+            .ct_new();
+        assert_eq!(
+            render_rule(&rule, AddrFamily::V4),
+            "-i wan -p tcp --dport 443 -m conntrack --ctstate NEW -j CONNMARK --set-mark 0x14e"
+        );
+    }
+
+    #[test]
+    fn renders_restore_mark() {
+        let rule = Rule::restore_mark(Family::Inet);
+        assert_eq!(render_rule(&rule, AddrFamily::V4), "-j CONNMARK --restore-mark");
+    }
+
+    #[test]
+    fn renders_mark_match_accept() {
+        let rule = Rule::accept(Family::Inet).mark_eq(0x14e);
+        assert_eq!(
+            render_rule(&rule, AddrFamily::V4),
+            "-m mark --mark 0x14e -j ACCEPT"
+        );
+    }
+
+    #[test]
     fn skips_v6_only_rules_in_v4_render() {
         let mut rs = RuleSet::default();
-        rs.input.push(Rule::accept(Family::V6).icmpv6_type(IcmpV6Type::RouterAdvert));
-        rs.input.push(Rule::accept(Family::V4).proto(Proto::Udp).dport(67));
-        rs.output.push(Rule::reject(Family::Inet));
-        rs.forward.push(Rule::reject(Family::Inet));
+        rs.filter.input.push(Rule::accept(Family::V6).icmpv6_type(IcmpV6Type::RouterAdvert));
+        rs.filter.input.push(Rule::accept(Family::V4).proto(Proto::Udp).dport(67));
+        rs.filter.output.push(Rule::reject(Family::Inet));
+        rs.filter.forward.push(Rule::reject(Family::Inet));
         let v4 = render(&rs, AddrFamily::V4);
         assert!(!v4.contains("icmpv6"));
         assert!(v4.contains("--dport 67"));
@@ -254,13 +301,46 @@ mod tests {
     #[test]
     fn skips_v4_only_rules_in_v6_render() {
         let mut rs = RuleSet::default();
-        rs.input.push(Rule::accept(Family::V6).icmpv6_type(IcmpV6Type::RouterAdvert));
-        rs.input.push(Rule::accept(Family::V4).proto(Proto::Udp).dport(67));
-        rs.output.push(Rule::reject(Family::Inet));
-        rs.forward.push(Rule::reject(Family::Inet));
+        rs.filter.input.push(Rule::accept(Family::V6).icmpv6_type(IcmpV6Type::RouterAdvert));
+        rs.filter.input.push(Rule::accept(Family::V4).proto(Proto::Udp).dport(67));
+        rs.filter.output.push(Rule::reject(Family::Inet));
+        rs.filter.forward.push(Rule::reject(Family::Inet));
         let v6 = render(&rs, AddrFamily::V6);
         assert!(v6.contains("icmpv6"));
         assert!(!v6.contains("--dport 67"));
+    }
+
+    #[test]
+    fn render_omits_mangle_table_when_empty() {
+        let rs = RuleSet::default();
+        let v4 = render(&rs, AddrFamily::V4);
+        assert!(!v4.contains("*mangle"));
+        assert!(!v4.contains("NYM_MANGLE_PREROUTING"));
+        assert!(v4.contains("*filter"));
+    }
+
+    #[test]
+    fn render_emits_mangle_table_when_non_empty() {
+        let mut rs = RuleSet::default();
+        rs.mangle.prerouting.push(Rule::restore_mark(Family::Inet));
+        rs.mangle.prerouting.push(
+            Rule::set_ct_mark(Family::V4, 0x14e)
+                .iif("wan")
+                .proto(Proto::Tcp)
+                .dport(443)
+                .ct_new(),
+        );
+        rs.mangle.output.push(Rule::restore_mark(Family::Inet));
+        let v4 = render(&rs, AddrFamily::V4);
+        assert!(v4.starts_with("*mangle\n"));
+        assert!(v4.contains(":NYM_MANGLE_PREROUTING - [0:0]"));
+        assert!(v4.contains(":NYM_MANGLE_OUTPUT - [0:0]"));
+        assert!(v4.contains("-A NYM_MANGLE_PREROUTING -j CONNMARK --restore-mark"));
+        assert!(v4.contains("-A NYM_MANGLE_PREROUTING -i wan -p tcp --dport 443 -m conntrack --ctstate NEW -j CONNMARK --set-mark 0x14e"));
+        assert!(v4.contains("-A NYM_MANGLE_OUTPUT -j CONNMARK --restore-mark"));
+        // Both tables COMMIT.
+        let commits: Vec<&str> = v4.matches("COMMIT").collect();
+        assert_eq!(commits.len(), 2, "expected COMMIT for both *mangle and *filter");
     }
 
     #[test]

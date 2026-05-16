@@ -107,6 +107,7 @@ impl ConnectingState {
                 // Allow default DNS servers since hickory does not rely on custom DNS
                 dns_servers: shared_state.tunnel_settings.default_dns_ips(),
                 tunnel_interface: None,
+                inbound_exemptions: shared_state.tunnel_settings.inbound_exemptions.clone(),
             };
 
             if let Err(err) = Self::set_firewall_policy(shared_state, &firewall_policy_params) {
@@ -682,6 +683,9 @@ struct ConnectingPolicyParameters {
 
     /// Tunnel interface
     tunnel_interface: Option<TunnelInterface>,
+
+    /// Inbound services exempted from the tunnel.
+    inbound_exemptions: Vec<nym_firewall::InboundExemption>,
 }
 
 impl ConnectingPolicyParameters {
@@ -758,6 +762,7 @@ impl ConnectingPolicyParameters {
             // todo: only allow connection towards entry endpoint?
             allowed_entry_tunnel_traffic: AllowedTunnelTraffic::All,
             allowed_exit_tunnel_traffic: AllowedTunnelTraffic::All,
+            inbound_exemptions: self.inbound_exemptions.clone(),
         }
     }
 }

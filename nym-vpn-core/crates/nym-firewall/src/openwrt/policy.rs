@@ -13,7 +13,7 @@ use ipnetwork::IpNetwork;
 use super::common;
 use super::rules::*;
 use crate::FirewallPolicy;
-use crate::net::{AllowedEndpoint, TransportProtocol, TunnelMetadata};
+use crate::net::{AllowedEndpoint, InboundExemption, TransportProtocol, TunnelMetadata};
 
 /// LAN networks (RFC1918 private + IPv6 link-local + ULA).
 const LAN_NETS_V4: &[&str] = &["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"];
@@ -48,6 +48,7 @@ pub fn compile(policy: &FirewallPolicy) -> RuleSet {
             allow_lan,
             dns_config,
             allowed_endpoints,
+            inbound_exemptions,
             ..
         } => {
             for ep in peer_endpoints {
@@ -67,10 +68,12 @@ pub fn compile(policy: &FirewallPolicy) -> RuleSet {
                     rs.tunnel_interfaces.push(m.interface.clone());
                 }
             }
+            exemption_filter_accepts(&mut rs, inbound_exemptions);
             block_dns(&mut rs);
             if *allow_lan {
                 allow_lan_traffic(&mut rs);
             }
+            exemption_mangle(&mut rs, inbound_exemptions);
         }
 
         FirewallPolicy::Connected {
@@ -78,9 +81,13 @@ pub fn compile(policy: &FirewallPolicy) -> RuleSet {
             tunnel,
             allow_lan,
             dns_config,
-            ..
+            allowed_endpoints,
+            inbound_exemptions,
         } => {
             for ep in peer_endpoints {
+                allow_endpoint(&mut rs, ep);
+            }
+            for ep in allowed_endpoints {
                 allow_endpoint(&mut rs, ep);
             }
             // Tunnel-configured DNS: only egress via the tunnel interface.
@@ -100,10 +107,12 @@ pub fn compile(policy: &FirewallPolicy) -> RuleSet {
                     cve_2019_14899_protection(&mut rs, m);
                 }
             }
+            exemption_filter_accepts(&mut rs, inbound_exemptions);
             block_dns(&mut rs);
             if *allow_lan {
                 allow_lan_traffic(&mut rs);
             }
+            exemption_mangle(&mut rs, inbound_exemptions);
         }
 
         FirewallPolicy::Blocked {
@@ -134,33 +143,33 @@ pub fn compile(policy: &FirewallPolicy) -> RuleSet {
 
 fn base_rules(rs: &mut RuleSet) {
     // Loopback.
-    rs.input.push(Rule::accept(Family::Inet).iif("lo"));
-    rs.output.push(Rule::accept(Family::Inet).oif("lo"));
+    rs.filter.input.push(Rule::accept(Family::Inet).iif("lo"));
+    rs.filter.output.push(Rule::accept(Family::Inet).oif("lo"));
 
     // Established/related — covers return traffic on every chain.
-    rs.input.push(Rule::accept(Family::Inet).ct_established());
-    rs.output.push(Rule::accept(Family::Inet).ct_established());
-    rs.forward.push(Rule::accept(Family::Inet).ct_established());
+    rs.filter.input.push(Rule::accept(Family::Inet).ct_established());
+    rs.filter.output.push(Rule::accept(Family::Inet).ct_established());
+    rs.filter.forward.push(Rule::accept(Family::Inet).ct_established());
 
     // DHCPv4 — router as client and as server.
-    rs.input.push(
+    rs.filter.input.push(
         Rule::accept(Family::V4)
             .proto(Proto::Udp)
             .sport(DHCPV4_SERVER_PORT)
             .dport(DHCPV4_CLIENT_PORT),
     );
-    rs.input.push(
+    rs.filter.input.push(
         Rule::accept(Family::V4)
             .proto(Proto::Udp)
             .dport(DHCPV4_SERVER_PORT),
     );
-    rs.output.push(
+    rs.filter.output.push(
         Rule::accept(Family::V4)
             .proto(Proto::Udp)
             .sport(DHCPV4_CLIENT_PORT)
             .dport(DHCPV4_SERVER_PORT),
     );
-    rs.output.push(
+    rs.filter.output.push(
         Rule::accept(Family::V4)
             .proto(Proto::Udp)
             .sport(DHCPV4_SERVER_PORT)
@@ -168,24 +177,24 @@ fn base_rules(rs: &mut RuleSet) {
     );
 
     // DHCPv6 — router as client and as server.
-    rs.input.push(
+    rs.filter.input.push(
         Rule::accept(Family::V6)
             .proto(Proto::Udp)
             .sport(DHCPV6_SERVER_PORT)
             .dport(DHCPV6_CLIENT_PORT),
     );
-    rs.input.push(
+    rs.filter.input.push(
         Rule::accept(Family::V6)
             .proto(Proto::Udp)
             .dport(DHCPV6_SERVER_PORT),
     );
-    rs.output.push(
+    rs.filter.output.push(
         Rule::accept(Family::V6)
             .proto(Proto::Udp)
             .sport(DHCPV6_CLIENT_PORT)
             .dport(DHCPV6_SERVER_PORT),
     );
-    rs.output.push(
+    rs.filter.output.push(
         Rule::accept(Family::V6)
             .proto(Proto::Udp)
             .sport(DHCPV6_SERVER_PORT)
@@ -199,14 +208,14 @@ fn base_rules(rs: &mut RuleSet) {
         IcmpV6Type::NeighborAdvert,
         IcmpV6Type::Redirect,
     ] {
-        rs.input.push(Rule::accept(Family::V6).icmpv6_type(t));
+        rs.filter.input.push(Rule::accept(Family::V6).icmpv6_type(t));
     }
     for t in [
         IcmpV6Type::RouterSolicit,
         IcmpV6Type::NeighborSolicit,
         IcmpV6Type::NeighborAdvert,
     ] {
-        rs.output.push(Rule::accept(Family::V6).icmpv6_type(t));
+        rs.filter.output.push(Rule::accept(Family::V6).icmpv6_type(t));
     }
 
     // mwan3 tracking pings — keep WAN interfaces alive so mwan3 doesn't
@@ -214,13 +223,13 @@ fn base_rules(rs: &mut RuleSet) {
     for ip in common::get_mwan3_track_ips() {
         match ip {
             IpAddr::V4(_) => {
-                rs.input.push(
+                rs.filter.input.push(
                     Rule::accept(Family::V4)
                         .proto(Proto::Icmp)
                         .icmpv4_type(IcmpV4Type::EchoReply)
                         .saddr(ip),
                 );
-                rs.output.push(
+                rs.filter.output.push(
                     Rule::accept(Family::V4)
                         .proto(Proto::Icmp)
                         .icmpv4_type(IcmpV4Type::EchoRequest)
@@ -228,13 +237,13 @@ fn base_rules(rs: &mut RuleSet) {
                 );
             }
             IpAddr::V6(_) => {
-                rs.input.push(
+                rs.filter.input.push(
                     Rule::accept(Family::V6)
                         .proto(Proto::IcmpV6)
                         .icmpv6_type(IcmpV6Type::EchoReply)
                         .saddr(ip),
                 );
-                rs.output.push(
+                rs.filter.output.push(
                     Rule::accept(Family::V6)
                         .proto(Proto::IcmpV6)
                         .icmpv6_type(IcmpV6Type::EchoRequest)
@@ -245,6 +254,58 @@ fn base_rules(rs: &mut RuleSet) {
     }
 }
 
+/// Filter accepts for the inbound-exemption mark. Slotted **after** tunnel
+/// allows (so tunnel traffic still runs through normal filter logic) and
+/// **before** `block_dns` (so a DNAT'd inbound DNS service on an exempt port
+/// isn't rejected). Anchored on the mark alone — port matching happened in
+/// the mangle prerouting chain, so by the time we see this we know the
+/// packet belongs to an exempted flow.
+fn exemption_filter_accepts(rs: &mut RuleSet, exemptions: &[InboundExemption]) {
+    if exemptions.is_empty() {
+        return;
+    }
+    rs.filter.input.push(Rule::accept(Family::Inet).mark_eq(common::EXEMPT_FWMARK));
+    rs.filter.output.push(Rule::accept(Family::Inet).mark_eq(common::EXEMPT_FWMARK));
+    rs.filter.forward.push(Rule::accept(Family::Inet).mark_eq(common::EXEMPT_FWMARK));
+}
+
+/// Mangle chain emission. `mangle_prerouting` restores the connmark for every
+/// packet (so replies traversing the router carry the mark for `ip rule`) and
+/// sets the connmark on the first packet of any matching inbound flow.
+/// `mangle_output` restores the connmark for router-originated reply packets
+/// so the post-mangle route reevaluation hits the fwmark rule.
+fn exemption_mangle(rs: &mut RuleSet, exemptions: &[InboundExemption]) {
+    if exemptions.is_empty() {
+        return;
+    }
+    let Some(wan_iface) = common::detect_wan_iface() else {
+        tracing::warn!(
+            "Inbound exemptions configured but WAN interface could not be detected. \
+             Exemption mangle rules will not be emitted; reply traffic will leak into the tunnel."
+        );
+        return;
+    };
+
+    // Restore comes first so replies on established flows pick up the mark.
+    rs.mangle.prerouting.push(Rule::restore_mark(Family::Inet));
+    // Set the connmark on the first packet of each exempted inbound flow.
+    for ex in exemptions {
+        let proto = match ex.proto {
+            TransportProtocol::Tcp => Proto::Tcp,
+            TransportProtocol::Udp => Proto::Udp,
+        };
+        rs.mangle.prerouting.push(
+            Rule::set_ct_mark(Family::Inet, common::EXEMPT_FWMARK)
+                .iif(&wan_iface)
+                .proto(proto)
+                .dport(ex.dport)
+                .ct_new(),
+        );
+    }
+    // Restore for locally-originated replies (router-hosted services).
+    rs.mangle.output.push(Rule::restore_mark(Family::Inet));
+}
+
 fn allow_endpoint(rs: &mut RuleSet, ep: &AllowedEndpoint) {
     let ip = ep.endpoint.address.ip();
     let port = ep.endpoint.address.port();
@@ -253,13 +314,13 @@ fn allow_endpoint(rs: &mut RuleSet, ep: &AllowedEndpoint) {
         TransportProtocol::Udp => Proto::Udp,
     };
     let family = family_of(&ip);
-    rs.output.push(
+    rs.filter.output.push(
         Rule::accept(family)
             .proto(proto)
             .daddr(ip)
             .dport(port),
     );
-    rs.input.push(
+    rs.filter.input.push(
         Rule::accept(family)
             .proto(proto)
             .saddr(ip)
@@ -292,14 +353,14 @@ fn allow_dns_server(rs: &mut RuleSet, dns: IpAddr, iface: Option<&str>) {
             out = out.oif(iface);
             inp = inp.iif(iface);
         }
-        rs.output.push(out);
-        rs.input.push(inp);
+        rs.filter.output.push(out);
+        rs.filter.input.push(inp);
     }
 
     // Forward DNS for LAN clients (only when not iface-restricted).
     if iface.is_none() {
         for proto in [Proto::Udp, Proto::Tcp] {
-            rs.forward.push(
+            rs.filter.forward.push(
                 Rule::accept(family)
                     .proto(proto)
                     .daddr(dns)
@@ -310,11 +371,11 @@ fn allow_dns_server(rs: &mut RuleSet, dns: IpAddr, iface: Option<&str>) {
 }
 
 fn allow_tunnel(rs: &mut RuleSet, iface: &str) {
-    rs.input.push(Rule::accept(Family::Inet).iif(iface));
-    rs.output.push(Rule::accept(Family::Inet).oif(iface));
+    rs.filter.input.push(Rule::accept(Family::Inet).iif(iface));
+    rs.filter.output.push(Rule::accept(Family::Inet).oif(iface));
     // Forward LAN traffic out the tunnel. Return traffic is handled by the
     // ct established rule at the top of the forward chain.
-    rs.forward.push(Rule::accept(Family::Inet).oif(iface));
+    rs.filter.forward.push(Rule::accept(Family::Inet).oif(iface));
 }
 
 /// CVE-2019-14899: an attacker on the local network can probe whether a host
@@ -322,7 +383,7 @@ fn allow_tunnel(rs: &mut RuleSet, iface: &str) {
 /// non-tunnel interface. Drop those.
 fn cve_2019_14899_protection(rs: &mut RuleSet, tunnel: &TunnelMetadata) {
     for ip in &tunnel.ips {
-        rs.input.push(
+        rs.filter.input.push(
             Rule::drop_(family_of(ip))
                 .iif_not(&tunnel.interface)
                 .daddr(*ip),
@@ -332,9 +393,9 @@ fn cve_2019_14899_protection(rs: &mut RuleSet, tunnel: &TunnelMetadata) {
 
 fn block_dns(rs: &mut RuleSet) {
     for proto in [Proto::Udp, Proto::Tcp] {
-        rs.output
+        rs.filter.output
             .push(Rule::reject(Family::Inet).proto(proto).dport(DNS_PORT));
-        rs.forward
+        rs.filter.forward
             .push(Rule::reject(Family::Inet).proto(proto).dport(DNS_PORT));
     }
 }
@@ -343,7 +404,7 @@ fn block_dns(rs: &mut RuleSet) {
 /// clock and would otherwise deadlock here, since TLS to the upstream API
 /// fails cert validity until sysntpd can sync.
 fn ntp_escape_hatch(rs: &mut RuleSet) {
-    rs.output.push(
+    rs.filter.output.push(
         Rule::accept(Family::Inet)
             .proto(Proto::Udp)
             .dport(NTP_PORT)
@@ -354,29 +415,29 @@ fn ntp_escape_hatch(rs: &mut RuleSet) {
 fn allow_lan_traffic(rs: &mut RuleSet) {
     for net in LAN_NETS_V4 {
         let n: IpNetwork = net.parse().expect("static LAN_NETS_V4 entry is valid");
-        rs.input.push(Rule::accept(Family::V4).saddr(n));
-        rs.output.push(Rule::accept(Family::V4).daddr(n));
+        rs.filter.input.push(Rule::accept(Family::V4).saddr(n));
+        rs.filter.output.push(Rule::accept(Family::V4).daddr(n));
         // Only daddr in forward — saddr would let a LAN client forward
         // straight out WAN between sessions, defeating the kill-switch.
-        rs.forward.push(Rule::accept(Family::V4).daddr(n));
+        rs.filter.forward.push(Rule::accept(Family::V4).daddr(n));
     }
     for net in LAN_NETS_V6 {
         let n: IpNetwork = net.parse().expect("static LAN_NETS_V6 entry is valid");
-        rs.input.push(Rule::accept(Family::V6).saddr(n));
-        rs.output.push(Rule::accept(Family::V6).daddr(n));
-        rs.forward.push(Rule::accept(Family::V6).daddr(n));
+        rs.filter.input.push(Rule::accept(Family::V6).saddr(n));
+        rs.filter.output.push(Rule::accept(Family::V6).daddr(n));
+        rs.filter.forward.push(Rule::accept(Family::V6).daddr(n));
     }
     let mcast4: IpNetwork = MULTICAST_V4.parse().unwrap();
     let mcast6: IpNetwork = MULTICAST_V6.parse().unwrap();
-    rs.output.push(Rule::accept(Family::V4).daddr(mcast4));
-    rs.output.push(Rule::accept(Family::V6).daddr(mcast6));
+    rs.filter.output.push(Rule::accept(Family::V4).daddr(mcast4));
+    rs.filter.output.push(Rule::accept(Family::V6).daddr(mcast6));
 }
 
 fn final_reject(rs: &mut RuleSet) {
     // INPUT is intentionally left to fall through to fw3/fw4's own input
     // chain so the router's own management traffic (SSH, LuCI) still works.
-    rs.output.push(Rule::reject(Family::Inet));
-    rs.forward.push(Rule::reject(Family::Inet));
+    rs.filter.output.push(Rule::reject(Family::Inet));
+    rs.filter.forward.push(Rule::reject(Family::Inet));
 }
 
 fn family_of(ip: &IpAddr) -> Family {
@@ -444,6 +505,7 @@ mod tests {
             allowed_endpoints: vec![],
             allowed_entry_tunnel_traffic: AllowedTunnelTraffic::All,
             allowed_exit_tunnel_traffic: AllowedTunnelTraffic::All,
+            inbound_exemptions: vec![],
         };
         let rs = compile(&policy);
         assert!(rs.output_terminates_in_block());
@@ -461,6 +523,8 @@ mod tests {
                 &["10.64.0.1".parse().unwrap()],
                 &["1.1.1.1".parse().unwrap()],
             ),
+            allowed_endpoints: vec![],
+            inbound_exemptions: vec![],
         };
         let rs = compile(&policy);
         assert_eq!(rs.tunnel_interfaces, vec!["wg0".to_string()]);
@@ -486,9 +550,11 @@ mod tests {
             tunnel: tunnel_iface("wg0", [10, 64, 0, 2]),
             allow_lan: true,
             dns_config: dns_config(&[], &[]),
+            allowed_endpoints: vec![],
+            inbound_exemptions: vec![],
         };
         let rs = compile(&policy);
-        let has_cve = rs.input.rules.iter().any(|r| {
+        let has_cve = rs.filter.input.rules.iter().any(|r| {
             r.matches.iif_not.as_deref() == Some("wg0")
                 && matches!(r.matches.daddr, Some(AddrMatch::Ip(_)))
                 && r.verdict == Verdict::Drop
@@ -501,14 +567,89 @@ mod tests {
             tunnel: tunnel_iface("wg0", [10, 64, 0, 2]),
             allow_lan: false,
             dns_config: dns_config(&[], &[]),
+            allowed_endpoints: vec![],
+            inbound_exemptions: vec![],
         };
         let rs = compile(&policy);
         let has_cve = rs
+            .filter
             .input
             .rules
             .iter()
             .any(|r| r.matches.iif_not.is_some() && r.verdict == Verdict::Drop);
         assert!(!has_cve, "CVE rule should be absent without allow_lan");
+    }
+
+    #[test]
+    fn connected_emits_allowed_endpoints() {
+        // The folded outbound-allow-list patch: Connected now passes its
+        // allowed_endpoints through the same allow_endpoint() helper as
+        // Connecting did.
+        let policy = FirewallPolicy::Connected {
+            peer_endpoints: vec![],
+            tunnel: tunnel_iface("wg0", [10, 64, 0, 2]),
+            allow_lan: false,
+            dns_config: dns_config(&[], &[]),
+            allowed_endpoints: vec![ep([198, 41, 192, 167], 7844)],
+            inbound_exemptions: vec![],
+        };
+        let rs = compile(&policy);
+        let has_endpoint_accept = rs.filter.output.rules.iter().any(|r| {
+            matches!(r.matches.daddr, Some(AddrMatch::Ip(IpAddr::V4(ip))) if ip.octets() == [198, 41, 192, 167])
+                && r.matches.dport == Some(7844)
+                && r.verdict == Verdict::Accept
+        });
+        assert!(has_endpoint_accept, "allowed_endpoints not emitted in OUTPUT");
+    }
+
+    #[test]
+    fn exemptions_do_not_emit_mangle_when_empty() {
+        let policy = FirewallPolicy::Connected {
+            peer_endpoints: vec![],
+            tunnel: tunnel_iface("wg0", [10, 64, 0, 2]),
+            allow_lan: true,
+            dns_config: dns_config(&[], &[]),
+            allowed_endpoints: vec![],
+            inbound_exemptions: vec![],
+        };
+        let rs = compile(&policy);
+        assert!(rs.mangle.is_empty(), "no mangle rules expected without exemptions");
+        let has_mark_accept = rs
+            .filter
+            .output
+            .rules
+            .iter()
+            .any(|r| r.matches.mark.is_some());
+        assert!(!has_mark_accept, "no mark accepts expected without exemptions");
+    }
+
+    #[test]
+    fn exemptions_emit_filter_mark_accepts_before_final_reject() {
+        let policy = FirewallPolicy::Connected {
+            peer_endpoints: vec![],
+            tunnel: tunnel_iface("wg0", [10, 64, 0, 2]),
+            allow_lan: false,
+            dns_config: dns_config(&[], &[]),
+            allowed_endpoints: vec![],
+            inbound_exemptions: vec![
+                InboundExemption::new(TransportProtocol::Tcp, 443),
+                InboundExemption::new(TransportProtocol::Udp, 51820),
+            ],
+        };
+        let rs = compile(&policy);
+
+        for chain in [&rs.filter.input, &rs.filter.output, &rs.filter.forward] {
+            let mark_pos = chain
+                .rules
+                .iter()
+                .position(|r| r.matches.mark == Some(common::EXEMPT_FWMARK));
+            assert!(mark_pos.is_some(), "expected mark accept in chain");
+            let last = chain.rules.last().expect("non-empty chain");
+            // mark accept must precede the final reject in OUTPUT/FORWARD.
+            if matches!(last.verdict, Verdict::Reject) {
+                assert!(mark_pos.unwrap() < chain.rules.len() - 1);
+            }
+        }
     }
 
     #[test]
@@ -523,7 +664,7 @@ mod tests {
         let rs = compile(&policy);
         // No forward rule should have an saddr LAN match (that would be the
         // historical leak). Only daddr LAN matches and ct established.
-        for r in &rs.forward.rules {
+        for r in &rs.filter.forward.rules {
             if let Some(AddrMatch::Net(net)) = &r.matches.saddr {
                 panic!(
                     "Blocked policy must not have an saddr-LAN accept in forward chain: {:?}",

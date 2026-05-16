@@ -111,6 +111,24 @@ return baseclass.extend({
         params: ['policy']
     }),
 
+    inboundList: rpc.declare({
+        object: 'nym-vpn',
+        method: 'inbound_list',
+        params: []
+    }),
+
+    inboundAdd: rpc.declare({
+        object: 'nym-vpn',
+        method: 'inbound_add',
+        params: ['proto', 'dport', 'label']
+    }),
+
+    inboundDel: rpc.declare({
+        object: 'nym-vpn',
+        method: 'inbound_del',
+        params: ['proto', 'dport']
+    }),
+
     dnsGet: rpc.declare({
         object: 'nym-vpn',
         method: 'dns_get',

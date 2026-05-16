@@ -16,8 +16,8 @@ mod openwrt;
 mod net;
 mod split_tunnel;
 pub use net::{
-    AllowedClients, AllowedEndpoint, AllowedTunnelTraffic, Endpoint, TransportProtocol,
-    TunnelInterface, TunnelMetadata,
+    AllowedClients, AllowedEndpoint, AllowedTunnelTraffic, Endpoint, InboundExemption,
+    TransportProtocol, TunnelInterface, TunnelMetadata,
 };
 
 pub use openwrt::Error;
@@ -75,6 +75,8 @@ pub enum FirewallPolicy {
         /// Networks for which to permit exit in-tunnel traffic.
         /// Used when only one tunnel interface is utilized.
         allowed_exit_tunnel_traffic: AllowedTunnelTraffic,
+        /// Inbound services exempted from the tunnel.
+        inbound_exemptions: Vec<InboundExemption>,
     },
 
     /// Allow traffic only to server and over tunnel interface
@@ -87,6 +89,11 @@ pub enum FirewallPolicy {
         allow_lan: bool,
         /// Servers that are allowed to respond to DNS requests.
         dns_config: ResolvedDnsConfig,
+        /// Hosts that should be reachable while connected (e.g. cloudflared,
+        /// frp client, ntfy push). Symmetric with `Connecting.allowed_endpoints`.
+        allowed_endpoints: Vec<AllowedEndpoint>,
+        /// Inbound services exempted from the tunnel.
+        inbound_exemptions: Vec<InboundExemption>,
     },
 
     /// Block all network traffic in and out from the computer.
@@ -118,10 +125,25 @@ impl FirewallPolicy {
             FirewallPolicy::Connecting {
                 allowed_endpoints, ..
             }
+            | FirewallPolicy::Connected {
+                allowed_endpoints, ..
+            }
             | FirewallPolicy::Blocked {
                 allowed_endpoints, ..
             } => allowed_endpoints,
-            _ => &[],
+        }
+    }
+
+    /// Return the inbound exemptions, if any.
+    pub fn inbound_exemptions(&self) -> &[InboundExemption] {
+        match self {
+            FirewallPolicy::Connecting {
+                inbound_exemptions, ..
+            }
+            | FirewallPolicy::Connected {
+                inbound_exemptions, ..
+            } => inbound_exemptions,
+            FirewallPolicy::Blocked { .. } => &[],
         }
     }
 
@@ -222,17 +244,21 @@ impl fmt::Display for FirewallPolicy {
                 tunnel,
                 allow_lan,
                 dns_config,
+                allowed_endpoints,
+                inbound_exemptions,
                 ..
             } => {
                 let dns_str = display_allowed_non_tunnel_dns(dns_config);
 
                 write!(
                     f,
-                    "Connected to {} over {}, {} LAN. Allowing non-tunnel DNS: {}",
+                    "Connected to {} over {}, {} LAN. Allowing endpoints: {}. Allowing non-tunnel DNS: {}. Inbound exemptions: {}",
                     display_peer_endpoints(peer_endpoints),
                     display_tunnel_interface(tunnel),
                     if *allow_lan { "Allowing" } else { "Blocking" },
-                    dns_str
+                    display_allowed_endpoints(allowed_endpoints),
+                    dns_str,
+                    display_inbound_exemptions(inbound_exemptions),
                 )
             }
             FirewallPolicy::Blocked {
@@ -320,6 +346,18 @@ fn display_allowed_endpoints(allowed_endpoints: &[AllowedEndpoint]) -> Cow<'_, s
                 .collect::<Vec<_>>()
                 .join(","),
         )
+    }
+}
+
+fn display_inbound_exemptions(exemptions: &[InboundExemption]) -> String {
+    if exemptions.is_empty() {
+        "none".to_owned()
+    } else {
+        exemptions
+            .iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
     }
 }
 

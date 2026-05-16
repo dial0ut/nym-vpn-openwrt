@@ -136,6 +136,11 @@ pub struct TunnelSettings {
     /// Kill-switch: enforce firewall rules and default route.
     /// When disabled, firewall policy and default route are skipped (for PBR compatibility).
     pub killswitch: bool,
+
+    /// Inbound services exempted from the tunnel. Reply traffic for these
+    /// `{proto, dport}` pairs is routed via the real WAN instead of the VPN,
+    /// so port-forwarded services remain reachable while the kill-switch is on.
+    pub inbound_exemptions: Vec<nym_firewall::InboundExemption>,
 }
 
 impl TunnelSettings {
@@ -220,6 +225,9 @@ impl TunnelSettings {
         if self.killswitch != other.killswitch {
             diff.add(TunnelSettingsDiffFields::Killswitch);
         }
+        if self.inbound_exemptions != other.inbound_exemptions {
+            diff.add(TunnelSettingsDiffFields::InboundExemptions);
+        }
 
         if diff.is_empty() { None } else { Some(diff) }
     }
@@ -240,6 +248,7 @@ pub enum TunnelSettingsDiffFields {
     ExitPoint,
     Dns,
     Killswitch,
+    InboundExemptions,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]

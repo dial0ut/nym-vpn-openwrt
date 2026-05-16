@@ -69,6 +69,7 @@ nav:
   - User Guide:
       - LuCI Web Interface: guide/luci.md
       - CLI Usage: guide/cli.md
+      - Inbound Services: guide/inbound-services.md
       - Split Tunneling: guide/split-tunneling.md
   - Architecture:
       - Overview: architecture/overview.md

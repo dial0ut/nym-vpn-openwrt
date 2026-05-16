@@ -72,10 +72,13 @@ impl RouteHandler {
         routing_config: RoutingConfig,
         enable_ipv6: bool,
         killswitch: bool,
+        has_inbound_exemptions: bool,
     ) -> Result<()> {
         let routes = Self::get_routes(routing_config, enable_ipv6, killswitch);
 
-        self.route_manager.create_routing_rules(enable_ipv6).await?;
+        self.route_manager
+            .create_routing_rules(enable_ipv6, has_inbound_exemptions)
+            .await?;
 
         self.route_manager.add_routes(routes).await?;
 

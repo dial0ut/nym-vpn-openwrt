@@ -100,6 +100,17 @@ impl Command {
                     display_on_off(config.enable_bridges)
                 );
                 println!("Kill-switch: {}", display_on_off(config.killswitch));
+                if config.inbound_exemptions.is_empty() {
+                    println!("Inbound exemptions: none");
+                } else {
+                    let list = config
+                        .inbound_exemptions
+                        .iter()
+                        .map(|e| format!("{}/{}", e.proto, e.dport))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    println!("Inbound exemptions: {list}");
+                }
                 println!("Mixnet traffic configuration: {}", config.mixnet_traffic);
 
                 Ok(())

@@ -69,6 +69,14 @@ pub enum VpnServiceCommand {
     SetNetstack(oneshot::Sender<()>, bool),
     SetAllowLan(oneshot::Sender<()>, bool),
     SetKillswitch(oneshot::Sender<()>, bool),
+    SetInboundExemptions(
+        oneshot::Sender<()>,
+        Vec<nym_vpn_lib_types::InboundExemption>,
+    ),
+    GetInboundExemptions(
+        oneshot::Sender<Vec<nym_vpn_lib_types::InboundExemption>>,
+        (),
+    ),
     SetEnableBridges(oneshot::Sender<()>, bool),
     SetResidentialExit(oneshot::Sender<()>, bool),
     SetEnableCustomDns(oneshot::Sender<()>, bool),
@@ -804,6 +812,13 @@ impl NymVpnService {
                 self.handle_set_killswitch(killswitch).await;
                 let _ = tx.send(());
             }
+            VpnServiceCommand::SetInboundExemptions(tx, exemptions) => {
+                self.handle_set_inbound_exemptions(exemptions).await;
+                let _ = tx.send(());
+            }
+            VpnServiceCommand::GetInboundExemptions(tx, ()) => {
+                let _ = tx.send(self.config_manager.inbound_exemptions().to_vec());
+            }
             VpnServiceCommand::SetEnableBridges(tx, enable_bridges) => {
                 self.handle_set_enable_bridges(enable_bridges).await;
                 let _ = tx.send(());
@@ -1040,6 +1055,16 @@ impl NymVpnService {
 
     async fn handle_set_killswitch(&mut self, killswitch: bool) {
         self.config_manager.set_killswitch(killswitch).await;
+        self.update_tunnel_settings_with_throttle();
+    }
+
+    async fn handle_set_inbound_exemptions(
+        &mut self,
+        exemptions: Vec<nym_vpn_lib_types::InboundExemption>,
+    ) {
+        self.config_manager
+            .set_inbound_exemptions(exemptions)
+            .await;
         self.update_tunnel_settings_with_throttle();
     }
 

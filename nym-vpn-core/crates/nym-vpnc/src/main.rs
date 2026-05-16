@@ -98,6 +98,12 @@ pub enum Command {
         subcommand: commands::tunnel::Command,
     },
 
+    /// Inbound service exemptions (port-forwarded services that bypass the tunnel)
+    Inbound {
+        #[command(subcommand)]
+        subcommand: commands::inbound::Command,
+    },
+
     /// Account information
     Account {
         #[command(subcommand)]
@@ -149,6 +155,7 @@ impl Command {
             Command::GetConfig => Self::get_config(rpc_client).await,
             Command::Gateway(args) => args.execute(rpc_client).await,
             Command::Tunnel { subcommand } => subcommand.execute(rpc_client).await,
+            Command::Inbound { subcommand } => subcommand.execute(rpc_client).await,
             Command::Lan { subcommand } => subcommand.execute(rpc_client).await,
             Command::Dns { subcommand } => subcommand.execute(rpc_client).await,
             Command::AdBlock { subcommand } => subcommand.execute(rpc_client).await,

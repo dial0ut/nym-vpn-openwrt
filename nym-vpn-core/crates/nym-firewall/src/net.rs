@@ -158,6 +158,45 @@ impl fmt::Display for TransportProtocol {
 #[error("not a valid transport protocol")]
 pub struct TransportProtocolParseError;
 
+/// A `{proto, dport}` pair declared by the operator as exempt from the VPN
+/// tunnel: inbound connections on the WAN matching the pair will have their
+/// reply traffic routed via the real WAN instead of the tunnel.
+///
+/// The matching WAN interface is auto-detected by the firewall backend at
+/// apply time (single-WAN in v1) — not carried per-exemption.
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct InboundExemption {
+    pub proto: TransportProtocol,
+    pub dport: u16,
+    /// Free-text label, never used in firewall rules. UCI-stored only.
+    pub label: Option<String>,
+}
+
+impl InboundExemption {
+    pub fn new(proto: TransportProtocol, dport: u16) -> Self {
+        Self {
+            proto,
+            dport,
+            label: None,
+        }
+    }
+
+    pub fn with_label(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+}
+
+impl fmt::Display for InboundExemption {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}/{}", self.proto, self.dport)?;
+        if let Some(label) = &self.label {
+            write!(f, " ({label})")?;
+        }
+        Ok(())
+    }
+}
+
 /// Information about a VPN tunnel.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct TunnelMetadata {

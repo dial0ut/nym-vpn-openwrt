@@ -66,6 +66,8 @@ impl ConnectedState {
                 ws_entry_endpoints: ws_endpoints,
                 dns_config: shared_state.tunnel_settings.resolved_dns_config(),
                 tunnel_interface: tunnel_interface.clone(),
+                allowed_endpoints: Vec::new(),
+                inbound_exemptions: shared_state.tunnel_settings.inbound_exemptions.clone(),
             }
         };
 
@@ -274,6 +276,12 @@ struct ConnectedPolicyParameters {
 
     /// Tunnel interface
     tunnel_interface: TunnelInterface,
+
+    /// Outbound endpoints reachable while connected (cloudflared, frp, etc.).
+    allowed_endpoints: Vec<nym_firewall::AllowedEndpoint>,
+
+    /// Inbound services exempted from the tunnel.
+    inbound_exemptions: Vec<nym_firewall::InboundExemption>,
 }
 
 impl ConnectedPolicyParameters {
@@ -314,6 +322,8 @@ impl ConnectedPolicyParameters {
             tunnel,
             allow_lan: self.allow_lan,
             dns_config: self.dns_config.clone(),
+            allowed_endpoints: self.allowed_endpoints.clone(),
+            inbound_exemptions: self.inbound_exemptions.clone(),
         }
     }
 }
@@ -390,6 +400,8 @@ mod tests {
             ws_entry_endpoints: ws_endpoints,
             dns_config,
             tunnel_interface,
+            allowed_endpoints: Vec::new(),
+            inbound_exemptions: Vec::new(),
         };
 
         // Build firewall policy

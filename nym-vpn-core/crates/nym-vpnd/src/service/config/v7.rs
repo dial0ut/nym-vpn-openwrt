@@ -76,6 +76,7 @@ impl TryFrom<VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
             enable_ad_blocking: value.enable_ad_blocking,
             network_stats,
             killswitch: true,
+            inbound_exemptions: Vec::new(),
         };
 
         Ok(config)

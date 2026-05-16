@@ -188,6 +188,23 @@ impl TryFrom<&nym_vpn_lib_types::VpnServiceConfig> for VpnServiceConfigExt {
 
         let network_stats = NetworkStatisticsConfig::from(&value.network_stats);
 
+        let inbound_exemptions = value
+            .inbound_exemptions
+            .iter()
+            .map(|e| v8::InboundExemption {
+                proto: match e.proto {
+                    nym_vpn_lib_types::InboundExemptionProtocol::Tcp => {
+                        v8::InboundExemptionProtocol::Tcp
+                    }
+                    nym_vpn_lib_types::InboundExemptionProtocol::Udp => {
+                        v8::InboundExemptionProtocol::Udp
+                    }
+                },
+                dport: e.dport,
+                label: e.label.clone(),
+            })
+            .collect();
+
         let v8 = v8::VpnServiceConfig {
             entry_point,
             exit_point,
@@ -205,6 +222,7 @@ impl TryFrom<&nym_vpn_lib_types::VpnServiceConfig> for VpnServiceConfigExt {
             mixnet_traffic,
             network_stats,
             killswitch: value.killswitch,
+            inbound_exemptions,
         };
 
         Ok(VpnServiceConfigExt::V8(v8))

@@ -42,6 +42,26 @@ Without special handling, the kill-switch rules would be wiped on any of these e
 
 This is the standard OpenWrt mechanism for third-party firewall integration. The scripts re-apply the saved rules from temporary files, so the kill-switch is restored automatically after every firewall reload.
 
+## Inbound Service Exemptions
+
+The kill-switch routes all output through the tunnel by default — including the **reply** to any inbound connection from the WAN. That breaks port-forwarded services: an external client connects to a public port on the router, the service replies, and the reply takes the tunnel instead of the original WAN path. The source IP at the egress no longer matches what the client connected to, and the connection dies.
+
+Inbound exemptions add a per-`{proto, port}` reply path that bypasses the tunnel. The mechanism is three layers:
+
+**1. Mangle PREROUTING — mark on inbound.** A chain `mangle_prerouting` in the `inet nym` table hooks at priority `mangle - 10` (= -160), which runs **before** OpenWrt's DNAT at `dstnat` priority -100. The rule matches `iifname "<wan>" ct state new <proto> dport <X>` and sets `ct mark = 0x14e`. Because the mark is set before DNAT, it sticks to the connection regardless of whether the destination gets rewritten to a LAN host.
+
+**2. Mark restore — for reply packets.** Both `mangle_prerouting` (for forwarded LAN replies) and `mangle_output` (for router-originated replies) start with `meta mark set ct mark`. This copies the conntrack mark onto the packet mark, which the kernel uses for routing rule lookup. For locally-generated packets on the router, the mangle hook triggers a route reevaluation after the mark change.
+
+**3. Routing rule — bypass the tunnel.** An `ip rule fwmark 0x14e lookup main` at priority 90 sits **before** the suppress rule (100) and the tunnel fwmark rule (200). Marked replies hit the main routing table — which has the real WAN as default — instead of table 333 (the tunnel default).
+
+The filter chains gain `meta mark 0x14e accept` after the tunnel-allow rules and before the DNS block, so the kill-switch's reject does not fire on the marked reply.
+
+The exemption only adds a reply path. It does not weaken outbound enforcement: a router-originated outbound connection has `ct mark = 0` (the prerouting set never fired, since the connection wasn't `iif=wan ct state new`) and stays in the tunnel. A compromised exempt service cannot exfiltrate through its own port.
+
+The exemption mechanism is independent of the DNAT layer. NymVPN does not own port forwards — those remain in OpenWrt's `firewall.@redirect[]` UCI section, configured via the native firewall UI. For LAN-hosted services the operator sets up both: a port forward in OpenWrt firewall plus a matching exemption here.
+
+See the [Inbound Services guide](../guide/inbound-services.md) for operator-facing usage.
+
 ## mwan3 Compatibility
 
 mwan3 is an OpenWrt package for multi-WAN load balancing and failover. It continuously pings tracking IPs to determine whether each WAN interface is alive. Several supported devices, particularly GL.iNet routers, ship with mwan3 pre-installed and enabled even on single-WAN configurations.

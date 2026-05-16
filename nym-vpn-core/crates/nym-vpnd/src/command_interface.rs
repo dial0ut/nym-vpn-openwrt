@@ -211,6 +211,74 @@ impl NymVpnService for CommandInterface {
         Ok(tonic::Response::new(()))
     }
 
+    async fn set_inbound_exemptions(
+        &self,
+        request: tonic::Request<proto::InboundExemptionList>,
+    ) -> Result<tonic::Response<()>> {
+        let list = request.into_inner();
+        let exemptions: Vec<nym_vpn_lib_types::InboundExemption> = list
+            .exemptions
+            .into_iter()
+            .filter_map(|e| {
+                let proto = match proto::InboundExemptionProtocol::try_from(e.proto).ok()? {
+                    proto::InboundExemptionProtocol::Tcp => {
+                        nym_vpn_lib_types::InboundExemptionProtocol::Tcp
+                    }
+                    proto::InboundExemptionProtocol::Udp => {
+                        nym_vpn_lib_types::InboundExemptionProtocol::Udp
+                    }
+                    proto::InboundExemptionProtocol::Unspecified => return None,
+                };
+                Some(nym_vpn_lib_types::InboundExemption {
+                    proto,
+                    dport: e.dport as u16,
+                    label: e.label,
+                })
+            })
+            .collect();
+
+        let _ = self
+            .send_and_wait(VpnServiceCommand::SetInboundExemptions, exemptions)
+            .await
+            .map_err(|e| {
+                tonic::Status::internal(format!("Failed to set inbound exemptions: {e}"))
+            })?;
+
+        Ok(tonic::Response::new(()))
+    }
+
+    async fn get_inbound_exemptions(
+        &self,
+        _request: tonic::Request<()>,
+    ) -> Result<tonic::Response<proto::InboundExemptionList>> {
+        let exemptions: Vec<nym_vpn_lib_types::InboundExemption> = self
+            .send_and_wait(VpnServiceCommand::GetInboundExemptions, ())
+            .await
+            .map_err(|e| {
+                tonic::Status::internal(format!("Failed to get inbound exemptions: {e}"))
+            })?;
+
+        let list = proto::InboundExemptionList {
+            exemptions: exemptions
+                .into_iter()
+                .map(|e| proto::InboundExemption {
+                    proto: match e.proto {
+                        nym_vpn_lib_types::InboundExemptionProtocol::Tcp => {
+                            proto::InboundExemptionProtocol::Tcp as i32
+                        }
+                        nym_vpn_lib_types::InboundExemptionProtocol::Udp => {
+                            proto::InboundExemptionProtocol::Udp as i32
+                        }
+                    },
+                    dport: e.dport as u32,
+                    label: e.label,
+                })
+                .collect(),
+        };
+
+        Ok(tonic::Response::new(list))
+    }
+
     async fn set_residential_exit(
         &self,
         request: tonic::Request<bool>,

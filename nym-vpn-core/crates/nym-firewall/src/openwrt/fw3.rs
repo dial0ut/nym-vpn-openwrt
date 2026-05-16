@@ -14,7 +14,10 @@ use std::io::Write as IoWrite;
 use std::process::{Command, Stdio};
 
 use super::common::{FW3_HOOK_FORWARD, FW3_HOOK_INPUT, FW3_HOOK_OUTPUT, FW3_INCLUDE_PATH, is_ipv6_enabled};
-use super::render_iptables::{self, AddrFamily, CHAIN_FORWARD, CHAIN_INPUT, CHAIN_OUTPUT};
+use super::render_iptables::{
+    self, AddrFamily, CHAIN_FORWARD, CHAIN_INPUT, CHAIN_MANGLE_OUTPUT, CHAIN_MANGLE_PREROUTING,
+    CHAIN_OUTPUT,
+};
 use super::rules::RuleSet;
 use super::{Error, Result};
 
@@ -28,10 +31,20 @@ pub fn apply(rs: &RuleSet) -> Result<()> {
 
     apply_filter(rs, AddrFamily::V4)?;
     setup_jumps(AddrFamily::V4)?;
+    if !rs.mangle.is_empty() {
+        setup_mangle_jumps(AddrFamily::V4)?;
+    } else {
+        cleanup_mangle(AddrFamily::V4);
+    }
 
     if is_ipv6_enabled() {
         apply_filter(rs, AddrFamily::V6)?;
         setup_jumps(AddrFamily::V6)?;
+        if !rs.mangle.is_empty() {
+            setup_mangle_jumps(AddrFamily::V6)?;
+        } else {
+            cleanup_mangle(AddrFamily::V6);
+        }
     } else {
         tracing::info!("IPv6 disabled, skipping ip6tables rules");
     }
@@ -48,8 +61,10 @@ pub fn reset() -> Result<()> {
 
     remove_masquerade_rules();
     cleanup_filter(AddrFamily::V4);
+    cleanup_mangle(AddrFamily::V4);
     if is_ipv6_enabled() {
         cleanup_filter(AddrFamily::V6);
+        cleanup_mangle(AddrFamily::V6);
     }
 
     tracing::debug!("Firewall policy reset successfully");
@@ -138,6 +153,53 @@ const JUMPS: [(&str, &str); 3] = [
     (FW3_HOOK_OUTPUT, CHAIN_OUTPUT),
     (FW3_HOOK_FORWARD, CHAIN_FORWARD),
 ];
+
+/// Jumps in the `mangle` table. Unlike the filter table, there are no fw3
+/// `*_rule` chains in mangle — we jump directly from the built-in PREROUTING
+/// and OUTPUT hooks.
+const MANGLE_JUMPS: [(&str, &str); 2] = [
+    ("PREROUTING", CHAIN_MANGLE_PREROUTING),
+    ("OUTPUT", CHAIN_MANGLE_OUTPUT),
+];
+
+/// Insert jumps from the mangle table's built-in chains into ours at position 1.
+/// Idempotent: any existing jump is removed first.
+fn setup_mangle_jumps(family: AddrFamily) -> Result<()> {
+    let ipt = ipt_cmd(family);
+    for (hook, target) in MANGLE_JUMPS {
+        let _ = Command::new(ipt)
+            .args(["-w", "-t", "mangle", "-D", hook, "-j", target])
+            .output();
+        let output = Command::new(ipt)
+            .args(["-w", "-t", "mangle", "-I", hook, "1", "-j", target])
+            .output()
+            .map_err(|e| Error::ApplyError(format!("spawn {ipt}: {e}")))?;
+        if !output.status.success() {
+            return Err(Error::ApplyError(format!(
+                "{ipt} -t mangle -I {hook} -j {target} failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn cleanup_mangle(family: AddrFamily) {
+    let ipt = ipt_cmd(family);
+    for (hook, target) in MANGLE_JUMPS {
+        let _ = Command::new(ipt)
+            .args(["-w", "-t", "mangle", "-D", hook, "-j", target])
+            .output();
+    }
+    for chain in [CHAIN_MANGLE_PREROUTING, CHAIN_MANGLE_OUTPUT] {
+        let _ = Command::new(ipt)
+            .args(["-w", "-t", "mangle", "-F", chain])
+            .output();
+        let _ = Command::new(ipt)
+            .args(["-w", "-t", "mangle", "-X", chain])
+            .output();
+    }
+}
 
 fn ipt_cmd(family: AddrFamily) -> &'static str {
     match family {

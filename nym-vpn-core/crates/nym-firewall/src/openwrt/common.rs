@@ -15,6 +15,51 @@ pub const FW3_HOOK_INPUT: &str = "input_rule";
 pub const FW3_HOOK_OUTPUT: &str = "output_rule";
 pub const FW3_HOOK_FORWARD: &str = "forwarding_rule";
 
+/// Firewall mark used for inbound-exemption reply pinning. Distinct from the
+/// tunnel fwmark (`0x14d`). Carried in `ct mark` for the connection lifetime
+/// and restored onto packet mark so reply traffic hits `ip rule fwmark` and
+/// routes via the real WAN instead of the tunnel.
+pub const EXEMPT_FWMARK: u32 = 0x14e;
+
+/// Detect the active WAN interface name. Used to anchor inbound-exemption
+/// rules so we only mark new flows arriving from the WAN side.
+///
+/// Strategy:
+/// 1. Read `uci get network.wan.device` — the canonical OpenWrt setting.
+/// 2. Fallback: parse `ip -o route get 1.1.1.1` for the `dev <name>` token.
+///
+/// Returns `None` only if both fail (very unusual on a router).
+pub fn detect_wan_iface() -> Option<String> {
+    if let Ok(output) = std::process::Command::new("uci")
+        .args(["get", "network.wan.device"])
+        .output()
+        && output.status.success()
+    {
+        let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !s.is_empty() {
+            return Some(s);
+        }
+    }
+
+    if let Ok(output) = std::process::Command::new("ip")
+        .args(["-o", "route", "get", "1.1.1.1"])
+        .output()
+        && output.status.success()
+    {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut iter = stdout.split_whitespace();
+        while let Some(tok) = iter.next() {
+            if tok == "dev"
+                && let Some(name) = iter.next()
+            {
+                return Some(name.to_string());
+            }
+        }
+    }
+
+    None
+}
+
 /// Check whether IPv6 is enabled in the kernel and `ip6tables` is usable.
 pub fn is_ipv6_enabled() -> bool {
     if let Ok(content) = std::fs::read_to_string("/proc/sys/net/ipv6/conf/all/disable_ipv6")

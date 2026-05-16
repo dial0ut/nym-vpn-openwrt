@@ -192,6 +192,35 @@ return baseclass.extend({
     .nym-pill:hover { border-color: var(--text-secondary); color: var(--text-primary); }\
     .nym-pill.active { background: var(--nym-green-dim); border-color: var(--nym-green); color: var(--nym-green); }\
     .nym-divider { height: 1px; background: var(--border-color); margin: 20px 0; }\
+    .nym-exemption-table { display: grid; gap: 6px; }\
+    .nym-exemption-header { display: grid; grid-template-columns: 64px 64px 1fr 100px 28px; gap: 12px; padding: 0 12px; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 4px; }\
+    .nym-exemption-row { display: grid; grid-template-columns: 64px 64px 1fr 100px 28px; gap: 12px; align-items: center; padding: 10px 12px; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 6px; transition: opacity 0.2s; }\
+    .nym-exemption-row.pending { opacity: 0.6; }\
+    .nym-exemption-row.removing { opacity: 0; }\
+    .nym-exemption-proto { font-size: 12px; color: var(--text-primary); font-weight: 500; }\
+    .nym-exemption-port { font-size: 13px; color: var(--text-primary); }\
+    .nym-exemption-label { font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }\
+    .nym-exemption-status { font-size: 11px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }\
+    .nym-exemption-status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--nym-green); }\
+    .nym-exemption-status.inert { color: var(--text-muted); }\
+    .nym-exemption-status.inert::before { background: var(--text-muted); }\
+    .nym-exemption-delete { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-muted); font-size: 18px; border-radius: 4px; transition: all 0.2s; user-select: none; }\
+    .nym-exemption-delete:hover { color: var(--danger); background: var(--danger-dim); }\
+    .nym-exemption-empty { font-size: 13px; color: var(--text-muted); font-style: italic; padding: 12px; text-align: center; }\
+    .nym-exemption-addrow { display: grid; grid-template-columns: 96px 110px 1fr auto; gap: 10px; align-items: center; }\
+    .nym-btn-spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; vertical-align: -2px; margin-right: 6px; animation: rotate-ring 0.8s linear infinite; }\
+    @media (max-width: 600px) {\
+        .nym-exemption-header { display: none; }\
+        .nym-exemption-row { grid-template-columns: 1fr auto; gap: 4px 12px; }\
+        .nym-exemption-row > .nym-exemption-proto { grid-column: 1; }\
+        .nym-exemption-row > .nym-exemption-port { grid-column: 1; }\
+        .nym-exemption-row > .nym-exemption-label { grid-column: 1 / -1; grid-row: 2; font-size: 11px; }\
+        .nym-exemption-row > .nym-exemption-status { grid-column: 1; grid-row: 1; justify-self: end; }\
+        .nym-exemption-row > .nym-exemption-delete { grid-column: 2; grid-row: 1; }\
+        .nym-exemption-addrow { grid-template-columns: 96px 1fr; }\
+        .nym-exemption-addrow > input[type="text"]:nth-of-type(2) { grid-column: 1 / -1; }\
+        .nym-exemption-addrow > button { grid-column: 1 / -1; }\
+    }\
     .nym-text-center { text-align: center; }\
     .nym-text-muted { color: var(--text-muted); }\
     .nym-mt-16 { margin-top: 16px; }\
