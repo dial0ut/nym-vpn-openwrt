@@ -5,58 +5,31 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use nym_common::trace_err_chain;
-use nym_firewall::FirewallPolicy;
 
-use crate::tunnel_state_machine::{Error, Result};
 use crate::tunnel_state_machine::{
     ErrorStateReason, NextTunnelState, PrivateTunnelState, SharedState, TunnelCommand,
-    TunnelStateHandler,
+    TunnelSettingsDiffFields, TunnelStateHandler,
     states::{ConnectingState, DisconnectedState, OfflineState},
 };
 
-pub struct ErrorState {
-    firewall_policy_params: BlockedPolicyParameters,
-}
+pub struct ErrorState;
 
 impl ErrorState {
     pub async fn enter(
         reason: ErrorStateReason,
         shared_state: &mut SharedState,
     ) -> (Box<dyn TunnelStateHandler>, PrivateTunnelState) {
-        // Disallow networking in error state since there are no configured firewall exceptions
-        shared_state.disallow_networking().await;
+        // Mirror DisconnectedState: only lock the firewall when the user
+        // opted into the kill-switch AND we have API endpoints to whitelist.
+        // Otherwise reset so the daemon can reach the API and self-recover
+        // from transient connect errors. The previous behavior — Blocked
+        // with empty exemptions — was a one-way deadlock.
+        shared_state.apply_killswitch_policy();
 
-        let firewall_policy_params = BlockedPolicyParameters {
-            allow_lan: shared_state.tunnel_settings.allow_lan,
-        };
+        shared_state.reset_resolver_overrides().await;
+        shared_state.allow_networking().await;
 
-        if let Err(err) = Self::set_firewall_policy(shared_state, &firewall_policy_params) {
-            trace_err_chain!(err, "failed to set firewall policy");
-        }
-
-        let blocked_state = Self {
-            firewall_policy_params,
-        };
-
-        (Box::new(blocked_state), PrivateTunnelState::Error(reason))
-    }
-
-    fn set_firewall_policy(
-        shared_state: &mut SharedState,
-        params: &BlockedPolicyParameters,
-    ) -> Result<()> {
-        let policy = params.as_policy();
-
-        shared_state
-            .firewall
-            .apply_policy(policy)
-            .map_err(Error::SetFirewallPolicy)
-    }
-
-    fn reset_firewall_policy(shared_state: &mut SharedState) {
-        if let Err(e) = shared_state.firewall.reset_policy() {
-            trace_err_chain!(e, "Failed to reset firewall policy");
-        }
+        (Box::new(Self), PrivateTunnelState::Error(reason))
     }
 
     async fn reset_dns(shared_state: &mut SharedState) {
@@ -101,41 +74,27 @@ impl TunnelStateHandler for ErrorState {
                             return NextTunnelState::SameState(self);
                         };
 
-                        if diff.allow_lan_changed() {
-                            self.firewall_policy_params.allow_lan = tunnel_settings.allow_lan;
+                        shared_state.tunnel_settings = tunnel_settings;
 
-                            if let Err(e) = Self::set_firewall_policy(shared_state, &self.firewall_policy_params) {
-                                trace_err_chain!(e, "failed to set firewall policy");
-                            }
+                        if diff.is_field_changed(&TunnelSettingsDiffFields::AllowLan)
+                            || diff.is_field_changed(&TunnelSettingsDiffFields::Killswitch)
+                            || diff.is_field_changed(&TunnelSettingsDiffFields::EnableIpv6)
+                            || diff.is_field_changed(&TunnelSettingsDiffFields::Dns)
+                        {
+                            shared_state.apply_killswitch_policy();
                         }
 
-                        shared_state.tunnel_settings = tunnel_settings;
                         NextTunnelState::SameState(self)
                     }
                 }
             }
             _ = shutdown_token.cancelled() => {
                 Self::reset_dns(shared_state).await;
-                Self::reset_firewall_policy(shared_state);
+                if let Err(e) = shared_state.firewall.reset_policy() {
+                    trace_err_chain!(e, "Failed to reset firewall policy");
+                }
                 NextTunnelState::Finished
             }
-        }
-    }
-}
-
-// Firewall policy configuration when blocked
-#[derive(Debug, Clone)]
-pub struct BlockedPolicyParameters {
-    /// Whether to allow LAN traffic
-    pub allow_lan: bool,
-}
-
-impl BlockedPolicyParameters {
-    pub fn as_policy(&self) -> FirewallPolicy {
-        FirewallPolicy::Blocked {
-            allow_lan: self.allow_lan,
-            allowed_endpoints: Vec::new(),
-            dns_servers: Vec::new(),
         }
     }
 }

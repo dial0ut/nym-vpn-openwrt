@@ -33,7 +33,10 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 use nym_dns::DnsConfig;
-use nym_firewall::{Firewall, FirewallArguments, InitialFirewallState};
+use nym_firewall::{
+    AllowedClients, AllowedEndpoint, Endpoint, Firewall, FirewallArguments, FirewallPolicy,
+    InitialFirewallState, TransportProtocol,
+};
 use nym_gateway_directory::{
     BlacklistedGateways, Config as GatewayDirectoryConfig, GatewayCacheHandle,
 };
@@ -602,6 +605,39 @@ impl SharedState {
             .ok();
         if let Err(err) = self.account_command_tx.set_resolver_overrides(None).await {
             nym_common::trace_err_chain!(err, "Failed to unset static API addresses");
+        }
+    }
+
+    /// Apply the between-sessions kill-switch policy used by idle states
+    /// (Disconnected, Error). When the user opted in AND we have cached API
+    /// endpoints to whitelist, lock the firewall to a Blocked policy that
+    /// still permits API and DNS so the account controller and the daemon
+    /// itself can self-recover. Otherwise reset the firewall to open so
+    /// transient errors cannot deadlock the daemon out of its own API.
+    fn apply_killswitch_policy(&mut self) {
+        if self.tunnel_settings.killswitch && !self.api_endpoints.is_empty() {
+            let enable_ipv6 = self.tunnel_settings.enable_ipv6;
+            let allowed_endpoints = self
+                .api_endpoints
+                .iter()
+                .filter(|addr| addr.is_ipv4() || (enable_ipv6 && addr.is_ipv6()))
+                .map(|addr| {
+                    AllowedEndpoint::new(
+                        Endpoint::from_socket_address(*addr, TransportProtocol::Tcp),
+                        AllowedClients::Root,
+                    )
+                })
+                .collect();
+            let policy = FirewallPolicy::Blocked {
+                allow_lan: self.tunnel_settings.allow_lan,
+                allowed_endpoints,
+                dns_servers: self.tunnel_settings.default_dns_ips(),
+            };
+            if let Err(e) = self.firewall.apply_policy(policy) {
+                nym_common::trace_err_chain!(e, "Failed to apply kill-switch policy");
+            }
+        } else if let Err(e) = self.firewall.reset_policy() {
+            nym_common::trace_err_chain!(e, "Failed to reset firewall policy");
         }
     }
 }
