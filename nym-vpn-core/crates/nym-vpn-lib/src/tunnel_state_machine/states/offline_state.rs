@@ -4,13 +4,33 @@
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::tunnel_state_machine::{Error, Result, states::error_state::BlockedPolicyParameters};
+use nym_common::trace_err_chain;
+use nym_firewall::FirewallPolicy;
+
 use crate::tunnel_state_machine::{
-    NextTunnelState, PrivateTunnelState, SharedState, TunnelCommand, TunnelStateHandler,
+    Error, NextTunnelState, PrivateTunnelState, Result, SharedState, TunnelCommand,
+    TunnelStateHandler,
     states::{ConnectingState, DisconnectedState},
     tunnel::SelectedGateways,
 };
-use nym_common::trace_err_chain;
+
+/// Firewall policy parameters used by [`OfflineState`]. While the device has
+/// no network connectivity there is nothing useful to whitelist, so this
+/// applies a fully-locked `Blocked` policy.
+#[derive(Debug, Clone)]
+struct BlockedPolicyParameters {
+    allow_lan: bool,
+}
+
+impl BlockedPolicyParameters {
+    fn as_policy(&self) -> FirewallPolicy {
+        FirewallPolicy::Blocked {
+            allow_lan: self.allow_lan,
+            allowed_endpoints: Vec::new(),
+            dns_servers: Vec::new(),
+        }
+    }
+}
 
 pub struct OfflineState {
     /// Whether to connect the tunnel once online

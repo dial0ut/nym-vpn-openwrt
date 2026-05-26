@@ -21,7 +21,7 @@ impl TryFrom<VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
         Ok(Self {
             entry_point: value.entry_point.try_into()?,
             exit_point: value.exit_point.try_into()?,
-            killswitch: true,
+            killswitch: false,
             ..Default::default()
         })
     }

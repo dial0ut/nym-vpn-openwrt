@@ -10,9 +10,6 @@ use crate::tunnel_state_machine::{
     tunnel::Tombstone,
 };
 use nym_common::trace_err_chain;
-use nym_firewall::{
-    AllowedClients, AllowedEndpoint, Endpoint, FirewallPolicy, TransportProtocol,
-};
 
 pub struct DisconnectedState;
 
@@ -21,16 +18,7 @@ impl DisconnectedState {
         tombstone: Option<Tombstone>,
         shared_state: &mut SharedState,
     ) -> (Box<dyn TunnelStateHandler>, PrivateTunnelState) {
-        // Kill-switch between sessions: once a prior Connecting has populated
-        // the cached API endpoints, keep a Blocked policy in place while the
-        // tunnel is down so traffic only reaches the Nym VPN API. On cold boot
-        // the cache is empty and we fall back to an open firewall so the
-        // account controller can sync.
-        if shared_state.tunnel_settings.killswitch && !shared_state.api_endpoints.is_empty() {
-            Self::apply_blocked_policy(shared_state);
-        } else {
-            Self::reset_firewall_policy(shared_state);
-        }
+        shared_state.apply_killswitch_policy();
 
         // Drop tombstone to close tunnel devices.
         drop(tombstone);
@@ -40,39 +28,6 @@ impl DisconnectedState {
         shared_state.allow_networking().await;
 
         (Box::new(Self), PrivateTunnelState::Disconnected)
-    }
-
-    fn apply_blocked_policy(shared_state: &mut SharedState) {
-        let enable_ipv6 = shared_state.tunnel_settings.enable_ipv6;
-        let allowed_endpoints = shared_state
-            .api_endpoints
-            .iter()
-            .filter(|addr| addr.is_ipv4() || (enable_ipv6 && addr.is_ipv6()))
-            .map(|addr| {
-                AllowedEndpoint::new(
-                    Endpoint::from_socket_address(*addr, TransportProtocol::Tcp),
-                    AllowedClients::Root,
-                )
-            })
-            .collect();
-        // DNS must stay open to resolve API hostnames; resolver overrides are
-        // cleared on DisconnectedState entry so the account controller falls
-        // back to system DNS.
-        let dns_servers = shared_state.tunnel_settings.default_dns_ips();
-        let policy = FirewallPolicy::Blocked {
-            allow_lan: shared_state.tunnel_settings.allow_lan,
-            allowed_endpoints,
-            dns_servers,
-        };
-        if let Err(e) = shared_state.firewall.apply_policy(policy) {
-            trace_err_chain!(e, "Failed to apply disconnected kill-switch policy");
-        }
-    }
-
-    fn reset_firewall_policy(shared_state: &mut SharedState) {
-        if let Err(e) = shared_state.firewall.reset_policy() {
-            trace_err_chain!(e, "Failed to reset firewall policy");
-        }
     }
 
     async fn reset_dns(shared_state: &mut SharedState) {

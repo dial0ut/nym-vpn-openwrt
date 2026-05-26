@@ -37,7 +37,7 @@ pub struct VpnServiceConfig {
 }
 
 fn default_killswitch() -> bool {
-    true
+    false
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Hash)]
