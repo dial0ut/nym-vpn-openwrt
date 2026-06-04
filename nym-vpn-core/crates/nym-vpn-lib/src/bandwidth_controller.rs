@@ -782,10 +782,18 @@ impl BandwidthController {
         let gateway_id = self.gateway_id(entry);
         if (entry && self.entry_previous_error_query) || (!entry && self.exit_previous_error_query)
         {
-            tracing::error!("gateway {gateway_id} is erroring out",);
-            // For now let's keep the old behavior of stopping, but only if we've had a successful check before
+            // Only treat repeated failures as a hard error — and tear the tunnel
+            // down — once we've actually had a successful bandwidth check. Before
+            // the first success, transient query failures are expected (e.g. the
+            // gateway is still coming up) and must not escalate or spam the log at
+            // error level (upstream nym-vpn-client #5405).
             if self.successful_checks != 0 {
+                tracing::error!("gateway {gateway_id} is erroring out");
                 self.shutdown_token.cancel();
+            } else {
+                tracing::warn!(
+                    "gateway {gateway_id} bandwidth query failing before any successful check; not escalating"
+                );
             }
         } else {
             if entry {
