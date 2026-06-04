@@ -1,6 +1,8 @@
 // Copyright 2025 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::time::Duration;
+
 use crate::{
     SharedAccountState,
     commands::{AccountCommand, UpgradeModeCommand, common_handler, handler},
@@ -28,6 +30,21 @@ pub(super) mod requesting_zknym_state;
 
 const MAX_SYNCING_ATTEMPTS: u32 = 10;
 const SYNCING_STATE_CONTEXT: &str = "SYNCING_STATE";
+const SYNCING_BACKOFF_BASE: Duration = Duration::from_millis(250);
+const MAX_SYNCING_BACKOFF_EXPONENT: u32 = 5;
+
+/// Bounded exponential backoff before a sync *retry*: zero on the first attempt,
+/// then [0.25, 0.5, 1, 2, 4, 8, 8, ...] seconds — each retry capped at 8s, ~55s
+/// total over MAX_SYNCING_ATTEMPTS. Without this the state machine re-enters
+/// `SyncingState` immediately on every API failure, hammering the VPN API and
+/// the log on an intermittent router uplink (upstream nym-vpn-client #4898).
+fn syncing_backoff(attempts: u32) -> Duration {
+    if attempts == 0 {
+        return Duration::ZERO;
+    }
+    let exponent = (attempts - 1).min(MAX_SYNCING_BACKOFF_EXPONENT);
+    SYNCING_BACKOFF_BASE * 2u32.pow(exponent)
+}
 
 /// Syncing State
 /// This is the heart of the Account Controller.
@@ -75,6 +92,13 @@ impl SyncingState {
         let vpn_api_client = shared_state.vpn_api_client.clone();
 
         let syncing_state_handle = tokio::spawn(async move {
+            let delay = syncing_backoff(attempts);
+            if !delay.is_zero() {
+                tracing::debug!(
+                    "Backing off {delay:?} before account-sync retry (attempt {attempts})"
+                );
+                tokio::time::sleep(delay).await;
+            }
             SyncingState::syncing_account(&vpn_api_client, &vpn_api_account, &device).await
         });
 
@@ -380,5 +404,22 @@ impl From<SyncError> for AccountControllerErrorStateReason {
                 context: SYNCING_STATE_CONTEXT.into(),
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backoff_is_zero_on_first_attempt_then_grows_and_caps() {
+        assert_eq!(syncing_backoff(0), Duration::ZERO);
+        assert_eq!(syncing_backoff(1), Duration::from_millis(250));
+        assert_eq!(syncing_backoff(2), Duration::from_millis(500));
+        assert_eq!(syncing_backoff(3), Duration::from_secs(1));
+        assert_eq!(syncing_backoff(6), Duration::from_secs(8));
+        // Caps each retry at 8s (exponent 5) and never overflows.
+        assert_eq!(syncing_backoff(9), Duration::from_secs(8));
+        assert_eq!(syncing_backoff(u32::MAX), Duration::from_secs(8));
     }
 }
