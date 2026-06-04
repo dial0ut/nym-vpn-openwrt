@@ -88,6 +88,23 @@ impl DnsDiagnostic {
         name_servers.merge(NameServerConfigGroup::cloudflare());
         name_servers.merge(NameServerConfigGroup::cloudflare_https());
 
+        // Also probe the host's actually-configured resolvers (e.g. dnsmasq on
+        // 127.0.0.1, or the ISP/upstream resolver), so the per-nameserver report
+        // reveals whether the router's own DNS resolves the Nym API/gateway
+        // hostnames — a common split-DNS / captive-portal failure mode that the
+        // fixed quad9/cloudflare probes can't surface (upstream nym-vpn-client
+        // #5267). A missing/unparseable resolv.conf degrades gracefully.
+        match hickory_resolver::system_conf::read_system_conf() {
+            Ok((system_config, _)) => {
+                let system_group: NameServerConfigGroup =
+                    system_config.name_servers().to_vec().into();
+                name_servers.merge(system_group);
+            }
+            Err(e) => {
+                tracing::warn!("Failed to read system DNS configuration for diagnostic: {e}");
+            }
+        }
+
         let mut results = Vec::new();
         for nameserver in name_servers.into_inner().into_iter() {
             tracing::debug!("DNs diagnostic - {nameserver:?}");
