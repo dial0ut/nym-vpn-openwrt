@@ -139,10 +139,7 @@ impl SyncingState {
                     summary.account_summary.fair_usage.usedGB,
                     summary.account_summary.fair_usage.limitGB,
                     summary.account_summary.fair_usage.resetsOnUtc.clone(),
-                )
-                .map_err(|e| SyncError::ApiResponseError {
-                    details: format!("Failed to create account summary from API response: {e}"),
-                })?;
+                );
 
                 // Checking that the account is active
                 if !summary.account_active() {

@@ -6151,6 +6151,7 @@ dependencies = [
  "si-scale 0.3.0",
  "thiserror 2.0.18",
  "time",
+ "tracing",
  "ts-rs",
  "zeroize",
 ]
