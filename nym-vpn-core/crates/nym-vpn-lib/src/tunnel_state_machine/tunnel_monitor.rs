@@ -137,6 +137,12 @@ pub enum TunnelMonitorEvent {
 
     /// Connection has failed
     ConnectionFailed,
+
+    /// Registration with the entry gateway failed (e.g. the gateway accepted the
+    /// connection but rejected WireGuard registration). Handled like a
+    /// connection failure: the entry gateway is blacklisted and re-selected so
+    /// we don't retry a gateway that registers-but-fails indefinitely.
+    RegistrationFailed,
 }
 
 pub struct TunnelMonitorHandle {
@@ -480,7 +486,12 @@ impl TunnelMonitor {
         let rc_builder = RegistrationClientBuilder::new(rc_builder_config);
 
         let registration_client = Box::pin(rc_builder.build()).await?;
-        let registration_result = Box::pin(registration_client.register()).await?;
+        let registration_result = Box::pin(registration_client.register())
+            .await
+            // A gateway that accepts the connection but fails registration must
+            // be dropped from the entry pool, otherwise we keep retrying it
+            // indefinitely (upstream nym-vpn-client #5379).
+            .inspect_err(|_| self.send_event(TunnelMonitorEvent::RegistrationFailed))?;
 
         // Send event upon successful gateway registration
         // The receiver should handle the event and add firewall exceptions for entry gateway
@@ -1148,6 +1159,11 @@ impl TunnelMonitor {
             tun_config
                 .name("nym0")
                 .address(interface_ipv4)
+                // Newer `tun` crate versions skip configuring the IPv4 address
+                // when no netmask is set, which silently drops IPv4 on the
+                // mixnet (5-hop) adapter. Mirror create_wireguard_device and set
+                // it explicitly (upstream nym-vpn-client #5207).
+                .netmask(Ipv4Addr::BROADCAST)
                 .mtu(mtu)
                 .up();
 
