@@ -45,7 +45,12 @@ pub async fn connect(socket_path: impl AsRef<Path>) -> Result<TokioIo<UnixStream
 pub fn incoming(socket_path: PathBuf) -> Result<Uds> {
     let uds = UnixListener::bind(&socket_path)?;
 
-    fs::set_permissions(&socket_path, PermissionsExt::from_mode(0o766))?;
+    // Restrict the control socket to its owner (root). On OpenWrt the daemon
+    // runs as root under procd and its only client (nym-vpnc, invoked by the
+    // LuCI rpcd backend) also runs as root, so 0o600 is sufficient and avoids
+    // exposing daemon control to any other local UID. (Upstream nym-vpn-client
+    // #5121 only dropped the meaningless exec bit, to 0o666; we go further.)
+    fs::set_permissions(&socket_path, PermissionsExt::from_mode(0o600))?;
 
     Ok(Uds {
         socket_path,
