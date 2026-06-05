@@ -106,7 +106,9 @@ cd docker/tier3-musl
 
 | Binary | Typical Size | Purpose |
 |--------|-------------|---------|
-| `nym-vpnd` | ~57 MB | VPN daemon |
-| `nym-vpnc` | ~5 MB | CLI client |
+| `nym-vpnd` | ~16–33 MB (arch-dependent) | VPN daemon |
+| `nym-vpnc` | ~2–3 MB | CLI client |
+
+Sizes vary by architecture: `nym-vpnd` is ~16 MB on armv5te/riscv64, ~22 MB on mips, ~28–29 MB on aarch64/armv7/i686, and ~33 MB on x86_64. Compressed `.ipk`/`.apk` packages are ~9–15 MB.
 
 Both are statically linked MUSL binaries with no runtime dependencies beyond the kernel.

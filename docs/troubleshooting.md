@@ -2,7 +2,20 @@
 
 ## "No related RPC reply" on GL.iNet Devices
 
-GL.iNet routers run their own admin panel on port 80, which conflicts with LuCI's session handling. Move LuCI to port 8080:
+GL.iNet routers serve their admin panel through nginx on port 80, but nginx
+does not proxy `/ubus` — the endpoint LuCI uses for RPC. So if you open the
+LuCI app via port 80, every RPC call gets an HTML redirect instead of a JSON
+reply and the page fails with "No related RPC reply". The backend daemon is
+fine; only the web transport is broken.
+
+LuCI runs on its own uhttpd port (default `8080`/`8443`), which serves `/ubus`
+correctly. Just access it there:
+
+```
+http://192.168.8.1:8080
+```
+
+If LuCI isn't on 8080, set it:
 
 ```bash
 uci set uhttpd.main.listen_http='0.0.0.0:8080'
@@ -11,12 +24,11 @@ uci commit uhttpd
 /etc/init.d/uhttpd restart
 ```
 
-Then access LuCI at `http://192.168.8.1:8080`.
-
 ## Not Enough Disk Space
 
-NymVPN binaries are ~57MB (nym-vpnd) + ~5MB (nym-vpnc). Devices with
-small `/tmp` (tmpfs backed by RAM) may not have room.
+NymVPN binaries are roughly 18-36MB installed (nym-vpnd ~16-33MB depending
+on architecture + nym-vpnc ~2-3MB). Devices with small `/tmp` (tmpfs backed
+by RAM) may not have room.
 
 **Check available space:**
 ```bash
