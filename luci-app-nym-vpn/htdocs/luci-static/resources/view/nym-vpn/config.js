@@ -1810,6 +1810,183 @@ return view.extend({
         ]);
         container.appendChild(logsCard);
 
+        // Diagnostics Card — surfaces the daemon's connectivity self-test
+        // (`nym-vpnc diagnostic run`): DNS resolution, VPN API reachability over
+        // HTTP, and the selected gateway's TCP/WebSocket handshake. The report is
+        // rendered as PASS/FAIL rows; the JSON is treated as opaque so new daemon
+        // probes appear automatically without touching this view.
+        var diagResults = E('div', { 'class': 'nym-diag-results empty' },
+            'Run a diagnostic to test DNS, API, and gateway connectivity.');
+        var diagSkipDns = E('input', { 'type': 'checkbox', 'id': 'diag-skip-dns' });
+        var diagSkipHttp = E('input', { 'type': 'checkbox', 'id': 'diag-skip-http' });
+        var diagRunBtn = E('button', { 'class': 'nym-btn nym-btn-primary nym-btn-small', 'type': 'button' }, 'Run Diagnostic');
+        var diagRunning = false;
+
+        var diagChip = function(ok) {
+            return E('span', { 'class': 'nym-diag-chip ' + (ok ? 'ok' : 'fail') }, ok ? 'PASS' : 'FAIL');
+        };
+        var diagRow = function(label, ok, detail) {
+            return E('div', { 'class': 'nym-diag-row' }, [
+                diagChip(ok),
+                E('div', { 'class': 'nym-diag-row-body' }, [
+                    E('div', { 'class': 'nym-diag-row-label' }, label),
+                    detail ? E('div', { 'class': 'nym-diag-row-detail' }, String(detail)) : ''
+                ])
+            ]);
+        };
+        var diagGroup = function(title, rows) {
+            if (!rows.length) rows = [E('div', { 'class': 'nym-diag-empty' }, 'No results.')];
+            return E('div', { 'class': 'nym-diag-group' },
+                [E('div', { 'class': 'nym-diag-group-title' }, title)].concat(rows));
+        };
+        var diagDnsRow = function(label, r) {
+            var res = r.resolution || {};
+            var detail;
+            if (res.ok)
+                detail = r.hostname + ' → ' + (res.value || []).join(', ') +
+                    ' (' + r.resolution_duration_ms + 'ms)';
+            else
+                detail = r.hostname + ' → ' + (res.error || 'failed');
+            return diagRow(label, !!res.ok, detail);
+        };
+        var renderDiagnosticReport = function(report) {
+            var groups = [];
+
+            // DNS resolution — host resolvers plus each configured nameserver.
+            if (report.dns) {
+                var dnsRows = [];
+                var sys = report.dns.system;
+                if (sys) {
+                    if (sys.ok && sys.value)
+                        sys.value.forEach(function(r) { dnsRows.push(diagDnsRow('System resolvers', r)); });
+                    else
+                        dnsRows.push(diagRow('System resolvers', false, sys.error || 'failed'));
+                }
+                (report.dns.by_nameserver || []).forEach(function(r) {
+                    dnsRows.push(diagDnsRow(r.nameservers || 'nameserver', r));
+                });
+                groups.push(diagGroup('DNS Resolution', dnsRows));
+            }
+
+            // HTTP — VPN API time skew, health endpoint, node count.
+            if (report.http) {
+                var httpRows = [];
+                var h = report.http;
+                if (h.ok && h.value) {
+                    var v = h.value;
+                    if (v.remote_time) {
+                        var rt = v.remote_time;
+                        httpRows.push(diagRow('API time skew',
+                            !!(rt.ok && rt.value && rt.value.accetably_synced),
+                            rt.ok && rt.value
+                                ? ('local ' + rt.value.local_time + ' / remote ' + rt.value.estimated_remote_time)
+                                : (rt.error || 'failed')));
+                    }
+                    if (v.health_response) {
+                        var hr = v.health_response;
+                        httpRows.push(diagRow('API health', !!hr.ok,
+                            hr.ok && hr.value ? (hr.value.status + ' @ ' + hr.value.timestamp_utc)
+                                : (hr.error || 'failed')));
+                    }
+                    if (v.nb_nymnodes) {
+                        var nn = v.nb_nymnodes;
+                        httpRows.push(diagRow('Nym nodes reachable', !!nn.ok,
+                            nn.ok ? (nn.value + ' nodes') : (nn.error || 'failed')));
+                    }
+                } else {
+                    httpRows.push(diagRow('VPN API', false, h.error || 'failed'));
+                }
+                groups.push(diagGroup('VPN API (HTTP)', httpRows));
+            }
+
+            // Gateway — selection plus TCP/WebSocket reachability.
+            if (report.gateway) {
+                var gwRows = [];
+                var g = report.gateway;
+                if (g.gateway) {
+                    var sel = g.gateway;
+                    var val = sel.value || {};
+                    var gwName = val.name || val.identity_key || val.identityKey || 'selected';
+                    gwRows.push(diagRow('Gateway selection', !!sel.ok,
+                        sel.ok ? gwName : (sel.error || 'failed')));
+                }
+                if (g.tcp)
+                    gwRows.push(diagRow('TCP reachability', !!g.tcp.ok,
+                        g.tcp.ok ? 'connected' : (g.tcp.error || 'failed')));
+                if (g.websocket)
+                    gwRows.push(diagRow('WebSocket handshake', !!g.websocket.ok,
+                        g.websocket.ok ? 'connected' : (g.websocket.error || 'failed')));
+                if (g.websocket_request)
+                    gwRows.push(diagRow('WebSocket request', !!g.websocket_request.ok,
+                        g.websocket_request.ok ? (g.websocket_request.value || 'ok')
+                            : (g.websocket_request.error || 'failed')));
+                groups.push(diagGroup('Gateway', gwRows));
+            }
+
+            if (!groups.length)
+                groups.push(E('div', { 'class': 'nym-diag-empty' }, 'Diagnostic returned no sections.'));
+            return groups;
+        };
+
+        var runDiagnostic = function() {
+            if (diagRunning) return;
+            diagRunning = true;
+            diagRunBtn.disabled = true;
+            diagRunBtn.textContent = 'Running…';
+            diagResults.className = 'nym-diag-results empty';
+            diagResults.textContent = 'Running diagnostic — this may take a few seconds…';
+
+            var reset = function() {
+                diagRunning = false;
+                diagRunBtn.disabled = false;
+                diagRunBtn.textContent = 'Run Diagnostic';
+            };
+
+            rpc.diagnosticRun(diagSkipDns.checked, diagSkipHttp.checked, '').then(function(result) {
+                reset();
+                if (!result || result.success !== true) {
+                    diagResults.className = 'nym-diag-results empty';
+                    diagResults.textContent = (result && result.error) || 'Diagnostic failed.';
+                    return;
+                }
+                var report;
+                try { report = JSON.parse(result.report); }
+                catch (e) {
+                    diagResults.className = 'nym-diag-results empty';
+                    diagResults.textContent = 'Could not parse diagnostic report.';
+                    return;
+                }
+                diagResults.className = 'nym-diag-results';
+                dom.content(diagResults, renderDiagnosticReport(report));
+            }).catch(function(err) {
+                reset();
+                diagResults.className = 'nym-diag-results empty';
+                diagResults.textContent = 'Diagnostic error: ' + (err && err.message ? err.message : err);
+            });
+        };
+        diagRunBtn.onclick = runDiagnostic;
+
+        var diagCard = E('div', { 'class': 'nym-card' }, [
+            E('div', { 'class': 'nym-card-header', 'click': function() { toggleCard(diagCard); } }, [
+                E('div', { 'class': 'nym-card-title' }, [
+                    svgIcon(assets.iconShield),
+                    'Diagnostics'
+                ]),
+                E('div', { 'class': 'nym-card-chevron' }, '▼')
+            ]),
+            E('div', { 'class': 'nym-card-body' }, [
+                E('div', { 'class': 'nym-card-description' },
+                    'Run a connectivity self-test against DNS, the Nym VPN API, and the selected gateway.'),
+                E('div', { 'class': 'nym-diag-controls' }, [
+                    diagRunBtn,
+                    E('label', { 'class': 'nym-diag-check' }, [diagSkipDns, ' Skip DNS']),
+                    E('label', { 'class': 'nym-diag-check' }, [diagSkipHttp, ' Skip HTTP'])
+                ]),
+                diagResults
+            ])
+        ]);
+        container.appendChild(diagCard);
+
         // Footer
         var footer = E('div', { 'class': 'nym-footer' }, [
             E('div', { 'class': 'nym-footer-info' }, [

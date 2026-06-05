@@ -193,5 +193,11 @@ return baseclass.extend({
         object: 'nym-vpn',
         method: 'logs_get',
         params: ['lines']
+    }),
+
+    diagnosticRun: rpc.declare({
+        object: 'nym-vpn',
+        method: 'diagnostic_run',
+        params: ['skip_dns', 'skip_http', 'gateway']
     })
 });

@@ -314,5 +314,20 @@ return baseclass.extend({
     .nym-log-viewer .nym-log-trace { color: var(--text-muted); opacity: 0.7; }\
     .nym-btn-secondary { background: transparent !important; color: var(--text-secondary) !important; border: 1px solid var(--border-color) !important; padding: 8px 16px; font-size: 12px; }\
     .nym-btn-secondary:hover:not(:disabled) { background: var(--bg-card-hover) !important; color: var(--text-primary) !important; border-color: var(--border-accent) !important; }\
+    .nym-diag-controls { display: flex; align-items: center; gap: 16px; margin-bottom: 14px; flex-wrap: wrap; }\
+    .nym-diag-check { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); cursor: pointer; }\
+    .nym-diag-results { background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px 16px; max-height: 420px; overflow: auto; }\
+    .nym-diag-results.empty { color: var(--text-muted); font-style: italic; font-size: 12px; }\
+    .nym-diag-group { margin-bottom: 18px; }\
+    .nym-diag-group:last-child { margin-bottom: 0; }\
+    .nym-diag-group-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-secondary); font-weight: 600; margin-bottom: 6px; }\
+    .nym-diag-row { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-top: 1px solid var(--border-color); }\
+    .nym-diag-chip { flex: 0 0 auto; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px; font-family: monospace; line-height: 1.6; }\
+    .nym-diag-chip.ok { background: var(--nym-green-dim); color: var(--nym-green); }\
+    .nym-diag-chip.fail { background: var(--danger-dim); color: var(--danger); }\
+    .nym-diag-row-body { min-width: 0; }\
+    .nym-diag-row-label { font-size: 13px; color: var(--text-primary); }\
+    .nym-diag-row-detail { font-size: 11px; color: var(--text-muted); margin-top: 2px; word-break: break-all; font-family: "SF Mono", "Fira Code", Consolas, monospace; }\
+    .nym-diag-empty { color: var(--text-muted); font-style: italic; font-size: 12px; }\
 '
 });

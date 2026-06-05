@@ -1314,6 +1314,41 @@ handle_logs_get() {
     json_dump
 }
 
+handle_diagnostic_run() {
+    read input
+    json_load "$input"
+
+    local skip_dns skip_http gateway
+    json_get_var skip_dns skip_dns
+    json_get_var skip_http skip_http
+    json_get_var gateway gateway
+
+    # The diagnostic probes DNS, the VPN API over HTTP, and the selected
+    # gateway's TCP/WebSocket reachability. nym-vpnc prints a JSON report on
+    # success; we pass it through verbatim for the LuCI view to parse.
+    set -- run
+    [ "$skip_dns" = "1" -o "$skip_dns" = "true" ]   && set -- "$@" --skip-dns
+    [ "$skip_http" = "1" -o "$skip_http" = "true" ] && set -- "$@" --skip-http
+    if [ -n "$gateway" ]; then
+        gateway=$(validate_input "$gateway" gateway_id)
+        [ -n "$gateway" ] && set -- "$@" --gateway "$gateway"
+    fi
+
+    local report
+    report=$($VPNC diagnostic "$@" 2>&1)
+    local rc=$?
+
+    json_init
+    if [ "$rc" -ne 0 ] || [ -z "$report" ]; then
+        json_add_boolean "success" 0
+        json_add_string "error" "${report:-diagnostic failed}"
+    else
+        json_add_boolean "success" 1
+        json_add_string "report" "$report"
+    fi
+    json_dump
+}
+
 handle_daemon_status() {
     json_init
 
@@ -1441,6 +1476,7 @@ case "$1" in
     "daemon_start": {},
     "daemon_stop": {},
     "logs_get": { "lines": "int" },
+    "diagnostic_run": { "skip_dns": "bool", "skip_http": "bool", "gateway": "str" },
     "watchdog_get": {},
     "watchdog_set": { "always_on": "bool", "interval": "int" }
 }
@@ -1480,6 +1516,7 @@ EOF
             daemon_start)            handle_daemon_start ;;
             daemon_stop)             handle_daemon_stop ;;
             logs_get)                handle_logs_get ;;
+            diagnostic_run)          handle_diagnostic_run ;;
             watchdog_get)            handle_watchdog_get ;;
             watchdog_set)            handle_watchdog_set ;;
             *)

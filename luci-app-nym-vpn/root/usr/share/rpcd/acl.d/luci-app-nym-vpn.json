@@ -20,7 +20,8 @@
           "dns_get",
           "daemon_status",
           "watchdog_get",
-          "logs_get"
+          "logs_get",
+          "diagnostic_run"
         ],
         "service": [
           "list"
