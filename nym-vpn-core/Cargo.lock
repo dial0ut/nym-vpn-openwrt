@@ -4765,17 +4765,20 @@ dependencies = [
  "nym-vpn-store",
  "pnet",
  "rand 0.8.5",
+ "rustls 0.23.37",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "time",
  "tokio",
+ "tokio-rustls 0.26.4",
  "tokio-tungstenite 0.28.0",
  "tokio-util",
  "tracing",
  "tracing-subscriber",
  "url",
  "vergen-gitcl",
+ "webpki-roots 1.0.6",
 ]
 
 [[package]]

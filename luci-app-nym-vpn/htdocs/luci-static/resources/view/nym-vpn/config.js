@@ -1923,6 +1923,18 @@ return view.extend({
                 groups.push(diagGroup('Gateway', gwRows));
             }
 
+            // Hybrid Transport — CTAP 2.2 relay reachability canary (#5314).
+            // Omitted from the JSON when --skip-hybrid-transport was passed.
+            if (report.hybrid_transport) {
+                var ht = report.hybrid_transport;
+                groups.push(diagGroup('Hybrid Transport', [
+                    diagRow('CTAP relay (cable.ua5v.com)', !!ht.ok,
+                        ht.ok && ht.value
+                            ? ('routing-id ' + ht.value.routing_id + ' (' + ht.value.handshake_duration_ms + 'ms)')
+                            : (ht.error || 'failed'))
+                ]));
+            }
+
             if (!groups.length)
                 groups.push(E('div', { 'class': 'nym-diag-empty' }, 'Diagnostic returned no sections.'));
             return groups;

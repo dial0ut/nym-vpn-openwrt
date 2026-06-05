@@ -55,6 +55,10 @@ pub struct RunParams {
     /// Skip HTTP diagnostic
     #[clap(long, action = clap::ArgAction::SetTrue)]
     pub skip_http: bool,
+
+    /// Skip CTAP 2.2 Hybrid Transport reachability diagnostic
+    #[clap(long, action = clap::ArgAction::SetTrue)]
+    pub skip_hybrid_transport: bool,
 }
 
 impl From<RunParams> for nym_vpn_lib_types::DiagnosticRunParams {
@@ -63,6 +67,7 @@ impl From<RunParams> for nym_vpn_lib_types::DiagnosticRunParams {
             gateway: value.gateway,
             skip_dns: value.skip_dns,
             skip_http: value.skip_http,
+            skip_hybrid_transport: value.skip_hybrid_transport,
         }
     }
 }
