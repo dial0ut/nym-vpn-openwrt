@@ -7,7 +7,7 @@ mod tests;
 use itertools::Itertools;
 use nym_sdk::mixnet::NodeIdentity;
 use nym_topology::{NodeId, RoutingNode};
-use nym_validator_client::models::{KeyRotationId, NymNodeDescriptionV1};
+use nym_validator_client::models::{KeyRotationId, LewesProtocolDetailsV1, NymNodeDescriptionV2};
 use nym_vpn_api_client::{
     response::{BridgeInformation, BridgeParameters},
     types::Percent,
@@ -64,11 +64,13 @@ pub struct Gateway {
     pub performance: Option<Performance>,
     #[builder(default)]
     pub version: Option<String>,
+    #[builder(default)]
+    pub lewes_protocol_details: Option<LewesProtocolDetailsV1>,
 }
 
 impl Gateway {
     pub fn try_from_node_description(
-        node_description: NymNodeDescriptionV1,
+        node_description: NymNodeDescriptionV2,
         current_key_rotation: KeyRotationId,
     ) -> Result<Self> {
         let identity = node_description.description.host_information.keys.ed25519;
@@ -105,6 +107,9 @@ impl Gateway {
             .network_requester
             .as_ref()
             .map(|nr| nr.address.clone());
+
+        let lewes_protocol_details = node_description.description.lewes_protocol.clone();
+
         let version = Some(node_description.version().to_string());
         let role = if node_description.description.declared_role.entry {
             nym_validator_client::nym_nodes::NodeRole::EntryGateway
@@ -145,6 +150,7 @@ impl Gateway {
             mixnet_performance: None,
             performance: None,
             version,
+            lewes_protocol_details,
         })
     }
 
@@ -399,6 +405,7 @@ pub struct ProbeOutcome {
     pub as_entry: Entry,
     pub as_exit: Option<Exit>,
     pub wg: Option<WgProbeResults>,
+    pub lp: Option<Lp>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -406,6 +413,14 @@ pub struct Socks5 {
     pub can_proxy_https: bool,
     pub score: Option<ScoreValue>,
     pub errors: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Lp {
+    pub can_connect: bool,
+    pub can_handshake: bool,
+    pub can_register: bool,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -514,6 +529,7 @@ impl From<nym_vpn_api_client::response::ProbeOutcome> for ProbeOutcome {
             as_entry: Entry::from(outcome.as_entry),
             as_exit,
             wg: outcome.wg.map(WgProbeResults::from),
+            lp: outcome.lp.map(From::from),
         }
     }
 }
@@ -524,6 +540,17 @@ impl From<nym_vpn_api_client::response::Socks5> for Socks5 {
             can_proxy_https: exit.can_proxy_https,
             score: exit.score.map(ScoreValue::from),
             errors: exit.errors,
+        }
+    }
+}
+
+impl From<nym_vpn_api_client::response::Lp> for Lp {
+    fn from(lp: nym_vpn_api_client::response::Lp) -> Self {
+        Lp {
+            can_connect: lp.can_connect,
+            can_handshake: lp.can_handshake,
+            can_register: lp.can_register,
+            error: lp.error,
         }
     }
 }
@@ -644,6 +671,7 @@ impl TryFrom<nym_vpn_api_client::response::NymDirectoryGateway> for Gateway {
             mixnet_performance: Some(gateway.performance),
             performance,
             version: gateway.build_information.map(|info| info.build_version),
+            lewes_protocol_details: gateway.lewes_protocol_details,
         })
     }
 }

@@ -245,7 +245,7 @@ async fn setup_registration(
     let api_client = build_api_client(network).await?;
 
     let described_nodes = api_client
-        .get_all_described_nodes()
+        .get_all_described_nodes_v2()
         .await
         .map_err(|e| anyhow::anyhow!("Failed to fetch described nodes : {e}"))?;
     let gateway = described_nodes

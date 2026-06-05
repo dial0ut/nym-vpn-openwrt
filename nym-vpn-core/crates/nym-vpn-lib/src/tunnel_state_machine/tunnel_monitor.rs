@@ -1,7 +1,7 @@
 // Copyright 2024 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 
 use std::ops::Deref;
 
@@ -30,7 +30,7 @@ use nym_registration_client::{
     MixnetRegistrationResult, RegistrationClientBuilder, RegistrationClientBuilderConfig,
     RegistrationMode, RegistrationNymNode, RegistrationResult, WireguardRegistrationResult,
 };
-use nym_registration_common::NymNodeInformation;
+use nym_registration_common::{NymNodeInformation, NymNodeLPInformation};
 use nym_vpn_account_controller::{AccountCommandSender, AccountStateReceiver};
 use nym_vpn_lib_types::{
     AccountControllerError, BridgeAddress, ConnectionData, ErrorStateReason,
@@ -417,6 +417,77 @@ impl TunnelMonitor {
             })
             .map_err(Box::new)?;
 
+        // Build per-gateway Lewes Protocol registration data from each gateway's
+        // advertised LP details (ports upstream gateway_provider/selector.rs inline,
+        // since this fork has no gateway_provider module). The registration builder
+        // requests LP unconditionally (enable_lp_registration(true)); it only takes
+        // effect when a gateway advertises valid LP details and use_lp() is satisfied,
+        // otherwise the legacy WireGuard registration path runs unchanged.
+        let entry_gateway = selected_gateways.entry_gateway();
+        if let Some(data) = entry_gateway.lewes_protocol_details.as_ref()
+            && !data.verify(&entry_gateway.identity)
+        {
+            tracing::warn!(
+                "Entry gateway {} has malformed LP information, something fishy is going on",
+                entry_gateway.identity()
+            );
+            return Err(tunnel::Error::SelectGateways(Box::new(
+                crate::GatewayDirectoryError::MalformedLewesProtocolInfo {
+                    identity: entry_gateway.identity().to_base58_string(),
+                },
+            ))
+            .into());
+        }
+        let entry_lp_data = entry_gateway
+            .lewes_protocol_details
+            .clone()
+            .and_then(|data| {
+                let kem_keys = data.content.kem_keys().ok()?;
+                let ciphersuite = nym_lp::Ciphersuite::from_node_version(
+                    semver::Version::parse(entry_gateway.version.as_ref()?).ok()?,
+                )?;
+                Some(NymNodeLPInformation {
+                    address: SocketAddr::new(entry_ip, data.content.control_port),
+                    expected_kem_key_hashes: kem_keys,
+                    x25519: data.content.x25519,
+                    ciphersuite,
+                    // TODO: proper derivation from build version; upstream hardcodes 1.
+                    lp_protocol_version: 1,
+                })
+            });
+
+        let exit_gateway = selected_gateways.exit_gateway();
+        if let Some(data) = exit_gateway.lewes_protocol_details.as_ref()
+            && !data.verify(&exit_gateway.identity)
+        {
+            tracing::warn!(
+                "Exit gateway {} has malformed LP information, something fishy is going on",
+                exit_gateway.identity()
+            );
+            return Err(tunnel::Error::SelectGateways(Box::new(
+                crate::GatewayDirectoryError::MalformedLewesProtocolInfo {
+                    identity: exit_gateway.identity().to_base58_string(),
+                },
+            ))
+            .into());
+        }
+        let exit_lp_data = exit_gateway
+            .lewes_protocol_details
+            .clone()
+            .and_then(|data| {
+                let kem_keys = data.content.kem_keys().ok()?;
+                let ciphersuite = nym_lp::Ciphersuite::from_node_version(
+                    semver::Version::parse(exit_gateway.version.as_ref()?).ok()?,
+                )?;
+                Some(NymNodeLPInformation {
+                    address: SocketAddr::new(exit_ip, data.content.control_port),
+                    expected_kem_key_hashes: kem_keys,
+                    x25519: data.content.x25519,
+                    ciphersuite,
+                    lp_protocol_version: 1,
+                })
+            });
+
         let entry_node = RegistrationNymNode {
             node: NymNodeInformation {
                 identity: selected_gateways.entry_gateway().identity,
@@ -430,7 +501,7 @@ impl TunnelMonitor {
                     .map(Into::into),
                 ip_address: entry_ip,
                 version: selected_gateways.entry_gateway().version.clone().into(),
-                lp_data: None,
+                lp_data: entry_lp_data,
             },
             keys: selected_gateways.entry_keypair().clone(),
         };
@@ -445,7 +516,7 @@ impl TunnelMonitor {
                     .map(Into::into),
                 ip_address: exit_ip,
                 version: selected_gateways.exit_gateway().version.clone().into(),
-                lp_data: None,
+                lp_data: exit_lp_data,
             },
             keys: selected_gateways.exit_keypair().clone(),
         };
@@ -464,6 +535,7 @@ impl TunnelMonitor {
         let rcb_config_builder = RegistrationClientBuilderConfig::builder()
             .entry_node(entry_node)
             .exit_node(exit_node)
+            .enable_lp_registration(true)
             .data_path(self.tunnel_parameters.nym_config.data_path.clone())
             .mixnet_client_config(mixnet_client_config)
             .mixnet_client_startup_timeout(REGISTRATION_CLIENT_STARTUP_TIMEOUT)
@@ -914,20 +986,21 @@ impl TunnelMonitor {
             bw_controller,
         ) = match registration_result {
             WireguardRegistrationResult::Legacy(res) => (
-                res.entry_gateway_client,
-                res.exit_gateway_client,
+                Some(res.entry_gateway_client),
+                Some(res.exit_gateway_client),
                 res.entry_gateway_data,
                 res.exit_gateway_data,
-                res.authenticator_listener_handle,
+                Some(res.authenticator_listener_handle),
                 res.bw_controller,
             ),
-            WireguardRegistrationResult::LewesProtocol(_) => {
-                // Lewes Protocol registration is not yet wired into this fork
-                // (Stage 3). The registration builder never requests it
-                // (enable_lp_registration defaults false), so this arm is
-                // unreachable at runtime; bail defensively if it is ever reached.
-                return Err(tunnel::Error::Cancelled.into());
-            }
+            WireguardRegistrationResult::LewesProtocol(res) => (
+                None,
+                None,
+                res.entry_gateway_data,
+                res.exit_gateway_data,
+                None,
+                res.bw_controller,
+            ),
         };
 
         let gw_update_version = self
@@ -951,15 +1024,17 @@ impl TunnelMonitor {
             self.shutdown_token.child_token(),
         );
 
-        let authenticator_listener_handle = if bw.is_using_latest_client() {
-            // We don't need the mixnet client anymore
-            tracing::info!(
-                "Disconnecting mixnet client as we are using the latest bandwidth controller"
-            );
-            authenticator_listener_handle.stop().await;
-            None
-        } else {
-            Some(authenticator_listener_handle)
+        let authenticator_listener_handle = match authenticator_listener_handle {
+            Some(handle) if bw.is_using_latest_client() => {
+                // We don't need the mixnet client anymore
+                tracing::info!(
+                    "Disconnecting mixnet client as we are using the latest bandwidth controller"
+                );
+                handle.stop().await;
+                None
+            }
+            Some(handle) => Some(handle),
+            None => None,
         };
         let bandwidth_controller_handle = tokio::spawn(bw.run());
 

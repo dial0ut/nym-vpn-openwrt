@@ -215,6 +215,7 @@ nym-ecash-time = { git = "https://github.com/nymtech/nym", branch = "vpn/release
 nym-gateway-requests = { git = "https://github.com/nymtech/nym", branch = "vpn/release/2026.9-venaco" }
 nym-http-api-client = { git = "https://github.com/nymtech/nym", branch = "vpn/release/2026.9-venaco" }
 nym-http-api-client-macro = { git = "https://github.com/nymtech/nym", branch = "vpn/release/2026.9-venaco" }
+nym-lp = { git = "https://github.com/nymtech/nym", branch = "vpn/release/2026.9-venaco" }
 nym-network-defaults = { git = "https://github.com/nymtech/nym", branch = "vpn/release/2026.9-venaco" }
 nym-ip-packet-requests = { git = "https://github.com/nymtech/nym", branch = "vpn/release/2026.9-venaco" }
 nym-ip-packet-client = { git = "https://github.com/nymtech/nym", branch = "vpn/release/2026.9-venaco" }

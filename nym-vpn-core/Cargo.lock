@@ -6243,6 +6243,7 @@ dependencies = [
  "nym-http-api-client",
  "nym-ip-packet-client",
  "nym-ip-packet-requests",
+ "nym-lp",
  "nym-offline-monitor",
  "nym-platform-metadata",
  "nym-registration-client",

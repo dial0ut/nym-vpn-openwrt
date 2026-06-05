@@ -39,4 +39,7 @@ pub enum GatewayDirectoryError {
         #[source]
         source: nym_vpn_store::keys::wireguard::KeysDbError,
     },
+
+    #[error("gateway {identity} announced malformed Lewes Protocol information")]
+    MalformedLewesProtocolInfo { identity: String },
 }
