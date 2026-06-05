@@ -1897,6 +1897,22 @@ return view.extend({
                     httpRows.push(diagRow('VPN API', false, h.error || 'failed'));
                 }
                 groups.push(diagGroup('VPN API (HTTP)', httpRows));
+
+                // Per-endpoint reachability, incl. domain-fronted probes (#5300).
+                if (h.ok && h.value && (h.value.by_endpoint || []).length) {
+                    var epRows = h.value.by_endpoint.map(function(ep) {
+                        if (ep.ok && ep.value) {
+                            var u = ep.value.url || {};
+                            var fronted = !!(u.front_hosts && u.front_hosts.length);
+                            return diagRow((u.url || 'endpoint') + (fronted ? ' [fronted]' : ''),
+                                true,
+                                'status: ' + ep.value.status +
+                                    (fronted ? ' · via ' + u.front_hosts.join(', ') : ''));
+                        }
+                        return diagRow('endpoint', false, ep.error || 'failed');
+                    });
+                    groups.push(diagGroup('API Endpoints', epRows));
+                }
             }
 
             // Gateway — selection plus TCP/WebSocket reachability.

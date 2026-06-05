@@ -10,7 +10,7 @@ use std::{
 };
 use time::OffsetDateTime;
 
-use crate::gateway;
+use crate::{ApiUrl, gateway};
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone)]
@@ -104,6 +104,15 @@ pub struct HttpReport {
     pub remote_time: DiagnosticResult<ApiTimeSkew>,
     pub health_response: DiagnosticResult<DiagnosticHealthResponse>,
     pub nb_nymnodes: DiagnosticResult<usize>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub by_endpoint: Vec<DiagnosticResult<DiagnosticEndpointResponse>>,
+}
+
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Debug)]
+pub struct DiagnosticEndpointResponse {
+    pub status: String,
+    pub url: ApiUrl,
 }
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

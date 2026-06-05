@@ -59,9 +59,9 @@ pub use connection_data::{
 };
 pub use device::{NymVpnDevice, NymVpnDeviceStatus, NymVpnUsage};
 pub use diagnostic::{
-    ApiTimeSkew, CompleteDnsReport, DiagnosticRegisterParams, DiagnosticReport, DiagnosticResult,
-    DiagnosticRunParams, DnsResolution, GatewayReport, HttpReport, HybridTransportReport,
-    PingReport, RegistrationReport,
+    ApiTimeSkew, CompleteDnsReport, DiagnosticEndpointResponse, DiagnosticRegisterParams,
+    DiagnosticReport, DiagnosticResult, DiagnosticRunParams, DnsResolution, GatewayReport,
+    HttpReport, HybridTransportReport, PingReport, RegistrationReport,
 };
 pub use gateway::{
     Asn, AsnKind, BridgeInformation, BridgeParameters, Country, Entry, EntryPoint, Exit, ExitPoint,
