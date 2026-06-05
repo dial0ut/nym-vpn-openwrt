@@ -1,7 +1,7 @@
-use std::time::Duration;
+use std::{collections::HashMap, net::IpAddr, sync::Arc, time::Duration};
 
 use crate::{ResolverOverrides, error::VpnApiClientError};
-use nym_http_api_client::{Client, ClientBuilder, FrontPolicy, Url, UserAgent};
+use nym_http_api_client::{Client, ClientBuilder, FrontPolicy, HickoryDnsResolver, Url, UserAgent};
 use nym_network_defaults::ApiUrl;
 
 pub async fn fronted_http_client(
@@ -42,13 +42,16 @@ pub async fn fronted_http_client_builder(
     }
 
     if has_front {
-        builder = builder.with_fronting(FrontPolicy::OnRetry);
+        builder = builder.with_fronting(Some(FrontPolicy::OnRetry));
     }
 
-    // Add resolver overrides
+    // Add resolver overrides. venaco removed ClientBuilder::resolve_to_addrs; the
+    // successor is a HickoryDnsResolver with a static pre-resolve map (overrides
+    // the listed domains, real DNS for everything else), attached via dns_resolver.
     if let Some(resolver_overrides) = resolver_overrides.as_ref()
         && !resolver_overrides.is_empty()
     {
+        let mut preresolve: HashMap<String, Vec<IpAddr>> = HashMap::new();
         for domain in resolver_overrides.domains() {
             if let Some(addrs) = resolver_overrides.addresses(&domain) {
                 tracing::info!(
@@ -59,8 +62,13 @@ pub async fn fronted_http_client_builder(
                         .collect::<Vec<_>>()
                         .join(", ")
                 );
-                builder = builder.resolve_to_addrs(&domain, &addrs);
+                preresolve.insert(domain, addrs.iter().map(|addr| addr.ip()).collect());
             }
+        }
+        if !preresolve.is_empty() {
+            let mut resolver = HickoryDnsResolver::default();
+            resolver.set_static_preresolve(preresolve);
+            builder = builder.dns_resolver(Arc::new(resolver));
         }
     }
 

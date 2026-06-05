@@ -121,8 +121,10 @@ impl WgNodeConfig {
 }
 
 impl WgNodeConfig {
+    #[allow(clippy::too_many_arguments)]
     pub fn with_gateway_data(
-        gateway_data: WireguardConfiguration,
+        gateway_data: &WireguardConfiguration,
+        endpoint: SocketAddr,
         private_key: &nym_crypto::asymmetric::encryption::PrivateKey,
         allowed_ips: AllowedIps,
         dns: Vec<IpAddr>,
@@ -150,7 +152,7 @@ impl WgNodeConfig {
             },
             peer: WgPeer {
                 public_key: PublicKey::from(*gateway_data.public_key.as_bytes()),
-                endpoint: gateway_data.endpoint,
+                endpoint,
             },
             allowed_ips,
         }

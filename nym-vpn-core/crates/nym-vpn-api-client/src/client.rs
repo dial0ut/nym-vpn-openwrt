@@ -140,7 +140,7 @@ impl VpnApiClient {
             resolver_overrides,
         )
         .await?
-        .with_fronting(front_policy)
+        .with_fronting(Some(front_policy))
         .build()
         .map_err(Box::new)
         .map_err(VpnApiClientError::CreateVpnApiClient)?;

@@ -513,12 +513,9 @@ impl TunnelMonitor {
             RegistrationResult::Wireguard(result) => {
                 TunnelConnectionData::Wireguard(WireguardConnectionData {
                     entry_bridge_addr: None, // not known yet
-                    entry: WireguardNode::from(result.entry_gateway_data.clone()),
-                    exit: WireguardNode::from(result.exit_gateway_data.clone()),
+                    entry: WireguardNode::from(result.entry_gateway_data()),
+                    exit: WireguardNode::from(result.exit_gateway_data()),
                 })
-            }
-            RegistrationResult::Lp(_) => {
-                return Err(tunnel::Error::Cancelled.into());
             }
         };
         let connection_data = Box::new(EstablishConnectionData {
@@ -606,9 +603,6 @@ impl TunnelMonitor {
                     mixnet_client_token,
                     bridge_close_tx,
                 )
-            }
-            RegistrationResult::Lp(_) => {
-                return Err(tunnel::Error::Cancelled.into());
             }
         };
 
@@ -911,14 +905,30 @@ impl TunnelMonitor {
             }
         });
 
-        let WireguardRegistrationResult {
+        let (
             entry_gateway_client,
             exit_gateway_client,
             entry_gateway_data,
             exit_gateway_data,
             authenticator_listener_handle,
             bw_controller,
-        } = registration_result;
+        ) = match registration_result {
+            WireguardRegistrationResult::Legacy(res) => (
+                res.entry_gateway_client,
+                res.exit_gateway_client,
+                res.entry_gateway_data,
+                res.exit_gateway_data,
+                res.authenticator_listener_handle,
+                res.bw_controller,
+            ),
+            WireguardRegistrationResult::LewesProtocol(_) => {
+                // Lewes Protocol registration is not yet wired into this fork
+                // (Stage 3). The registration builder never requests it
+                // (enable_lp_registration defaults false), so this arm is
+                // unreachable at runtime; bail defensively if it is ever reached.
+                return Err(tunnel::Error::Cancelled.into());
+            }
+        };
 
         let gw_update_version = self
             .tunnel_parameters
@@ -933,8 +943,8 @@ impl TunnelMonitor {
             selected_gateways,
             entry_gateway_client,
             exit_gateway_client,
-            entry_gateway_data.clone(),
-            exit_gateway_data.clone(),
+            &entry_gateway_data,
+            &exit_gateway_data,
             entry_signal_rx,
             exit_signal_rx,
             gw_update_version,
@@ -1103,8 +1113,8 @@ impl TunnelMonitor {
 
         let tunnel_conn_data = TunnelConnectionData::Wireguard(WireguardConnectionData {
             entry_bridge_addr: conn_data.entry_bridge_addr.clone(),
-            entry: WireguardNode::from(conn_data.entry.clone()),
-            exit: WireguardNode::from(conn_data.exit.clone()),
+            entry: WireguardNode::from(&conn_data.entry),
+            exit: WireguardNode::from(&conn_data.exit),
         });
 
         let dns_config = self.tunnel_parameters.tunnel_settings.resolved_dns_config();

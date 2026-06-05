@@ -12,7 +12,7 @@ pub mod connected_tunnel;
 pub mod fd;
 pub mod two_hop_config;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ConnectionData {
     pub entry_bridge_addr: Option<BridgeAddress>,
     pub entry: WireguardConfiguration,
@@ -26,13 +26,6 @@ impl ConnectionData {
             .as_ref()
             .map(|addr| addr.listen_addr)
             .unwrap_or(self.entry.endpoint)
-    }
-
-    /// Returns effective entry gateway data set to bridge listen endpoint when entry bridge address is available.
-    pub fn effective_entry_gateway_data(&self) -> WireguardConfiguration {
-        let mut gateway_data = self.entry.clone();
-        gateway_data.endpoint = self.effective_entry_endpoint();
-        gateway_data
     }
 
     /// Returns effective *remote* entry endpoint set to bridge remote endpoint when entry bridge address is available. Otherwise, returns the wireguard entry endpoint.
