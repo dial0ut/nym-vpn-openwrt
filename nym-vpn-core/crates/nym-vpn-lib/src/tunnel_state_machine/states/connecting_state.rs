@@ -103,6 +103,10 @@ impl ConnectingState {
                     .as_ref()
                     .map(|v| v.entry_gateway().endpoints())
                     .unwrap_or_default(),
+                lp_entry_endpoints: selected_gateways
+                    .as_ref()
+                    .map(|v| v.entry_gateway().lp_endpoints())
+                    .unwrap_or_default(),
                 api_endpoints: Vec::new(),
                 // Allow default DNS servers since hickory does not rely on custom DNS
                 dns_servers: shared_state.tunnel_settings.default_dns_ips(),
@@ -398,6 +402,8 @@ impl ConnectingState {
             }
 
             self.firewall_policy_params.ws_entry_endpoints = gateways.entry_gateway().endpoints();
+            self.firewall_policy_params.lp_entry_endpoints =
+                gateways.entry_gateway().lp_endpoints();
             Self::set_firewall_policy(shared_state, &self.firewall_policy_params)
         };
         self.selected_gateways = Some(*gateways);
@@ -714,6 +720,9 @@ struct ConnectingPolicyParameters {
     /// Entry gateway websocket endpoints
     ws_entry_endpoints: Vec<SocketAddr>,
 
+    /// Entry gateway Lewes Protocol control endpoints
+    lp_entry_endpoints: Vec<SocketAddr>,
+
     /// API endpoints
     api_endpoints: Vec<SocketAddr>,
 
@@ -769,7 +778,7 @@ impl ConnectingPolicyParameters {
             });
 
         // Allow API endpoints
-        let allowed_endpoints = self
+        let mut allowed_endpoints = self
             .api_endpoints
             .iter()
             .filter(|ip| ip.is_ipv4() || (self.enable_ipv6 && ip.is_ipv6()))
@@ -780,6 +789,22 @@ impl ConnectingPolicyParameters {
                 )
             })
             .collect::<Vec<_>>();
+
+        // Allow LP control endpoints for LP-based registration. These must be in
+        // allowed_endpoints (non-tunnel), not peer_endpoints, since LP registration
+        // connects to the entry gateway's control port before the tunnel is up
+        // (upstream nym-vpn-client #5516).
+        allowed_endpoints.extend(
+            self.lp_entry_endpoints
+                .iter()
+                .filter(|addr| addr.is_ipv4() || (self.enable_ipv6 && addr.is_ipv6()))
+                .map(|addr| {
+                    AllowedEndpoint::new(
+                        Endpoint::from_socket_address(*addr, TransportProtocol::Tcp),
+                        AllowedClients::Root,
+                    )
+                }),
+        );
 
         let tunnel = self
             .tunnel_interface
