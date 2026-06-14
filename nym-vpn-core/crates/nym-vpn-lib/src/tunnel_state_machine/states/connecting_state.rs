@@ -610,17 +610,9 @@ impl TunnelStateHandler for ConnectingState {
                             return NextTunnelState::SameState(self);
                         };
 
-                        // Hot-apply path — mirrors connected_state. See the
-                        // comment block there for the rule-vs-firewall ordering
-                        // rationale.
-                        let had_exemptions = !shared_state.tunnel_settings.inbound_exemptions.is_empty();
-                        let has_exemptions = !tunnel_settings.inbound_exemptions.is_empty();
-                        let exempt_rule_transition = match (had_exemptions, has_exemptions) {
-                            (false, true) => Some(true),
-                            (true, false) => Some(false),
-                            _ => None,
-                        };
-
+                        // Hot-apply path — mirrors connected_state. The exempt
+                        // routing rule is permanent for the tunnel lifetime, so only
+                        // the firewall mark-set rules are re-applied here.
                         if diff.allow_lan_changed() {
                             self.firewall_policy_params.allow_lan = tunnel_settings.allow_lan;
                         }
@@ -629,29 +621,9 @@ impl TunnelStateHandler for ConnectingState {
                                 tunnel_settings.inbound_exemptions.clone();
                         }
 
-                        if exempt_rule_transition == Some(true) {
-                            if let Err(e) = shared_state.route_handler
-                                .set_exempt_rule(true, shared_state.tunnel_settings.enable_ipv6)
-                                .await
-                            {
-                                trace_err_chain!(e, "failed to install exempt routing rule");
-                                return NextTunnelState::NewState(ErrorState::enter(ErrorStateReason::SetFirewallPolicy, shared_state).await);
-                            }
-                        }
-
                         if diff.allow_lan_changed() || diff.inbound_exemptions_changed() {
                             if let Err(e) = Self::set_firewall_policy(shared_state, &self.firewall_policy_params) {
                                 trace_err_chain!(e, "failed to set firewall policy");
-                                return NextTunnelState::NewState(ErrorState::enter(ErrorStateReason::SetFirewallPolicy, shared_state).await);
-                            }
-                        }
-
-                        if exempt_rule_transition == Some(false) {
-                            if let Err(e) = shared_state.route_handler
-                                .set_exempt_rule(false, shared_state.tunnel_settings.enable_ipv6)
-                                .await
-                            {
-                                trace_err_chain!(e, "failed to remove exempt routing rule");
                                 return NextTunnelState::NewState(ErrorState::enter(ErrorStateReason::SetFirewallPolicy, shared_state).await);
                             }
                         }

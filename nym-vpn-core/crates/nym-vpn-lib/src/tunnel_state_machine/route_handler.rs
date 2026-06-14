@@ -71,13 +71,16 @@ impl RouteHandler {
         &mut self,
         routing_config: RoutingConfig,
         enable_ipv6: bool,
-        killswitch: bool,
-        has_inbound_exemptions: bool,
     ) -> Result<()> {
-        let routes = Self::get_routes(routing_config, enable_ipv6, killswitch);
+        let routes = Self::get_routes(routing_config, enable_ipv6);
 
+        // The exempt rule (fwmark 0x14e -> main, pri 90) is always installed while
+        // the tunnel is up, not just when inbound exemptions exist. It honours any
+        // exempt-marked packet — inbound-service replies AND split-tunnel carve-outs
+        // applied externally (e.g. via PBR / nft mangle). It matches nothing when no
+        // packets carry the mark, so it is harmless when unused.
         self.route_manager
-            .create_routing_rules(enable_ipv6, has_inbound_exemptions)
+            .create_routing_rules(enable_ipv6, true)
             .await?;
 
         self.route_manager.add_routes(routes).await?;
@@ -121,22 +124,21 @@ impl RouteHandler {
     fn get_routes(
         routing_config: RoutingConfig,
         enable_ipv6: bool,
-        killswitch: bool,
     ) -> HashSet<RequiredRoute> {
         let mut routes = HashSet::new();
 
+        // The default routes into the tunnel are installed unconditionally whenever
+        // the tunnel is up. They are NOT gated on the kill-switch: routing traffic
+        // into the tunnel is the daemon's job regardless, while the kill-switch only
+        // controls whether non-tunnel WAN egress is *blocked* (see nym-firewall).
+        // Split tunnelling carves traffic back out via the exempt fwmark, not by
+        // withholding the default route. See docs/guide/split-tunneling.md.
         match routing_config {
             RoutingConfig::Mixnet {
                 tun_name,
                 tun_mtu,
             } => {
-                if killswitch {
-                    routes.extend(Self::get_default_routes(tun_name, tun_mtu, enable_ipv6));
-                } else {
-                    tracing::info!(
-                        "Kill-switch disabled: skipping default routes for PBR compatibility"
-                    );
-                }
+                routes.extend(Self::get_default_routes(tun_name, tun_mtu, enable_ipv6));
             }
             RoutingConfig::Wireguard {
                 entry_tun_name,
@@ -156,17 +158,11 @@ impl RouteHandler {
                     entry_tun_name,
                     entry_tun_mtu,
                 ));
-                if killswitch {
-                    routes.extend(Self::get_default_routes(
-                        exit_tun_name,
-                        exit_tun_mtu,
-                        enable_ipv6,
-                    ));
-                } else {
-                    tracing::info!(
-                        "Kill-switch disabled: skipping default routes for PBR compatibility"
-                    );
-                }
+                routes.extend(Self::get_default_routes(
+                    exit_tun_name,
+                    exit_tun_mtu,
+                    enable_ipv6,
+                ));
             }
         }
 

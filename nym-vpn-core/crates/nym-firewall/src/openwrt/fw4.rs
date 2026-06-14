@@ -44,14 +44,36 @@ pub fn apply(rs: &RuleSet) -> Result<()> {
     Ok(())
 }
 
+/// Install only the LAN↔tunnel forwarding plane (masquerade + forward accepts),
+/// dropping any kill-switch blocking table. Used when the kill-switch is off:
+/// routing into the tunnel is unconditional, so the tunnel must still NAT and
+/// forward LAN traffic, but nothing is fenced off from the WAN.
+pub fn apply_forwarding_only(rs: &RuleSet) -> Result<()> {
+    tracing::debug!("Applying tunnel forwarding plane (kill-switch off) via fw4/nftables");
+
+    // Lift any blocking left over from a previous kill-switch-on state.
+    delete_nym_table();
+
+    integrate_with_fw4(&rs.tunnel_interfaces)?;
+
+    tracing::debug!("Tunnel forwarding plane applied successfully");
+    Ok(())
+}
+
 /// Remove our kill-switch table and integration chains. Best-effort: any
 /// step that fails because state is already absent is logged and ignored.
 pub fn reset() -> Result<()> {
     tracing::debug!("Resetting firewall policy via fw4/nftables backend");
 
     remove_integration();
+    delete_nym_table();
 
-    // Delete our table; ignore failure (it may not exist).
+    tracing::debug!("Firewall policy reset successfully");
+    Ok(())
+}
+
+/// Delete the `inet nym` kill-switch table. Best-effort; ignores absence.
+fn delete_nym_table() {
     let output = Command::new("nft")
         .args(["delete", "table", "inet", "nym"])
         .output();
@@ -63,9 +85,6 @@ pub fn reset() -> Result<()> {
             String::from_utf8_lossy(&o.stderr).trim()
         );
     }
-
-    tracing::debug!("Firewall policy reset successfully");
-    Ok(())
 }
 
 fn run_nft_script(script: &str) -> Result<()> {
