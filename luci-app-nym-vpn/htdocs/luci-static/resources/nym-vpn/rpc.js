@@ -87,6 +87,12 @@ return baseclass.extend({
         params: []
     }),
 
+    accountReset: rpc.declare({
+        object: 'nym-vpn',
+        method: 'account_reset',
+        params: []
+    }),
+
     accountRotateKeys: rpc.declare({
         object: 'nym-vpn',
         method: 'account_rotate_keys',

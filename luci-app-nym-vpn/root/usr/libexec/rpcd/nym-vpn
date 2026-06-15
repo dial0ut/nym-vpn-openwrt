@@ -179,11 +179,29 @@ emit_account_error() {
 handle_status() {
     local state=$($VPNC status 2>&1)
 
+    # Browser-independent session timer. The old per-browser localStorage
+    # clock drifted between sessions and is useless when the router clock is
+    # itself desynced. Instead we stamp the epoch when the tunnel is first
+    # observed Connected and report the elapsed seconds from the router's own
+    # clock, so every client shows the same duration.
+    local marker="/tmp/nym-vpnd-connected-at"
+
     json_init
 
     if echo "$state" | grep -q "State: Connected"; then
         json_add_string "state" "connected"
         json_add_boolean "connected" 1
+
+        local now connected_since
+        now=$(date +%s)
+        [ -f "$marker" ] && connected_since=$(cat "$marker" 2>/dev/null)
+        case "$connected_since" in
+            ''|*[!0-9]*) connected_since=$now; echo "$now" > "$marker" ;;
+        esac
+        local elapsed=$((now - connected_since))
+        [ "$elapsed" -lt 0 ] && elapsed=0
+        json_add_string "connected_since" "$connected_since"
+        json_add_int "connected_seconds" "$elapsed"
 
         # Detect mode and parse connection info. The chosen list types must
         # match the connection mode — in wg/fast mode the gateway IDs are not
@@ -272,6 +290,9 @@ handle_status() {
         json_add_string "raw_state" "$state"
         emit_account_error
     fi
+
+    # Reset the session-timer stamp whenever the tunnel is not Connected.
+    echo "$state" | grep -q "State: Connected" || rm -f "$marker"
 
     json_dump
 }
@@ -688,6 +709,49 @@ handle_account_rotate_keys() {
     else
         json_add_boolean "success" 0
         json_add_string "error" "$result"
+    fi
+    json_dump
+}
+
+# Hard recovery for the account-state desync where `nym-vpnc account forget`
+# can't clear a stranded account: forget requires the tunnel to be in
+# Disconnected, and an account error (e.g. Device Time Desynced) strands it in
+# Error/Disconnecting, so the command is rejected and the stored mnemonic is
+# never removed — `account get` keeps reporting the account as set. This
+# mirrors the proven manual fix (stop daemon, wipe the account/key store under
+# the data dir, start again with a delay), bypassing the forget precondition.
+# Only the daemon data dir (/etc/nym/data: mnemonic, device keys, credentials
+# and wireguard-keys DBs, mixnet identity) is wiped; UCI settings in
+# /etc/config/nym-vpn and the global config in /etc/nym are left untouched.
+handle_account_reset() {
+    json_init
+
+    /etc/init.d/nym-vpnd stop >/dev/null 2>&1
+    # Give procd time to tear down the tunnel and release the data dir before
+    # we delete it — a plain `restart` is too quick and leaves stale state.
+    sleep 3
+
+    # Belt-and-braces: kill any lingering process holding the data dir open.
+    killall nym-vpnd >/dev/null 2>&1
+    sleep 1
+
+    rm -rf /etc/nym/data >/dev/null 2>&1
+    mkdir -p /etc/nym/data
+
+    /etc/init.d/nym-vpnd start >/dev/null 2>&1
+    # The daemon needs a moment to come up and re-create its stores before the
+    # UI polls account state again.
+    sleep 3
+
+    local status=$(/etc/init.d/nym-vpnd status 2>&1)
+    if [ "$status" = "running" ]; then
+        json_add_boolean "success" 1
+        json_add_string "message" "Account state reset; daemon restarted"
+        json_add_string "status" "running"
+    else
+        json_add_boolean "success" 0
+        json_add_string "error" "Account store wiped but daemon failed to restart"
+        json_add_string "status" "stopped"
     fi
     json_dump
 }
@@ -1368,8 +1432,15 @@ handle_daemon_status() {
 handle_daemon_restart() {
     json_init
 
-    /etc/init.d/nym-vpnd restart >/dev/null 2>&1
-    sleep 2
+    # An in-place `restart` re-launches the daemon too quickly: it can come
+    # back before the previous instance has released its socket/state, which
+    # leaves the account controller wedged (the 1.27.1 reports where "restart
+    # does not work" but stop → wait → start does). Sequence it explicitly with
+    # a gap so the old instance fully tears down first.
+    /etc/init.d/nym-vpnd stop >/dev/null 2>&1
+    sleep 3
+    /etc/init.d/nym-vpnd start >/dev/null 2>&1
+    sleep 3
 
     local status=$(/etc/init.d/nym-vpnd status 2>&1)
 
@@ -1459,6 +1530,7 @@ case "$1" in
     "account_get": {},
     "account_set": { "mnemonic": "str", "mode": "str" },
     "account_forget": {},
+    "account_reset": {},
     "account_rotate_keys": {},
     "network_get": {},
     "network_set": { "network": "str" },
@@ -1499,6 +1571,7 @@ EOF
             account_get)             handle_account_get ;;
             account_set)             handle_account_set ;;
             account_forget)          handle_account_forget ;;
+            account_reset)           handle_account_reset ;;
             account_rotate_keys)     handle_account_rotate_keys ;;
             network_get)             handle_network_get ;;
             network_set)             handle_network_set ;;

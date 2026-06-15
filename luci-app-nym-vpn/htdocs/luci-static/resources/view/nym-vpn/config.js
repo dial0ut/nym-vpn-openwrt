@@ -60,6 +60,11 @@ return view.extend({
         var entryGatewayContainer, exitGatewayContainer;
         var isTwoHopMode = tunnel_config.two_hop === 'on';
         var previousState = status.state || 'unknown';
+        // Last account error_reason seen from status polling. When it changes
+        // (e.g. a Device-Time-Desynced error clears after recovery) we re-fetch
+        // account state and rebuild the card so it doesn't stay stale until a
+        // manual page reload.
+        var prevErrorReason = (status && status.error_reason) || '';
         var actionInProgress = false;
         var daemonStatusBadge;
         var daemonStatusBadgeText;
@@ -71,21 +76,28 @@ return view.extend({
         var connectionStartTime = null;
         var uptimeInterval = null;
 
-        var startUptimeTimer = function(existingStartTime) {
+        // The session duration is anchored to the router-reported elapsed
+        // seconds (status.connected_seconds) instead of a per-browser
+        // localStorage timestamp — that old timer drifted between
+        // browsers/sessions and was meaningless when the router clock itself
+        // was desynced. connectionStartTime is a *virtual* start expressed in
+        // the local clock (now - elapsed) used only to drive a smooth 1s tick;
+        // the authoritative base comes from the router on every poll.
+        var renderUptime = function() {
+            if (uptimeDisplay && connectionStartTime) {
+                var elapsed = Math.floor((Date.now() - connectionStartTime) / 1000);
+                if (elapsed < 0) elapsed = 0;
+                uptimeDisplay.textContent = nymUI.formatUptime(elapsed);
+            }
+        };
+
+        var syncUptime = function(elapsedSeconds) {
             if (uptimeInterval) clearInterval(uptimeInterval);
-
-            connectionStartTime = existingStartTime || Date.now();
-            nymUI.saveStartTime(connectionStartTime);
-
-            var updateDisplay = function() {
-                if (uptimeDisplay && connectionStartTime) {
-                    var elapsed = Math.floor((Date.now() - connectionStartTime) / 1000);
-                    uptimeDisplay.textContent = nymUI.formatUptime(elapsed);
-                }
-            };
-
-            updateDisplay();
-            uptimeInterval = setInterval(updateDisplay, 1000);
+            var base = (typeof elapsedSeconds === 'number' && isFinite(elapsedSeconds) && elapsedSeconds >= 0)
+                ? elapsedSeconds : 0;
+            connectionStartTime = Date.now() - base * 1000;
+            renderUptime();
+            uptimeInterval = setInterval(renderUptime, 1000);
         };
 
         var stopUptimeTimer = function() {
@@ -146,8 +158,14 @@ return view.extend({
                 if (statusLabel) {
                     if (state === 'connected') {
                         statusLabel.textContent = 'Connected';
-                        if (!connectionStartTime) {
-                            startUptimeTimer(nymUI.getStoredStartTime());
+                        // Re-anchor to the router's elapsed seconds each poll so
+                        // the timer self-corrects and stays consistent across
+                        // browsers; falls back to a local count if absent.
+                        var secs = parseInt(result.connected_seconds, 10);
+                        if (!isNaN(secs)) {
+                            syncUptime(secs);
+                        } else if (!connectionStartTime) {
+                            syncUptime(0);
                         }
                     } else if (state === 'connecting') {
                         statusLabel.textContent = 'Connecting';
@@ -215,6 +233,15 @@ return view.extend({
                     if (exitGatewayDisplay) exitGatewayDisplay.innerHTML = '<div class="nym-gateway-empty">—</div>';
                 }
                 // Keep gateway info visible during 'disconnecting' state
+
+                // Re-render the account card when the account error situation
+                // changes, so a recovered account (or a newly-failed one)
+                // reflects live instead of waiting for a page reload.
+                var curErrorReason = result.error_reason || '';
+                if (curErrorReason !== prevErrorReason) {
+                    prevErrorReason = curErrorReason;
+                    if (typeof refreshAccountCard === 'function') refreshAccountCard();
+                }
 
                 // Update previous state for next poll
                 previousState = state;
@@ -500,8 +527,10 @@ return view.extend({
                         E('input', { 'type': 'radio', 'name': inputName, 'value': gw.id || '' }),
                         iconDiv,
                         E('div', { 'class': 'nym-gateway-option-info' }, [
-                            E('div', { 'class': 'nym-gateway-option-name' }, gw.name || 'Unknown'),
-                            E('div', { 'class': 'nym-gateway-option-perf' }, perf)
+                            // Array-wrap: gateway name/perf come from the directory
+                            // (operator-controlled) and must render as text, not innerHTML.
+                            E('div', { 'class': 'nym-gateway-option-name' }, [String(gw.name || 'Unknown')]),
+                            E('div', { 'class': 'nym-gateway-option-perf' }, [String(perf)])
                         ])
                     ]);
                     option.addEventListener('click', function() {
@@ -757,6 +786,36 @@ return view.extend({
             );
         };
 
+        // Hard account-state reset for the desync where `forget` can't clear a
+        // stranded account. Stops the daemon, wipes the account/key store, and
+        // restarts with a delay (the proven manual recovery). Last resort.
+        var handleAccountReset = function() {
+            confirmModal(
+                'Reset account state',
+                'Use this only if logging out fails or the account is stuck. It stops the VPN service, erases the stored account and keys on this device, then restarts. Your saved settings are kept, but you will need your recovery phrase to log back in.',
+                '⚠',
+                function() {
+                    showModal('Resetting', 'Stopping service and clearing account state…');
+                    rpc.accountReset().then(function(result) {
+                        if (result && result.success) {
+                            setModalSuccess('Done', 'Account state reset', '✓');
+                            setTimeout(function() {
+                                fadeOutModal(function() {
+                                    location.reload();
+                                });
+                            }, 900);
+                        } else {
+                            hideModal();
+                            showToast('Reset failed: ' + ((result && result.error) || 'Unknown'), 'error');
+                        }
+                    }).catch(function(err) {
+                        hideModal();
+                        showToast('Error: ' + err.message, 'error');
+                    });
+                }
+            );
+        };
+
         var handleRotateKeys = function() {
             rpc.status().then(function(st) {
                 if (st && (st.state === 'connected' || st.state === 'connecting')) {
@@ -859,13 +918,25 @@ return view.extend({
             });
         };
 
-        // Check if logged in
-        var identity = account_info.identity || '';
-        var rawState = account_info.state || '';
-        var state = rawState.replace(/([a-z])([A-Z])/g, '$1 $2');
-        var invalidIdentities = ['', 'Not set', 'LoggedOut', 'unset', 'none'];
-        var hasError = state.indexOf('Error') >= 0 || identity.indexOf('Error') >= 0;
-        var isLoggedIn = identity && invalidIdentities.indexOf(identity) === -1 && !hasError;
+        // Derive account flags from an `account get` result. A leftover device
+        // identity paired with a LoggedOut/cleared state must NOT read as
+        // logged in — that is the 1.27.1 desync where the Account card offered
+        // "Sign out" while the status strip simultaneously said "no account
+        // configured". State is authoritative; a stale identity does not count.
+        var computeAccountFlags = function(acct) {
+            acct = acct || {};
+            var identity = acct.identity || '';
+            var rawState = acct.state || '';
+            var state = rawState.replace(/([a-z])([A-Z])/g, '$1 $2');
+            var invalidIdentities = ['', 'Not set', 'LoggedOut', 'unset', 'none'];
+            var hasError = state.indexOf('Error') >= 0 || identity.indexOf('Error') >= 0;
+            var isLoggedOut = (rawState || '').trim() === 'LoggedOut';
+            var isLoggedIn = !!identity && invalidIdentities.indexOf(identity) === -1 && !hasError && !isLoggedOut;
+            return {
+                identity: identity, rawState: rawState, state: state,
+                hasError: hasError, isLoggedIn: isLoggedIn, isLoggedOut: isLoggedOut
+            };
+        };
 
         var container = E('div', { 'class': 'nym-container' }, [
             E('style', {}, theme.css || ''),
@@ -1382,56 +1453,120 @@ return view.extend({
         ]);
         container.appendChild(dnsCard);
 
-        // Account Card
-        var accountStatusLabel = (state || '').trim() || 'Active';
-        var loggedInBody = null;
-        if (isLoggedIn) {
-            var copyBtn = E('button', {
-                'class': 'nym-identity-copy',
-                'type': 'button',
-                'title': 'Copy device identity'
-            });
-            copyBtn.innerHTML = assets.iconCopy;
-            copyBtn.addEventListener('click', function(ev) {
-                ev.preventDefault();
-                copyIdentity(identity, copyBtn);
-            });
+        // Account Card. The body is rebuilt from a fresh `account get` each
+        // time refreshAccountCard() runs, so a recovered account clears the
+        // error panel without a manual page reload (the 1.27.1 "error stays
+        // until refresh" report).
+        var accountBodyEl;
 
-            var rotateBtn = E('button', {
-                'class': 'nym-card-action rotate',
-                'type': 'button',
-                'click': handleRotateKeys
-            });
-            rotateBtn.innerHTML = assets.iconRefresh + '<span>Rotate keys</span>';
+        var buildAccountBody = function(flags) {
+            var identity = flags.identity;
+            var state = flags.state;
+            var accountStatusLabel = (state || '').trim() || 'Active';
 
-            var signOutBtn = E('button', {
-                'class': 'nym-card-action danger',
-                'type': 'button',
-                'click': handleAccountLogout
-            });
-            signOutBtn.innerHTML = assets.iconPower + '<span>Sign out</span>';
+            if (flags.isLoggedIn) {
+                var copyBtn = E('button', {
+                    'class': 'nym-identity-copy',
+                    'type': 'button',
+                    'title': 'Copy device identity'
+                });
+                copyBtn.innerHTML = assets.iconCopy;
+                copyBtn.addEventListener('click', function(ev) {
+                    ev.preventDefault();
+                    copyIdentity(identity, copyBtn);
+                });
 
-            loggedInBody = E('div', { 'class': 'nym-account-panel' }, [
-                E('div', { 'class': 'nym-info-frame' }, [
-                    E('div', { 'class': 'nym-info-frame-label' }, 'Device Identity'),
-                    E('div', { 'class': 'nym-info-frame-main' }, [
-                        E('div', { 'class': 'nym-info-frame-id-row' }, [
-                            E('div', { 'class': 'nym-info-frame-value' }, identity),
-                            copyBtn
-                        ]),
-                        E('div', { 'class': 'nym-card-status' }, [
-                            E('span', { 'class': 'nym-card-status-indicator' }),
-                            E('span', { 'class': 'nym-card-status-text' }, accountStatusLabel)
+                var rotateBtn = E('button', {
+                    'class': 'nym-card-action rotate',
+                    'type': 'button',
+                    'click': handleRotateKeys
+                });
+                rotateBtn.innerHTML = assets.iconRefresh + '<span>Rotate keys</span>';
+
+                var signOutBtn = E('button', {
+                    'class': 'nym-card-action danger',
+                    'type': 'button',
+                    'click': handleAccountLogout
+                });
+                signOutBtn.innerHTML = assets.iconPower + '<span>Sign out</span>';
+
+                return E('div', { 'class': 'nym-account-panel' }, [
+                    E('div', { 'class': 'nym-info-frame' }, [
+                        E('div', { 'class': 'nym-info-frame-label' }, 'Device Identity'),
+                        E('div', { 'class': 'nym-info-frame-main' }, [
+                            E('div', { 'class': 'nym-info-frame-id-row' }, [
+                                E('div', { 'class': 'nym-info-frame-value' }, identity),
+                                copyBtn
+                            ]),
+                            E('div', { 'class': 'nym-card-status' }, [
+                                E('span', { 'class': 'nym-card-status-indicator' }),
+                                E('span', { 'class': 'nym-card-status-text' }, accountStatusLabel)
+                            ])
                         ])
+                    ]),
+                    E('div', { 'class': 'nym-card-actions-bar' }, [
+                        rotateBtn,
+                        E('div', { 'class': 'nym-card-action-divider' }),
+                        signOutBtn
                     ])
+                ]);
+            }
+
+            if (flags.hasError) {
+                return E('div', { 'class': 'nym-account-logged-in' }, [
+                    E('div', { 'class': 'nym-account-state', 'style': 'background: var(--danger-dim); color: var(--danger)' }, state || identity),
+                    E('div', { 'class': 'nym-card-description', 'style': 'margin: 16px 0' }, 'There is an issue with the account. You may need to logout and try again.'),
+                    E('button', { 'class': 'nym-btn nym-btn-danger', 'style': 'width: 100%', 'click': handleAccountLogout }, 'Logout'),
+                    E('button', { 'class': 'nym-btn nym-btn-secondary', 'style': 'width: 100%; margin-top: 8px', 'click': handleAccountReset }, 'Reset account state'),
+                    E('div', { 'class': 'nym-card-description', 'style': 'margin-top: 8px; opacity: 0.7' }, 'If Logout fails or the state is stuck, Reset stops the service and clears the stored account.')
+                ]);
+            }
+
+            var form = E('form', { 'submit': handleAccountLogin }, [
+                E('div', { 'class': 'nym-card-description' },
+                    'Enter your Nym account recovery phrase to connect.'),
+                E('div', { 'class': 'nym-form-group' }, [
+                    E('label', { 'class': 'nym-form-label' }, 'Recovery Phrase'),
+                    E('input', {
+                        'class': 'nym-input',
+                        'type': 'text',
+                        'name': 'mnemonic',
+                        'autocomplete': 'off',
+                        'autocapitalize': 'off',
+                        'autocorrect': 'off',
+                        'spellcheck': 'false',
+                        'placeholder': 'Enter your recovery phrase...'
+                    })
                 ]),
-                E('div', { 'class': 'nym-card-actions-bar' }, [
-                    rotateBtn,
-                    E('div', { 'class': 'nym-card-action-divider' }),
-                    signOutBtn
-                ])
+                E('button', { 'class': 'nym-btn nym-btn-primary', 'type': 'submit', 'style': 'width: 100%' }, 'Login')
             ]);
-        }
+
+            // Desync recovery: the daemon reports LoggedOut yet still has a
+            // leftover device identity (the "says not set but won't forget"
+            // case). Offer the hard reset so the user isn't stuck.
+            if (flags.isLoggedOut && flags.identity) {
+                return E('div', {}, [
+                    form,
+                    E('div', { 'class': 'nym-card-description', 'style': 'margin-top: 16px; opacity: 0.7' }, 'Stale account data detected on this device. If login fails, reset the stored account state.'),
+                    E('button', { 'class': 'nym-btn nym-btn-secondary', 'style': 'width: 100%; margin-top: 8px', 'click': handleAccountReset }, 'Reset account state')
+                ]);
+            }
+
+            return form;
+        };
+
+        // Re-fetch live account state and rebuild the card body in place.
+        var refreshAccountCard = function() {
+            return rpc.accountGet().then(function(acct) {
+                if (accountBodyEl) {
+                    dom.content(accountBodyEl, buildAccountBody(computeAccountFlags(acct)));
+                }
+            }).catch(function() { /* leave the existing card on transient errors */ });
+        };
+
+        accountBodyEl = E('div', { 'class': 'nym-card-body' }, [
+            buildAccountBody(computeAccountFlags(account_info))
+        ]);
 
         var accountCard = E('div', { 'class': 'nym-card', 'id': 'nym-card-account' }, [
             E('div', { 'class': 'nym-card-header', 'click': function() { toggleCard(accountCard); } }, [
@@ -1441,30 +1576,7 @@ return view.extend({
                 ]),
                 E('div', { 'class': 'nym-card-chevron' }, '▼')
             ]),
-            E('div', { 'class': 'nym-card-body' }, [
-                isLoggedIn ? loggedInBody : hasError ? E('div', { 'class': 'nym-account-logged-in' }, [
-                    E('div', { 'class': 'nym-account-state', 'style': 'background: var(--danger-dim); color: var(--danger)' }, state || identity),
-                    E('div', { 'class': 'nym-card-description', 'style': 'margin: 16px 0' }, 'There is an issue with the account. You may need to logout and try again.'),
-                    E('button', { 'class': 'nym-btn nym-btn-danger', 'style': 'width: 100%', 'click': handleAccountLogout }, 'Logout')
-                ]) : E('form', { 'submit': handleAccountLogin }, [
-                    E('div', { 'class': 'nym-card-description' },
-                        'Enter your Nym account recovery phrase to connect.'),
-                    E('div', { 'class': 'nym-form-group' }, [
-                        E('label', { 'class': 'nym-form-label' }, 'Recovery Phrase'),
-                        E('input', {
-                            'class': 'nym-input',
-                            'type': 'text',
-                            'name': 'mnemonic',
-                            'autocomplete': 'off',
-                            'autocapitalize': 'off',
-                            'autocorrect': 'off',
-                            'spellcheck': 'false',
-                            'placeholder': 'Enter your recovery phrase...'
-                        })
-                    ]),
-                    E('button', { 'class': 'nym-btn nym-btn-primary', 'type': 'submit', 'style': 'width: 100%' }, 'Login')
-                ])
-            ])
+            accountBodyEl
         ]);
         container.appendChild(accountCard);
 
@@ -1829,15 +1941,19 @@ return view.extend({
             return E('div', { 'class': 'nym-diag-row' }, [
                 diagChip(ok),
                 E('div', { 'class': 'nym-diag-row-body' }, [
-                    E('div', { 'class': 'nym-diag-row-label' }, label),
-                    detail ? E('div', { 'class': 'nym-diag-row-detail' }, String(detail)) : ''
+                    // Array-wrap so LuCI's dom.append renders these as text nodes
+                    // (createTextNode); a bare string child is assigned via innerHTML,
+                    // which would execute markup in untrusted report fields (gateway
+                    // operator name, X-Cable-Routing-Id, daemon error strings).
+                    E('div', { 'class': 'nym-diag-row-label' }, [String(label)]),
+                    detail ? E('div', { 'class': 'nym-diag-row-detail' }, [String(detail)]) : ''
                 ])
             ]);
         };
         var diagGroup = function(title, rows) {
             if (!rows.length) rows = [E('div', { 'class': 'nym-diag-empty' }, 'No results.')];
             return E('div', { 'class': 'nym-diag-group' },
-                [E('div', { 'class': 'nym-diag-group-title' }, title)].concat(rows));
+                [E('div', { 'class': 'nym-diag-group-title' }, [String(title)])].concat(rows));
         };
         var diagDnsRow = function(label, r) {
             var res = r.resolution || {};
@@ -2068,10 +2184,10 @@ return view.extend({
             actionBtn.onclick = handleConnect;
         }
 
-        // Start uptime if connected
+        // Start uptime if connected, anchored to the router's elapsed seconds.
         if (status.state === 'connected') {
-            var storedTime = nymUI.getStoredStartTime();
-            startUptimeTimer(storedTime);
+            var initSecs = parseInt(status.connected_seconds, 10);
+            syncUptime(isNaN(initSecs) ? 0 : initSecs);
         }
 
         // Start polling
