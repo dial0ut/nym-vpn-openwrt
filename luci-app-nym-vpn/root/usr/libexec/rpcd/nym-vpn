@@ -235,6 +235,16 @@ handle_status() {
         [ -n "$exit_ip" ] && json_add_string "exit_ip" "$exit_ip"
         [ -n "$exit_id" ] && json_add_string "exit_id" "$exit_id"
 
+        # Live QUIC circumvention bridge: only WireGuard advertises this in the
+        # status line (" via bridge <addr>"), and only when entry traffic is
+        # actually traversing one. Surfaces the active transport vs the mere
+        # config toggle (circumvention_transports in tunnel_get).
+        if echo "$state" | grep -q "via bridge"; then
+            json_add_boolean "via_bridge" 1
+            local bridge_addr=$(echo "$state" | sed -n 's/.*via bridge \([^ ]*\).*/\1/p')
+            [ -n "$bridge_addr" ] && json_add_string "bridge_addr" "$bridge_addr"
+        fi
+
         # Look up gateway names and countries from ID
         if [ -n "$entry_id" ]; then
             entry_name=$(lookup_gateway_name "$entry_id" "$entry_list_type")
@@ -552,6 +562,7 @@ handle_tunnel_get() {
     local ipv6=$(echo "$config" | grep "IPv6:" | sed 's/.*IPv6: //')
     local two_hop=$(echo "$config" | grep "Two-hop:" | sed 's/.*Two-hop: //')
     local netstack=$(echo "$config" | grep "Netstack:" | sed 's/.*Netstack: //')
+    local lewes=$(echo "$config" | grep "Lewes protocol:" | sed 's/.*Lewes protocol: //')
     local circumvention=$(echo "$config" | grep "Circumvention transports:" | sed 's/.*Circumvention transports: //')
     local killswitch=$(echo "$config" | grep "Kill-switch:" | sed 's/.*Kill-switch: //')
 
@@ -559,6 +570,7 @@ handle_tunnel_get() {
     json_add_string "ipv6" "$ipv6"
     json_add_string "two_hop" "$two_hop"
     json_add_string "netstack" "$netstack"
+    json_add_string "lewes_protocol" "$lewes"
     json_add_string "circumvention_transports" "$circumvention"
     json_add_string "killswitch" "$killswitch"
     json_add_string "raw_config" "$config"

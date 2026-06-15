@@ -243,6 +243,10 @@ return view.extend({
                     if (typeof refreshAccountCard === 'function') refreshAccountCard();
                 }
 
+                // Keep the transport panel in step with the live connection
+                // (mode + whether a QUIC bridge is actually carrying traffic).
+                if (typeof renderTransport === 'function') renderTransport(result);
+
                 // Update previous state for next poll
                 previousState = state;
 
@@ -1727,6 +1731,72 @@ return view.extend({
         ]);
         container.appendChild(serviceCard);
 
+        // Transport Card — what protocol/transport the connection is using
+        // (WireGuard vs mixnet, hop count, QUIC bridge, post-quantum Lewes,
+        // IPv6, kill-switch) so users don't need to read logs. Static rows come
+        // from the tunnel config; live rows (mode, active bridge) refresh on the
+        // status poll via renderTransport().
+        var transportBody = E('div', { 'class': 'nym-card-body' }, []);
+        var onOffText = function(v) {
+            v = (v || '').toString().trim().toLowerCase();
+            if (v === 'on' || v === 'true' || v === '1') return 'On';
+            if (v === 'off' || v === 'false' || v === '0' || v === '') return 'Off';
+            return v;
+        };
+        var transportRow = function(label, value) {
+            return E('div', { 'class': 'nym-diag-row' }, [
+                E('div', { 'class': 'nym-diag-row-body' }, [
+                    E('div', { 'class': 'nym-diag-row-label' }, [String(label)]),
+                    E('div', { 'class': 'nym-diag-row-detail' }, [String(value)])
+                ])
+            ]);
+        };
+        var buildTransportRows = function(st) {
+            st = st || {};
+            var connected = st.state === 'connected';
+            var twoHop = tunnel_config.two_hop === 'on';
+            var mode;
+            if (connected && st.mode) {
+                mode = (st.mode === 'wireguard')
+                    ? 'WireGuard · Fast (2 hops)'
+                    : 'Mixnet · Anonymous (5 hops)';
+            } else {
+                mode = twoHop ? 'WireGuard · Fast (2 hops)' : 'Mixnet · Anonymous (5 hops)';
+            }
+            var rows = [transportRow('Mode', mode)];
+            // Live bridge (from the status line) beats the mere config toggle.
+            if (connected && st.via_bridge) {
+                rows.push(transportRow('Circumvention',
+                    'QUIC bridge active' + (st.bridge_addr ? ' · ' + st.bridge_addr : '')));
+            } else {
+                rows.push(transportRow('Circumvention (QUIC)', onOffText(tunnel_config.circumvention_transports)));
+            }
+            rows.push(transportRow('Post-quantum (Lewes)', onOffText(tunnel_config.lewes_protocol)));
+            rows.push(transportRow('IPv6', onOffText(tunnel_config.ipv6)));
+            rows.push(transportRow('Kill-switch', onOffText(tunnel_config.killswitch)));
+            if (!connected) {
+                rows.push(E('div', { 'class': 'nym-card-description', 'style': 'margin-top: 8px; opacity: 0.6' },
+                    'Configured transport profile — connect to confirm the live path.'));
+            }
+            return rows;
+        };
+        var renderTransport = function(st) {
+            dom.content(transportBody, buildTransportRows(st));
+        };
+        renderTransport(status);
+
+        var transportCard = E('div', { 'class': 'nym-card' }, [
+            E('div', { 'class': 'nym-card-header', 'click': function() { toggleCard(transportCard); } }, [
+                E('div', { 'class': 'nym-card-title' }, [
+                    svgIcon(assets.iconTunnel),
+                    'Transport'
+                ]),
+                E('div', { 'class': 'nym-card-chevron' }, '▼')
+            ]),
+            transportBody
+        ]);
+        container.appendChild(transportCard);
+
         // Logs Card — tail of `logread -e nym-vpn`. Auto-refreshes every 5s
         // while the card is expanded and not paused by the user.
         var logViewer = E('div', { 'class': 'nym-log-viewer empty' }, 'Expand to load logs.');
@@ -1741,6 +1811,15 @@ return view.extend({
             E('option', { 'value': '5', 'selected': 'selected' }, 'Every 5s'),
             E('option', { 'value': '10' }, 'Every 10s'),
             E('option', { 'value': '30' }, 'Every 30s')
+        ]);
+        // Error-context filter: collapse the buffer to just error/warn lines
+        // plus a window of surrounding lines, so info/debug noise is only kept
+        // where it gives context to a failure.
+        var logFilterSelect = E('select', { 'class': 'nym-select', 'title': 'Filter log level' }, [
+            E('option', { 'value': 'all', 'selected': 'selected' }, 'All levels'),
+            E('option', { 'value': 'err0' }, 'Errors only'),
+            E('option', { 'value': 'err10' }, 'Errors ±10'),
+            E('option', { 'value': 'err30' }, 'Errors ±30')
         ]);
         var logStatus = E('span', { 'class': 'nym-log-status paused' }, 'paused');
         var logPauseBtn = E('button', { 'class': 'nym-btn nym-btn-secondary nym-btn-icon', 'type': 'button', 'title': 'Play' });
@@ -1788,6 +1867,61 @@ return view.extend({
             return out;
         };
 
+        // A line is an "error anchor" if it carries an ERROR/WARN tracing level
+        // (after the ISO-8601 timestamp) or a syslog daemon.{err,warn,crit,…}
+        // facility from logread. Anchoring avoids matching the words in a body.
+        var errLineRe = /\d{4}-\d{2}-\d{2}T[\d:.]+Z\s+(?:ERROR|WARN(?:ING)?)\b|daemon\.(?:err(?:or)?|warn(?:ing)?|crit|alert|emerg)\b/;
+        var lastLogsDisplay = '';
+
+        // Reduce the buffer to error/warn lines plus a +/-N line context window.
+        // Skipped runs are collapsed to a single ellipsis marker. mode is one of
+        // all | err0 | err10 | err30.
+        var applyLogFilter = function(text) {
+            var mode = logFilterSelect.value;
+            if (mode === 'all') return text;
+            var ctx = mode === 'err30' ? 30 : (mode === 'err10' ? 10 : 0);
+            var lines = text.split('\n');
+            var keep = new Array(lines.length);
+            var anyErr = false;
+            for (var i = 0; i < lines.length; i++) {
+                if (errLineRe.test(lines[i])) {
+                    anyErr = true;
+                    var lo = Math.max(0, i - ctx), hi = Math.min(lines.length - 1, i + ctx);
+                    for (var j = lo; j <= hi; j++) keep[j] = true;
+                }
+            }
+            if (!anyErr) return '';
+            var out = [], skipping = false;
+            for (var k = 0; k < lines.length; k++) {
+                if (keep[k]) {
+                    if (skipping) { out.push('        ⋯'); skipping = false; }
+                    out.push(lines[k]);
+                } else {
+                    skipping = true;
+                }
+            }
+            return out.join('\n');
+        };
+
+        // Render lastLogsClean through the active filter. Called both on fetch
+        // and on filter change (no refetch needed — filtering is client-side).
+        var renderLogView = function(cleaned) {
+            var display = applyLogFilter(cleaned);
+            lastLogsDisplay = display;
+            var shouldAutoscroll = (logViewer.scrollTop + logViewer.clientHeight) >= (logViewer.scrollHeight - 8);
+            if (cleaned.length === 0) {
+                logViewer.className = 'nym-log-viewer empty';
+                logViewer.textContent = 'No nym-vpn log entries in the system buffer.';
+            } else if (display.length === 0) {
+                logViewer.className = 'nym-log-viewer empty';
+                logViewer.textContent = 'No error or warning entries in the current buffer.';
+            } else {
+                logViewer.className = 'nym-log-viewer';
+                logViewer.innerHTML = renderColoredLogs(display);
+                if (shouldAutoscroll) logViewer.scrollTop = logViewer.scrollHeight;
+            }
+        };
+
         var fetchLogs = function() {
             if (logsFetching) return;
             logsFetching = true;
@@ -1802,15 +1936,7 @@ return view.extend({
                 var raw = result.logs || '';
                 var cleaned = raw.replace(ansiRe, '');
                 lastLogsClean = cleaned;
-                var shouldAutoscroll = (logViewer.scrollTop + logViewer.clientHeight) >= (logViewer.scrollHeight - 8);
-                if (cleaned.length === 0) {
-                    logViewer.className = 'nym-log-viewer empty';
-                    logViewer.textContent = 'No nym-vpn log entries in the system buffer.';
-                } else {
-                    logViewer.className = 'nym-log-viewer';
-                    logViewer.innerHTML = renderColoredLogs(cleaned);
-                    if (shouldAutoscroll) logViewer.scrollTop = logViewer.scrollHeight;
-                }
+                renderLogView(cleaned);
             }).catch(function(err) {
                 logsFetching = false;
                 logViewer.className = 'nym-log-viewer empty';
@@ -1819,7 +1945,9 @@ return view.extend({
         };
 
         var copyLogs = function() {
-            var text = lastLogsClean || '';
+            // Copy what's shown — when a filter is active this is the focused
+            // error-context view, which is what users want to share.
+            var text = lastLogsDisplay || lastLogsClean || '';
             if (!text) {
                 showToast('No logs to copy', 'warning');
                 return;
@@ -1884,6 +2012,8 @@ return view.extend({
         };
         logLinesSelect.addEventListener('change', function() { if (!logsPaused) fetchLogs(); });
         logIntervalSelect.addEventListener('change', function() { if (!logsPaused) startLogTimer(); });
+        // Re-filter in place from the buffer we already have — no refetch.
+        logFilterSelect.addEventListener('change', function() { renderLogView(lastLogsClean); });
 
         var logsCard = E('div', { 'class': 'nym-card' }, [
             E('div', { 'class': 'nym-card-header', 'click': function() {
@@ -1913,6 +2043,7 @@ return view.extend({
                 E('div', { 'class': 'nym-log-controls' }, [
                     logLinesSelect,
                     logIntervalSelect,
+                    logFilterSelect,
                     logPauseBtn,
                     logCopyBtn,
                     logStatus
