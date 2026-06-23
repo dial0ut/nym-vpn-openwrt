@@ -557,17 +557,32 @@ return view.extend({
                     return;
                 }
 
+                var inputName = type === 'mixnet-entry' ? 'entry_gateway_id' : 'exit_gateway_id';
+                // Circumvention Transports gating: when CT is on, only bridge-
+                // capable gateways are valid ENTRY gateways. Read the live toggle
+                // (falling back to saved config); for the entry picker only, sink
+                // incompatible gateways and disable selecting them below. gw.bridges
+                // is only present when the daemon reports it, so treat strictly
+                // === false to stay graceful against an older daemon.
+                var ctEl = document.getElementById('circumvention-toggle');
+                var ctOn = ctEl ? ctEl.checked : (tunnel_config.circumvention_transports === 'on');
+                var ctFilter = (inputName === 'entry_gateway_id') && ctOn;
+
+                var perfRank = function(p) {
+                    p = p || '';
+                    return p.indexOf('High') >= 0 ? 3 :
+                           p.indexOf('Medium') >= 0 ? 2 :
+                           p.indexOf('Offline') >= 0 ? 0 : 1;
+                };
                 var sorted = result.gateways.slice().sort(function(a, b) {
-                    var scoreA = (a.performance || '').indexOf('High') >= 0 ? 3 :
-                                 (a.performance || '').indexOf('Medium') >= 0 ? 2 :
-                                 (a.performance || '').indexOf('Offline') >= 0 ? 0 : 1;
-                    var scoreB = (b.performance || '').indexOf('High') >= 0 ? 3 :
-                                 (b.performance || '').indexOf('Medium') >= 0 ? 2 :
-                                 (b.performance || '').indexOf('Offline') >= 0 ? 0 : 1;
-                    return scoreB - scoreA;
+                    if (ctFilter) {
+                        var ca = (a.bridges === false) ? 1 : 0;
+                        var cb = (b.bridges === false) ? 1 : 0;
+                        if (ca !== cb) return ca - cb;
+                    }
+                    return perfRank(b.performance) - perfRank(a.performance);
                 });
 
-                var inputName = type === 'mixnet-entry' ? 'entry_gateway_id' : 'exit_gateway_id';
                 var gatewayList = E('div', { 'class': 'nym-gateway-list' });
 
                 var randomOption = E('label', { 'class': 'nym-gateway-option selected' }, [
@@ -589,22 +604,39 @@ return view.extend({
                     var iconDiv = E('div', { 'class': 'nym-gateway-option-icon' });
                     iconDiv.innerHTML = nymUI.getQualityIcon(perf, assets);
 
-                    var option = E('label', { 'class': 'nym-gateway-option' }, [
-                        E('input', { 'type': 'radio', 'name': inputName, 'value': gw.id || '' }),
+                    var ctIncompatible = ctFilter && (gw.bridges === false);
+
+                    var nameChildren = [String(gw.name || 'Unknown')];
+                    if (ctIncompatible) {
+                        nameChildren.push(E('span', {
+                            'style': 'margin-left:6px; padding:1px 5px; border-radius:8px; font-size:9px; text-transform:uppercase; letter-spacing:0.5px; background:var(--danger,#e74c3c); color:#fff; vertical-align:middle'
+                        }, 'No CT'));
+                    }
+
+                    var inputAttrs = { 'type': 'radio', 'name': inputName, 'value': gw.id || '' };
+                    if (ctIncompatible) inputAttrs.disabled = 'disabled';
+
+                    var option = E('label', {
+                        'class': 'nym-gateway-option' + (ctIncompatible ? ' disabled' : ''),
+                        'style': ctIncompatible ? 'opacity:0.5; cursor:not-allowed' : ''
+                    }, [
+                        E('input', inputAttrs),
                         iconDiv,
                         E('div', { 'class': 'nym-gateway-option-info' }, [
                             // Array-wrap: gateway name/perf come from the directory
                             // (operator-controlled) and must render as text, not innerHTML.
-                            E('div', { 'class': 'nym-gateway-option-name' }, [String(gw.name || 'Unknown')]),
+                            E('div', { 'class': 'nym-gateway-option-name' }, nameChildren),
                             E('div', { 'class': 'nym-gateway-option-perf' }, [String(perf)])
                         ])
                     ]);
-                    option.addEventListener('click', function() {
-                        container.querySelectorAll('.nym-gateway-option').forEach(function(el) {
-                            el.classList.remove('selected');
+                    if (!ctIncompatible) {
+                        option.addEventListener('click', function() {
+                            container.querySelectorAll('.nym-gateway-option').forEach(function(el) {
+                                el.classList.remove('selected');
+                            });
+                            option.classList.add('selected');
                         });
-                        option.classList.add('selected');
-                    });
+                    }
                     gatewayList.appendChild(option);
                 });
 

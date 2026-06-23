@@ -516,15 +516,27 @@ handle_gateway_list_by_country() {
         local rest="${line#*|}"
         local num_fields=$(echo "$rest" | awk -F'|' '{print NF}')
 
-        if [ "$num_fields" -ge 4 ]; then
-            local perf_field=$((num_fields - 3))
+        # Fields in "$rest" (everything after the ID column):
+        #   Name | Location | Performance | Exit IPv4 | Exit IPv6 | Build Version [| Bridges]
+        # Newer daemons append a "Bridges" column (CT capability). Detect it by
+        # field count so an older daemon (no column) still parses correctly:
+        # without Bridges there are 3 columns after Performance, with it 4.
+        local has_bridges=0
+        local perf_off=3
+        if [ "$num_fields" -ge 7 ]; then
+            has_bridges=1
+            perf_off=4
+        fi
+
+        if [ "$num_fields" -ge $((perf_off + 1)) ]; then
+            local perf_field=$((num_fields - perf_off))
             local performance=$(echo "$rest" | awk -F'|' -v field="$perf_field" '{print $field}' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
         else
             local performance="Unknown"
         fi
 
-        if [ "$num_fields" -ge 5 ]; then
-            local loc_field=$((num_fields - 4))
+        if [ "$num_fields" -ge $((perf_off + 2)) ]; then
+            local loc_field=$((num_fields - perf_off - 1))
             local location=$(echo "$rest" | awk -F'|' -v field="$loc_field" '{print $field}' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
             local max_name_field=$((loc_field - 1))
             if [ "$max_name_field" -eq 1 ]; then
@@ -542,6 +554,14 @@ handle_gateway_list_by_country() {
         json_add_string "name" "${name:-Unknown}"
         json_add_string "location" "${location:-Unknown}"
         json_add_string "performance" "${performance:-Unknown}"
+        if [ "$has_bridges" -eq 1 ]; then
+            local bridges=$(echo "$rest" | awk -F'|' -v field="$num_fields" '{print $field}' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            if [ "$bridges" = "yes" ]; then
+                json_add_boolean "bridges" 1
+            else
+                json_add_boolean "bridges" 0
+            fi
+        fi
         json_close_object
     done <<EOF
 $result

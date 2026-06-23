@@ -352,6 +352,8 @@ pub struct GatewayModel {
     pub exit_ipv6: String,
     #[tabled(rename = "Build Version")]
     pub build_version: String,
+    #[tabled(rename = "Bridges")]
+    pub bridges: String,
 }
 
 impl GatewayModel {
@@ -409,6 +411,11 @@ impl GatewayModel {
                 .collect::<Vec<_>>()
                 .join(","),
             build_version: gateway.build_version.unwrap_or("N/A".to_owned()),
+            bridges: if gateway.bridge_params.is_some() {
+                "yes".to_owned()
+            } else {
+                "no".to_owned()
+            },
         }
     }
 }
