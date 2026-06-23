@@ -65,6 +65,9 @@ return view.extend({
         // account state and rebuild the card so it doesn't stay stale until a
         // manual page reload.
         var prevErrorReason = (status && status.error_reason) || '';
+        // Last tunnel_error seen from status polling, so we notify once per
+        // occurrence instead of re-toasting on every 5s poll.
+        var prevTunnelError = (status && status.tunnel_error) || '';
         var actionInProgress = false;
         var daemonStatusBadge;
         var daemonStatusBadgeText;
@@ -138,6 +141,24 @@ return view.extend({
             return true;
         };
 
+        // User-facing copy for tunnel (state-machine) errors. Keyed by the
+        // variant rpcd parses out of "State: Error state: <Reason>".
+        var TUNNEL_ERROR_COPY = {
+            PerformantEntryGatewayUnavailable: 'Entry gateway unavailable — switch gateways.',
+            PerformantExitGatewayUnavailable: 'Exit gateway unavailable — switch gateways.'
+        };
+
+        // Toast for a tunnel error. Returns true if one was shown. `force`
+        // bypasses the once-per-occurrence guard (used in the connect flow,
+        // where the user is actively waiting on a result).
+        var tunnelErrorToast = function(result, force) {
+            var reason = result && result.tunnel_error;
+            if (!reason) return false;
+            if (!force && reason === prevTunnelError) return false;
+            showToast(TUNNEL_ERROR_COPY[reason] || 'Tunnel error — switch gateways.', 'error');
+            return true;
+        };
+
         // Update status display
         var updateStatus = function() {
             // Block background polls while a connect/disconnect action owns the UI
@@ -175,6 +196,12 @@ return view.extend({
                         // Disconnecting; the error strip shows why, so the
                         // label switches to Halted to stop implying progress.
                         statusLabel.textContent = result.error_reason ? 'Halted' : 'Disconnecting';
+                    } else if (result.tunnel_error) {
+                        // Persistent cue once the toast has faded: the tunnel
+                        // bounced to Error (e.g. gateway unavailable), not a
+                        // clean user disconnect.
+                        statusLabel.textContent = 'Gateway unavailable';
+                        stopUptimeTimer();
                     } else {
                         statusLabel.textContent = 'Disconnected';
                         stopUptimeTimer();
@@ -243,9 +270,13 @@ return view.extend({
                     if (typeof refreshAccountCard === 'function') refreshAccountCard();
                 }
 
-                // Keep the transport panel in step with the live connection
-                // (mode + whether a QUIC bridge is actually carrying traffic).
-                if (typeof renderTransport === 'function') renderTransport(result);
+                // Surface tunnel errors (e.g. gateway unavailable) once, when
+                // they first appear, so the user knows to switch gateways.
+                var curTunnelError = result.tunnel_error || '';
+                if (curTunnelError && curTunnelError !== prevTunnelError) {
+                    tunnelErrorToast(result);
+                }
+                prevTunnelError = curTunnelError;
 
                 // Update previous state for next poll
                 previousState = state;
@@ -365,6 +396,16 @@ return view.extend({
                                     actionInProgress = false;
                                     updateStatus();
                                 });
+                                return;
+                            }
+                            // Tunnel bounced to Error during the connect attempt
+                            // (e.g. selected gateway unavailable). Surface it and
+                            // stop cleanly so the user can switch gateways.
+                            if (st && st.tunnel_error) {
+                                tunnelErrorToast(st, true);
+                                prevTunnelError = st.tunnel_error;
+                                actionInProgress = false;
+                                updateStatus();
                                 return;
                             }
                             if (st && st.state === 'connected') {
@@ -1730,72 +1771,6 @@ return view.extend({
             ])
         ]);
         container.appendChild(serviceCard);
-
-        // Transport Card — what protocol/transport the connection is using
-        // (WireGuard vs mixnet, hop count, QUIC bridge, post-quantum Lewes,
-        // IPv6, kill-switch) so users don't need to read logs. Static rows come
-        // from the tunnel config; live rows (mode, active bridge) refresh on the
-        // status poll via renderTransport().
-        var transportBody = E('div', { 'class': 'nym-card-body' }, []);
-        var onOffText = function(v) {
-            v = (v || '').toString().trim().toLowerCase();
-            if (v === 'on' || v === 'true' || v === '1') return 'On';
-            if (v === 'off' || v === 'false' || v === '0' || v === '') return 'Off';
-            return v;
-        };
-        var transportRow = function(label, value) {
-            return E('div', { 'class': 'nym-diag-row' }, [
-                E('div', { 'class': 'nym-diag-row-body' }, [
-                    E('div', { 'class': 'nym-diag-row-label' }, [String(label)]),
-                    E('div', { 'class': 'nym-diag-row-detail' }, [String(value)])
-                ])
-            ]);
-        };
-        var buildTransportRows = function(st) {
-            st = st || {};
-            var connected = st.state === 'connected';
-            var twoHop = tunnel_config.two_hop === 'on';
-            var mode;
-            if (connected && st.mode) {
-                mode = (st.mode === 'wireguard')
-                    ? 'WireGuard · Fast (2 hops)'
-                    : 'Mixnet · Anonymous (5 hops)';
-            } else {
-                mode = twoHop ? 'WireGuard · Fast (2 hops)' : 'Mixnet · Anonymous (5 hops)';
-            }
-            var rows = [transportRow('Mode', mode)];
-            // Live bridge (from the status line) beats the mere config toggle.
-            if (connected && st.via_bridge) {
-                rows.push(transportRow('Circumvention',
-                    'QUIC bridge active' + (st.bridge_addr ? ' · ' + st.bridge_addr : '')));
-            } else {
-                rows.push(transportRow('Circumvention (QUIC)', onOffText(tunnel_config.circumvention_transports)));
-            }
-            rows.push(transportRow('Post-quantum (Lewes)', onOffText(tunnel_config.lewes_protocol)));
-            rows.push(transportRow('IPv6', onOffText(tunnel_config.ipv6)));
-            rows.push(transportRow('Kill-switch', onOffText(tunnel_config.killswitch)));
-            if (!connected) {
-                rows.push(E('div', { 'class': 'nym-card-description', 'style': 'margin-top: 8px; opacity: 0.6' },
-                    'Configured transport profile — connect to confirm the live path.'));
-            }
-            return rows;
-        };
-        var renderTransport = function(st) {
-            dom.content(transportBody, buildTransportRows(st));
-        };
-        renderTransport(status);
-
-        var transportCard = E('div', { 'class': 'nym-card' }, [
-            E('div', { 'class': 'nym-card-header', 'click': function() { toggleCard(transportCard); } }, [
-                E('div', { 'class': 'nym-card-title' }, [
-                    svgIcon(assets.iconTunnel),
-                    'Transport'
-                ]),
-                E('div', { 'class': 'nym-card-chevron' }, '▼')
-            ]),
-            transportBody
-        ]);
-        container.appendChild(transportCard);
 
         // Logs Card — tail of `logread -e nym-vpn`. Auto-refreshes every 5s
         // while the card is expanded and not paused by the user.
