@@ -60,6 +60,12 @@ return view.extend({
         var entryGatewayContainer, exitGatewayContainer;
         var isTwoHopMode = tunnel_config.two_hop === 'on';
         var previousState = status.state || 'unknown';
+        // Signature of the last connected-state render (gateway identity + hop
+        // count). The status poll fires every 5s, but none of this changes for
+        // the life of a connection, so we only rebuild the gateway panels and
+        // the connection chain when the signature actually changes. This avoids
+        // tearing down and recreating the animated chain elements every poll.
+        var lastConnectedSig = null;
         // Last account error_reason seen from status polling. When it changes
         // (e.g. a Device-Time-Desynced error clears after recovery) we re-fetch
         // account state and rebuild the card so it doesn't stay stale until a
@@ -94,13 +100,16 @@ return view.extend({
             }
         };
 
+        // Re-anchor the virtual start on every poll (cheap), but keep a single
+        // 1s ticker for the connection's lifetime instead of tearing it down
+        // and rebuilding it each poll (which churned a timer and could stutter
+        // the display).
         var syncUptime = function(elapsedSeconds) {
-            if (uptimeInterval) clearInterval(uptimeInterval);
             var base = (typeof elapsedSeconds === 'number' && isFinite(elapsedSeconds) && elapsedSeconds >= 0)
                 ? elapsedSeconds : 0;
             connectionStartTime = Date.now() - base * 1000;
             renderUptime();
-            uptimeInterval = setInterval(renderUptime, 1000);
+            if (!uptimeInterval) uptimeInterval = setInterval(renderUptime, 1000);
         };
 
         var stopUptimeTimer = function() {
@@ -233,19 +242,29 @@ return view.extend({
                 }
 
                 if (state === 'connected') {
-                    nymUI.renderGatewayInfo(entryGatewayDisplay,
-                        result.entry_name,
-                        result.entry_id,
-                        result.entry_ip,
-                        result.entry_country,
-                        countries.data);
-                    nymUI.renderGatewayInfo(exitGatewayDisplay,
-                        result.exit_name,
-                        result.exit_id,
-                        result.exit_ip,
-                        result.exit_country,
-                        countries.data);
-                    buildConnectionChain(isTwoHopMode ? 2 : 5);
+                    // Only rebuild the gateway panels and chain when something
+                    // actually changed — the poll fires every 5s but this data
+                    // is fixed for the connection's lifetime.
+                    var hops = isTwoHopMode ? 2 : 5;
+                    var sig = [result.entry_name, result.entry_id, result.entry_ip, result.entry_country,
+                               result.exit_name, result.exit_id, result.exit_ip, result.exit_country,
+                               hops].join('|');
+                    if (sig !== lastConnectedSig) {
+                        lastConnectedSig = sig;
+                        nymUI.renderGatewayInfo(entryGatewayDisplay,
+                            result.entry_name,
+                            result.entry_id,
+                            result.entry_ip,
+                            result.entry_country,
+                            countries.data);
+                        nymUI.renderGatewayInfo(exitGatewayDisplay,
+                            result.exit_name,
+                            result.exit_id,
+                            result.exit_ip,
+                            result.exit_country,
+                            countries.data);
+                        buildConnectionChain(hops);
+                    }
 
                     // Reset gateway selectors to default state only on state change to connected
                     if (previousState !== 'connected') {
@@ -258,6 +277,8 @@ return view.extend({
                     // Only clear gateway info when fully disconnected or connecting fresh
                     if (entryGatewayDisplay) entryGatewayDisplay.innerHTML = '<div class="nym-gateway-empty">—</div>';
                     if (exitGatewayDisplay) exitGatewayDisplay.innerHTML = '<div class="nym-gateway-empty">—</div>';
+                    // Force a fresh render on the next connect.
+                    lastConnectedSig = null;
                 }
                 // Keep gateway info visible during 'disconnecting' state
 

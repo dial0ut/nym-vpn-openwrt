@@ -57,10 +57,13 @@ return baseclass.extend({
     .nym-mode-label { font-size: 10px; text-transform: uppercase; letter-spacing: 2px; color: var(--nym-green); opacity: 0.8; margin-bottom: 8px; }\
     .nym-connection-chain { display: flex; align-items: center; justify-content: center; padding-top: 0; gap: 0; margin: 0 -12px; }\
     .nym-chain-node { width: 14px; height: 14px; border-radius: 50%; background: var(--nym-green); opacity: 0.8; flex-shrink: 0; box-shadow: 0 0 6px var(--nym-green-glow); }\
-    .nym-chain-line { width: 24px; height: 2px; background: repeating-linear-gradient(90deg, var(--nym-green) 0px, var(--nym-green) 3px, transparent 3px, transparent 6px); background-size: 200% 100%; opacity: 0.5; animation: chain-flow 4s linear infinite; }\
+    .nym-chain-line { width: 24px; height: 2px; opacity: 0.5; position: relative; overflow: hidden; }\
+    /* Flow is animated via transform on a pseudo-element (compositor-only, no\
+       per-frame main-thread repaint) instead of animating background-position. */\
+    .nym-chain-line::after { content: ""; position: absolute; top: 0; left: 0; height: 100%; width: 200%; background: repeating-linear-gradient(90deg, var(--nym-green) 0px, var(--nym-green) 3px, transparent 3px, transparent 6px); animation: chain-flow 4s linear infinite; will-change: transform; }\
     .nym-chain-node.mixnet { width: 12px; height: 12px; opacity: 0.6; }\
     .nym-chain-line.long { width: 126px; }\
-    @keyframes chain-flow { 0% { background-position: 100% 0; } 100% { background-position: 0% 0; } }\
+    @keyframes chain-flow { from { transform: translateX(0); } to { transform: translateX(-6px); } }\
     .nym-gateway-value { display: flex; flex-direction: column; align-items: center; gap: 4px; }\
     .nym-gateway-flag { font-size: 28px; line-height: 1; min-width: 36px; text-align: center; }\
     .nym-gateway-name { font-size: 12px; color: var(--text-primary); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\
