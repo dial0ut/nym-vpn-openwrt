@@ -138,11 +138,13 @@ pub enum TunnelMonitorEvent {
     /// Connection has failed
     ConnectionFailed,
 
-    /// Registration with the entry gateway failed (e.g. the gateway accepted the
-    /// connection but rejected WireGuard registration). Handled like a
-    /// connection failure: the entry gateway is blacklisted and re-selected so
-    /// we don't retry a gateway that registers-but-fails indefinitely.
-    RegistrationFailed,
+    /// Registration with a gateway failed. `entry_culpable` indicates whether
+    /// the entry gateway is at fault: true for entry-side (or non-specific)
+    /// failures — the entry gateway is blacklisted and re-selected so we don't
+    /// retry a gateway that registers-but-fails indefinitely; false when the
+    /// failure is attributable to the exit gateway, in which case the (innocent)
+    /// entry gateway must NOT be blacklisted.
+    RegistrationFailed { entry_culpable: bool },
 }
 
 pub struct TunnelMonitorHandle {
@@ -563,7 +565,19 @@ impl TunnelMonitor {
             // A gateway that accepts the connection but fails registration must
             // be dropped from the entry pool, otherwise we keep retrying it
             // indefinitely (upstream nym-vpn-client #5379).
-            .inspect_err(|_| self.send_event(TunnelMonitorEvent::RegistrationFailed))?;
+            .inspect_err(|err| {
+                // A registration rejection from the EXIT gateway must not
+                // blacklist the (innocent) entry gateway; only entry-side or
+                // non-specific failures should.
+                use nym_registration_client::RegistrationClientError as RcErr;
+                let entry_culpable = !matches!(
+                    err,
+                    RcErr::ExitGatewayRegisterLp { .. }
+                        | RcErr::WireguardExitRegistration { .. }
+                        | RcErr::WireguardExitRegistrationCredentialSent { .. }
+                );
+                self.send_event(TunnelMonitorEvent::RegistrationFailed { entry_culpable });
+            })?;
 
         // Send event upon successful gateway registration
         // The receiver should handle the event and add firewall exceptions for entry gateway

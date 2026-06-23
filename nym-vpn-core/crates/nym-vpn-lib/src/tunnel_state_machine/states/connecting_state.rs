@@ -569,17 +569,37 @@ impl TunnelStateHandler for ConnectingState {
                             self.reconnect(shared_state).await
                         }
                     }
-                    TunnelMonitorEvent::ConnectionFailed
-                    | TunnelMonitorEvent::RegistrationFailed => {
-                        // We have failed to connect (or to register) with the entry gateway;
-                        // blacklist the previously selected entry gateway for a while and force
-                        // gateway re-selection.
+                    TunnelMonitorEvent::ConnectionFailed => {
+                        // We have failed to connect to the entry gateway; blacklist the
+                        // previously selected entry gateway for a while and force gateway
+                        // re-selection.
                         if let Some(ref selected_gateways) = self.selected_gateways {
                             let entry_gateway_identifier = selected_gateways.entry_gateway().identity;
                             if let Err(e) = shared_state.blacklisted_entry_gateways.add(entry_gateway_identifier) {
                                 tracing::error!("Failed to add gateway {} to blacklisted entry gateway list: {e}", entry_gateway_identifier);
                             } else {
                                 tracing::warn!("Blacklisted entry gateway {} due to repeated connection failure", entry_gateway_identifier);
+                            }
+                            self.selected_gateways = None;
+                        }
+                        NextTunnelState::SameState(self)
+                    }
+                    TunnelMonitorEvent::RegistrationFailed { entry_culpable } => {
+                        // Registration failed. Only blacklist the entry gateway when it is
+                        // the culpable party — an exit-gateway registration rejection must
+                        // not poison the (innocent) entry gateway. Either way force
+                        // re-selection so a Random exit can land on a different node next
+                        // attempt (a pinned, broken exit will simply keep retrying).
+                        if let Some(ref selected_gateways) = self.selected_gateways {
+                            if entry_culpable {
+                                let entry_gateway_identifier = selected_gateways.entry_gateway().identity;
+                                if let Err(e) = shared_state.blacklisted_entry_gateways.add(entry_gateway_identifier) {
+                                    tracing::error!("Failed to add gateway {} to blacklisted entry gateway list: {e}", entry_gateway_identifier);
+                                } else {
+                                    tracing::warn!("Blacklisted entry gateway {} due to repeated registration failure", entry_gateway_identifier);
+                                }
+                            } else {
+                                tracing::warn!("Registration failed at the exit gateway; not blacklisting the entry gateway");
                             }
                             self.selected_gateways = None;
                         }
