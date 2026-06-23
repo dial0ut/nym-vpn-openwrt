@@ -1,5 +1,36 @@
 # Troubleshooting
 
+## Firewall Stuck After Crash
+
+If nym-vpnd crashes or is killed while connected, its firewall rules
+may remain active, blocking internet access.
+
+**Symptoms:** No internet connectivity after nym-vpnd exits unexpectedly.
+
+**Fix:**
+```
+# Flush nym firewall chains
+iptables -F NYM_INPUT 2>/dev/null
+iptables -F NYM_OUTPUT 2>/dev/null
+iptables -F NYM_FORWARD 2>/dev/null
+iptables -t nat -F NYM_NAT 2>/dev/null
+
+# Remove jumps to nym chains
+iptables -D input_rule -j NYM_INPUT 2>/dev/null
+iptables -D output_rule -j NYM_OUTPUT 2>/dev/null
+iptables -D forwarding_rule -j NYM_FORWARD 2>/dev/null
+iptables -t nat -D postrouting_rule -j NYM_NAT 2>/dev/null
+
+# Restart firewall to restore defaults
+/etc/init.d/firewall restart
+```
+
+For fw4 (OpenWrt 22.03+), replace the above with:
+```
+nft delete table inet nym 2>/dev/null
+/etc/init.d/firewall restart
+```
+
 ## "No related RPC reply" on GL.iNet Devices
 
 GL.iNet routers serve their admin panel through nginx on port 80, but nginx
@@ -91,37 +122,6 @@ Verify with:
 
 **Note:** File-based swap (`swapon /path/to/swapfile`) does not work on
 UBIFS/JFFS2 filesystems commonly used by OpenWrt. Use zram instead.
-
-## Firewall Stuck After Crash
-
-If nym-vpnd crashes or is killed while connected, its firewall rules
-may remain active, blocking internet access.
-
-**Symptoms:** No internet connectivity after nym-vpnd exits unexpectedly.
-
-**Fix:**
-```
-# Flush nym firewall chains
-iptables -F NYM_INPUT 2>/dev/null
-iptables -F NYM_OUTPUT 2>/dev/null
-iptables -F NYM_FORWARD 2>/dev/null
-iptables -t nat -F NYM_NAT 2>/dev/null
-
-# Remove jumps to nym chains
-iptables -D input_rule -j NYM_INPUT 2>/dev/null
-iptables -D output_rule -j NYM_OUTPUT 2>/dev/null
-iptables -D forwarding_rule -j NYM_FORWARD 2>/dev/null
-iptables -t nat -D postrouting_rule -j NYM_NAT 2>/dev/null
-
-# Restart firewall to restore defaults
-/etc/init.d/firewall restart
-```
-
-For fw4 (OpenWrt 22.03+), replace the above with:
-```
-nft delete table inet nym 2>/dev/null
-/etc/init.d/firewall restart
-```
 
 ## Gateway Timeout on Connect
 
