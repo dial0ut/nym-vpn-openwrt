@@ -596,6 +596,12 @@ handle_tunnel_set() {
         [ -n "$killswitch" ] && args="$args --killswitch $killswitch"
     fi
 
+    json_get_var circumvention circumvention
+    if [ -n "$circumvention" ]; then
+        circumvention=$(validate_input "$circumvention" onoff)
+        [ -n "$circumvention" ] && args="$args --circumvention-transports $circumvention"
+    fi
+
     if [ -n "$args" ]; then
         result=$($VPNC tunnel set $args 2>&1)
         ret=$?

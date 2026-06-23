@@ -68,8 +68,15 @@ impl IdentityBasedVerifier {
         // annoyingly rustls wants CA root certificates - might be possible to set a single fake one to keep it happy
         roots.extend(TLS_SERVER_ROOTS.iter().cloned());
 
-        // create a verifier so we can use default implementations
-        let default_verifier = WebPkiServerVerifier::builder(Arc::new(roots)).build()?;
+        // create a verifier so we can use default implementations.
+        // Select the crypto provider explicitly: rustls links both `ring` and
+        // `aws-lc-rs` via Cargo feature unification, so the plain `builder()` would
+        // panic trying to auto-resolve an ambiguous process-level CryptoProvider.
+        let crypto_provider = rustls::crypto::CryptoProvider::get_default()
+            .cloned()
+            .unwrap_or_else(|| Arc::new(rustls::crypto::ring::default_provider()));
+        let default_verifier =
+            WebPkiServerVerifier::builder_with_provider(Arc::new(roots), crypto_provider).build()?;
 
         Ok(IdentityBasedVerifier {
             alt_names,

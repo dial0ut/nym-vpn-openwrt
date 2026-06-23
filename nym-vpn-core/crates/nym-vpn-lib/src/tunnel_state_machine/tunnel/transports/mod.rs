@@ -404,7 +404,18 @@ pub async fn transport_conn(
     let verifier =
         IdentityBasedVerifier::new_with_alt_names(&options.id_pubkey, alt_names).unwrap();
 
-    let mut client_crypto = rustls::ClientConfig::builder()
+    // rustls links both the `ring` and `aws-lc-rs` providers via Cargo feature
+    // unification, so the process-level provider is ambiguous and the plain
+    // `ClientConfig::builder()` panics ("Could not automatically determine the
+    // process-level CryptoProvider"). Select the ring provider explicitly to keep
+    // QUIC transport init deterministic.
+    let crypto_provider = rustls::crypto::CryptoProvider::get_default()
+        .unwrap_or(&Arc::new(rustls::crypto::ring::default_provider()))
+        .clone();
+
+    let mut client_crypto = rustls::ClientConfig::builder_with_provider(crypto_provider)
+        .with_protocol_versions(rustls::DEFAULT_VERSIONS)
+        .map_err(|e| TransportError::other(format!("rustls client config init failed: {e}")))?
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(verifier))
         .with_no_client_auth();

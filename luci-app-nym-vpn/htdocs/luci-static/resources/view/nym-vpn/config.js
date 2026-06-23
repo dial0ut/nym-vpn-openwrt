@@ -704,13 +704,15 @@ return view.extend({
             var ipv6El = document.getElementById('ipv6-toggle');
             var twoHopEl = document.getElementById('two-hop-toggle');
             var killswitchEl = document.getElementById('killswitch-toggle');
-            if (!ipv6El || !twoHopEl || !killswitchEl) return;
+            var circumventionEl = document.getElementById('circumvention-toggle');
+            if (!ipv6El || !twoHopEl || !killswitchEl || !circumventionEl) return;
 
             var ipv6 = ipv6El.checked ? 'on' : 'off';
             var two_hop = twoHopEl.checked ? 'on' : 'off';
             var killswitch = killswitchEl.checked ? 'on' : 'off';
+            var circumvention = circumventionEl.checked ? 'on' : 'off';
 
-            rpc.tunnelSet(ipv6, two_hop, killswitch).then(function(result) {
+            rpc.tunnelSet(ipv6, two_hop, killswitch, circumvention).then(function(result) {
                 if (result && result.success) {
                     isTwoHopMode = (two_hop === 'on');
                     showToast('Tunnel settings saved', 'success');
@@ -1128,6 +1130,21 @@ return view.extend({
                                 'type': 'checkbox',
                                 'id': 'two-hop-toggle',
                                 'checked': tunnel_config.two_hop === 'on' ? 'checked' : null,
+                                'change': saveTunnelSettings
+                            }),
+                            E('span', { 'class': 'nym-toggle-slider' })
+                        ])
+                    ]),
+                    E('div', { 'class': 'nym-toggle-row' }, [
+                        E('div', { 'class': 'nym-toggle-info' }, [
+                            E('div', { 'class': 'nym-toggle-title' }, 'Circumvention Transports'),
+                            E('div', { 'class': 'nym-toggle-desc' }, 'Wrap the entry gateway connection to evade censorship. Applies to two-hop mode.')
+                        ]),
+                        E('label', { 'class': 'nym-toggle' }, [
+                            E('input', {
+                                'type': 'checkbox',
+                                'id': 'circumvention-toggle',
+                                'checked': tunnel_config.circumvention_transports === 'on' ? 'checked' : null,
                                 'change': saveTunnelSettings
                             }),
                             E('span', { 'class': 'nym-toggle-slider' })
