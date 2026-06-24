@@ -6,7 +6,7 @@
 |-------------|---------|-------------|
 | OpenWrt | 18.06+ | 23.05+ |
 | RAM | 128 MB | 256 MB+ |
-| Storage | 70 MB free | 128 MB+ |
+| Storage | 40 MB free | 128 MB+ |
 | Kernel module | `kmod-tun` | `kmod-tun` |
 
 !!! note
@@ -39,4 +39,4 @@ For the best NymVPN experience, look for:
 1. **256 MB+ RAM** — avoids OOM issues
 2. **aarch64 or x86_64** — Tier 2 stable builds
 3. **OpenWrt 23.05+ support** — nftables firewall (fw4)
-4. **USB or large flash** — room for the ~62 MB binaries
+4. **USB or large flash** — room for the ~18–36 MB binaries (arch-dependent)

@@ -103,6 +103,10 @@ impl ConnectingState {
                     .as_ref()
                     .map(|v| v.entry_gateway().endpoints())
                     .unwrap_or_default(),
+                lp_entry_endpoints: selected_gateways
+                    .as_ref()
+                    .map(|v| v.entry_gateway().lp_endpoints())
+                    .unwrap_or_default(),
                 api_endpoints: Vec::new(),
                 // Allow default DNS servers since hickory does not rely on custom DNS
                 dns_servers: shared_state.tunnel_settings.default_dns_ips(),
@@ -398,6 +402,8 @@ impl ConnectingState {
             }
 
             self.firewall_policy_params.ws_entry_endpoints = gateways.entry_gateway().endpoints();
+            self.firewall_policy_params.lp_entry_endpoints =
+                gateways.entry_gateway().lp_endpoints();
             Self::set_firewall_policy(shared_state, &self.firewall_policy_params)
         };
         self.selected_gateways = Some(*gateways);
@@ -564,14 +570,36 @@ impl TunnelStateHandler for ConnectingState {
                         }
                     }
                     TunnelMonitorEvent::ConnectionFailed => {
-                        // We have failed to connect repeatedly; let's blacklist the previously selected
-                        // entry gateways for a while and force gateway re-selection.
+                        // We have failed to connect to the entry gateway; blacklist the
+                        // previously selected entry gateway for a while and force gateway
+                        // re-selection.
                         if let Some(ref selected_gateways) = self.selected_gateways {
                             let entry_gateway_identifier = selected_gateways.entry_gateway().identity;
                             if let Err(e) = shared_state.blacklisted_entry_gateways.add(entry_gateway_identifier) {
                                 tracing::error!("Failed to add gateway {} to blacklisted entry gateway list: {e}", entry_gateway_identifier);
                             } else {
                                 tracing::warn!("Blacklisted entry gateway {} due to repeated connection failure", entry_gateway_identifier);
+                            }
+                            self.selected_gateways = None;
+                        }
+                        NextTunnelState::SameState(self)
+                    }
+                    TunnelMonitorEvent::RegistrationFailed { entry_culpable } => {
+                        // Registration failed. Only blacklist the entry gateway when it is
+                        // the culpable party — an exit-gateway registration rejection must
+                        // not poison the (innocent) entry gateway. Either way force
+                        // re-selection so a Random exit can land on a different node next
+                        // attempt (a pinned, broken exit will simply keep retrying).
+                        if let Some(ref selected_gateways) = self.selected_gateways {
+                            if entry_culpable {
+                                let entry_gateway_identifier = selected_gateways.entry_gateway().identity;
+                                if let Err(e) = shared_state.blacklisted_entry_gateways.add(entry_gateway_identifier) {
+                                    tracing::error!("Failed to add gateway {} to blacklisted entry gateway list: {e}", entry_gateway_identifier);
+                                } else {
+                                    tracing::warn!("Blacklisted entry gateway {} due to repeated registration failure", entry_gateway_identifier);
+                                }
+                            } else {
+                                tracing::warn!("Registration failed at the exit gateway; not blacklisting the entry gateway");
                             }
                             self.selected_gateways = None;
                         }
@@ -602,17 +630,9 @@ impl TunnelStateHandler for ConnectingState {
                             return NextTunnelState::SameState(self);
                         };
 
-                        // Hot-apply path — mirrors connected_state. See the
-                        // comment block there for the rule-vs-firewall ordering
-                        // rationale.
-                        let had_exemptions = !shared_state.tunnel_settings.inbound_exemptions.is_empty();
-                        let has_exemptions = !tunnel_settings.inbound_exemptions.is_empty();
-                        let exempt_rule_transition = match (had_exemptions, has_exemptions) {
-                            (false, true) => Some(true),
-                            (true, false) => Some(false),
-                            _ => None,
-                        };
-
+                        // Hot-apply path — mirrors connected_state. The exempt
+                        // routing rule is permanent for the tunnel lifetime, so only
+                        // the firewall mark-set rules are re-applied here.
                         if diff.allow_lan_changed() {
                             self.firewall_policy_params.allow_lan = tunnel_settings.allow_lan;
                         }
@@ -621,29 +641,9 @@ impl TunnelStateHandler for ConnectingState {
                                 tunnel_settings.inbound_exemptions.clone();
                         }
 
-                        if exempt_rule_transition == Some(true) {
-                            if let Err(e) = shared_state.route_handler
-                                .set_exempt_rule(true, shared_state.tunnel_settings.enable_ipv6)
-                                .await
-                            {
-                                trace_err_chain!(e, "failed to install exempt routing rule");
-                                return NextTunnelState::NewState(ErrorState::enter(ErrorStateReason::SetFirewallPolicy, shared_state).await);
-                            }
-                        }
-
                         if diff.allow_lan_changed() || diff.inbound_exemptions_changed() {
                             if let Err(e) = Self::set_firewall_policy(shared_state, &self.firewall_policy_params) {
                                 trace_err_chain!(e, "failed to set firewall policy");
-                                return NextTunnelState::NewState(ErrorState::enter(ErrorStateReason::SetFirewallPolicy, shared_state).await);
-                            }
-                        }
-
-                        if exempt_rule_transition == Some(false) {
-                            if let Err(e) = shared_state.route_handler
-                                .set_exempt_rule(false, shared_state.tunnel_settings.enable_ipv6)
-                                .await
-                            {
-                                trace_err_chain!(e, "failed to remove exempt routing rule");
                                 return NextTunnelState::NewState(ErrorState::enter(ErrorStateReason::SetFirewallPolicy, shared_state).await);
                             }
                         }
@@ -712,6 +712,9 @@ struct ConnectingPolicyParameters {
     /// Entry gateway websocket endpoints
     ws_entry_endpoints: Vec<SocketAddr>,
 
+    /// Entry gateway Lewes Protocol control endpoints
+    lp_entry_endpoints: Vec<SocketAddr>,
+
     /// API endpoints
     api_endpoints: Vec<SocketAddr>,
 
@@ -767,7 +770,7 @@ impl ConnectingPolicyParameters {
             });
 
         // Allow API endpoints
-        let allowed_endpoints = self
+        let mut allowed_endpoints = self
             .api_endpoints
             .iter()
             .filter(|ip| ip.is_ipv4() || (self.enable_ipv6 && ip.is_ipv6()))
@@ -778,6 +781,22 @@ impl ConnectingPolicyParameters {
                 )
             })
             .collect::<Vec<_>>();
+
+        // Allow LP control endpoints for LP-based registration. These must be in
+        // allowed_endpoints (non-tunnel), not peer_endpoints, since LP registration
+        // connects to the entry gateway's control port before the tunnel is up
+        // (upstream nym-vpn-client #5516).
+        allowed_endpoints.extend(
+            self.lp_entry_endpoints
+                .iter()
+                .filter(|addr| addr.is_ipv4() || (self.enable_ipv6 && addr.is_ipv6()))
+                .map(|addr| {
+                    AllowedEndpoint::new(
+                        Endpoint::from_socket_address(*addr, TransportProtocol::Tcp),
+                        AllowedClients::Root,
+                    )
+                }),
+        );
 
         let tunnel = self
             .tunnel_interface

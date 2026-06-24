@@ -23,7 +23,7 @@ Or grab the `.ipk` (or `.apk` for OpenWrt 25.x+) for your architecture from the 
 |--|---------|
 | OpenWrt | 18.06+ |
 | RAM | 128 MB (256 MB recommended) |
-| Storage | 70 MB free |
+| Storage | 40 MB free |
 | Kernel module | `kmod-tun` |
 
 Runs on x86_64, ARM, and MIPS routers. See [Supported Devices](devices.md) for a full list.

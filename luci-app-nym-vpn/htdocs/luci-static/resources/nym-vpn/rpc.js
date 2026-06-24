@@ -66,7 +66,7 @@ return baseclass.extend({
     tunnelSet: rpc.declare({
         object: 'nym-vpn',
         method: 'tunnel_set',
-        params: ['ipv6', 'two_hop', 'killswitch']
+        params: ['ipv6', 'two_hop', 'killswitch', 'circumvention']
     }),
 
     accountGet: rpc.declare({
@@ -84,6 +84,12 @@ return baseclass.extend({
     accountForget: rpc.declare({
         object: 'nym-vpn',
         method: 'account_forget',
+        params: []
+    }),
+
+    accountReset: rpc.declare({
+        object: 'nym-vpn',
+        method: 'account_reset',
         params: []
     }),
 
@@ -193,5 +199,11 @@ return baseclass.extend({
         object: 'nym-vpn',
         method: 'logs_get',
         params: ['lines']
+    }),
+
+    diagnosticRun: rpc.declare({
+        object: 'nym-vpn',
+        method: 'diagnostic_run',
+        params: ['skip_dns', 'skip_http', 'gateway']
     })
 });

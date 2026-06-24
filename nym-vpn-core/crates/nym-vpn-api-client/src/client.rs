@@ -9,7 +9,8 @@ use std::{
 use backon::Retryable;
 use nym_credential_proxy_requests::api::v1::ticketbook::models::PartialVerificationKeysResponse;
 use nym_http_api_client::{
-    ApiClient, Client, HttpClientError, NO_PARAMS, Params, PathSegments, Url, UserAgent,
+    ApiClient, Client, FrontPolicy, HttpClientError, NO_PARAMS, Params, PathSegments, Url,
+    UserAgent,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use time::{Duration as TimeDuration, OffsetDateTime};
@@ -18,7 +19,7 @@ use tokio::sync::RwLock;
 use crate::{
     ResolverOverrides, api_urls_to_urls,
     error::{Result, VpnApiClientError},
-    fronted_http_client,
+    fronted_http_client, fronted_http_client_builder,
     request::{
         ApplyFreepassRequestBody, CreateAndroidAccountRequestBody, CreateAppleAccountRequestBody,
         CreateSubscriptionKind, CreateSubscriptionRequestBody, RegisterDeviceRequestBody,
@@ -88,6 +89,18 @@ pub struct VpnApiClient {
     skew_state: Arc<RwLock<Option<SkewState>>>,
 }
 
+impl AsRef<Client> for VpnApiClient {
+    fn as_ref(&self) -> &Client {
+        &self.inner
+    }
+}
+
+impl AsMut<Client> for VpnApiClient {
+    fn as_mut(&mut self) -> &mut Client {
+        &mut self.inner
+    }
+}
+
 impl VpnApiClient {
     pub async fn new(
         urls: Vec<Url>,
@@ -101,6 +114,36 @@ impl VpnApiClient {
             resolver_overrides,
         )
         .await?;
+
+        Ok(Self {
+            inner,
+            urls,
+            user_agent,
+            skew_state: Arc::new(RwLock::new(None)),
+        })
+    }
+
+    /// Like [`Self::new`], but forces an explicit domain-fronting policy on the
+    /// inner client at build time. The pinned http-api-client has no runtime
+    /// `set_front_policy`, so the diagnostic uses this to build an
+    /// always-fronted client for reachability testing.
+    pub async fn new_with_front_policy(
+        urls: Vec<Url>,
+        user_agent: UserAgent,
+        front_policy: FrontPolicy,
+        resolver_overrides: Option<&ResolverOverrides>,
+    ) -> Result<Self> {
+        let inner = fronted_http_client_builder(
+            urls.clone(),
+            Some(user_agent.clone()),
+            Some(NYM_VPN_API_TIMEOUT),
+            resolver_overrides,
+        )
+        .await?
+        .with_fronting(Some(front_policy))
+        .build()
+        .map_err(Box::new)
+        .map_err(VpnApiClientError::CreateVpnApiClient)?;
 
         Ok(Self {
             inner,

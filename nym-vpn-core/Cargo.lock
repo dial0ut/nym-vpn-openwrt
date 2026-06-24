@@ -449,6 +449,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
+name = "aws-lc-rs"
+version = "1.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ec2f1fc3ec205783a5da9a7e6c1509cc69dedf09a1949e412c1e18469326d00"
+dependencies = [
+ "aws-lc-sys",
+ "zeroize",
+]
+
+[[package]]
+name = "aws-lc-sys"
+version = "0.41.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a2f9779ce85b93ab6170dd940ad0169b5766ff848247aff13bb788b832fe3f4"
+dependencies = [
+ "cc",
+ "cmake",
+ "dunce",
+ "fs_extra",
+]
+
+[[package]]
 name = "axum"
 version = "0.7.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1134,12 +1156,22 @@ checksum = "3a822ea5bc7590f9d40f1ba12c0dc3c2760f3482c6984db1573ad11031420831"
 
 [[package]]
 name = "classic-mceliece-rust"
-version = "3.2.0"
-source = "git+https://github.com/georgio/classic-mceliece-rust#7bdf0c3c8c727cbc4784e05b0972641ad0791ab9"
+version = "3.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62a9b6d27e553269a76625911aa8cf6afaa8659f1b0c85b410cb5f51a87183d9"
 dependencies = [
- "rand 0.9.2",
+ "rand 0.8.5",
  "sha3",
  "zeroize",
+]
+
+[[package]]
+name = "cmake"
+version = "0.1.58"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0f78a02292a74a88ac736019ab962ece0bc380e3f977bf72e376c5d78ff0678"
+dependencies = [
+ "cc",
 ]
 
 [[package]]
@@ -1167,6 +1199,16 @@ checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "combine"
+version = "4.6.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba5a308b75df32fe02788e748662718f03fde005016435c444eea572398219fd"
+dependencies = [
+ "bytes",
+ "memchr",
 ]
 
 [[package]]
@@ -1227,6 +1269,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "core-foundation"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b2a6cd9ae233e7f62ba4e9353e81a88df7fc8a5987b8d445b4d90c879bd156f6"
+dependencies = [
+ "core-foundation-sys",
+ "libc",
+]
+
+[[package]]
 name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1235,7 +1287,8 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 [[package]]
 name = "core-models"
 version = "0.0.5"
-source = "git+https://github.com/cryspen/libcrux#95f8d7da0d6dec07c8090d17a9ac3cf196d4373e"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "657f625ff361906f779745d08375ae3cc9fef87a35fba5f22874cf773010daf4"
 dependencies = [
  "hax-lib",
  "pastey",
@@ -1967,6 +2020,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "dunce"
+version = "1.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
+
+[[package]]
 name = "duplicate"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2011,7 +2070,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33ce99a9e19c84beb4cc35ece85374335ccc398240712114c85038319ed709bd"
 dependencies = [
  "ct-codecs",
- "getrandom 0.3.4",
+ "getrandom 0.3.3",
 ]
 
 [[package]]
@@ -2280,6 +2339,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "fs_extra"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
+
+[[package]]
 name = "futures"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2418,21 +2483,21 @@ dependencies = [
  "cfg-if",
  "js-sys",
  "libc",
- "wasi",
+ "wasi 0.11.1+wasi-snapshot-preview1",
  "wasm-bindgen",
 ]
 
 [[package]]
 name = "getrandom"
-version = "0.3.4"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "899def5c37c4fd7b2664648c28120ecec138e4d395b459e5ca34f9cce2dd77fd"
+checksum = "26145e563e54f2cadc477553f1ec5ee650b00862f0a58bcd12cbdc5f0ea2d2f4"
 dependencies = [
  "cfg-if",
  "js-sys",
  "libc",
  "r-efi",
- "wasip2",
+ "wasi 0.14.7+wasi-0.2.4",
  "wasm-bindgen",
 ]
 
@@ -3413,12 +3478,61 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92ecc6618181def0457392ccd0ee51198e065e016d1d527a7ac1b6dc7c1f09d2"
 
 [[package]]
+name = "jni"
+version = "0.22.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5efd9a482cf3a427f00d6b35f14332adc7902ce91efb778580e180ff90fa3498"
+dependencies = [
+ "cfg-if",
+ "combine",
+ "jni-macros",
+ "jni-sys",
+ "log",
+ "simd_cesu8",
+ "thiserror 2.0.18",
+ "walkdir",
+ "windows-link 0.2.1",
+]
+
+[[package]]
+name = "jni-macros"
+version = "0.22.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a00109accc170f0bdb141fed3e393c565b6f5e072365c3bd58f5b062591560a3"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "rustc_version",
+ "simd_cesu8",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "jni-sys"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6377a88cb3910bee9b0fa88d4f42e1d2da8e79915598f65fb0c7ee14c878af2"
+dependencies = [
+ "jni-sys-macros",
+]
+
+[[package]]
+name = "jni-sys-macros"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38c0b942f458fe50cdac086d2f946512305e5631e720728f2a61aabcd47a6264"
+dependencies = [
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "jobserver"
 version = "0.1.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9afb3de4395d6b3e67a780b6de64b51c978ecf11cb9a462c66be7d4ca9039d33"
 dependencies = [
- "getrandom 0.3.4",
+ "getrandom 0.3.3",
  "libc",
 ]
 
@@ -3511,7 +3625,8 @@ checksum = "6800badb6cb2082ffd7b6a67e6125bb39f18782f793520caee8cb8846be06112"
 [[package]]
 name = "libcrux-aesgcm"
 version = "0.0.7"
-source = "git+https://github.com/cryspen/libcrux#95f8d7da0d6dec07c8090d17a9ac3cf196d4373e"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "99f2a019dab4097585a7d4f5b9deebe46cd1e628b16a5bc4cb0ce35e1da334e6"
 dependencies = [
  "libcrux-intrinsics",
  "libcrux-platform",
@@ -3521,8 +3636,9 @@ dependencies = [
 
 [[package]]
 name = "libcrux-chacha20poly1305"
-version = "0.0.6"
-source = "git+https://github.com/cryspen/libcrux#95f8d7da0d6dec07c8090d17a9ac3cf196d4373e"
+version = "0.0.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc08d044676af21343b32b988411fa98dbb5cf65a03c9df478ced221bbdfdb1b"
 dependencies = [
  "libcrux-hacl-rs",
  "libcrux-macros",
@@ -3534,7 +3650,8 @@ dependencies = [
 [[package]]
 name = "libcrux-curve25519"
 version = "0.0.6"
-source = "git+https://github.com/cryspen/libcrux#95f8d7da0d6dec07c8090d17a9ac3cf196d4373e"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb1e5fd8476a6ed609d24ef42aee5ab6f99f7c65d054f92412da9f499e423299"
 dependencies = [
  "libcrux-hacl-rs",
  "libcrux-macros",
@@ -3545,7 +3662,8 @@ dependencies = [
 [[package]]
 name = "libcrux-ecdh"
 version = "0.0.6"
-source = "git+https://github.com/cryspen/libcrux#95f8d7da0d6dec07c8090d17a9ac3cf196d4373e"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b65f73ce79337c762eb38bbac91e4c9b9e60cf318e8501b812750c640814d45e"
 dependencies = [
  "libcrux-curve25519",
  "libcrux-p256",
@@ -3555,8 +3673,9 @@ dependencies = [
 
 [[package]]
 name = "libcrux-ed25519"
-version = "0.0.6"
-source = "git+https://github.com/cryspen/libcrux#95f8d7da0d6dec07c8090d17a9ac3cf196d4373e"
+version = "0.0.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "835919315b7042fe9e03b6458efe0db94bf2aa7b873934dbee5b5463a8124b43"
 dependencies = [
  "libcrux-hacl-rs",
  "libcrux-macros",
@@ -3568,7 +3687,8 @@ dependencies = [
 [[package]]
 name = "libcrux-hacl-rs"
 version = "0.0.4"
-source = "git+https://github.com/cryspen/libcrux#95f8d7da0d6dec07c8090d17a9ac3cf196d4373e"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2637dc87d158e1f1b550fd9b226443e84153fded4de69028d897b534d16d22e6"
 dependencies = [
  "libcrux-macros",
 ]
@@ -3576,7 +3696,8 @@ dependencies = [
 [[package]]
 name = "libcrux-hkdf"
 version = "0.0.6"
-source = "git+https://github.com/cryspen/libcrux#95f8d7da0d6dec07c8090d17a9ac3cf196d4373e"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c1a89ca0c89be3a268a921e47105fb7873badf7267f5e3ebf4ea46baedd73ef"
 dependencies = [
  "libcrux-hacl-rs",
  "libcrux-hmac",
@@ -3586,7 +3707,8 @@ dependencies = [
 [[package]]
 name = "libcrux-hmac"
 version = "0.0.6"
-source = "git+https://github.com/cryspen/libcrux#95f8d7da0d6dec07c8090d17a9ac3cf196d4373e"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a7a242707d65960770bd7e14e4f18a92bdf0b967777dd404887db8d087a643b"
 dependencies = [
  "libcrux-hacl-rs",
  "libcrux-macros",
@@ -3596,7 +3718,8 @@ dependencies = [
 [[package]]
 name = "libcrux-intrinsics"
 version = "0.0.6"
-source = "git+https://github.com/cryspen/libcrux#95f8d7da0d6dec07c8090d17a9ac3cf196d4373e"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1b5db005ff8001e026b73a6842ee81bbef8ec5ff0e1915a67ae65fd2a9fafa5"
 dependencies = [
  "core-models",
  "hax-lib",
@@ -3604,8 +3727,9 @@ dependencies = [
 
 [[package]]
 name = "libcrux-kem"
-version = "0.0.6"
-source = "git+https://github.com/cryspen/libcrux#95f8d7da0d6dec07c8090d17a9ac3cf196d4373e"
+version = "0.0.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12631592f491d22fd1a176d32b2c6edfb673998fd3987e9d95f8fa79ad2a737b"
 dependencies = [
  "libcrux-curve25519",
  "libcrux-ecdh",
@@ -3620,7 +3744,8 @@ dependencies = [
 [[package]]
 name = "libcrux-macros"
 version = "0.0.3"
-source = "git+https://github.com/cryspen/libcrux#95f8d7da0d6dec07c8090d17a9ac3cf196d4373e"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ffd6aa2dcd5be681662001b81d493f1569c6d49a32361f470b0c955465cd0338"
 dependencies = [
  "quote",
  "syn 2.0.117",
@@ -3628,8 +3753,9 @@ dependencies = [
 
 [[package]]
 name = "libcrux-ml-dsa"
-version = "0.0.7"
-source = "git+https://github.com/cryspen/libcrux#95f8d7da0d6dec07c8090d17a9ac3cf196d4373e"
+version = "0.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a72929ed421cc3bf16a946b3e7d2a58d215b0b5c2a12be26b53629f081bf49b2"
 dependencies = [
  "core-models",
  "hax-lib",
@@ -3642,8 +3768,9 @@ dependencies = [
 
 [[package]]
 name = "libcrux-ml-kem"
-version = "0.0.7"
-source = "git+https://github.com/cryspen/libcrux#95f8d7da0d6dec07c8090d17a9ac3cf196d4373e"
+version = "0.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a14ab3e477de9df6ee1273a114018ff62c4996ca9220070c4e5cb1743f94a67d"
 dependencies = [
  "hax-lib",
  "libcrux-intrinsics",
@@ -3658,7 +3785,8 @@ dependencies = [
 [[package]]
 name = "libcrux-p256"
 version = "0.0.6"
-source = "git+https://github.com/cryspen/libcrux#95f8d7da0d6dec07c8090d17a9ac3cf196d4373e"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4778ba25cb08bb8a96bd100e19ed9aecf78337198fd176036e21042b2dd99bc"
 dependencies = [
  "libcrux-hacl-rs",
  "libcrux-macros",
@@ -3670,15 +3798,17 @@ dependencies = [
 [[package]]
 name = "libcrux-platform"
 version = "0.0.3"
-source = "git+https://github.com/cryspen/libcrux#95f8d7da0d6dec07c8090d17a9ac3cf196d4373e"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d9e21d7ed31a92ac539bd69a8c970b183ee883872d2d19ce27036e24cb8ecc4"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "libcrux-poly1305"
-version = "0.0.4"
-source = "git+https://github.com/cryspen/libcrux#95f8d7da0d6dec07c8090d17a9ac3cf196d4373e"
+version = "0.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02491808ee5b9db8cb65fad64ae0be812db64beef179d945c00c7787dc7dfcf9"
 dependencies = [
  "libcrux-hacl-rs",
  "libcrux-macros",
@@ -3686,9 +3816,11 @@ dependencies = [
 
 [[package]]
 name = "libcrux-psq"
-version = "0.0.7"
-source = "git+https://github.com/cryspen/libcrux#95f8d7da0d6dec07c8090d17a9ac3cf196d4373e"
+version = "0.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "779ade7aa5e1b4b400c716b313cbf69070988dd005f92e961c2da4c3c42fbea4"
 dependencies = [
+ "classic-mceliece-rust",
  "libcrux-aesgcm",
  "libcrux-chacha20poly1305",
  "libcrux-ecdh",
@@ -3700,6 +3832,7 @@ dependencies = [
  "libcrux-ml-kem",
  "libcrux-sha2",
  "libcrux-traits",
+ "rand 0.8.5",
  "rand 0.9.2",
  "tls_codec",
 ]
@@ -3707,7 +3840,8 @@ dependencies = [
 [[package]]
 name = "libcrux-secrets"
 version = "0.0.5"
-source = "git+https://github.com/cryspen/libcrux#95f8d7da0d6dec07c8090d17a9ac3cf196d4373e"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ce650f3041b44ba40d4263852347d007cd2cd9d1cc856a6f6c8b2e10c3fd40b"
 dependencies = [
  "hax-lib",
 ]
@@ -3715,7 +3849,8 @@ dependencies = [
 [[package]]
 name = "libcrux-sha2"
 version = "0.0.6"
-source = "git+https://github.com/cryspen/libcrux#95f8d7da0d6dec07c8090d17a9ac3cf196d4373e"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9d253473f259fc74a280c43f29c464f7e374abdf28b4942234dc707f529d4b7"
 dependencies = [
  "libcrux-hacl-rs",
  "libcrux-macros",
@@ -3724,8 +3859,9 @@ dependencies = [
 
 [[package]]
 name = "libcrux-sha3"
-version = "0.0.7"
-source = "git+https://github.com/cryspen/libcrux#95f8d7da0d6dec07c8090d17a9ac3cf196d4373e"
+version = "0.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1ae0b7d0e1cc4793a609fd0ff2ca3b3a3fabae523770c619a3d4bc86417b0d7"
 dependencies = [
  "hax-lib",
  "libcrux-intrinsics",
@@ -3736,7 +3872,8 @@ dependencies = [
 [[package]]
 name = "libcrux-traits"
 version = "0.0.6"
-source = "git+https://github.com/cryspen/libcrux#95f8d7da0d6dec07c8090d17a9ac3cf196d4373e"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "812e4fa89f3f5e34b47f928b22b1b78395a0d4ec23b1f583db635f128159d65f"
 dependencies = [
  "libcrux-secrets",
  "rand 0.9.2",
@@ -3937,7 +4074,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a69bcab0ad47271a0234d9422b131806bf3968021e5dc9328caf2d4cd58557fc"
 dependencies = [
  "libc",
- "wasi",
+ "wasi 0.11.1+wasi-snapshot-preview1",
  "windows-sys 0.61.2",
 ]
 
@@ -4245,8 +4382,8 @@ dependencies = [
 
 [[package]]
 name = "nym-api-requests"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "bs58",
  "celes",
@@ -4286,8 +4423,8 @@ dependencies = [
 
 [[package]]
 name = "nym-authenticator-client"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "bincode",
  "futures",
@@ -4309,8 +4446,8 @@ dependencies = [
 
 [[package]]
 name = "nym-authenticator-requests"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "base64 0.22.1",
  "bincode",
@@ -4333,8 +4470,8 @@ dependencies = [
 
 [[package]]
 name = "nym-bandwidth-controller"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "async-trait",
  "log",
@@ -4351,8 +4488,8 @@ dependencies = [
 
 [[package]]
 name = "nym-bin-common"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "const-str",
  "log",
@@ -4383,14 +4520,15 @@ dependencies = [
 
 [[package]]
 name = "nym-client-core"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
  "bs58",
  "cfg-if",
  "futures",
+ "getrandom 0.3.3",
  "gloo-timers",
  "http-body-util",
  "humantime",
@@ -4442,8 +4580,8 @@ dependencies = [
 
 [[package]]
 name = "nym-client-core-config-types"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "humantime-serde",
  "nym-config",
@@ -4458,8 +4596,8 @@ dependencies = [
 
 [[package]]
 name = "nym-client-core-gateways-storage"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4478,8 +4616,8 @@ dependencies = [
 
 [[package]]
 name = "nym-client-core-surb-storage"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4497,8 +4635,8 @@ dependencies = [
 
 [[package]]
 name = "nym-coconut-dkg-common"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
@@ -4511,7 +4649,16 @@ dependencies = [
 
 [[package]]
 name = "nym-common"
-version = "1.27.1"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
+dependencies = [
+ "tracing",
+ "tracing-test",
+]
+
+[[package]]
+name = "nym-common"
+version = "1.30.0"
 dependencies = [
  "tracing",
  "tracing-test",
@@ -4519,8 +4666,8 @@ dependencies = [
 
 [[package]]
 name = "nym-compact-ecash"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "bincode",
  "bs58",
@@ -4542,8 +4689,8 @@ dependencies = [
 
 [[package]]
 name = "nym-config"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "dirs",
  "handlebars",
@@ -4557,12 +4704,12 @@ dependencies = [
 
 [[package]]
 name = "nym-connection-monitor"
-version = "1.27.1"
+version = "1.30.0"
 dependencies = [
  "async-trait",
  "futures",
  "nix 0.31.2",
- "nym-common",
+ "nym-common 1.30.0",
  "pretty_assertions",
  "socket2 0.6.2",
  "surge-ping",
@@ -4575,8 +4722,8 @@ dependencies = [
 
 [[package]]
 name = "nym-contracts-common"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "bs58",
  "cosmwasm-schema",
@@ -4590,8 +4737,8 @@ dependencies = [
 
 [[package]]
 name = "nym-credential-proxy-requests"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "async-trait",
  "nym-credentials",
@@ -4599,7 +4746,7 @@ dependencies = [
  "nym-http-api-client",
  "nym-serde-helpers",
  "nym-upgrade-mode-check",
- "reqwest 0.12.28",
+ "reqwest 0.13.4",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -4611,8 +4758,8 @@ dependencies = [
 
 [[package]]
 name = "nym-credential-storage"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4632,8 +4779,8 @@ dependencies = [
 
 [[package]]
 name = "nym-credential-utils"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "log",
  "nym-bandwidth-controller",
@@ -4651,8 +4798,8 @@ dependencies = [
 
 [[package]]
 name = "nym-credentials"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "bincode",
  "cosmrs",
@@ -4675,8 +4822,8 @@ dependencies = [
 
 [[package]]
 name = "nym-credentials-interface"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "nym-bls12_381-fork",
  "nym-compact-ecash",
@@ -4694,8 +4841,8 @@ dependencies = [
 
 [[package]]
 name = "nym-crypto"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "aead",
  "aes 0.8.4",
@@ -4712,9 +4859,12 @@ dependencies = [
  "hkdf",
  "hmac",
  "jwt-simple",
+ "libcrux-curve25519",
+ "libcrux-psq",
  "nym-pemstore",
  "nym-sphinx-types",
  "rand 0.8.5",
+ "rand 0.9.2",
  "serde",
  "serde_bytes",
  "sha2 0.10.9",
@@ -4726,7 +4876,7 @@ dependencies = [
 
 [[package]]
 name = "nym-dbus"
-version = "1.27.1"
+version = "1.30.0"
 dependencies = [
  "dbus",
  "libc",
@@ -4737,7 +4887,7 @@ dependencies = [
 
 [[package]]
 name = "nym-diagnostic"
-version = "1.27.1"
+version = "1.30.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4765,28 +4915,31 @@ dependencies = [
  "nym-vpn-store",
  "pnet",
  "rand 0.8.5",
+ "rustls 0.23.37",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "time",
  "tokio",
+ "tokio-rustls 0.26.4",
  "tokio-tungstenite 0.28.0",
  "tokio-util",
  "tracing",
  "tracing-subscriber",
  "url",
  "vergen-gitcl",
+ "webpki-roots 1.0.6",
 ]
 
 [[package]]
 name = "nym-dns"
-version = "1.27.1"
+version = "1.30.0"
 dependencies = [
  "duct",
  "futures",
  "inotify",
  "nix 0.31.2",
- "nym-common",
+ "nym-common 1.30.0",
  "nym-dbus",
  "nym-routing",
  "resolv-conf",
@@ -4799,8 +4952,8 @@ dependencies = [
 
 [[package]]
 name = "nym-ecash-contract-common"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "bs58",
  "cosmwasm-schema",
@@ -4813,8 +4966,8 @@ dependencies = [
 
 [[package]]
 name = "nym-ecash-signer-check-types"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "nym-coconut-dkg-common",
  "nym-crypto",
@@ -4829,8 +4982,8 @@ dependencies = [
 
 [[package]]
 name = "nym-ecash-time"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "nym-compact-ecash",
  "time",
@@ -4838,8 +4991,8 @@ dependencies = [
 
 [[package]]
 name = "nym-exit-policy"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "serde",
  "serde_json",
@@ -4850,7 +5003,7 @@ dependencies = [
 
 [[package]]
 name = "nym-firewall"
-version = "1.27.1"
+version = "1.30.0"
 dependencies = [
  "ipnetwork",
  "iptables",
@@ -4866,15 +5019,15 @@ dependencies = [
 
 [[package]]
 name = "nym-firewall-config"
-version = "1.27.1"
+version = "1.30.0"
 dependencies = [
  "ipnetwork",
 ]
 
 [[package]]
 name = "nym-gateway-client"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "futures",
  "getrandom 0.2.17",
@@ -4912,7 +5065,7 @@ dependencies = [
 
 [[package]]
 name = "nym-gateway-directory"
-version = "1.27.1"
+version = "1.30.0"
 dependencies = [
  "anyhow",
  "itertools 0.14.0",
@@ -4937,8 +5090,8 @@ dependencies = [
 
 [[package]]
 name = "nym-gateway-requests"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "bs58",
  "futures",
@@ -4967,8 +5120,8 @@ dependencies = [
 
 [[package]]
 name = "nym-group-contract-common"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "cosmwasm-schema",
  "cw-controllers",
@@ -4979,8 +5132,8 @@ dependencies = [
 
 [[package]]
 name = "nym-http-api-client"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "async-trait",
  "bincode",
@@ -4997,7 +5150,8 @@ dependencies = [
  "nym-http-api-common",
  "nym-network-defaults",
  "once_cell",
- "reqwest 0.12.28",
+ "reqwest 0.13.4",
+ "rustls 0.23.37",
  "serde",
  "serde_json",
  "serde_plain",
@@ -5011,8 +5165,8 @@ dependencies = [
 
 [[package]]
 name = "nym-http-api-client-macro"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -5023,8 +5177,8 @@ dependencies = [
 
 [[package]]
 name = "nym-http-api-common"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "bincode",
  "serde",
@@ -5034,8 +5188,8 @@ dependencies = [
 
 [[package]]
 name = "nym-id"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "nym-credential-storage",
  "nym-credentials",
@@ -5047,13 +5201,14 @@ dependencies = [
 
 [[package]]
 name = "nym-ip-packet-client"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "bincode",
  "bytes",
  "futures",
  "nym-ip-packet-requests",
+ "nym-lp",
  "nym-sdk",
  "thiserror 2.0.18",
  "tokio",
@@ -5063,8 +5218,8 @@ dependencies = [
 
 [[package]]
 name = "nym-ip-packet-requests"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "bincode",
  "bytes",
@@ -5073,16 +5228,18 @@ dependencies = [
  "nym-service-provider-requests-common",
  "nym-sphinx",
  "rand 0.8.5",
+ "semver",
  "serde",
  "thiserror 2.0.18",
  "time",
  "tokio",
  "tokio-util",
+ "tracing",
 ]
 
 [[package]]
 name = "nym-ipc"
-version = "1.27.1"
+version = "1.30.0"
 dependencies = [
  "hyper-util",
  "tokio",
@@ -5094,16 +5251,18 @@ dependencies = [
 [[package]]
 name = "nym-kkt"
 version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
- "blake3",
- "classic-mceliece-rust",
  "libcrux-chacha20poly1305",
  "libcrux-ecdh",
  "libcrux-kem",
+ "libcrux-ml-kem",
+ "libcrux-psq",
  "num_enum",
  "nym-crypto",
  "nym-kkt-ciphersuite",
+ "nym-kkt-context",
+ "nym-pemstore",
  "rand 0.9.2",
  "strum",
  "thiserror 2.0.18",
@@ -5112,63 +5271,53 @@ dependencies = [
 
 [[package]]
 name = "nym-kkt-ciphersuite"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "blake3",
  "libcrux-sha3",
  "num_enum",
+ "semver",
  "strum",
  "strum_macros",
  "thiserror 2.0.18",
 ]
 
 [[package]]
+name = "nym-kkt-context"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
+dependencies = [
+ "num_enum",
+ "nym-kkt-ciphersuite",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "nym-lp"
-version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "bs58",
  "bytes",
- "chacha20poly1305",
- "dashmap",
- "libcrux-kem",
  "libcrux-psq",
- "libcrux-traits",
  "num_enum",
+ "nym-common 1.20.4",
  "nym-crypto",
  "nym-kkt",
- "nym-lp-common",
- "parking_lot",
- "rand 0.8.5",
+ "nym-kkt-ciphersuite",
  "rand 0.9.2",
- "serde",
- "sha2 0.10.9",
- "snow",
  "thiserror 2.0.18",
  "tls_codec",
+ "tokio",
  "tracing",
  "zeroize",
 ]
 
 [[package]]
-name = "nym-lp-common"
-version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
-
-[[package]]
-name = "nym-lp-transport"
-version = "0.1.0"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
-dependencies = [
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "nym-metrics"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "dashmap",
  "lazy_static",
@@ -5178,8 +5327,8 @@ dependencies = [
 
 [[package]]
 name = "nym-mixnet-client"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "dashmap",
  "futures",
@@ -5194,8 +5343,8 @@ dependencies = [
 
 [[package]]
 name = "nym-mixnet-contract-common"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "bs58",
  "cosmwasm-schema",
@@ -5215,8 +5364,8 @@ dependencies = [
 
 [[package]]
 name = "nym-multisig-contract-common"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
@@ -5231,8 +5380,8 @@ dependencies = [
 
 [[package]]
 name = "nym-network-defaults"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "cargo_metadata 0.19.2",
  "dotenvy",
@@ -5248,8 +5397,8 @@ dependencies = [
 
 [[package]]
 name = "nym-node-requests"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "celes",
  "humantime-serde",
@@ -5273,8 +5422,8 @@ dependencies = [
 
 [[package]]
 name = "nym-noise"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "arc-swap",
  "bytes",
@@ -5294,8 +5443,8 @@ dependencies = [
 
 [[package]]
 name = "nym-noise-keys"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "nym-crypto",
  "schemars 0.8.22",
@@ -5305,8 +5454,8 @@ dependencies = [
 
 [[package]]
 name = "nym-nonexhaustive-delayqueue"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "tokio",
  "tokio-stream",
@@ -5316,10 +5465,10 @@ dependencies = [
 
 [[package]]
 name = "nym-offline-monitor"
-version = "1.27.1"
+version = "1.30.0"
 dependencies = [
  "async-trait",
- "nym-common",
+ "nym-common 1.30.0",
  "nym-routing",
  "thiserror 2.0.18",
  "tokio",
@@ -5329,8 +5478,8 @@ dependencies = [
 
 [[package]]
 name = "nym-ordered-buffer"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "log",
  "thiserror 2.0.18",
@@ -5338,16 +5487,12 @@ dependencies = [
 
 [[package]]
 name = "nym-outfox"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "blake3",
  "chacha20",
  "chacha20poly1305",
- "getrandom 0.2.17",
- "log",
- "rand 0.8.5",
- "rayon",
  "sphinx-packet",
  "thiserror 2.0.18",
  "x25519-dalek",
@@ -5356,8 +5501,8 @@ dependencies = [
 
 [[package]]
 name = "nym-pemstore"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "pem",
  "tracing",
@@ -5366,8 +5511,8 @@ dependencies = [
 
 [[package]]
 name = "nym-performance-contract-common"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
@@ -5380,7 +5525,7 @@ dependencies = [
 
 [[package]]
 name = "nym-platform-metadata"
-version = "1.27.1"
+version = "1.30.0"
 dependencies = [
  "nym-dbus",
  "rs-release",
@@ -5390,9 +5535,10 @@ dependencies = [
 
 [[package]]
 name = "nym-registration-client"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
+ "bincode",
  "bytes",
  "futures",
  "nym-authenticator-client",
@@ -5402,24 +5548,22 @@ dependencies = [
  "nym-crypto",
  "nym-ip-packet-client",
  "nym-lp",
- "nym-lp-transport",
  "nym-registration-common",
  "nym-sdk",
  "nym-validator-client",
  "nym-wireguard-types",
- "rand 0.8.5",
+ "rand 0.9.2",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
  "tracing",
  "typed-builder 0.23.2",
- "url",
 ]
 
 [[package]]
 name = "nym-registration-common"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "bincode",
  "nym-authenticator-requests",
@@ -5435,7 +5579,7 @@ dependencies = [
 
 [[package]]
 name = "nym-routing"
-version = "1.27.1"
+version = "1.30.0"
 dependencies = [
  "futures",
  "ipnetwork",
@@ -5443,7 +5587,7 @@ dependencies = [
  "netlink-packet-core",
  "netlink-packet-route",
  "netlink-sys",
- "nym-common",
+ "nym-common 1.30.0",
  "rtnetlink",
  "thiserror 2.0.18",
  "tokio",
@@ -5452,8 +5596,8 @@ dependencies = [
 
 [[package]]
 name = "nym-sdk"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5478,6 +5622,8 @@ dependencies = [
  "nym-crypto",
  "nym-gateway-requests",
  "nym-http-api-client",
+ "nym-ip-packet-requests",
+ "nym-lp",
  "nym-network-defaults",
  "nym-ordered-buffer",
  "nym-service-providers-common",
@@ -5490,6 +5636,7 @@ dependencies = [
  "nym-topology",
  "nym-validator-client",
  "rand 0.8.5",
+ "semver",
  "serde",
  "tap",
  "tempfile",
@@ -5507,8 +5654,8 @@ dependencies = [
 
 [[package]]
 name = "nym-serde-helpers"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "base64 0.22.1",
  "bs58",
@@ -5519,8 +5666,8 @@ dependencies = [
 
 [[package]]
 name = "nym-service-provider-requests-common"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "serde",
  "thiserror 2.0.18",
@@ -5528,8 +5675,8 @@ dependencies = [
 
 [[package]]
 name = "nym-service-providers-common"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "async-trait",
  "log",
@@ -5542,8 +5689,8 @@ dependencies = [
 
 [[package]]
 name = "nym-socks5-client-core"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "anyhow",
  "dirs",
@@ -5564,7 +5711,7 @@ dependencies = [
  "nym-validator-client",
  "pin-project",
  "rand 0.8.5",
- "reqwest 0.12.28",
+ "reqwest 0.13.4",
  "schemars 0.8.22",
  "serde",
  "tap",
@@ -5575,8 +5722,8 @@ dependencies = [
 
 [[package]]
 name = "nym-socks5-proxy-helpers"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "bytes",
  "futures",
@@ -5590,8 +5737,8 @@ dependencies = [
 
 [[package]]
 name = "nym-socks5-requests"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "bincode",
  "log",
@@ -5606,8 +5753,8 @@ dependencies = [
 
 [[package]]
 name = "nym-sphinx"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "nym-crypto",
  "nym-metrics",
@@ -5632,8 +5779,8 @@ dependencies = [
 
 [[package]]
 name = "nym-sphinx-acknowledgements"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "nym-crypto",
  "nym-pemstore",
@@ -5649,8 +5796,8 @@ dependencies = [
 
 [[package]]
 name = "nym-sphinx-addressing"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "nym-crypto",
  "nym-sphinx-types",
@@ -5660,8 +5807,8 @@ dependencies = [
 
 [[package]]
 name = "nym-sphinx-anonymous-replies"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "bs58",
  "nym-crypto",
@@ -5678,8 +5825,8 @@ dependencies = [
 
 [[package]]
 name = "nym-sphinx-chunking"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "dashmap",
  "log",
@@ -5697,8 +5844,8 @@ dependencies = [
 
 [[package]]
 name = "nym-sphinx-cover"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "nym-crypto",
  "nym-sphinx-acknowledgements",
@@ -5715,8 +5862,8 @@ dependencies = [
 
 [[package]]
 name = "nym-sphinx-forwarding"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "nym-sphinx-addressing",
  "nym-sphinx-anonymous-replies",
@@ -5727,8 +5874,8 @@ dependencies = [
 
 [[package]]
 name = "nym-sphinx-framing"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -5744,8 +5891,8 @@ dependencies = [
 
 [[package]]
 name = "nym-sphinx-params"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "nym-crypto",
  "nym-sphinx-types",
@@ -5755,8 +5902,8 @@ dependencies = [
 
 [[package]]
 name = "nym-sphinx-routing"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "nym-sphinx-addressing",
  "nym-sphinx-types",
@@ -5765,8 +5912,8 @@ dependencies = [
 
 [[package]]
 name = "nym-sphinx-types"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "nym-outfox",
  "sphinx-packet",
@@ -5775,8 +5922,8 @@ dependencies = [
 
 [[package]]
 name = "nym-sqlx-pool-guard"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "proc_pidinfo",
  "sqlx",
@@ -5787,7 +5934,7 @@ dependencies = [
 
 [[package]]
 name = "nym-statistics"
-version = "1.27.1"
+version = "1.30.0"
 dependencies = [
  "futures",
  "nym-bin-common",
@@ -5811,7 +5958,7 @@ dependencies = [
 
 [[package]]
 name = "nym-statistics-api-client"
-version = "1.27.1"
+version = "1.30.0"
 dependencies = [
  "nym-http-api-client",
  "nym-statistics-common",
@@ -5822,8 +5969,8 @@ dependencies = [
 
 [[package]]
 name = "nym-statistics-common"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "futures",
  "log",
@@ -5847,8 +5994,8 @@ dependencies = [
 
 [[package]]
 name = "nym-task"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "cfg-if",
  "futures",
@@ -5864,8 +6011,8 @@ dependencies = [
 
 [[package]]
 name = "nym-ticketbooks-merkle"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "nym-credentials-interface",
  "nym-serde-helpers",
@@ -5879,8 +6026,8 @@ dependencies = [
 
 [[package]]
 name = "nym-topology"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "async-trait",
  "nym-api-requests",
@@ -5889,7 +6036,7 @@ dependencies = [
  "nym-sphinx-addressing",
  "nym-sphinx-types",
  "rand 0.8.5",
- "reqwest 0.12.28",
+ "reqwest 0.13.4",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -5899,13 +6046,13 @@ dependencies = [
 
 [[package]]
 name = "nym-upgrade-mode-check"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "jwt-simple",
  "nym-crypto",
  "nym-http-api-client",
- "reqwest 0.12.28",
+ "reqwest 0.13.4",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -5916,8 +6063,8 @@ dependencies = [
 
 [[package]]
 name = "nym-validator-client"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -5950,7 +6097,7 @@ dependencies = [
  "nym-serde-helpers",
  "nym-vesting-contract-common",
  "prost 0.13.5",
- "reqwest 0.12.28",
+ "reqwest 0.13.4",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -5966,8 +6113,8 @@ dependencies = [
 
 [[package]]
 name = "nym-vesting-contract-common"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
@@ -5979,7 +6126,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpn-account-controller"
-version = "1.27.1"
+version = "1.30.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -5989,7 +6136,7 @@ dependencies = [
  "bs58",
  "futures",
  "hkdf",
- "nym-common",
+ "nym-common 1.30.0",
  "nym-compact-ecash",
  "nym-credential-proxy-requests",
  "nym-credential-storage",
@@ -6031,7 +6178,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpn-api-client"
-version = "1.27.1"
+version = "1.30.0"
 dependencies = [
  "backon",
  "base64-url",
@@ -6039,7 +6186,7 @@ dependencies = [
  "bs58",
  "chrono",
  "itertools 0.14.0",
- "nym-common",
+ "nym-common 1.30.0",
  "nym-compact-ecash",
  "nym-config",
  "nym-contracts-common",
@@ -6064,7 +6211,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpn-lib"
-version = "1.27.1"
+version = "1.30.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -6084,7 +6231,7 @@ dependencies = [
  "nym-bandwidth-controller",
  "nym-bin-common",
  "nym-client-core",
- "nym-common",
+ "nym-common 1.30.0",
  "nym-config",
  "nym-connection-monitor",
  "nym-credentials-interface",
@@ -6096,6 +6243,7 @@ dependencies = [
  "nym-http-api-client",
  "nym-ip-packet-client",
  "nym-ip-packet-requests",
+ "nym-lp",
  "nym-offline-monitor",
  "nym-platform-metadata",
  "nym-registration-client",
@@ -6134,7 +6282,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpn-lib-types"
-version = "1.27.1"
+version = "1.30.0"
 dependencies = [
  "ipnetwork",
  "nym-bandwidth-controller",
@@ -6151,18 +6299,19 @@ dependencies = [
  "si-scale 0.3.0",
  "thiserror 2.0.18",
  "time",
+ "tracing",
  "ts-rs",
  "zeroize",
 ]
 
 [[package]]
 name = "nym-vpn-network-config"
-version = "1.27.1"
+version = "1.30.0"
 dependencies = [
  "futures-util",
  "itertools 0.14.0",
  "nym-api-requests",
- "nym-common",
+ "nym-common 1.30.0",
  "nym-http-api-client",
  "nym-network-defaults",
  "nym-offline-monitor",
@@ -6183,7 +6332,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpn-proto"
-version = "1.27.1"
+version = "1.30.0"
 dependencies = [
  "nym-ipc",
  "nym-vpn-lib-types",
@@ -6201,13 +6350,14 @@ dependencies = [
 
 [[package]]
 name = "nym-vpn-store"
-version = "1.27.1"
+version = "1.30.0"
 dependencies = [
  "anyhow",
  "async-trait",
  "bip39",
  "nym-crypto",
  "nym-pemstore",
+ "nym-sqlx-pool-guard",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "serde",
@@ -6223,7 +6373,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpnc"
-version = "1.27.1"
+version = "1.30.0"
 dependencies = [
  "anyhow",
  "celes",
@@ -6239,7 +6389,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpnd"
-version = "1.27.1"
+version = "1.30.0"
 dependencies = [
  "anyhow",
  "bip39",
@@ -6251,7 +6401,7 @@ dependencies = [
  "hyper-util",
  "log-panics",
  "nym-bin-common",
- "nym-common",
+ "nym-common 1.30.0",
  "nym-diagnostic",
  "nym-firewall",
  "nym-gateway-directory",
@@ -6298,8 +6448,8 @@ dependencies = [
 
 [[package]]
 name = "nym-wasm-utils"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "futures",
  "getrandom 0.2.17",
@@ -6313,7 +6463,7 @@ dependencies = [
 
 [[package]]
 name = "nym-wg-gotatun"
-version = "1.27.1"
+version = "1.30.0"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -6329,7 +6479,7 @@ dependencies = [
 
 [[package]]
 name = "nym-wg-metadata-client"
-version = "1.27.1"
+version = "1.30.0"
 dependencies = [
  "nym-credentials-interface",
  "nym-gateway-directory",
@@ -6344,8 +6494,8 @@ dependencies = [
 
 [[package]]
 name = "nym-wireguard-private-metadata-client"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "async-trait",
  "nym-http-api-client",
@@ -6355,8 +6505,8 @@ dependencies = [
 
 [[package]]
 name = "nym-wireguard-private-metadata-shared"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "axum 0.7.9",
  "bincode",
@@ -6369,14 +6519,15 @@ dependencies = [
 
 [[package]]
 name = "nym-wireguard-types"
-version = "1.20.1"
-source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.3-parmigiano#1ecb457c66ccabc4877e3822566f266c7331d29e"
+version = "1.20.4"
+source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"
 dependencies = [
  "base64 0.22.1",
  "nym-crypto",
  "serde",
  "thiserror 2.0.18",
  "x25519-dalek",
+ "zeroize",
 ]
 
 [[package]]
@@ -6599,6 +6750,12 @@ name = "openssl-probe"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d05e27ee213611ffe7d6348b942e8f942b37114c00cc03cec254295a4a17852e"
+
+[[package]]
+name = "openssl-probe"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 
 [[package]]
 name = "opentelemetry"
@@ -7370,8 +7527,9 @@ version = "0.11.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1906b49b0c3bc04b5fe5d86a77925ae6524a19b816ae38ce1e426255f1d8a31"
 dependencies = [
+ "aws-lc-rs",
  "bytes",
- "getrandom 0.3.4",
+ "getrandom 0.3.3",
  "lru-slab",
  "rand 0.9.2",
  "ring",
@@ -7470,7 +7628,7 @@ version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "76afc826de14238e6e8c374ddcc1fa19e374fd8dd986b0d2af0d02377261d83c"
 dependencies = [
- "getrandom 0.3.4",
+ "getrandom 0.3.3",
 ]
 
 [[package]]
@@ -7615,7 +7773,7 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "rustls 0.21.12",
- "rustls-native-certs",
+ "rustls-native-certs 0.6.3",
  "rustls-pemfile",
  "serde",
  "serde_json",
@@ -7670,6 +7828,43 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
  "webpki-roots 1.0.6",
+]
+
+[[package]]
+name = "reqwest"
+version = "0.13.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "219c5811de6525e5416c7d5d53bb656d3afdbc6c5af816e0802bcfa42dbdc1c3"
+dependencies = [
+ "base64 0.22.1",
+ "bytes",
+ "futures-core",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-rustls 0.27.7",
+ "hyper-util",
+ "js-sys",
+ "log",
+ "percent-encoding",
+ "pin-project-lite",
+ "quinn",
+ "rustls 0.23.37",
+ "rustls-pki-types",
+ "rustls-platform-verifier",
+ "serde",
+ "serde_json",
+ "sync_wrapper 1.0.2",
+ "tokio",
+ "tokio-rustls 0.26.4",
+ "tower",
+ "tower-http",
+ "tower-service",
+ "url",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
@@ -7844,6 +8039,7 @@ version = "0.23.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "758025cb5fccfd3bc2fd74708fd4682be41d99e5dff73c377c0646c6012c73a4"
 dependencies = [
+ "aws-lc-rs",
  "log",
  "once_cell",
  "ring",
@@ -7859,10 +8055,22 @@ version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a9aace74cb666635c918e9c12bc0d348266037aa8eb599b5cba565709a8dff00"
 dependencies = [
- "openssl-probe",
+ "openssl-probe 0.1.6",
  "rustls-pemfile",
  "schannel",
- "security-framework",
+ "security-framework 2.11.1",
+]
+
+[[package]]
+name = "rustls-native-certs"
+version = "0.8.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dab5152771c58876a2146916e53e35057e1a4dfa2b9df0f0305b07f611fdea4d"
+dependencies = [
+ "openssl-probe 0.2.1",
+ "rustls-pki-types",
+ "schannel",
+ "security-framework 3.7.0",
 ]
 
 [[package]]
@@ -7885,6 +8093,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustls-platform-verifier"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "26d1e2536ce4f35f4846aa13bff16bd0ff40157cdb14cc056c7b14ba41233ba0"
+dependencies = [
+ "core-foundation 0.10.1",
+ "core-foundation-sys",
+ "jni",
+ "log",
+ "once_cell",
+ "rustls 0.23.37",
+ "rustls-native-certs 0.8.4",
+ "rustls-platform-verifier-android",
+ "rustls-webpki 0.103.9",
+ "security-framework 3.7.0",
+ "security-framework-sys",
+ "webpki-root-certs",
+ "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "rustls-platform-verifier-android"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f"
+
+[[package]]
 name = "rustls-webpki"
 version = "0.101.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7900,6 +8135,7 @@ version = "0.103.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d7df23109aa6c1567d1c575b9952556388da57401e4ace1d15f79eedad0d8f53"
 dependencies = [
+ "aws-lc-rs",
  "ring",
  "rustls-pki-types",
  "untrusted",
@@ -8056,7 +8292,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "897b2245f0b511c87893af39b033e5ca9cce68824c4d7e7630b5a1d339658d02"
 dependencies = [
  "bitflags 2.11.0",
- "core-foundation",
+ "core-foundation 0.9.4",
+ "core-foundation-sys",
+ "libc",
+ "security-framework-sys",
+]
+
+[[package]]
+name = "security-framework"
+version = "3.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7f4bc775c73d9a02cde8bf7b2ec4c9d12743edf609006c7facc23998404cd1d"
+dependencies = [
+ "bitflags 2.11.0",
+ "core-foundation 0.10.1",
  "core-foundation-sys",
  "libc",
  "security-framework-sys",
@@ -8564,6 +8813,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e320a6c5ad31d271ad523dcf3ad13e2767ad8b1cb8f047f75a8aeaf8da139da2"
 
 [[package]]
+name = "simd_cesu8"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94f90157bb87cddf702797c5dadfa0be7d266cdf49e22da2fcaa32eff75b2c33"
+dependencies = [
+ "rustc_version",
+ "simdutf8",
+]
+
+[[package]]
+name = "simdutf8"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
+
+[[package]]
 name = "siphasher"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8890,18 +9155,18 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "strum"
-version = "0.27.2"
+version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af23d6f6c1a224baef9d3f61e287d2761385a5b88fdab4eb4c6f11aeb54c4bcf"
+checksum = "9628de9b8791db39ceda2b119bbe13134770b56c138ec1d3af810d045c04f9bd"
 dependencies = [
  "strum_macros",
 ]
 
 [[package]]
 name = "strum_macros"
-version = "0.27.2"
+version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7695ce3845ea4b33927c055a39dc438a45b059f7c1b3d91d38d10355fb8cbca7"
+checksum = "ab85eea0270ee17587ed4156089e10b9e6880ee688791d45a905f5b1ca36f664"
 dependencies = [
  "heck",
  "proc-macro2",
@@ -9050,7 +9315,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba3a3adc5c275d719af8cb4272ea1c4a6d668a777f37e115f6d11ddbc1c8e0e7"
 dependencies = [
  "bitflags 1.3.2",
- "core-foundation",
+ "core-foundation 0.9.4",
  "system-configuration-sys",
 ]
 
@@ -10285,6 +10550,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
 
 [[package]]
+name = "wasi"
+version = "0.14.7+wasi-0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "883478de20367e224c0090af9cf5f9fa85bed63a95c1abf3afc5c083ebc06e8c"
+dependencies = [
+ "wasip2",
+]
+
+[[package]]
 name = "wasip2"
 version = "1.0.2+wasi-0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10314,7 +10588,7 @@ version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1757e0d1f8456693c7e5c6c629bdb54884e032aa0bb53c155f6a39f94440d332"
 dependencies = [
- "wasi",
+ "wasi 0.11.1+wasi-snapshot-preview1",
 ]
 
 [[package]]
@@ -10442,6 +10716,15 @@ checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "webpki-root-certs"
+version = "1.0.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f31141ce3fc3e300ae89b78c0dd67f9708061d1d2eda54b8209346fd6be9a92c"
+dependencies = [
+ "rustls-pki-types",
 ]
 
 [[package]]

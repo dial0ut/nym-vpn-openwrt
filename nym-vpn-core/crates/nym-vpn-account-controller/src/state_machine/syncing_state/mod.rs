@@ -1,6 +1,8 @@
 // Copyright 2025 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::time::Duration;
+
 use crate::{
     SharedAccountState,
     commands::{AccountCommand, UpgradeModeCommand, common_handler, handler},
@@ -28,6 +30,21 @@ pub(super) mod requesting_zknym_state;
 
 const MAX_SYNCING_ATTEMPTS: u32 = 10;
 const SYNCING_STATE_CONTEXT: &str = "SYNCING_STATE";
+const SYNCING_BACKOFF_BASE: Duration = Duration::from_millis(250);
+const MAX_SYNCING_BACKOFF_EXPONENT: u32 = 5;
+
+/// Bounded exponential backoff before a sync *retry*: zero on the first attempt,
+/// then [0.25, 0.5, 1, 2, 4, 8, 8, ...] seconds — each retry capped at 8s, ~55s
+/// total over MAX_SYNCING_ATTEMPTS. Without this the state machine re-enters
+/// `SyncingState` immediately on every API failure, hammering the VPN API and
+/// the log on an intermittent router uplink (upstream nym-vpn-client #4898).
+fn syncing_backoff(attempts: u32) -> Duration {
+    if attempts == 0 {
+        return Duration::ZERO;
+    }
+    let exponent = (attempts - 1).min(MAX_SYNCING_BACKOFF_EXPONENT);
+    SYNCING_BACKOFF_BASE * 2u32.pow(exponent)
+}
 
 /// Syncing State
 /// This is the heart of the Account Controller.
@@ -48,8 +65,39 @@ const SYNCING_STATE_CONTEXT: &str = "SYNCING_STATE";
 /// - OfflineState : the connectivity monitor is telling we're not connected
 /// - DecentralisedState : The loaded account is set to "decentralised" mode
 pub struct SyncingState {
-    syncing_state_handle: JoinHandle<Result<VpnAccountSummary, SyncError>>,
+    syncing_state_handle: JoinHandle<SyncOutcome>,
     attempts: u32,
+}
+
+/// Outcome of an account sync attempt. The best-effort `summary` is persisted
+/// even when `result` is an error, so the daemon/LuCI can still show last-known
+/// account state when sync ultimately fails (upstream nym-vpn-client #4812).
+struct SyncOutcome {
+    summary: Option<VpnAccountSummary>,
+    result: Result<(), SyncError>,
+}
+
+impl SyncOutcome {
+    fn failed(error: SyncError) -> Self {
+        Self {
+            summary: None,
+            result: Err(error),
+        }
+    }
+
+    fn from_result(result: Result<(), SyncError>) -> Self {
+        Self {
+            summary: None,
+            result,
+        }
+    }
+
+    fn stored(summary: VpnAccountSummary, error: SyncError) -> Self {
+        Self {
+            summary: Some(summary),
+            result: Err(error),
+        }
+    }
 }
 
 impl SyncingState {
@@ -75,6 +123,13 @@ impl SyncingState {
         let vpn_api_client = shared_state.vpn_api_client.clone();
 
         let syncing_state_handle = tokio::spawn(async move {
+            let delay = syncing_backoff(attempts);
+            if !delay.is_zero() {
+                tracing::debug!(
+                    "Backing off {delay:?} before account-sync retry (attempt {attempts})"
+                );
+                tokio::time::sleep(delay).await;
+            }
             SyncingState::syncing_account(&vpn_api_client, &vpn_api_account, &device).await
         });
 
@@ -91,8 +146,8 @@ impl SyncingState {
         vpn_api_client: &VpnApiClient,
         vpn_api_account: &VpnAccount,
         device: &Device,
-    ) -> Result<VpnAccountSummary, SyncError> {
-        let handle_vpn_api_error = |e: VpnApiClientError| -> Result<VpnAccountSummary, SyncError> {
+    ) -> SyncOutcome {
+        let handle_vpn_api_error = |e: VpnApiClientError| -> Result<(), SyncError> {
             let error_response = NymErrorResponse::try_from(e)?;
             // SW Use UUID when it will be available
             if error_response.status == "access_denied"
@@ -114,11 +169,11 @@ impl SyncingState {
         match vpn_api_client.get_remote_time().await {
             Ok(remote_time) => {
                 if !remote_time.is_acceptable_synced() {
-                    return Err(SyncError::DeviceTimeDesynced);
+                    return SyncOutcome::failed(SyncError::DeviceTimeDesynced);
                 }
             }
             Err(e) => {
-                return handle_vpn_api_error(e);
+                return SyncOutcome::from_result(handle_vpn_api_error(e));
             }
         }
 
@@ -139,40 +194,48 @@ impl SyncingState {
                     summary.account_summary.fair_usage.usedGB,
                     summary.account_summary.fair_usage.limitGB,
                     summary.account_summary.fair_usage.resetsOnUtc.clone(),
-                )
-                .map_err(|e| SyncError::ApiResponseError {
-                    details: format!("Failed to create account summary from API response: {e}"),
-                })?;
+                );
+
+                // From here the summary is stored regardless of the eligibility
+                // checks below, so last-known state survives a soft failure.
 
                 // Checking that the account is active
                 if !summary.account_active() {
-                    return Err(SyncError::InactiveAccount(
-                        summary.account_summary.account.status.to_string(),
-                    ));
+                    return SyncOutcome::stored(
+                        vpn_account_summary,
+                        SyncError::InactiveAccount(
+                            summary.account_summary.account.status.to_string(),
+                        ),
+                    );
                 }
 
                 // that there is an active subscription
                 if !summary.subscription_active() {
-                    return Err(SyncError::InactiveSubscription);
+                    return SyncOutcome::stored(vpn_account_summary, SyncError::InactiveSubscription);
                 }
 
                 // that the device is registered or there is a spot left for it with fair usage
                 if summary.active_device.is_none() {
                     if summary.remaining_devices() == 0 {
-                        return Err(SyncError::MaxDeviceReached); // Early detection of max device reached
+                        // Early detection of max device reached
+                        return SyncOutcome::stored(vpn_account_summary, SyncError::MaxDeviceReached);
                     }
 
                     if !vpn_account_summary.fair_usage_left() {
-                        return Err(SyncError::FairUsageDepleted);
-                    } else {
-                        SyncingState::register_device(vpn_api_client, vpn_api_account, device)
-                            .await?
+                        return SyncOutcome::stored(vpn_account_summary, SyncError::FairUsageDepleted);
+                    } else if let Err(e) =
+                        SyncingState::register_device(vpn_api_client, vpn_api_account, device).await
+                    {
+                        return SyncOutcome::stored(vpn_account_summary, e);
                     }
                 }
-                Ok(vpn_account_summary)
+                SyncOutcome {
+                    summary: Some(vpn_account_summary),
+                    result: Ok(()),
+                }
             }
 
-            Err(e) => handle_vpn_api_error(e),
+            Err(e) => SyncOutcome::from_result(handle_vpn_api_error(e)),
         }
     }
 
@@ -204,10 +267,12 @@ impl<C: ConnectivityMonitor> AccountControllerStateHandler<C> for SyncingState {
             }
             syncing_result = &mut self.syncing_state_handle => {
                 match syncing_result {
-                    Ok(result) => {
-                        match result {
-                            Ok(vpn_account_summary) => {
-                                shared_state.vpn_account_summary = Some(vpn_account_summary);
+                    Ok(outcome) => {
+                        if let Some(vpn_account_summary) = outcome.summary {
+                            shared_state.vpn_account_summary = Some(vpn_account_summary);
+                        }
+                        match outcome.result {
+                            Ok(()) => {
                                 NextAccountControllerState::NewState(RequestingZkNymsState::enter(shared_state, self.attempts, false))
                             },
                             Err(e) if e.is_retryable() => {
@@ -383,5 +448,22 @@ impl From<SyncError> for AccountControllerErrorStateReason {
                 context: SYNCING_STATE_CONTEXT.into(),
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backoff_is_zero_on_first_attempt_then_grows_and_caps() {
+        assert_eq!(syncing_backoff(0), Duration::ZERO);
+        assert_eq!(syncing_backoff(1), Duration::from_millis(250));
+        assert_eq!(syncing_backoff(2), Duration::from_millis(500));
+        assert_eq!(syncing_backoff(3), Duration::from_secs(1));
+        assert_eq!(syncing_backoff(6), Duration::from_secs(8));
+        // Caps each retry at 8s (exponent 5) and never overflows.
+        assert_eq!(syncing_backoff(9), Duration::from_secs(8));
+        assert_eq!(syncing_backoff(u32::MAX), Duration::from_secs(8));
     }
 }

@@ -236,28 +236,76 @@ impl VpnAccountSummary {
         traffic_used_gb: u64,
         traffic_limit_gb: u64,
         traffic_reset_time: Option<String>,
-    ) -> Result<Self, time::Error> {
-        let subscription_valid_until = subscription_expiry_time
-            .map(|time| {
-                OffsetDateTime::parse(&time, &time::format_description::well_known::Rfc3339)
-            })
-            .transpose()?;
-
-        let traffic_reset_time = traffic_reset_time
-            .map(|time| {
-                OffsetDateTime::parse(&time, &time::format_description::well_known::Rfc3339)
-            })
-            .transpose()?;
-
-        Ok(Self {
-            subscription_valid_until,
+    ) -> Self {
+        Self {
+            subscription_valid_until: subscription_expiry_time
+                .as_deref()
+                .and_then(parse_api_timestamp),
             traffic_used_gb,
             traffic_limit_gb,
-            traffic_reset_time,
-        })
+            traffic_reset_time: traffic_reset_time.as_deref().and_then(parse_api_timestamp),
+        }
     }
 
     pub fn fair_usage_left(&self) -> bool {
-        self.traffic_used_gb != self.traffic_limit_gb
+        // A limit of 0 means the API has no reliable fair-usage figure for this
+        // account (e.g. a transient fair-usage database outage), NOT that the
+        // quota is exhausted. Treat it as "usage available" so an always-on
+        // router is not torn down on a false positive. Genuine depletion is only
+        // a positive limit that has been reached.
+        self.traffic_limit_gb == 0 || self.traffic_used_gb < self.traffic_limit_gb
+    }
+}
+
+/// Parse an RFC 3339 timestamp from the VPN API, tolerating the space-separated
+/// variant some endpoints emit (`"2026-06-03 17:31:15Z"` vs the canonical
+/// `"2026-06-03T17:15:15Z"`). A single malformed field must never fail the whole
+/// account summary (the root cause of accounts silently appearing inactive), so
+/// on error we log and fall back to `None`.
+fn parse_api_timestamp(raw: &str) -> Option<OffsetDateTime> {
+    let rfc3339 = &time::format_description::well_known::Rfc3339;
+    OffsetDateTime::parse(raw, rfc3339)
+        .or_else(|_| OffsetDateTime::parse(&raw.replacen(' ', "T", 1), rfc3339))
+        .map_err(|err| {
+            tracing::warn!("Ignoring unparseable account-summary timestamp {raw:?}: {err}");
+        })
+        .ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fair_usage_left_treats_unknown_limit_as_available() {
+        // limit == 0 is the API's "unknown / unavailable" sentinel — must not be
+        // read as depleted (regression: false BandwidthExceeded teardown).
+        assert!(VpnAccountSummary::new(None, 0, 0, None).fair_usage_left());
+        assert!(VpnAccountSummary::new(None, 100, 0, None).fair_usage_left());
+    }
+
+    #[test]
+    fn fair_usage_left_detects_real_depletion() {
+        assert!(VpnAccountSummary::new(None, 5, 10, None).fair_usage_left());
+        assert!(!VpnAccountSummary::new(None, 10, 10, None).fair_usage_left());
+        assert!(!VpnAccountSummary::new(None, 11, 10, None).fair_usage_left());
+    }
+
+    #[test]
+    fn parses_canonical_and_space_separated_timestamps() {
+        assert!(parse_api_timestamp("2026-06-03T17:15:15Z").is_some());
+        assert!(parse_api_timestamp("2026-06-03 17:15:15Z").is_some());
+    }
+
+    #[test]
+    fn one_bad_timestamp_does_not_fail_the_summary() {
+        let summary = VpnAccountSummary::new(
+            Some("not-a-date".to_string()),
+            1,
+            10,
+            Some("2026-06-03 17:15:15Z".to_string()),
+        );
+        assert!(summary.subscription_valid_until.is_none());
+        assert!(summary.traffic_reset_time.is_some());
     }
 }

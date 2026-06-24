@@ -1580,9 +1580,17 @@ impl NymVpnService {
     }
 
     async fn handle_forget_account(&mut self) -> Result<(), AccountCommandError> {
-        if *self.tunnel_state.read().await != TunnelState::Disconnected {
+        // Permit forget from Disconnected *and* Error: an account problem (e.g.
+        // DeviceTimeDesynced) strands the tunnel in Error, and the old
+        // `!= Disconnected` guard then rejected forget — leaving the user
+        // unable to clear the account without manually wiping the data dir.
+        // Only an actively-establishing/up tunnel should block it.
+        if !matches!(
+            *self.tunnel_state.read().await,
+            TunnelState::Disconnected | TunnelState::Error(_)
+        ) {
             return Err(AccountCommandError::internal(
-                "Unable to forget account while connected",
+                "Unable to forget account while the tunnel is active; disconnect first",
             ));
         }
 

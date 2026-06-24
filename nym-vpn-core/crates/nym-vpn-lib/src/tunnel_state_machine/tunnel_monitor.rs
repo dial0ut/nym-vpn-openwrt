@@ -1,7 +1,7 @@
 // Copyright 2024 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 
 use std::ops::Deref;
 
@@ -30,7 +30,7 @@ use nym_registration_client::{
     MixnetRegistrationResult, RegistrationClientBuilder, RegistrationClientBuilderConfig,
     RegistrationMode, RegistrationNymNode, RegistrationResult, WireguardRegistrationResult,
 };
-use nym_registration_common::NymNodeInformation;
+use nym_registration_common::{NymNodeInformation, NymNodeLPInformation};
 use nym_vpn_account_controller::{AccountCommandSender, AccountStateReceiver};
 use nym_vpn_lib_types::{
     AccountControllerError, BridgeAddress, ConnectionData, ErrorStateReason,
@@ -137,6 +137,14 @@ pub enum TunnelMonitorEvent {
 
     /// Connection has failed
     ConnectionFailed,
+
+    /// Registration with a gateway failed. `entry_culpable` indicates whether
+    /// the entry gateway is at fault: true for entry-side (or non-specific)
+    /// failures — the entry gateway is blacklisted and re-selected so we don't
+    /// retry a gateway that registers-but-fails indefinitely; false when the
+    /// failure is attributable to the exit gateway, in which case the (innocent)
+    /// entry gateway must NOT be blacklisted.
+    RegistrationFailed { entry_culpable: bool },
 }
 
 pub struct TunnelMonitorHandle {
@@ -411,6 +419,77 @@ impl TunnelMonitor {
             })
             .map_err(Box::new)?;
 
+        // Build per-gateway Lewes Protocol registration data from each gateway's
+        // advertised LP details (ports upstream gateway_provider/selector.rs inline,
+        // since this fork has no gateway_provider module). The registration builder
+        // requests LP unconditionally (enable_lp_registration(true)); it only takes
+        // effect when a gateway advertises valid LP details and use_lp() is satisfied,
+        // otherwise the legacy WireGuard registration path runs unchanged.
+        let entry_gateway = selected_gateways.entry_gateway();
+        if let Some(data) = entry_gateway.lewes_protocol_details.as_ref()
+            && !data.verify(&entry_gateway.identity)
+        {
+            tracing::warn!(
+                "Entry gateway {} has malformed LP information, something fishy is going on",
+                entry_gateway.identity()
+            );
+            return Err(tunnel::Error::SelectGateways(Box::new(
+                crate::GatewayDirectoryError::MalformedLewesProtocolInfo {
+                    identity: entry_gateway.identity().to_base58_string(),
+                },
+            ))
+            .into());
+        }
+        let entry_lp_data = entry_gateway
+            .lewes_protocol_details
+            .clone()
+            .and_then(|data| {
+                let kem_keys = data.content.kem_keys().ok()?;
+                let ciphersuite = nym_lp::Ciphersuite::from_node_version(
+                    semver::Version::parse(entry_gateway.version.as_ref()?).ok()?,
+                )?;
+                Some(NymNodeLPInformation {
+                    address: SocketAddr::new(entry_ip, data.content.control_port),
+                    expected_kem_key_hashes: kem_keys,
+                    x25519: data.content.x25519,
+                    ciphersuite,
+                    // TODO: proper derivation from build version; upstream hardcodes 1.
+                    lp_protocol_version: 1,
+                })
+            });
+
+        let exit_gateway = selected_gateways.exit_gateway();
+        if let Some(data) = exit_gateway.lewes_protocol_details.as_ref()
+            && !data.verify(&exit_gateway.identity)
+        {
+            tracing::warn!(
+                "Exit gateway {} has malformed LP information, something fishy is going on",
+                exit_gateway.identity()
+            );
+            return Err(tunnel::Error::SelectGateways(Box::new(
+                crate::GatewayDirectoryError::MalformedLewesProtocolInfo {
+                    identity: exit_gateway.identity().to_base58_string(),
+                },
+            ))
+            .into());
+        }
+        let exit_lp_data = exit_gateway
+            .lewes_protocol_details
+            .clone()
+            .and_then(|data| {
+                let kem_keys = data.content.kem_keys().ok()?;
+                let ciphersuite = nym_lp::Ciphersuite::from_node_version(
+                    semver::Version::parse(exit_gateway.version.as_ref()?).ok()?,
+                )?;
+                Some(NymNodeLPInformation {
+                    address: SocketAddr::new(exit_ip, data.content.control_port),
+                    expected_kem_key_hashes: kem_keys,
+                    x25519: data.content.x25519,
+                    ciphersuite,
+                    lp_protocol_version: 1,
+                })
+            });
+
         let entry_node = RegistrationNymNode {
             node: NymNodeInformation {
                 identity: selected_gateways.entry_gateway().identity,
@@ -424,7 +503,7 @@ impl TunnelMonitor {
                     .map(Into::into),
                 ip_address: entry_ip,
                 version: selected_gateways.entry_gateway().version.clone().into(),
-                lp_data: None,
+                lp_data: entry_lp_data,
             },
             keys: selected_gateways.entry_keypair().clone(),
         };
@@ -439,7 +518,7 @@ impl TunnelMonitor {
                     .map(Into::into),
                 ip_address: exit_ip,
                 version: selected_gateways.exit_gateway().version.clone().into(),
-                lp_data: None,
+                lp_data: exit_lp_data,
             },
             keys: selected_gateways.exit_keypair().clone(),
         };
@@ -458,6 +537,7 @@ impl TunnelMonitor {
         let rcb_config_builder = RegistrationClientBuilderConfig::builder()
             .entry_node(entry_node)
             .exit_node(exit_node)
+            .enable_lp_registration(true)
             .data_path(self.tunnel_parameters.nym_config.data_path.clone())
             .mixnet_client_config(mixnet_client_config)
             .mixnet_client_startup_timeout(REGISTRATION_CLIENT_STARTUP_TIMEOUT)
@@ -480,7 +560,24 @@ impl TunnelMonitor {
         let rc_builder = RegistrationClientBuilder::new(rc_builder_config);
 
         let registration_client = Box::pin(rc_builder.build()).await?;
-        let registration_result = Box::pin(registration_client.register()).await?;
+        let registration_result = Box::pin(registration_client.register())
+            .await
+            // A gateway that accepts the connection but fails registration must
+            // be dropped from the entry pool, otherwise we keep retrying it
+            // indefinitely (upstream nym-vpn-client #5379).
+            .inspect_err(|err| {
+                // A registration rejection from the EXIT gateway must not
+                // blacklist the (innocent) entry gateway; only entry-side or
+                // non-specific failures should.
+                use nym_registration_client::RegistrationClientError as RcErr;
+                let entry_culpable = !matches!(
+                    err,
+                    RcErr::ExitGatewayRegisterLp { .. }
+                        | RcErr::WireguardExitRegistration { .. }
+                        | RcErr::WireguardExitRegistrationCredentialSent { .. }
+                );
+                self.send_event(TunnelMonitorEvent::RegistrationFailed { entry_culpable });
+            })?;
 
         // Send event upon successful gateway registration
         // The receiver should handle the event and add firewall exceptions for entry gateway
@@ -502,12 +599,9 @@ impl TunnelMonitor {
             RegistrationResult::Wireguard(result) => {
                 TunnelConnectionData::Wireguard(WireguardConnectionData {
                     entry_bridge_addr: None, // not known yet
-                    entry: WireguardNode::from(result.entry_gateway_data.clone()),
-                    exit: WireguardNode::from(result.exit_gateway_data.clone()),
+                    entry: WireguardNode::from(result.entry_gateway_data()),
+                    exit: WireguardNode::from(result.exit_gateway_data()),
                 })
-            }
-            RegistrationResult::Lp(_) => {
-                return Err(tunnel::Error::Cancelled.into());
             }
         };
         let connection_data = Box::new(EstablishConnectionData {
@@ -595,9 +689,6 @@ impl TunnelMonitor {
                     mixnet_client_token,
                     bridge_close_tx,
                 )
-            }
-            RegistrationResult::Lp(_) => {
-                return Err(tunnel::Error::Cancelled.into());
             }
         };
 
@@ -900,14 +991,31 @@ impl TunnelMonitor {
             }
         });
 
-        let WireguardRegistrationResult {
+        let (
             entry_gateway_client,
             exit_gateway_client,
             entry_gateway_data,
             exit_gateway_data,
             authenticator_listener_handle,
             bw_controller,
-        } = registration_result;
+        ) = match registration_result {
+            WireguardRegistrationResult::Legacy(res) => (
+                Some(res.entry_gateway_client),
+                Some(res.exit_gateway_client),
+                res.entry_gateway_data,
+                res.exit_gateway_data,
+                Some(res.authenticator_listener_handle),
+                res.bw_controller,
+            ),
+            WireguardRegistrationResult::LewesProtocol(res) => (
+                None,
+                None,
+                res.entry_gateway_data,
+                res.exit_gateway_data,
+                None,
+                res.bw_controller,
+            ),
+        };
 
         let gw_update_version = self
             .tunnel_parameters
@@ -922,23 +1030,25 @@ impl TunnelMonitor {
             selected_gateways,
             entry_gateway_client,
             exit_gateway_client,
-            entry_gateway_data.clone(),
-            exit_gateway_data.clone(),
+            &entry_gateway_data,
+            &exit_gateway_data,
             entry_signal_rx,
             exit_signal_rx,
             gw_update_version,
             self.shutdown_token.child_token(),
         );
 
-        let authenticator_listener_handle = if bw.is_using_latest_client() {
-            // We don't need the mixnet client anymore
-            tracing::info!(
-                "Disconnecting mixnet client as we are using the latest bandwidth controller"
-            );
-            authenticator_listener_handle.stop().await;
-            None
-        } else {
-            Some(authenticator_listener_handle)
+        let authenticator_listener_handle = match authenticator_listener_handle {
+            Some(handle) if bw.is_using_latest_client() => {
+                // We don't need the mixnet client anymore
+                tracing::info!(
+                    "Disconnecting mixnet client as we are using the latest bandwidth controller"
+                );
+                handle.stop().await;
+                None
+            }
+            Some(handle) => Some(handle),
+            None => None,
         };
         let bandwidth_controller_handle = tokio::spawn(bw.run());
 
@@ -1092,8 +1202,8 @@ impl TunnelMonitor {
 
         let tunnel_conn_data = TunnelConnectionData::Wireguard(WireguardConnectionData {
             entry_bridge_addr: conn_data.entry_bridge_addr.clone(),
-            entry: WireguardNode::from(conn_data.entry.clone()),
-            exit: WireguardNode::from(conn_data.exit.clone()),
+            entry: WireguardNode::from(&conn_data.entry),
+            exit: WireguardNode::from(&conn_data.exit),
         });
 
         let dns_config = self.tunnel_parameters.tunnel_settings.resolved_dns_config();
@@ -1123,14 +1233,8 @@ impl TunnelMonitor {
     }
 
     async fn set_routes(&mut self, routing_config: RoutingConfig, enable_ipv6: bool) -> Result<()> {
-        let killswitch = self.tunnel_parameters.tunnel_settings.killswitch;
-        let has_inbound_exemptions = !self
-            .tunnel_parameters
-            .tunnel_settings
-            .inbound_exemptions
-            .is_empty();
         self.route_handler
-            .add_routes(routing_config, enable_ipv6, killswitch, has_inbound_exemptions)
+            .add_routes(routing_config, enable_ipv6)
             .await
             .map_err(Error::AddRoutes)?;
 
@@ -1148,6 +1252,11 @@ impl TunnelMonitor {
             tun_config
                 .name("nym0")
                 .address(interface_ipv4)
+                // Newer `tun` crate versions skip configuring the IPv4 address
+                // when no netmask is set, which silently drops IPv4 on the
+                // mixnet (5-hop) adapter. Mirror create_wireguard_device and set
+                // it explicitly (upstream nym-vpn-client #5207).
+                .netmask(Ipv4Addr::BROADCAST)
                 .mtu(mtu)
                 .up();
 

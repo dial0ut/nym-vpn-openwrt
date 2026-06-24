@@ -60,32 +60,59 @@ return view.extend({
         var entryGatewayContainer, exitGatewayContainer;
         var isTwoHopMode = tunnel_config.two_hop === 'on';
         var previousState = status.state || 'unknown';
+        // Signature of the last connected-state render (gateway identity + hop
+        // count). The status poll fires every 5s, but none of this changes for
+        // the life of a connection, so we only rebuild the gateway panels and
+        // the connection chain when the signature actually changes. This avoids
+        // tearing down and recreating the animated chain elements every poll.
+        var lastConnectedSig = null;
+        // Last account error_reason seen from status polling. When it changes
+        // (e.g. a Device-Time-Desynced error clears after recovery) we re-fetch
+        // account state and rebuild the card so it doesn't stay stale until a
+        // manual page reload.
+        var prevErrorReason = (status && status.error_reason) || '';
+        // Last tunnel_error seen from status polling, so we notify once per
+        // occurrence instead of re-toasting on every 5s poll.
+        var prevTunnelError = (status && status.tunnel_error) || '';
         var actionInProgress = false;
         var daemonStatusBadge;
         var daemonStatusBadgeText;
         var serviceInfoFrame;
         var daemonStartBtn;
         var daemonStopBtn;
+        // Inbound-exemptions section, mounted inside the Tunnel Settings card
+        // under the Kill-Switch toggle and shown only while kill-switch is on.
+        var inboundMount;
 
         // Uptime tracking
         var connectionStartTime = null;
         var uptimeInterval = null;
 
-        var startUptimeTimer = function(existingStartTime) {
-            if (uptimeInterval) clearInterval(uptimeInterval);
+        // The session duration is anchored to the router-reported elapsed
+        // seconds (status.connected_seconds) instead of a per-browser
+        // localStorage timestamp — that old timer drifted between
+        // browsers/sessions and was meaningless when the router clock itself
+        // was desynced. connectionStartTime is a *virtual* start expressed in
+        // the local clock (now - elapsed) used only to drive a smooth 1s tick;
+        // the authoritative base comes from the router on every poll.
+        var renderUptime = function() {
+            if (uptimeDisplay && connectionStartTime) {
+                var elapsed = Math.floor((Date.now() - connectionStartTime) / 1000);
+                if (elapsed < 0) elapsed = 0;
+                uptimeDisplay.textContent = nymUI.formatUptime(elapsed);
+            }
+        };
 
-            connectionStartTime = existingStartTime || Date.now();
-            nymUI.saveStartTime(connectionStartTime);
-
-            var updateDisplay = function() {
-                if (uptimeDisplay && connectionStartTime) {
-                    var elapsed = Math.floor((Date.now() - connectionStartTime) / 1000);
-                    uptimeDisplay.textContent = nymUI.formatUptime(elapsed);
-                }
-            };
-
-            updateDisplay();
-            uptimeInterval = setInterval(updateDisplay, 1000);
+        // Re-anchor the virtual start on every poll (cheap), but keep a single
+        // 1s ticker for the connection's lifetime instead of tearing it down
+        // and rebuilding it each poll (which churned a timer and could stutter
+        // the display).
+        var syncUptime = function(elapsedSeconds) {
+            var base = (typeof elapsedSeconds === 'number' && isFinite(elapsedSeconds) && elapsedSeconds >= 0)
+                ? elapsedSeconds : 0;
+            connectionStartTime = Date.now() - base * 1000;
+            renderUptime();
+            if (!uptimeInterval) uptimeInterval = setInterval(renderUptime, 1000);
         };
 
         var stopUptimeTimer = function() {
@@ -126,6 +153,24 @@ return view.extend({
             return true;
         };
 
+        // User-facing copy for tunnel (state-machine) errors. Keyed by the
+        // variant rpcd parses out of "State: Error state: <Reason>".
+        var TUNNEL_ERROR_COPY = {
+            PerformantEntryGatewayUnavailable: 'Entry gateway unavailable — switch gateways.',
+            PerformantExitGatewayUnavailable: 'Exit gateway unavailable — switch gateways.'
+        };
+
+        // Toast for a tunnel error. Returns true if one was shown. `force`
+        // bypasses the once-per-occurrence guard (used in the connect flow,
+        // where the user is actively waiting on a result).
+        var tunnelErrorToast = function(result, force) {
+            var reason = result && result.tunnel_error;
+            if (!reason) return false;
+            if (!force && reason === prevTunnelError) return false;
+            showToast(TUNNEL_ERROR_COPY[reason] || 'Tunnel error — switch gateways.', 'error');
+            return true;
+        };
+
         // Update status display
         var updateStatus = function() {
             // Block background polls while a connect/disconnect action owns the UI
@@ -146,8 +191,14 @@ return view.extend({
                 if (statusLabel) {
                     if (state === 'connected') {
                         statusLabel.textContent = 'Connected';
-                        if (!connectionStartTime) {
-                            startUptimeTimer(nymUI.getStoredStartTime());
+                        // Re-anchor to the router's elapsed seconds each poll so
+                        // the timer self-corrects and stays consistent across
+                        // browsers; falls back to a local count if absent.
+                        var secs = parseInt(result.connected_seconds, 10);
+                        if (!isNaN(secs)) {
+                            syncUptime(secs);
+                        } else if (!connectionStartTime) {
+                            syncUptime(0);
                         }
                     } else if (state === 'connecting') {
                         statusLabel.textContent = 'Connecting';
@@ -157,6 +208,12 @@ return view.extend({
                         // Disconnecting; the error strip shows why, so the
                         // label switches to Halted to stop implying progress.
                         statusLabel.textContent = result.error_reason ? 'Halted' : 'Disconnecting';
+                    } else if (result.tunnel_error) {
+                        // Persistent cue once the toast has faded: the tunnel
+                        // bounced to Error (e.g. gateway unavailable), not a
+                        // clean user disconnect.
+                        statusLabel.textContent = 'Gateway unavailable';
+                        stopUptimeTimer();
                     } else {
                         statusLabel.textContent = 'Disconnected';
                         stopUptimeTimer();
@@ -188,19 +245,29 @@ return view.extend({
                 }
 
                 if (state === 'connected') {
-                    nymUI.renderGatewayInfo(entryGatewayDisplay,
-                        result.entry_name,
-                        result.entry_id,
-                        result.entry_ip,
-                        result.entry_country,
-                        countries.data);
-                    nymUI.renderGatewayInfo(exitGatewayDisplay,
-                        result.exit_name,
-                        result.exit_id,
-                        result.exit_ip,
-                        result.exit_country,
-                        countries.data);
-                    buildConnectionChain(isTwoHopMode ? 2 : 5);
+                    // Only rebuild the gateway panels and chain when something
+                    // actually changed — the poll fires every 5s but this data
+                    // is fixed for the connection's lifetime.
+                    var hops = isTwoHopMode ? 2 : 5;
+                    var sig = [result.entry_name, result.entry_id, result.entry_ip, result.entry_country,
+                               result.exit_name, result.exit_id, result.exit_ip, result.exit_country,
+                               hops].join('|');
+                    if (sig !== lastConnectedSig) {
+                        lastConnectedSig = sig;
+                        nymUI.renderGatewayInfo(entryGatewayDisplay,
+                            result.entry_name,
+                            result.entry_id,
+                            result.entry_ip,
+                            result.entry_country,
+                            countries.data);
+                        nymUI.renderGatewayInfo(exitGatewayDisplay,
+                            result.exit_name,
+                            result.exit_id,
+                            result.exit_ip,
+                            result.exit_country,
+                            countries.data);
+                        buildConnectionChain(hops);
+                    }
 
                     // Reset gateway selectors to default state only on state change to connected
                     if (previousState !== 'connected') {
@@ -213,8 +280,27 @@ return view.extend({
                     // Only clear gateway info when fully disconnected or connecting fresh
                     if (entryGatewayDisplay) entryGatewayDisplay.innerHTML = '<div class="nym-gateway-empty">—</div>';
                     if (exitGatewayDisplay) exitGatewayDisplay.innerHTML = '<div class="nym-gateway-empty">—</div>';
+                    // Force a fresh render on the next connect.
+                    lastConnectedSig = null;
                 }
                 // Keep gateway info visible during 'disconnecting' state
+
+                // Re-render the account card when the account error situation
+                // changes, so a recovered account (or a newly-failed one)
+                // reflects live instead of waiting for a page reload.
+                var curErrorReason = result.error_reason || '';
+                if (curErrorReason !== prevErrorReason) {
+                    prevErrorReason = curErrorReason;
+                    if (typeof refreshAccountCard === 'function') refreshAccountCard();
+                }
+
+                // Surface tunnel errors (e.g. gateway unavailable) once, when
+                // they first appear, so the user knows to switch gateways.
+                var curTunnelError = result.tunnel_error || '';
+                if (curTunnelError && curTunnelError !== prevTunnelError) {
+                    tunnelErrorToast(result);
+                }
+                prevTunnelError = curTunnelError;
 
                 // Update previous state for next poll
                 previousState = state;
@@ -334,6 +420,16 @@ return view.extend({
                                     actionInProgress = false;
                                     updateStatus();
                                 });
+                                return;
+                            }
+                            // Tunnel bounced to Error during the connect attempt
+                            // (e.g. selected gateway unavailable). Surface it and
+                            // stop cleanly so the user can switch gateways.
+                            if (st && st.tunnel_error) {
+                                tunnelErrorToast(st, true);
+                                prevTunnelError = st.tunnel_error;
+                                actionInProgress = false;
+                                updateStatus();
                                 return;
                             }
                             if (st && st.state === 'connected') {
@@ -464,17 +560,32 @@ return view.extend({
                     return;
                 }
 
+                var inputName = type === 'mixnet-entry' ? 'entry_gateway_id' : 'exit_gateway_id';
+                // Circumvention Transports gating: when CT is on, only bridge-
+                // capable gateways are valid ENTRY gateways. Read the live toggle
+                // (falling back to saved config); for the entry picker only, sink
+                // incompatible gateways and disable selecting them below. gw.bridges
+                // is only present when the daemon reports it, so treat strictly
+                // === false to stay graceful against an older daemon.
+                var ctEl = document.getElementById('circumvention-toggle');
+                var ctOn = ctEl ? ctEl.checked : (tunnel_config.circumvention_transports === 'on');
+                var ctFilter = (inputName === 'entry_gateway_id') && ctOn;
+
+                var perfRank = function(p) {
+                    p = p || '';
+                    return p.indexOf('High') >= 0 ? 3 :
+                           p.indexOf('Medium') >= 0 ? 2 :
+                           p.indexOf('Offline') >= 0 ? 0 : 1;
+                };
                 var sorted = result.gateways.slice().sort(function(a, b) {
-                    var scoreA = (a.performance || '').indexOf('High') >= 0 ? 3 :
-                                 (a.performance || '').indexOf('Medium') >= 0 ? 2 :
-                                 (a.performance || '').indexOf('Offline') >= 0 ? 0 : 1;
-                    var scoreB = (b.performance || '').indexOf('High') >= 0 ? 3 :
-                                 (b.performance || '').indexOf('Medium') >= 0 ? 2 :
-                                 (b.performance || '').indexOf('Offline') >= 0 ? 0 : 1;
-                    return scoreB - scoreA;
+                    if (ctFilter) {
+                        var ca = (a.bridges === false) ? 1 : 0;
+                        var cb = (b.bridges === false) ? 1 : 0;
+                        if (ca !== cb) return ca - cb;
+                    }
+                    return perfRank(b.performance) - perfRank(a.performance);
                 });
 
-                var inputName = type === 'mixnet-entry' ? 'entry_gateway_id' : 'exit_gateway_id';
                 var gatewayList = E('div', { 'class': 'nym-gateway-list' });
 
                 var randomOption = E('label', { 'class': 'nym-gateway-option selected' }, [
@@ -496,20 +607,39 @@ return view.extend({
                     var iconDiv = E('div', { 'class': 'nym-gateway-option-icon' });
                     iconDiv.innerHTML = nymUI.getQualityIcon(perf, assets);
 
-                    var option = E('label', { 'class': 'nym-gateway-option' }, [
-                        E('input', { 'type': 'radio', 'name': inputName, 'value': gw.id || '' }),
+                    var ctIncompatible = ctFilter && (gw.bridges === false);
+
+                    var nameChildren = [String(gw.name || 'Unknown')];
+                    if (ctIncompatible) {
+                        nameChildren.push(E('span', {
+                            'style': 'margin-left:6px; padding:1px 5px; border-radius:8px; font-size:9px; text-transform:uppercase; letter-spacing:0.5px; background:var(--danger,#e74c3c); color:#fff; vertical-align:middle'
+                        }, 'No CT'));
+                    }
+
+                    var inputAttrs = { 'type': 'radio', 'name': inputName, 'value': gw.id || '' };
+                    if (ctIncompatible) inputAttrs.disabled = 'disabled';
+
+                    var option = E('label', {
+                        'class': 'nym-gateway-option' + (ctIncompatible ? ' disabled' : ''),
+                        'style': ctIncompatible ? 'opacity:0.5; cursor:not-allowed' : ''
+                    }, [
+                        E('input', inputAttrs),
                         iconDiv,
                         E('div', { 'class': 'nym-gateway-option-info' }, [
-                            E('div', { 'class': 'nym-gateway-option-name' }, gw.name || 'Unknown'),
-                            E('div', { 'class': 'nym-gateway-option-perf' }, perf)
+                            // Array-wrap: gateway name/perf come from the directory
+                            // (operator-controlled) and must render as text, not innerHTML.
+                            E('div', { 'class': 'nym-gateway-option-name' }, nameChildren),
+                            E('div', { 'class': 'nym-gateway-option-perf' }, [String(perf)])
                         ])
                     ]);
-                    option.addEventListener('click', function() {
-                        container.querySelectorAll('.nym-gateway-option').forEach(function(el) {
-                            el.classList.remove('selected');
+                    if (!ctIncompatible) {
+                        option.addEventListener('click', function() {
+                            container.querySelectorAll('.nym-gateway-option').forEach(function(el) {
+                                el.classList.remove('selected');
+                            });
+                            option.classList.add('selected');
                         });
-                        option.classList.add('selected');
-                    });
+                    }
                     gatewayList.appendChild(option);
                 });
 
@@ -530,7 +660,12 @@ return view.extend({
             while (select.options.length > 0) select.remove(0);
             select.appendChild(E('option', { 'value': 'none' }, '— Select Country —'));
             select.appendChild(E('option', { 'value': 'random' }, '🌐 Random'));
-            countryList.forEach(function(c) {
+            // The directory returns countries in ISO-code order; sort by the
+            // displayed name so the dropdown reads alphabetically.
+            var sorted = countryList.slice().sort(function(a, b) {
+                return countries.getDisplay(a.code).name.localeCompare(countries.getDisplay(b.code).name);
+            });
+            sorted.forEach(function(c) {
                 var info = countries.getDisplay(c.code);
                 select.appendChild(E('option', { 'value': c.code },
                     info.flag + ' ' + info.name + ' (' + c.count + ')'));
@@ -609,13 +744,15 @@ return view.extend({
             var ipv6El = document.getElementById('ipv6-toggle');
             var twoHopEl = document.getElementById('two-hop-toggle');
             var killswitchEl = document.getElementById('killswitch-toggle');
-            if (!ipv6El || !twoHopEl || !killswitchEl) return;
+            var circumventionEl = document.getElementById('circumvention-toggle');
+            if (!ipv6El || !twoHopEl || !killswitchEl || !circumventionEl) return;
 
             var ipv6 = ipv6El.checked ? 'on' : 'off';
             var two_hop = twoHopEl.checked ? 'on' : 'off';
             var killswitch = killswitchEl.checked ? 'on' : 'off';
+            var circumvention = circumventionEl.checked ? 'on' : 'off';
 
-            rpc.tunnelSet(ipv6, two_hop, killswitch).then(function(result) {
+            rpc.tunnelSet(ipv6, two_hop, killswitch, circumvention).then(function(result) {
                 if (result && result.success) {
                     isTwoHopMode = (two_hop === 'on');
                     showToast('Tunnel settings saved', 'success');
@@ -757,6 +894,36 @@ return view.extend({
             );
         };
 
+        // Hard account-state reset for the desync where `forget` can't clear a
+        // stranded account. Stops the daemon, wipes the account/key store, and
+        // restarts with a delay (the proven manual recovery). Last resort.
+        var handleAccountReset = function() {
+            confirmModal(
+                'Reset account state',
+                'Use this only if logging out fails or the account is stuck. It stops the VPN service, erases the stored account and keys on this device, then restarts. Your saved settings are kept, but you will need your recovery phrase to log back in.',
+                '⚠',
+                function() {
+                    showModal('Resetting', 'Stopping service and clearing account state…');
+                    rpc.accountReset().then(function(result) {
+                        if (result && result.success) {
+                            setModalSuccess('Done', 'Account state reset', '✓');
+                            setTimeout(function() {
+                                fadeOutModal(function() {
+                                    location.reload();
+                                });
+                            }, 900);
+                        } else {
+                            hideModal();
+                            showToast('Reset failed: ' + ((result && result.error) || 'Unknown'), 'error');
+                        }
+                    }).catch(function(err) {
+                        hideModal();
+                        showToast('Error: ' + err.message, 'error');
+                    });
+                }
+            );
+        };
+
         var handleRotateKeys = function() {
             rpc.status().then(function(st) {
                 if (st && (st.state === 'connected' || st.state === 'connecting')) {
@@ -802,38 +969,116 @@ return view.extend({
             done(legacyCopy(text));
         };
 
-        // Custom DNS handler
+        // Custom DNS — managed as a list, added/removed one server at a time.
+        // The daemon replaces the whole set per call (dns set <list>, or dns
+        // clear when empty), so every add/remove re-sends the joined list.
+        var dnsServersList = (dns_config.servers || '').split(/\s+/).filter(Boolean);
+        var dnsListEl = E('div', { 'class': 'nym-dns-list' });
+
+        // Light client check (IPv4 dotted-quad, or anything colon-bearing for
+        // IPv6); the daemon validates strictly before applying.
+        var isValidDnsIp = function(s) {
+            if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(s)) {
+                return s.split('.').every(function(o) { return +o >= 0 && +o <= 255; });
+            }
+            return /^[0-9a-fA-F:]+$/.test(s) && s.indexOf(':') >= 0;
+        };
+
+        var renderDnsRow = function(ip) {
+            return E('div', { 'class': 'nym-dns-row', 'data-ip': ip }, [
+                E('div', { 'class': 'nym-dns-ip' }, [String(ip)]),
+                E('div', {
+                    'class': 'nym-exemption-delete',
+                    'title': 'Remove',
+                    'click': function() { deleteDnsServer(ip); }
+                }, '×')
+            ]);
+        };
+
+        var redrawDnsList = function() {
+            dnsListEl.innerHTML = '';
+            if (dnsServersList.length === 0) {
+                dnsListEl.appendChild(E('div', { 'class': 'nym-exemption-empty' },
+                    'Using the VPN default resolvers. Add a server below.'));
+                return;
+            }
+            dnsServersList.forEach(function(ip) { dnsListEl.appendChild(renderDnsRow(ip)); });
+        };
+
+        // Push the current enabled state + full server list to the daemon.
+        var persistDns = function() {
+            var dnsToggle = document.getElementById('dns-toggle');
+            var enabled = dnsToggle ? dnsToggle.checked : false;
+            return rpc.dnsSet(enabled, dnsServersList.join(' '));
+        };
+
+        var addDnsServer = function() {
+            var input = document.getElementById('dns-server-input');
+            var addBtn = document.getElementById('dns-add-btn');
+            if (!input) return;
+            var ip = (input.value || '').trim();
+            if (!ip) { showToast('Enter a DNS server address', 'error'); return; }
+            if (!isValidDnsIp(ip)) { showToast('Not a valid IPv4 or IPv6 address', 'error'); return; }
+            if (dnsServersList.indexOf(ip) !== -1) { showToast(ip + ' is already in the list', 'error'); return; }
+
+            dnsServersList.push(ip);
+            if (addBtn) { addBtn.disabled = true; addBtn.innerHTML = '<span class="nym-btn-spinner"></span>Adding'; }
+            persistDns().then(function(result) {
+                if (addBtn) { addBtn.disabled = false; addBtn.textContent = 'Add'; }
+                if (result && result.success) {
+                    redrawDnsList();
+                    input.value = '';
+                    showToast('Added ' + ip, 'success');
+                } else {
+                    dnsServersList.pop();
+                    showToast('Failed: ' + ((result && result.error) || 'Unknown'), 'error');
+                }
+            }).catch(function(err) {
+                if (addBtn) { addBtn.disabled = false; addBtn.textContent = 'Add'; }
+                dnsServersList.pop();
+                showToast('Error: ' + (err && err.message ? err.message : err), 'error');
+            });
+        };
+
+        var deleteDnsServer = function(ip) {
+            var idx = dnsServersList.indexOf(ip);
+            if (idx === -1) return;
+            var row = dnsListEl.querySelector('.nym-dns-row[data-ip="' + ip + '"]');
+            if (row) row.classList.add('removing');
+            dnsServersList.splice(idx, 1);
+            persistDns().then(function(result) {
+                if (result && result.success) {
+                    redrawDnsList();
+                    showToast('Removed ' + ip, 'success');
+                } else {
+                    dnsServersList.splice(idx, 0, ip);
+                    if (row) row.classList.remove('removing');
+                    showToast('Failed: ' + ((result && result.error) || 'Unknown'), 'error');
+                }
+            }).catch(function(err) {
+                dnsServersList.splice(idx, 0, ip);
+                if (row) row.classList.remove('removing');
+                showToast('Error: ' + (err && err.message ? err.message : err), 'error');
+            });
+        };
+
+        var onDnsKeydown = function(ev) {
+            if (ev.key === 'Enter') { ev.preventDefault(); addDnsServer(); }
+        };
+
         var handleDnsToggle = function(enabled) {
-            var serversInput = document.getElementById('dns-servers-input');
-            var servers = serversInput ? serversInput.value.trim() : null;
-            rpc.dnsSet(enabled, servers || null).then(function(result) {
+            persistDns().then(function(result) {
                 if (result && result.success) {
                     showToast(enabled ? 'Custom DNS enabled' : 'Custom DNS disabled', 'success');
                 } else {
-                    showToast('Failed: ' + (result.error || 'Unknown'), 'error');
+                    showToast('Failed: ' + ((result && result.error) || 'Unknown'), 'error');
                     var toggle = document.getElementById('dns-toggle');
                     if (toggle) toggle.checked = !enabled;
                 }
             }).catch(function(err) {
-                showToast('Error: ' + err.message, 'error');
+                showToast('Error: ' + (err && err.message ? err.message : err), 'error');
                 var toggle = document.getElementById('dns-toggle');
                 if (toggle) toggle.checked = !enabled;
-            });
-        };
-
-        var handleDnsSave = function() {
-            var serversInput = document.getElementById('dns-servers-input');
-            var dnsToggle = document.getElementById('dns-toggle');
-            var servers = serversInput ? serversInput.value.trim() : '';
-            var enabled = dnsToggle ? dnsToggle.checked : false;
-            rpc.dnsSet(enabled, servers || null).then(function(result) {
-                if (result && result.success) {
-                    showToast('DNS servers updated', 'success');
-                } else {
-                    showToast('Failed: ' + (result.error || 'Unknown'), 'error');
-                }
-            }).catch(function(err) {
-                showToast('Error: ' + err.message, 'error');
             });
         };
 
@@ -859,13 +1104,25 @@ return view.extend({
             });
         };
 
-        // Check if logged in
-        var identity = account_info.identity || '';
-        var rawState = account_info.state || '';
-        var state = rawState.replace(/([a-z])([A-Z])/g, '$1 $2');
-        var invalidIdentities = ['', 'Not set', 'LoggedOut', 'unset', 'none'];
-        var hasError = state.indexOf('Error') >= 0 || identity.indexOf('Error') >= 0;
-        var isLoggedIn = identity && invalidIdentities.indexOf(identity) === -1 && !hasError;
+        // Derive account flags from an `account get` result. A leftover device
+        // identity paired with a LoggedOut/cleared state must NOT read as
+        // logged in — that is the 1.27.1 desync where the Account card offered
+        // "Sign out" while the status strip simultaneously said "no account
+        // configured". State is authoritative; a stale identity does not count.
+        var computeAccountFlags = function(acct) {
+            acct = acct || {};
+            var identity = acct.identity || '';
+            var rawState = acct.state || '';
+            var state = rawState.replace(/([a-z])([A-Z])/g, '$1 $2');
+            var invalidIdentities = ['', 'Not set', 'LoggedOut', 'unset', 'none'];
+            var hasError = state.indexOf('Error') >= 0 || identity.indexOf('Error') >= 0;
+            var isLoggedOut = (rawState || '').trim() === 'LoggedOut';
+            var isLoggedIn = !!identity && invalidIdentities.indexOf(identity) === -1 && !hasError && !isLoggedOut;
+            return {
+                identity: identity, rawState: rawState, state: state,
+                hasError: hasError, isLoggedIn: isLoggedIn, isLoggedOut: isLoggedOut
+            };
+        };
 
         var container = E('div', { 'class': 'nym-container' }, [
             E('style', {}, theme.css || ''),
@@ -876,28 +1133,40 @@ return view.extend({
                 var logoDiv = E('div', { 'class': 'nym-logo' });
                 logoDiv.innerHTML = assets.logo || '';
                 header.appendChild(logoDiv);
-                header.appendChild(E('div', { 'class': 'nym-subtitle' }, 'The world\'s most private VPN'));
                 return header;
             })(),
 
             // Status Hero with integrated gateway selection
             statusHero = E('div', { 'class': 'nym-status-hero disconnected' }, [
-                // Three-column layout: Entry selector | Status ring | Exit selector
+                // Three-column layout. Each side column hosts BOTH a picker
+                // (.nym-panel-picker, shown while disconnected) and the live
+                // connection info (.nym-panel-info, shown while connected) for
+                // that hop, so the same columns are reused in both states — the
+                // connected view fills the width instead of stranding the
+                // gateway info in a separate row below the ring.
                 E('div', { 'class': 'nym-hero-gateway-row' }, [
-                    // LEFT: Entry Gateway Selection
+                    // LEFT: Entry — picker + connected info
                     E('div', { 'class': 'nym-hero-gateway-panel' }, [
-                        E('div', { 'class': 'nym-gateway-box-title' }, 'Entry Gateway'),
-                        E('div', { 'class': 'nym-form-group', 'style': 'margin-bottom: 0' }, [
-                            E('label', { 'class': 'nym-form-label' }, 'Country'),
-                            entryCountrySelect = createCountrySelect('mixnet-entry', 'entry_country', function(ev) {
-                                loadGatewaysForCountry(ev.target.value, 'mixnet-entry', entryGatewayContainer);
-                            })
+                        E('div', { 'class': 'nym-panel-picker' }, [
+                            E('div', { 'class': 'nym-gateway-box-title' }, 'Entry Gateway'),
+                            E('div', { 'class': 'nym-form-group', 'style': 'margin-bottom: 0' }, [
+                                E('label', { 'class': 'nym-form-label' }, 'Country'),
+                                entryCountrySelect = createCountrySelect('mixnet-entry', 'entry_country', function(ev) {
+                                    loadGatewaysForCountry(ev.target.value, 'mixnet-entry', entryGatewayContainer);
+                                })
+                            ]),
+                            entryGatewayContainer = E('div', { 'class': 'nym-form-group', 'style': 'margin-bottom: 0' },
+                                E('div', { 'class': 'nym-gateway-loading' }, 'Select a country'))
                         ]),
-                        entryGatewayContainer = E('div', { 'class': 'nym-form-group', 'style': 'margin-bottom: 0' },
-                            E('div', { 'class': 'nym-gateway-loading' }, 'Select a country'))
+                        E('div', { 'class': 'nym-panel-info' }, [
+                            E('div', { 'class': 'nym-gateway-label' }, 'Entry'),
+                            entryGatewayDisplay = E('div', { 'class': 'nym-gateway-value' }, [
+                                E('div', { 'class': 'nym-gateway-empty' }, '—')
+                            ])
+                        ])
                     ]),
 
-                    // CENTER: Status Ring + Uptime
+                    // CENTER: Status Ring + Uptime + connection chain
                     E('div', { 'class': 'nym-hero-center' }, [
                         E('div', { 'class': 'nym-status-ring' }, [
                             E('div', { 'class': 'nym-status-ring-pulse' }),
@@ -909,39 +1178,31 @@ return view.extend({
                         E('div', { 'class': 'nym-uptime' }, [
                             uptimeDisplay = E('span', {}, '--:--')
                         ]),
-                        E('div', { 'class': 'nym-uptime-label' }, 'Session Duration')
-                    ]),
-
-                    // RIGHT: Exit Gateway Selection
-                    E('div', { 'class': 'nym-hero-gateway-panel' }, [
-                        E('div', { 'class': 'nym-gateway-box-title' }, 'Exit Gateway'),
-                        E('div', { 'class': 'nym-form-group', 'style': 'margin-bottom: 0' }, [
-                            E('label', { 'class': 'nym-form-label' }, 'Country'),
-                            exitCountrySelect = createCountrySelect('mixnet-exit', 'exit_country', function(ev) {
-                                loadGatewaysForCountry(ev.target.value, 'mixnet-exit', exitGatewayContainer);
-                            })
-                        ]),
-                        exitGatewayContainer = E('div', { 'class': 'nym-form-group', 'style': 'margin-bottom: 0' },
-                            E('div', { 'class': 'nym-gateway-loading' }, 'Select a country'))
-                    ])
-                ]),
-
-                // Gateway info display (shown when connected)
-                E('div', { 'class': 'nym-gateway-display' }, [
-                    E('div', { 'class': 'nym-gateway-item' }, [
-                        E('div', { 'class': 'nym-gateway-label' }, 'Entry'),
-                        entryGatewayDisplay = E('div', { 'class': 'nym-gateway-value' }, [
-                            E('div', { 'class': 'nym-gateway-empty' }, '—')
+                        E('div', { 'class': 'nym-uptime-label' }, 'Session Duration'),
+                        E('div', { 'class': 'nym-connection-wrapper' }, [
+                            modeLabel = E('div', { 'class': 'nym-mode-label' }),
+                            connectionChain = E('div', { 'class': 'nym-connection-chain' })
                         ])
                     ]),
-                    E('div', { 'class': 'nym-connection-wrapper' }, [
-                        modeLabel = E('div', { 'class': 'nym-mode-label' }),
-                        connectionChain = E('div', { 'class': 'nym-connection-chain' })
-                    ]),
-                    E('div', { 'class': 'nym-gateway-item' }, [
-                        E('div', { 'class': 'nym-gateway-label' }, 'Exit'),
-                        exitGatewayDisplay = E('div', { 'class': 'nym-gateway-value' }, [
-                            E('div', { 'class': 'nym-gateway-empty' }, '—')
+
+                    // RIGHT: Exit — picker + connected info
+                    E('div', { 'class': 'nym-hero-gateway-panel' }, [
+                        E('div', { 'class': 'nym-panel-picker' }, [
+                            E('div', { 'class': 'nym-gateway-box-title' }, 'Exit Gateway'),
+                            E('div', { 'class': 'nym-form-group', 'style': 'margin-bottom: 0' }, [
+                                E('label', { 'class': 'nym-form-label' }, 'Country'),
+                                exitCountrySelect = createCountrySelect('mixnet-exit', 'exit_country', function(ev) {
+                                    loadGatewaysForCountry(ev.target.value, 'mixnet-exit', exitGatewayContainer);
+                                })
+                            ]),
+                            exitGatewayContainer = E('div', { 'class': 'nym-form-group', 'style': 'margin-bottom: 0' },
+                                E('div', { 'class': 'nym-gateway-loading' }, 'Select a country'))
+                        ]),
+                        E('div', { 'class': 'nym-panel-info' }, [
+                            E('div', { 'class': 'nym-gateway-label' }, 'Exit'),
+                            exitGatewayDisplay = E('div', { 'class': 'nym-gateway-value' }, [
+                                E('div', { 'class': 'nym-gateway-empty' }, '—')
+                            ])
                         ])
                     ])
                 ]),
@@ -991,6 +1252,21 @@ return view.extend({
                                 'type': 'checkbox',
                                 'id': 'two-hop-toggle',
                                 'checked': tunnel_config.two_hop === 'on' ? 'checked' : null,
+                                'change': saveTunnelSettings
+                            }),
+                            E('span', { 'class': 'nym-toggle-slider' })
+                        ])
+                    ]),
+                    E('div', { 'class': 'nym-toggle-row' }, [
+                        E('div', { 'class': 'nym-toggle-info' }, [
+                            E('div', { 'class': 'nym-toggle-title' }, 'Circumvention Transports'),
+                            E('div', { 'class': 'nym-toggle-desc' }, 'Wrap the entry gateway connection in a QUIC transport to evade censorship. Applies to two-hop mode.')
+                        ]),
+                        E('label', { 'class': 'nym-toggle' }, [
+                            E('input', {
+                                'type': 'checkbox',
+                                'id': 'circumvention-toggle',
+                                'checked': tunnel_config.circumvention_transports === 'on' ? 'checked' : null,
                                 'change': saveTunnelSettings
                             }),
                             E('span', { 'class': 'nym-toggle-slider' })
@@ -1100,6 +1376,7 @@ return view.extend({
                                 'change': function(ev) {
                                     var warn = ev.target.closest('.nym-toggle-row').querySelector('.nym-toggle-warning');
                                     if (warn) warn.style.display = ev.target.checked ? 'none' : 'block';
+                                    if (inboundMount) inboundMount.style.display = ev.target.checked ? 'block' : 'none';
                                     saveTunnelSettings();
                                 }
                             }),
@@ -1107,6 +1384,10 @@ return view.extend({
                         ])
                     ])
                 ]),
+                inboundMount = E('div', {
+                    'class': 'nym-inbound-section',
+                    'style': 'display: ' + (tunnel_config.killswitch !== 'off' ? 'block' : 'none')
+                })
             ])
         ]);
         container.appendChild(tunnelCard);
@@ -1244,30 +1525,19 @@ return view.extend({
             });
         };
 
-        var inboundCard = E('div', { 'class': 'nym-card' }, [
-            E('div', { 'class': 'nym-card-header', 'click': function() { toggleCard(inboundCard); } }, [
-                E('div', { 'class': 'nym-card-title' }, [
-                    svgIcon(assets.iconServer),
-                    'Inbound Services'
-                ]),
-                E('div', { 'class': 'nym-card-chevron' }, '▼')
-            ]),
-            E('div', { 'class': 'nym-card-body' }, [
-                E('div', { 'class': 'nym-card-description' },
-                    'Declare ports that bypass the tunnel for reply traffic. Useful for ' +
-                    'hosted services (HTTPS, WireGuard, SSH) reached from the WAN while ' +
-                    'the kill-switch is on. For LAN-hosted services, set up the port ' +
-                    'forward in Network → Firewall → Port Forwards first, then add ' +
-                    'the matching port here.'),
-                (tunnel_config.killswitch === 'off') ? E('div', { 'class': 'nym-error-strip warning' }, [
-                    E('div', { 'class': 'nym-error-icon' }, '⚠'),
-                    E('div', { 'class': 'nym-error-body' }, [
-                        E('div', { 'class': 'nym-error-heading' }, 'Kill-switch is off'),
-                        E('div', {}, 'Exemptions are inert. Services are already reachable directly via WAN.')
-                    ])
-                ]) : E('div', { 'style': 'display:none' }),
-                inboundListEl,
-                E('div', { 'class': 'nym-divider' }),
+        // Inbound exemptions render inside the Tunnel Settings card, beneath the
+        // Kill-Switch toggle (they only matter while the kill-switch is on). The
+        // daemon stores exemptions independently of the kill-switch, so toggling
+        // it off/on never loses them — see handle_inbound_* vs handle_tunnel_set.
+        dom.content(inboundMount, [
+            E('div', { 'class': 'nym-divider' }),
+            E('div', { 'class': 'nym-toggle-title', 'style': 'margin-bottom: 6px' }, 'Inbound Services'),
+            E('div', { 'class': 'nym-card-description' },
+                'Ports that stay reachable from the WAN while the kill-switch is on ' +
+                '(e.g. hosted HTTPS, WireGuard, SSH). For LAN services, add the ' +
+                'Network → Firewall port forward first, then the matching port here.'),
+            inboundListEl,
+            E('div', { 'class': 'nym-exemption-add' }, [
                 E('div', { 'class': 'nym-form-label' }, 'Add Exemption'),
                 E('div', { 'class': 'nym-exemption-addrow' }, [
                     E('select', { 'class': 'nym-select', 'id': 'nym-inbound-proto' }, [
@@ -1292,7 +1562,7 @@ return view.extend({
                         'keydown': onAddRowKeydown
                     }),
                     E('button', {
-                        'class': 'nym-btn nym-btn-primary nym-btn-small',
+                        'class': 'nym-btn nym-btn-primary',
                         'id': 'nym-inbound-save',
                         'click': addInbound
                     }, 'Save')
@@ -1300,12 +1570,10 @@ return view.extend({
             ])
         ]);
         redrawInboundList();
-        container.appendChild(inboundCard);
 
         // DNS & Ad Blocking Card
         var adBlockEnabled = ad_block.enabled ? true : false;
         var dnsEnabled = dns_config.enabled ? true : false;
-        var dnsServers = dns_config.servers || '';
         var dnsCard = E('div', { 'class': 'nym-card' }, [
             E('div', { 'class': 'nym-card-header', 'click': function() { toggleCard(dnsCard); } }, [
                 E('div', { 'class': 'nym-card-title' }, [
@@ -1337,28 +1605,32 @@ return view.extend({
                     ])
                 ]),
 
-                // DNS servers input
-                E('div', { 'style': 'margin-top: 12px' }, [
-                    E('div', { 'class': 'nym-toggle-desc', 'style': 'margin-bottom: 8px' },
-                        'Space-separated IP addresses (e.g. 1.1.1.1 8.8.8.8)'),
-                    E('div', { 'style': 'display: flex; gap: 8px' }, [
+                // Current servers list (above) + single-server add panel (below),
+                // mirroring the Inbound exemptions add-one-at-a-time layout.
+                dnsListEl,
+                E('div', { 'class': 'nym-form-panel' }, [
+                    E('div', { 'class': 'nym-form-label' }, 'Add DNS Server'),
+                    E('div', { 'class': 'nym-form-row' }, [
                         E('input', {
                             'type': 'text',
-                            'id': 'dns-servers-input',
+                            'id': 'dns-server-input',
                             'class': 'nym-input',
-                            'placeholder': '1.1.1.1 8.8.8.8',
-                            'value': dnsServers,
-                            'style': 'flex: 1'
+                            'placeholder': 'e.g. 1.1.1.1 or 2606:4700:4700::1111',
+                            'autocomplete': 'off',
+                            'autocapitalize': 'off',
+                            'spellcheck': 'false',
+                            'keydown': onDnsKeydown
                         }),
                         E('button', {
-                            'class': 'nym-btn nym-btn-primary nym-btn-small',
-                            'click': handleDnsSave
-                        }, 'Save')
+                            'class': 'nym-btn nym-btn-primary',
+                            'id': 'dns-add-btn',
+                            'click': addDnsServer
+                        }, 'Add')
                     ])
                 ]),
 
                 // Divider
-                E('div', { 'style': 'border-top: 1px solid var(--border-color); margin: 16px 0' }),
+                E('div', { 'class': 'nym-divider' }),
 
                 // Ad Blocking toggle
                 E('div', { 'class': 'nym-toggle-row' }, [
@@ -1381,57 +1653,122 @@ return view.extend({
             ])
         ]);
         container.appendChild(dnsCard);
+        redrawDnsList();
 
-        // Account Card
-        var accountStatusLabel = (state || '').trim() || 'Active';
-        var loggedInBody = null;
-        if (isLoggedIn) {
-            var copyBtn = E('button', {
-                'class': 'nym-identity-copy',
-                'type': 'button',
-                'title': 'Copy device identity'
-            });
-            copyBtn.innerHTML = assets.iconCopy;
-            copyBtn.addEventListener('click', function(ev) {
-                ev.preventDefault();
-                copyIdentity(identity, copyBtn);
-            });
+        // Account Card. The body is rebuilt from a fresh `account get` each
+        // time refreshAccountCard() runs, so a recovered account clears the
+        // error panel without a manual page reload (the 1.27.1 "error stays
+        // until refresh" report).
+        var accountBodyEl;
 
-            var rotateBtn = E('button', {
-                'class': 'nym-card-action rotate',
-                'type': 'button',
-                'click': handleRotateKeys
-            });
-            rotateBtn.innerHTML = assets.iconRefresh + '<span>Rotate keys</span>';
+        var buildAccountBody = function(flags) {
+            var identity = flags.identity;
+            var state = flags.state;
+            var accountStatusLabel = (state || '').trim() || 'Active';
 
-            var signOutBtn = E('button', {
-                'class': 'nym-card-action danger',
-                'type': 'button',
-                'click': handleAccountLogout
-            });
-            signOutBtn.innerHTML = assets.iconPower + '<span>Sign out</span>';
+            if (flags.isLoggedIn) {
+                var copyBtn = E('button', {
+                    'class': 'nym-identity-copy',
+                    'type': 'button',
+                    'title': 'Copy device identity'
+                });
+                copyBtn.innerHTML = assets.iconCopy;
+                copyBtn.addEventListener('click', function(ev) {
+                    ev.preventDefault();
+                    copyIdentity(identity, copyBtn);
+                });
 
-            loggedInBody = E('div', { 'class': 'nym-account-panel' }, [
-                E('div', { 'class': 'nym-info-frame' }, [
-                    E('div', { 'class': 'nym-info-frame-label' }, 'Device Identity'),
-                    E('div', { 'class': 'nym-info-frame-main' }, [
-                        E('div', { 'class': 'nym-info-frame-id-row' }, [
-                            E('div', { 'class': 'nym-info-frame-value' }, identity),
-                            copyBtn
-                        ]),
-                        E('div', { 'class': 'nym-card-status' }, [
-                            E('span', { 'class': 'nym-card-status-indicator' }),
-                            E('span', { 'class': 'nym-card-status-text' }, accountStatusLabel)
+                var rotateBtn = E('button', {
+                    'class': 'nym-card-action rotate',
+                    'type': 'button',
+                    'click': handleRotateKeys
+                });
+                rotateBtn.innerHTML = assets.iconRefresh + '<span>Rotate keys</span>';
+
+                var signOutBtn = E('button', {
+                    'class': 'nym-card-action danger',
+                    'type': 'button',
+                    'click': handleAccountLogout
+                });
+                signOutBtn.innerHTML = assets.iconPower + '<span>Sign out</span>';
+
+                return E('div', { 'class': 'nym-account-panel' }, [
+                    E('div', { 'class': 'nym-info-frame' }, [
+                        E('div', { 'class': 'nym-info-frame-label' }, 'Device Identity'),
+                        E('div', { 'class': 'nym-info-frame-main' }, [
+                            E('div', { 'class': 'nym-info-frame-id-row' }, [
+                                E('div', { 'class': 'nym-info-frame-value' }, identity),
+                                copyBtn
+                            ]),
+                            E('div', { 'class': 'nym-card-status' }, [
+                                E('span', { 'class': 'nym-card-status-indicator' }),
+                                E('span', { 'class': 'nym-card-status-text' }, accountStatusLabel)
+                            ])
                         ])
+                    ]),
+                    E('div', { 'class': 'nym-card-actions-bar' }, [
+                        rotateBtn,
+                        E('div', { 'class': 'nym-card-action-divider' }),
+                        signOutBtn
                     ])
+                ]);
+            }
+
+            if (flags.hasError) {
+                return E('div', { 'class': 'nym-account-logged-in' }, [
+                    E('div', { 'class': 'nym-account-state', 'style': 'background: var(--danger-dim); color: var(--danger)' }, state || identity),
+                    E('div', { 'class': 'nym-card-description', 'style': 'margin: 16px 0' }, 'There is an issue with the account. You may need to logout and try again.'),
+                    E('button', { 'class': 'nym-btn nym-btn-danger', 'style': 'width: 100%', 'click': handleAccountLogout }, 'Logout'),
+                    E('button', { 'class': 'nym-btn nym-btn-secondary', 'style': 'width: 100%; margin-top: 8px', 'click': handleAccountReset }, 'Reset account state'),
+                    E('div', { 'class': 'nym-card-description', 'style': 'margin-top: 8px; opacity: 0.7' }, 'If Logout fails or the state is stuck, Reset stops the service and clears the stored account.')
+                ]);
+            }
+
+            var form = E('form', { 'submit': handleAccountLogin }, [
+                E('div', { 'class': 'nym-card-description' },
+                    'Enter your Nym account recovery phrase to connect.'),
+                E('div', { 'class': 'nym-form-group' }, [
+                    E('label', { 'class': 'nym-form-label' }, 'Recovery Phrase'),
+                    E('input', {
+                        'class': 'nym-input',
+                        'type': 'text',
+                        'name': 'mnemonic',
+                        'autocomplete': 'off',
+                        'autocapitalize': 'off',
+                        'autocorrect': 'off',
+                        'spellcheck': 'false',
+                        'placeholder': 'Enter your recovery phrase...'
+                    })
                 ]),
-                E('div', { 'class': 'nym-card-actions-bar' }, [
-                    rotateBtn,
-                    E('div', { 'class': 'nym-card-action-divider' }),
-                    signOutBtn
-                ])
+                E('button', { 'class': 'nym-btn nym-btn-primary', 'type': 'submit', 'style': 'width: 100%' }, 'Login')
             ]);
-        }
+
+            // Desync recovery: the daemon reports LoggedOut yet still has a
+            // leftover device identity (the "says not set but won't forget"
+            // case). Offer the hard reset so the user isn't stuck.
+            if (flags.isLoggedOut && flags.identity) {
+                return E('div', {}, [
+                    form,
+                    E('div', { 'class': 'nym-card-description', 'style': 'margin-top: 16px; opacity: 0.7' }, 'Stale account data detected on this device. If login fails, reset the stored account state.'),
+                    E('button', { 'class': 'nym-btn nym-btn-secondary', 'style': 'width: 100%; margin-top: 8px', 'click': handleAccountReset }, 'Reset account state')
+                ]);
+            }
+
+            return form;
+        };
+
+        // Re-fetch live account state and rebuild the card body in place.
+        var refreshAccountCard = function() {
+            return rpc.accountGet().then(function(acct) {
+                if (accountBodyEl) {
+                    dom.content(accountBodyEl, buildAccountBody(computeAccountFlags(acct)));
+                }
+            }).catch(function() { /* leave the existing card on transient errors */ });
+        };
+
+        accountBodyEl = E('div', { 'class': 'nym-card-body' }, [
+            buildAccountBody(computeAccountFlags(account_info))
+        ]);
 
         var accountCard = E('div', { 'class': 'nym-card', 'id': 'nym-card-account' }, [
             E('div', { 'class': 'nym-card-header', 'click': function() { toggleCard(accountCard); } }, [
@@ -1441,30 +1778,7 @@ return view.extend({
                 ]),
                 E('div', { 'class': 'nym-card-chevron' }, '▼')
             ]),
-            E('div', { 'class': 'nym-card-body' }, [
-                isLoggedIn ? loggedInBody : hasError ? E('div', { 'class': 'nym-account-logged-in' }, [
-                    E('div', { 'class': 'nym-account-state', 'style': 'background: var(--danger-dim); color: var(--danger)' }, state || identity),
-                    E('div', { 'class': 'nym-card-description', 'style': 'margin: 16px 0' }, 'There is an issue with the account. You may need to logout and try again.'),
-                    E('button', { 'class': 'nym-btn nym-btn-danger', 'style': 'width: 100%', 'click': handleAccountLogout }, 'Logout')
-                ]) : E('form', { 'submit': handleAccountLogin }, [
-                    E('div', { 'class': 'nym-card-description' },
-                        'Enter your Nym account recovery phrase to connect.'),
-                    E('div', { 'class': 'nym-form-group' }, [
-                        E('label', { 'class': 'nym-form-label' }, 'Recovery Phrase'),
-                        E('input', {
-                            'class': 'nym-input',
-                            'type': 'text',
-                            'name': 'mnemonic',
-                            'autocomplete': 'off',
-                            'autocapitalize': 'off',
-                            'autocorrect': 'off',
-                            'spellcheck': 'false',
-                            'placeholder': 'Enter your recovery phrase...'
-                        })
-                    ]),
-                    E('button', { 'class': 'nym-btn nym-btn-primary', 'type': 'submit', 'style': 'width: 100%' }, 'Login')
-                ])
-            ])
+            accountBodyEl
         ]);
         container.appendChild(accountCard);
 
@@ -1630,6 +1944,15 @@ return view.extend({
             E('option', { 'value': '10' }, 'Every 10s'),
             E('option', { 'value': '30' }, 'Every 30s')
         ]);
+        // Error-context filter: collapse the buffer to just error/warn lines
+        // plus a window of surrounding lines, so info/debug noise is only kept
+        // where it gives context to a failure.
+        var logFilterSelect = E('select', { 'class': 'nym-select', 'title': 'Filter log level' }, [
+            E('option', { 'value': 'all', 'selected': 'selected' }, 'All levels'),
+            E('option', { 'value': 'err0' }, 'Errors only'),
+            E('option', { 'value': 'err10' }, 'Errors ±10'),
+            E('option', { 'value': 'err30' }, 'Errors ±30')
+        ]);
         var logStatus = E('span', { 'class': 'nym-log-status paused' }, 'paused');
         var logPauseBtn = E('button', { 'class': 'nym-btn nym-btn-secondary nym-btn-icon', 'type': 'button', 'title': 'Play' });
         logPauseBtn.innerHTML = assets.iconPlay;
@@ -1676,6 +1999,61 @@ return view.extend({
             return out;
         };
 
+        // A line is an "error anchor" if it carries an ERROR/WARN tracing level
+        // (after the ISO-8601 timestamp) or a syslog daemon.{err,warn,crit,…}
+        // facility from logread. Anchoring avoids matching the words in a body.
+        var errLineRe = /\d{4}-\d{2}-\d{2}T[\d:.]+Z\s+(?:ERROR|WARN(?:ING)?)\b|daemon\.(?:err(?:or)?|warn(?:ing)?|crit|alert|emerg)\b/;
+        var lastLogsDisplay = '';
+
+        // Reduce the buffer to error/warn lines plus a +/-N line context window.
+        // Skipped runs are collapsed to a single ellipsis marker. mode is one of
+        // all | err0 | err10 | err30.
+        var applyLogFilter = function(text) {
+            var mode = logFilterSelect.value;
+            if (mode === 'all') return text;
+            var ctx = mode === 'err30' ? 30 : (mode === 'err10' ? 10 : 0);
+            var lines = text.split('\n');
+            var keep = new Array(lines.length);
+            var anyErr = false;
+            for (var i = 0; i < lines.length; i++) {
+                if (errLineRe.test(lines[i])) {
+                    anyErr = true;
+                    var lo = Math.max(0, i - ctx), hi = Math.min(lines.length - 1, i + ctx);
+                    for (var j = lo; j <= hi; j++) keep[j] = true;
+                }
+            }
+            if (!anyErr) return '';
+            var out = [], skipping = false;
+            for (var k = 0; k < lines.length; k++) {
+                if (keep[k]) {
+                    if (skipping) { out.push('        ⋯'); skipping = false; }
+                    out.push(lines[k]);
+                } else {
+                    skipping = true;
+                }
+            }
+            return out.join('\n');
+        };
+
+        // Render lastLogsClean through the active filter. Called both on fetch
+        // and on filter change (no refetch needed — filtering is client-side).
+        var renderLogView = function(cleaned) {
+            var display = applyLogFilter(cleaned);
+            lastLogsDisplay = display;
+            var shouldAutoscroll = (logViewer.scrollTop + logViewer.clientHeight) >= (logViewer.scrollHeight - 8);
+            if (cleaned.length === 0) {
+                logViewer.className = 'nym-log-viewer empty';
+                logViewer.textContent = 'No nym-vpn log entries in the system buffer.';
+            } else if (display.length === 0) {
+                logViewer.className = 'nym-log-viewer empty';
+                logViewer.textContent = 'No error or warning entries in the current buffer.';
+            } else {
+                logViewer.className = 'nym-log-viewer';
+                logViewer.innerHTML = renderColoredLogs(display);
+                if (shouldAutoscroll) logViewer.scrollTop = logViewer.scrollHeight;
+            }
+        };
+
         var fetchLogs = function() {
             if (logsFetching) return;
             logsFetching = true;
@@ -1690,15 +2068,7 @@ return view.extend({
                 var raw = result.logs || '';
                 var cleaned = raw.replace(ansiRe, '');
                 lastLogsClean = cleaned;
-                var shouldAutoscroll = (logViewer.scrollTop + logViewer.clientHeight) >= (logViewer.scrollHeight - 8);
-                if (cleaned.length === 0) {
-                    logViewer.className = 'nym-log-viewer empty';
-                    logViewer.textContent = 'No nym-vpn log entries in the system buffer.';
-                } else {
-                    logViewer.className = 'nym-log-viewer';
-                    logViewer.innerHTML = renderColoredLogs(cleaned);
-                    if (shouldAutoscroll) logViewer.scrollTop = logViewer.scrollHeight;
-                }
+                renderLogView(cleaned);
             }).catch(function(err) {
                 logsFetching = false;
                 logViewer.className = 'nym-log-viewer empty';
@@ -1707,7 +2077,9 @@ return view.extend({
         };
 
         var copyLogs = function() {
-            var text = lastLogsClean || '';
+            // Copy what's shown — when a filter is active this is the focused
+            // error-context view, which is what users want to share.
+            var text = lastLogsDisplay || lastLogsClean || '';
             if (!text) {
                 showToast('No logs to copy', 'warning');
                 return;
@@ -1772,6 +2144,8 @@ return view.extend({
         };
         logLinesSelect.addEventListener('change', function() { if (!logsPaused) fetchLogs(); });
         logIntervalSelect.addEventListener('change', function() { if (!logsPaused) startLogTimer(); });
+        // Re-filter in place from the buffer we already have — no refetch.
+        logFilterSelect.addEventListener('change', function() { renderLogView(lastLogsClean); });
 
         var logsCard = E('div', { 'class': 'nym-card' }, [
             E('div', { 'class': 'nym-card-header', 'click': function() {
@@ -1801,6 +2175,7 @@ return view.extend({
                 E('div', { 'class': 'nym-log-controls' }, [
                     logLinesSelect,
                     logIntervalSelect,
+                    logFilterSelect,
                     logPauseBtn,
                     logCopyBtn,
                     logStatus
@@ -1808,6 +2183,217 @@ return view.extend({
                 logViewer
             ])
         ]);
+        // Troubleshooting group appended last (Diagnostics → Logs); logsCard is
+        // appended after diagCard below.
+
+        // Diagnostics Card — surfaces the daemon's connectivity self-test
+        // (`nym-vpnc diagnostic run`): DNS resolution, VPN API reachability over
+        // HTTP, and the selected gateway's TCP/WebSocket handshake. The report is
+        // rendered as PASS/FAIL rows; the JSON is treated as opaque so new daemon
+        // probes appear automatically without touching this view.
+        var diagResults = E('div', { 'class': 'nym-diag-results empty' },
+            'Run a diagnostic to test DNS, API, and gateway connectivity.');
+        var diagSkipDns = E('input', { 'type': 'checkbox', 'id': 'diag-skip-dns' });
+        var diagSkipHttp = E('input', { 'type': 'checkbox', 'id': 'diag-skip-http' });
+        var diagRunBtn = E('button', { 'class': 'nym-btn nym-btn-primary nym-btn-small', 'type': 'button' }, 'Run Diagnostic');
+        var diagRunning = false;
+
+        var diagChip = function(ok) {
+            return E('span', { 'class': 'nym-diag-chip ' + (ok ? 'ok' : 'fail') }, ok ? 'PASS' : 'FAIL');
+        };
+        var diagRow = function(label, ok, detail) {
+            return E('div', { 'class': 'nym-diag-row' }, [
+                diagChip(ok),
+                E('div', { 'class': 'nym-diag-row-body' }, [
+                    // Array-wrap so LuCI's dom.append renders these as text nodes
+                    // (createTextNode); a bare string child is assigned via innerHTML,
+                    // which would execute markup in untrusted report fields (gateway
+                    // operator name, X-Cable-Routing-Id, daemon error strings).
+                    E('div', { 'class': 'nym-diag-row-label' }, [String(label)]),
+                    detail ? E('div', { 'class': 'nym-diag-row-detail' }, [String(detail)]) : ''
+                ])
+            ]);
+        };
+        var diagGroup = function(title, rows) {
+            if (!rows.length) rows = [E('div', { 'class': 'nym-diag-empty' }, 'No results.')];
+            return E('div', { 'class': 'nym-diag-group' },
+                [E('div', { 'class': 'nym-diag-group-title' }, [String(title)])].concat(rows));
+        };
+        var diagDnsRow = function(label, r) {
+            var res = r.resolution || {};
+            var detail;
+            if (res.ok)
+                detail = r.hostname + ' → ' + (res.value || []).join(', ') +
+                    ' (' + r.resolution_duration_ms + 'ms)';
+            else
+                detail = r.hostname + ' → ' + (res.error || 'failed');
+            return diagRow(label, !!res.ok, detail);
+        };
+        var renderDiagnosticReport = function(report) {
+            var groups = [];
+
+            // DNS resolution — host resolvers plus each configured nameserver.
+            if (report.dns) {
+                var dnsRows = [];
+                var sys = report.dns.system;
+                if (sys) {
+                    if (sys.ok && sys.value)
+                        sys.value.forEach(function(r) { dnsRows.push(diagDnsRow('System resolvers', r)); });
+                    else
+                        dnsRows.push(diagRow('System resolvers', false, sys.error || 'failed'));
+                }
+                (report.dns.by_nameserver || []).forEach(function(r) {
+                    dnsRows.push(diagDnsRow(r.nameservers || 'nameserver', r));
+                });
+                groups.push(diagGroup('DNS Resolution', dnsRows));
+            }
+
+            // HTTP — VPN API time skew, health endpoint, node count.
+            if (report.http) {
+                var httpRows = [];
+                var h = report.http;
+                if (h.ok && h.value) {
+                    var v = h.value;
+                    if (v.remote_time) {
+                        var rt = v.remote_time;
+                        httpRows.push(diagRow('API time skew',
+                            !!(rt.ok && rt.value && rt.value.accetably_synced),
+                            rt.ok && rt.value
+                                ? ('local ' + rt.value.local_time + ' / remote ' + rt.value.estimated_remote_time)
+                                : (rt.error || 'failed')));
+                    }
+                    if (v.health_response) {
+                        var hr = v.health_response;
+                        httpRows.push(diagRow('API health', !!hr.ok,
+                            hr.ok && hr.value ? (hr.value.status + ' @ ' + hr.value.timestamp_utc)
+                                : (hr.error || 'failed')));
+                    }
+                    if (v.nb_nymnodes) {
+                        var nn = v.nb_nymnodes;
+                        httpRows.push(diagRow('Nym nodes reachable', !!nn.ok,
+                            nn.ok ? (nn.value + ' nodes') : (nn.error || 'failed')));
+                    }
+                } else {
+                    httpRows.push(diagRow('VPN API', false, h.error || 'failed'));
+                }
+                groups.push(diagGroup('VPN API (HTTP)', httpRows));
+
+                // Per-endpoint reachability, incl. domain-fronted probes (#5300).
+                if (h.ok && h.value && (h.value.by_endpoint || []).length) {
+                    var epRows = h.value.by_endpoint.map(function(ep) {
+                        if (ep.ok && ep.value) {
+                            var u = ep.value.url || {};
+                            var fronted = !!(u.front_hosts && u.front_hosts.length);
+                            return diagRow((u.url || 'endpoint') + (fronted ? ' [fronted]' : ''),
+                                true,
+                                'status: ' + ep.value.status +
+                                    (fronted ? ' · via ' + u.front_hosts.join(', ') : ''));
+                        }
+                        return diagRow('endpoint', false, ep.error || 'failed');
+                    });
+                    groups.push(diagGroup('API Endpoints', epRows));
+                }
+            }
+
+            // Gateway — selection plus TCP/WebSocket reachability.
+            if (report.gateway) {
+                var gwRows = [];
+                var g = report.gateway;
+                if (g.gateway) {
+                    var sel = g.gateway;
+                    var val = sel.value || {};
+                    var gwName = val.name || val.identity_key || val.identityKey || 'selected';
+                    gwRows.push(diagRow('Gateway selection', !!sel.ok,
+                        sel.ok ? gwName : (sel.error || 'failed')));
+                }
+                if (g.tcp)
+                    gwRows.push(diagRow('TCP reachability', !!g.tcp.ok,
+                        g.tcp.ok ? 'connected' : (g.tcp.error || 'failed')));
+                if (g.websocket)
+                    gwRows.push(diagRow('WebSocket handshake', !!g.websocket.ok,
+                        g.websocket.ok ? 'connected' : (g.websocket.error || 'failed')));
+                if (g.websocket_request)
+                    gwRows.push(diagRow('WebSocket request', !!g.websocket_request.ok,
+                        g.websocket_request.ok ? (g.websocket_request.value || 'ok')
+                            : (g.websocket_request.error || 'failed')));
+                groups.push(diagGroup('Gateway', gwRows));
+            }
+
+            // Hybrid Transport — CTAP 2.2 relay reachability canary (#5314).
+            // Omitted from the JSON when --skip-hybrid-transport was passed.
+            if (report.hybrid_transport) {
+                var ht = report.hybrid_transport;
+                groups.push(diagGroup('Hybrid Transport', [
+                    diagRow('CTAP relay (cable.ua5v.com)', !!ht.ok,
+                        ht.ok && ht.value
+                            ? ('routing-id ' + ht.value.routing_id + ' (' + ht.value.handshake_duration_ms + 'ms)')
+                            : (ht.error || 'failed'))
+                ]));
+            }
+
+            if (!groups.length)
+                groups.push(E('div', { 'class': 'nym-diag-empty' }, 'Diagnostic returned no sections.'));
+            return groups;
+        };
+
+        var runDiagnostic = function() {
+            if (diagRunning) return;
+            diagRunning = true;
+            diagRunBtn.disabled = true;
+            diagRunBtn.textContent = 'Running…';
+            diagResults.className = 'nym-diag-results empty';
+            diagResults.textContent = 'Running diagnostic — this may take a few seconds…';
+
+            var reset = function() {
+                diagRunning = false;
+                diagRunBtn.disabled = false;
+                diagRunBtn.textContent = 'Run Diagnostic';
+            };
+
+            rpc.diagnosticRun(diagSkipDns.checked, diagSkipHttp.checked, '').then(function(result) {
+                reset();
+                if (!result || result.success !== true) {
+                    diagResults.className = 'nym-diag-results empty';
+                    diagResults.textContent = (result && result.error) || 'Diagnostic failed.';
+                    return;
+                }
+                var report;
+                try { report = JSON.parse(result.report); }
+                catch (e) {
+                    diagResults.className = 'nym-diag-results empty';
+                    diagResults.textContent = 'Could not parse diagnostic report.';
+                    return;
+                }
+                diagResults.className = 'nym-diag-results';
+                dom.content(diagResults, renderDiagnosticReport(report));
+            }).catch(function(err) {
+                reset();
+                diagResults.className = 'nym-diag-results empty';
+                diagResults.textContent = 'Diagnostic error: ' + (err && err.message ? err.message : err);
+            });
+        };
+        diagRunBtn.onclick = runDiagnostic;
+
+        var diagCard = E('div', { 'class': 'nym-card' }, [
+            E('div', { 'class': 'nym-card-header', 'click': function() { toggleCard(diagCard); } }, [
+                E('div', { 'class': 'nym-card-title' }, [
+                    svgIcon(assets.iconDiagnostic),
+                    'Diagnostics'
+                ]),
+                E('div', { 'class': 'nym-card-chevron' }, '▼')
+            ]),
+            E('div', { 'class': 'nym-card-body' }, [
+                E('div', { 'class': 'nym-card-description' },
+                    'Run a connectivity self-test against DNS, the Nym VPN API, and the selected gateway.'),
+                E('div', { 'class': 'nym-diag-controls' }, [
+                    diagRunBtn,
+                    E('label', { 'class': 'nym-diag-check' }, [diagSkipDns, ' Skip DNS']),
+                    E('label', { 'class': 'nym-diag-check' }, [diagSkipHttp, ' Skip HTTP'])
+                ]),
+                diagResults
+            ])
+        ]);
+        container.appendChild(diagCard);
         container.appendChild(logsCard);
 
         // Footer
@@ -1863,10 +2449,10 @@ return view.extend({
             actionBtn.onclick = handleConnect;
         }
 
-        // Start uptime if connected
+        // Start uptime if connected, anchored to the router's elapsed seconds.
         if (status.state === 'connected') {
-            var storedTime = nymUI.getStoredStartTime();
-            startUptimeTimer(storedTime);
+            var initSecs = parseInt(status.connected_seconds, 10);
+            syncUptime(isNaN(initSecs) ? 0 : initSecs);
         }
 
         // Start polling

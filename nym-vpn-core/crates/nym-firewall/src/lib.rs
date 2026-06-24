@@ -420,10 +420,13 @@ impl Firewall {
     /// until this method is called again with another policy, or until `reset_policy` is called.
     pub fn apply_policy(&mut self, policy: FirewallPolicy) -> Result<(), Error> {
         if !self.killswitch {
-            tracing::info!(
-                "Kill-switch disabled: skipping firewall policy for PBR compatibility"
-            );
-            return Ok(());
+            // Kill-switch off: don't install the blocking rules, but DO install
+            // the LAN↔tunnel forwarding plane (masquerade + forward accepts).
+            // Routing into the tunnel is unconditional (see route_handler), so
+            // without NAT the exit gateway drops LAN-sourced packets. The
+            // kill-switch governs *blocking* non-tunnel egress, not forwarding.
+            tracing::info!("Kill-switch disabled: installing tunnel forwarding plane only (no blocking)");
+            return self.inner.apply_forwarding_only(policy);
         }
         tracing::info!("Applying firewall policy: {}", policy);
         self.inner.apply_policy(policy)

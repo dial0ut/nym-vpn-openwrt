@@ -12,6 +12,7 @@ use itertools::Itertools;
 use nym_contracts_common::Percent;
 use nym_credential_proxy_requests::api::v1::ticketbook::models::TicketbookWalletSharesResponse;
 pub use nym_credential_proxy_requests::api::v1::ticketbook::models::UpgradeModeAttestation;
+use nym_validator_client::models::LewesProtocolDetailsV1;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
@@ -370,6 +371,7 @@ pub struct NymDirectoryGateway {
     // about the node in a user-friendly way
     pub performance_v2: Option<DVpnGatewayPerformance>,
     pub build_information: Option<BuildInformation>,
+    pub lewes_protocol_details: Option<LewesProtocolDetailsV1>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -531,6 +533,7 @@ pub struct ProbeOutcome {
     pub as_exit: Option<Exit>,
     pub wg: Option<WgProbeResults>,
     pub socks5: Option<Socks5>,
+    pub lp: Option<Lp>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -538,6 +541,14 @@ pub struct Socks5 {
     pub can_proxy_https: bool,
     pub score: Option<ScoreValue>,
     pub errors: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Lp {
+    pub can_connect: bool,
+    pub can_handshake: bool,
+    pub can_register: bool,
+    pub error: Option<String>,
 }
 
 impl ProbeOutcome {
@@ -715,7 +726,6 @@ pub struct NymWellknownDiscoveryItemResponse {
     pub feature_flags: Option<serde_json::Value>,
     pub system_messages: Option<Vec<SystemMessageResponse>>,
     pub system_configuration: Option<SystemConfigurationResponse>,
-    pub network_compatibility: Option<NetworkCompatibilityResponse>,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]

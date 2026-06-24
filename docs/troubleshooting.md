@@ -1,8 +1,52 @@
 # Troubleshooting
 
+## Firewall Stuck After Crash
+
+If nym-vpnd crashes or is killed while connected, its firewall rules
+may remain active, blocking internet access.
+
+**Symptoms:** No internet connectivity after nym-vpnd exits unexpectedly.
+
+**Fix:**
+```
+# Flush nym firewall chains
+iptables -F NYM_INPUT 2>/dev/null
+iptables -F NYM_OUTPUT 2>/dev/null
+iptables -F NYM_FORWARD 2>/dev/null
+iptables -t nat -F NYM_NAT 2>/dev/null
+
+# Remove jumps to nym chains
+iptables -D input_rule -j NYM_INPUT 2>/dev/null
+iptables -D output_rule -j NYM_OUTPUT 2>/dev/null
+iptables -D forwarding_rule -j NYM_FORWARD 2>/dev/null
+iptables -t nat -D postrouting_rule -j NYM_NAT 2>/dev/null
+
+# Restart firewall to restore defaults
+/etc/init.d/firewall restart
+```
+
+For fw4 (OpenWrt 22.03+), replace the above with:
+```
+nft delete table inet nym 2>/dev/null
+/etc/init.d/firewall restart
+```
+
 ## "No related RPC reply" on GL.iNet Devices
 
-GL.iNet routers run their own admin panel on port 80, which conflicts with LuCI's session handling. Move LuCI to port 8080:
+GL.iNet routers serve their admin panel through nginx on port 80, but nginx
+does not proxy `/ubus` — the endpoint LuCI uses for RPC. So if you open the
+LuCI app via port 80, every RPC call gets an HTML redirect instead of a JSON
+reply and the page fails with "No related RPC reply". The backend daemon is
+fine; only the web transport is broken.
+
+LuCI runs on its own uhttpd port (default `8080`/`8443`), which serves `/ubus`
+correctly. Just access it there:
+
+```
+http://192.168.8.1:8080
+```
+
+If LuCI isn't on 8080, set it:
 
 ```bash
 uci set uhttpd.main.listen_http='0.0.0.0:8080'
@@ -11,12 +55,11 @@ uci commit uhttpd
 /etc/init.d/uhttpd restart
 ```
 
-Then access LuCI at `http://192.168.8.1:8080`.
-
 ## Not Enough Disk Space
 
-NymVPN binaries are ~57MB (nym-vpnd) + ~5MB (nym-vpnc). Devices with
-small `/tmp` (tmpfs backed by RAM) may not have room.
+NymVPN binaries are roughly 18-36MB installed (nym-vpnd ~16-33MB depending
+on architecture + nym-vpnc ~2-3MB). Devices with small `/tmp` (tmpfs backed
+by RAM) may not have room.
 
 **Check available space:**
 ```bash
@@ -79,37 +122,6 @@ Verify with:
 
 **Note:** File-based swap (`swapon /path/to/swapfile`) does not work on
 UBIFS/JFFS2 filesystems commonly used by OpenWrt. Use zram instead.
-
-## Firewall Stuck After Crash
-
-If nym-vpnd crashes or is killed while connected, its firewall rules
-may remain active, blocking internet access.
-
-**Symptoms:** No internet connectivity after nym-vpnd exits unexpectedly.
-
-**Fix:**
-```
-# Flush nym firewall chains
-iptables -F NYM_INPUT 2>/dev/null
-iptables -F NYM_OUTPUT 2>/dev/null
-iptables -F NYM_FORWARD 2>/dev/null
-iptables -t nat -F NYM_NAT 2>/dev/null
-
-# Remove jumps to nym chains
-iptables -D input_rule -j NYM_INPUT 2>/dev/null
-iptables -D output_rule -j NYM_OUTPUT 2>/dev/null
-iptables -D forwarding_rule -j NYM_FORWARD 2>/dev/null
-iptables -t nat -D postrouting_rule -j NYM_NAT 2>/dev/null
-
-# Restart firewall to restore defaults
-/etc/init.d/firewall restart
-```
-
-For fw4 (OpenWrt 22.03+), replace the above with:
-```
-nft delete table inet nym 2>/dev/null
-/etc/init.d/firewall restart
-```
 
 ## Gateway Timeout on Connect
 

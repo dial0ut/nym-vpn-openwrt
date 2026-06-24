@@ -1,26 +1,29 @@
 #!/bin/bash
 # Build APK package for OpenWrt 25.x+ (apk package manager)
 #
-# Usage: build-apk.sh <version> <openwrt_arch> <binary_dir> <luci_dir> [output_dir]
+# Usage: build-apk.sh <version> <openwrt_arch> <binary_dir> [luci_dir] [output_dir]
+#
+#   luci_dir defaults to luci-app-nym-vpn/ in this repo.
 #
 # Uses apk mkpkg from apk-tools 3.x (via Docker Alpine) to produce
 # properly formatted packages compatible with OpenWrt 25's apk-tools.
 
 set -euo pipefail
 
-if [ $# -lt 4 ]; then
-    echo "Usage: $0 <version> <openwrt_arch> <binary_dir> <luci_dir> [output_dir]"
+if [ $# -lt 3 ]; then
+    echo "Usage: $0 <version> <openwrt_arch> <binary_dir> [luci_dir] [output_dir]"
     exit 1
 fi
 
 VERSION="$1"
 OPENWRT_ARCH="$2"
 BINARY_DIR="$3"
-LUCI_DIR="$4"
+LUCI_DIR="${4:-}"
 OUTPUT_DIR="${5:-.}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+LUCI_DIR="${LUCI_DIR:-$REPO_ROOT/luci-app-nym-vpn}"
 IPK_SCRIPT_DIR="$REPO_ROOT/scripts/ipk"
 mkdir -p "$OUTPUT_DIR"
 OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"

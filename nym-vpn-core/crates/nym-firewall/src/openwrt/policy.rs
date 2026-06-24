@@ -70,6 +70,12 @@ pub fn compile(policy: &FirewallPolicy) -> RuleSet {
             }
             exemption_filter_accepts(&mut rs, inbound_exemptions);
             block_dns(&mut rs);
+            // A clockless router that boots straight into a connect attempt
+            // needs NTP to reach a server before TLS to the API/gateway can
+            // validate, otherwise it deadlocks in DeviceTimeDesynced. The
+            // tunnel isn't up yet, so allow the same rate-limited escape hatch
+            // as the Blocked state.
+            ntp_escape_hatch(&mut rs);
             if *allow_lan {
                 allow_lan_traffic(&mut rs);
             }
@@ -511,6 +517,31 @@ mod tests {
         assert!(rs.output_terminates_in_block());
         assert!(rs.forward_terminates_in_block());
         assert!(rs.tunnel_interfaces.is_empty());
+    }
+
+    #[test]
+    fn connecting_policy_has_ntp_escape_hatch() {
+        // A clockless router connecting with the kill-switch on must still be
+        // able to reach NTP, or it deadlocks in DeviceTimeDesynced before TLS
+        // to the API can validate.
+        let policy = FirewallPolicy::Connecting {
+            peer_endpoints: vec![ep([1, 2, 3, 4], 443)],
+            tunnel: None,
+            allow_lan: false,
+            dns_config: dns_config(&[], &[]),
+            allowed_endpoints: vec![],
+            allowed_entry_tunnel_traffic: AllowedTunnelTraffic::All,
+            allowed_exit_tunnel_traffic: AllowedTunnelTraffic::All,
+            inbound_exemptions: vec![],
+        };
+        let rs = compile(&policy);
+        let has_ntp = rs
+            .filter
+            .output
+            .rules
+            .iter()
+            .any(|r| r.matches.dport == Some(NTP_PORT) && r.verdict == Verdict::Accept);
+        assert!(has_ntp, "Connecting policy is missing the NTP escape hatch");
     }
 
     #[test]

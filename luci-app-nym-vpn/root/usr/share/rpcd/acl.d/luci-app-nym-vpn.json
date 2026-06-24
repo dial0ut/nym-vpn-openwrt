@@ -20,7 +20,8 @@
           "dns_get",
           "daemon_status",
           "watchdog_get",
-          "logs_get"
+          "logs_get",
+          "diagnostic_run"
         ],
         "service": [
           "list"
@@ -39,6 +40,7 @@
           "tunnel_set",
           "account_set",
           "account_forget",
+          "account_reset",
           "account_rotate_keys",
           "network_set",
           "lan_set",

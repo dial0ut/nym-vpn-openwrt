@@ -20,6 +20,10 @@ const NETWORKS_SUBDIR: &str = "networks";
 const ENVS_FILE: &str = "envs.json";
 static DEFAULT_ENVS_JSON: &[u8] = include_bytes!("../default/envs.json");
 
+/// Retired network names that may still appear in the fetched wellknown envs
+/// until the VPN API deploys catch up; filtered out so we don't register them.
+const RETIRED_NETWORKS: &[&str] = &["evil"];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RegisteredNetworks {
     inner: HashSet<String>,
@@ -51,6 +55,15 @@ impl fmt::Display for RegisteredNetworks {
 }
 
 impl RegisteredNetworks {
+    /// Drop retired networks (e.g. `evil`) that the remote wellknown envs may
+    /// still advertise, so they are never registered as selectable.
+    fn without_retired(mut self) -> Self {
+        for name in RETIRED_NETWORKS {
+            self.inner.remove(*name);
+        }
+        self
+    }
+
     fn path(config_dir: &Path) -> PathBuf {
         config_dir.join(NETWORKS_SUBDIR).join(ENVS_FILE)
     }
@@ -87,7 +100,7 @@ impl RegisteredNetworks {
         .map_err(Error::GetWellKnownEnvs)?;
         tracing::debug!("Envs response: {:#?}", inner);
 
-        Ok(Self { inner })
+        Ok(Self { inner }.without_retired())
     }
 
     fn read_from_file(config_dir: &Path) -> Result<Self> {
@@ -178,6 +191,19 @@ mod tests {
     fn test_registered_networks_default() {
         let registered_networks = RegisteredNetworks::default();
         assert!(registered_networks.inner.contains("mainnet"));
+        assert!(!registered_networks.inner.contains("evil"));
+    }
+
+    #[test]
+    fn test_without_retired_drops_evil() {
+        let networks = RegisteredNetworks {
+            inner: vec!["mainnet".to_string(), "evil".to_string()]
+                .into_iter()
+                .collect(),
+        };
+        let filtered = networks.without_retired();
+        assert!(filtered.inner.contains("mainnet"));
+        assert!(!filtered.inner.contains("evil"));
     }
 
     #[tokio::test]

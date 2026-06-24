@@ -324,32 +324,40 @@ pub(crate) enum TemporaryBandwidthClient {
 impl TemporaryBandwidthClient {
     pub(crate) fn new(
         gateway: &Gateway,
-        authenticator_client: AuthenticatorClient,
+        authenticator_client: Option<AuthenticatorClient>,
         metadata_client: MetadataClient,
         gateway_metadata_update_version: Option<semver::Version>,
     ) -> Self {
-        if let Some(gateway_version) = gateway.version.as_ref()
-            && let Ok(gateway_version) = semver::Version::parse(gateway_version)
-            && let Some(update_version) = gateway_metadata_update_version
-            && gateway_version >= update_version
-            && gateway
-                .last_probe
-                .as_ref()
-                .and_then(|p| p.outcome.wg.as_ref())
-                .map(|r| r.can_query_metadata_v4)
-                .unwrap_or(false)
-        {
+        if let Some(auth_client) = authenticator_client {
+            if let Some(gateway_version) = gateway.version.as_ref()
+                && let Ok(gateway_version) = semver::Version::parse(gateway_version)
+                && let Some(update_version) = gateway_metadata_update_version
+                && gateway_version >= update_version
+                && gateway
+                    .last_probe
+                    .as_ref()
+                    .and_then(|p| p.outcome.wg.as_ref())
+                    .map(|r| r.can_query_metadata_v4)
+                    .unwrap_or(false)
+            {
+                tracing::debug!(
+                    "Using latest metadata client for {}'s bandwidth controller",
+                    gateway.identity()
+                );
+                TemporaryBandwidthClient::Latest(Box::new(metadata_client))
+            } else {
+                tracing::debug!(
+                    "Using deprecated mixnet client for {}'s bandwidth controller",
+                    gateway.identity()
+                );
+                TemporaryBandwidthClient::Deprecated(Box::new(auth_client))
+            }
+        } else {
             tracing::debug!(
-                "Using latest metadata client for {}'s bandwidth controller",
+                "No authenticator client provided, using latest metadata client for {}'s bandwidth controller",
                 gateway.identity()
             );
             TemporaryBandwidthClient::Latest(Box::new(metadata_client))
-        } else {
-            tracing::debug!(
-                "Using deprecated mixnet client for {}'s bandwidth controller",
-                gateway.identity()
-            );
-            TemporaryBandwidthClient::Deprecated(Box::new(authenticator_client))
         }
     }
 
@@ -557,7 +565,7 @@ impl BandwidthController {
         bind_ip: IpAddr,
         signal_channel: TunUpReceiver,
         gateway: &Gateway,
-        authenticator_client: AuthenticatorClient,
+        authenticator_client: Option<AuthenticatorClient>,
         gateway_metadata_update_version: Option<semver::Version>,
     ) -> TemporaryBandwidthClient {
         // this shouldn't fail, verified by unit test as well
@@ -630,10 +638,10 @@ impl BandwidthController {
         ticket_provider: Box<dyn BandwidthTicketProvider>,
         account_command_tx: AccountCommandSender,
         selected_gateways: &SelectedGateways,
-        entry_auth_client: AuthenticatorClient,
-        exit_auth_client: AuthenticatorClient,
-        entry_gateway_data: WireguardConfiguration,
-        exit_gateway_data: WireguardConfiguration,
+        entry_auth_client: Option<AuthenticatorClient>,
+        exit_auth_client: Option<AuthenticatorClient>,
+        entry_gateway_data: &WireguardConfiguration,
+        exit_gateway_data: &WireguardConfiguration,
         entry_signal_channel: TunUpReceiver,
         exit_signal_channel: TunUpReceiver,
         gateway_metadata_update_version: Option<semver::Version>,
@@ -782,10 +790,18 @@ impl BandwidthController {
         let gateway_id = self.gateway_id(entry);
         if (entry && self.entry_previous_error_query) || (!entry && self.exit_previous_error_query)
         {
-            tracing::error!("gateway {gateway_id} is erroring out",);
-            // For now let's keep the old behavior of stopping, but only if we've had a successful check before
+            // Only treat repeated failures as a hard error — and tear the tunnel
+            // down — once we've actually had a successful bandwidth check. Before
+            // the first success, transient query failures are expected (e.g. the
+            // gateway is still coming up) and must not escalate or spam the log at
+            // error level (upstream nym-vpn-client #5405).
             if self.successful_checks != 0 {
+                tracing::error!("gateway {gateway_id} is erroring out");
                 self.shutdown_token.cancel();
+            } else {
+                tracing::warn!(
+                    "gateway {gateway_id} bandwidth query failing before any successful check; not escalating"
+                );
             }
         } else {
             if entry {

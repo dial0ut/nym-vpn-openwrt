@@ -51,7 +51,19 @@ return baseclass.extend({
             container.innerHTML = '<div class="nym-gateway-empty">—</div>';
             return;
         }
-        var flag = country ? (countryData[country] || {}).flag || '🌐' : '🌐';
+        // Curated flag if we have one; otherwise derive it from the ISO code
+        // (Regional Indicator Symbols) so any country still shows a flag.
+        var flag = '🌐';
+        if (country) {
+            var entry = countryData[country] || {};
+            if (entry.flag) {
+                flag = entry.flag;
+            } else if (/^[A-Za-z]{2}$/.test(country)) {
+                var cc = country.toUpperCase();
+                flag = String.fromCodePoint(0x1F1E6 + cc.charCodeAt(0) - 65,
+                                            0x1F1E6 + cc.charCodeAt(1) - 65);
+            }
+        }
         var html = '<div class="nym-gateway-flag">' + flag + '</div>';
         if (name) html += '<div class="nym-gateway-name" title="' + (name || '') + '">' + name + '</div>';
         if (id) html += '<div class="nym-gateway-id">' + id + '</div>';

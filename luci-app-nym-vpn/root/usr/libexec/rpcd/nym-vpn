@@ -179,11 +179,29 @@ emit_account_error() {
 handle_status() {
     local state=$($VPNC status 2>&1)
 
+    # Browser-independent session timer. The old per-browser localStorage
+    # clock drifted between sessions and is useless when the router clock is
+    # itself desynced. Instead we stamp the epoch when the tunnel is first
+    # observed Connected and report the elapsed seconds from the router's own
+    # clock, so every client shows the same duration.
+    local marker="/tmp/nym-vpnd-connected-at"
+
     json_init
 
     if echo "$state" | grep -q "State: Connected"; then
         json_add_string "state" "connected"
         json_add_boolean "connected" 1
+
+        local now connected_since
+        now=$(date +%s)
+        [ -f "$marker" ] && connected_since=$(cat "$marker" 2>/dev/null)
+        case "$connected_since" in
+            ''|*[!0-9]*) connected_since=$now; echo "$now" > "$marker" ;;
+        esac
+        local elapsed=$((now - connected_since))
+        [ "$elapsed" -lt 0 ] && elapsed=0
+        json_add_string "connected_since" "$connected_since"
+        json_add_int "connected_seconds" "$elapsed"
 
         # Detect mode and parse connection info. The chosen list types must
         # match the connection mode — in wg/fast mode the gateway IDs are not
@@ -265,6 +283,11 @@ handle_status() {
         json_add_string "state" "disconnected"
         json_add_boolean "connected" 0
         json_add_string "raw_state" "$state"
+        # Pull the tunnel-error variant out of "State: Error state: <Reason>"
+        # so the UI can react to specific failures (e.g. a pinned gateway that
+        # is blacklisted/unavailable -> tell the user to switch gateways).
+        tunnel_error=$(echo "$state" | sed -n 's/.*Error state: *\([A-Za-z0-9_]*\).*/\1/p')
+        [ -n "$tunnel_error" ] && json_add_string "tunnel_error" "$tunnel_error"
         emit_account_error
     else
         json_add_string "state" "unknown"
@@ -272,6 +295,9 @@ handle_status() {
         json_add_string "raw_state" "$state"
         emit_account_error
     fi
+
+    # Reset the session-timer stamp whenever the tunnel is not Connected.
+    echo "$state" | grep -q "State: Connected" || rm -f "$marker"
 
     json_dump
 }
@@ -490,15 +516,27 @@ handle_gateway_list_by_country() {
         local rest="${line#*|}"
         local num_fields=$(echo "$rest" | awk -F'|' '{print NF}')
 
-        if [ "$num_fields" -ge 4 ]; then
-            local perf_field=$((num_fields - 3))
+        # Fields in "$rest" (everything after the ID column):
+        #   Name | Location | Performance | Exit IPv4 | Exit IPv6 | Build Version [| Bridges]
+        # Newer daemons append a "Bridges" column (CT capability). Detect it by
+        # field count so an older daemon (no column) still parses correctly:
+        # without Bridges there are 3 columns after Performance, with it 4.
+        local has_bridges=0
+        local perf_off=3
+        if [ "$num_fields" -ge 7 ]; then
+            has_bridges=1
+            perf_off=4
+        fi
+
+        if [ "$num_fields" -ge $((perf_off + 1)) ]; then
+            local perf_field=$((num_fields - perf_off))
             local performance=$(echo "$rest" | awk -F'|' -v field="$perf_field" '{print $field}' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
         else
             local performance="Unknown"
         fi
 
-        if [ "$num_fields" -ge 5 ]; then
-            local loc_field=$((num_fields - 4))
+        if [ "$num_fields" -ge $((perf_off + 2)) ]; then
+            local loc_field=$((num_fields - perf_off - 1))
             local location=$(echo "$rest" | awk -F'|' -v field="$loc_field" '{print $field}' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
             local max_name_field=$((loc_field - 1))
             if [ "$max_name_field" -eq 1 ]; then
@@ -516,6 +554,14 @@ handle_gateway_list_by_country() {
         json_add_string "name" "${name:-Unknown}"
         json_add_string "location" "${location:-Unknown}"
         json_add_string "performance" "${performance:-Unknown}"
+        if [ "$has_bridges" -eq 1 ]; then
+            local bridges=$(echo "$rest" | awk -F'|' -v field="$num_fields" '{print $field}' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            if [ "$bridges" = "yes" ]; then
+                json_add_boolean "bridges" 1
+            else
+                json_add_boolean "bridges" 0
+            fi
+        fi
         json_close_object
     done <<EOF
 $result
@@ -531,6 +577,7 @@ handle_tunnel_get() {
     local ipv6=$(echo "$config" | grep "IPv6:" | sed 's/.*IPv6: //')
     local two_hop=$(echo "$config" | grep "Two-hop:" | sed 's/.*Two-hop: //')
     local netstack=$(echo "$config" | grep "Netstack:" | sed 's/.*Netstack: //')
+    local lewes=$(echo "$config" | grep "Lewes protocol:" | sed 's/.*Lewes protocol: //')
     local circumvention=$(echo "$config" | grep "Circumvention transports:" | sed 's/.*Circumvention transports: //')
     local killswitch=$(echo "$config" | grep "Kill-switch:" | sed 's/.*Kill-switch: //')
 
@@ -538,6 +585,7 @@ handle_tunnel_get() {
     json_add_string "ipv6" "$ipv6"
     json_add_string "two_hop" "$two_hop"
     json_add_string "netstack" "$netstack"
+    json_add_string "lewes_protocol" "$lewes"
     json_add_string "circumvention_transports" "$circumvention"
     json_add_string "killswitch" "$killswitch"
     json_add_string "raw_config" "$config"
@@ -566,6 +614,12 @@ handle_tunnel_set() {
     if [ -n "$killswitch" ]; then
         killswitch=$(validate_input "$killswitch" onoff)
         [ -n "$killswitch" ] && args="$args --killswitch $killswitch"
+    fi
+
+    json_get_var circumvention circumvention
+    if [ -n "$circumvention" ]; then
+        circumvention=$(validate_input "$circumvention" onoff)
+        [ -n "$circumvention" ] && args="$args --circumvention-transports $circumvention"
     fi
 
     if [ -n "$args" ]; then
@@ -688,6 +742,49 @@ handle_account_rotate_keys() {
     else
         json_add_boolean "success" 0
         json_add_string "error" "$result"
+    fi
+    json_dump
+}
+
+# Hard recovery for the account-state desync where `nym-vpnc account forget`
+# can't clear a stranded account: forget requires the tunnel to be in
+# Disconnected, and an account error (e.g. Device Time Desynced) strands it in
+# Error/Disconnecting, so the command is rejected and the stored mnemonic is
+# never removed — `account get` keeps reporting the account as set. This
+# mirrors the proven manual fix (stop daemon, wipe the account/key store under
+# the data dir, start again with a delay), bypassing the forget precondition.
+# Only the daemon data dir (/etc/nym/data: mnemonic, device keys, credentials
+# and wireguard-keys DBs, mixnet identity) is wiped; UCI settings in
+# /etc/config/nym-vpn and the global config in /etc/nym are left untouched.
+handle_account_reset() {
+    json_init
+
+    /etc/init.d/nym-vpnd stop >/dev/null 2>&1
+    # Give procd time to tear down the tunnel and release the data dir before
+    # we delete it — a plain `restart` is too quick and leaves stale state.
+    sleep 3
+
+    # Belt-and-braces: kill any lingering process holding the data dir open.
+    killall nym-vpnd >/dev/null 2>&1
+    sleep 1
+
+    rm -rf /etc/nym/data >/dev/null 2>&1
+    mkdir -p /etc/nym/data
+
+    /etc/init.d/nym-vpnd start >/dev/null 2>&1
+    # The daemon needs a moment to come up and re-create its stores before the
+    # UI polls account state again.
+    sleep 3
+
+    local status=$(/etc/init.d/nym-vpnd status 2>&1)
+    if [ "$status" = "running" ]; then
+        json_add_boolean "success" 1
+        json_add_string "message" "Account state reset; daemon restarted"
+        json_add_string "status" "running"
+    else
+        json_add_boolean "success" 0
+        json_add_string "error" "Account store wiped but daemon failed to restart"
+        json_add_string "status" "stopped"
     fi
     json_dump
 }
@@ -1314,6 +1411,41 @@ handle_logs_get() {
     json_dump
 }
 
+handle_diagnostic_run() {
+    read input
+    json_load "$input"
+
+    local skip_dns skip_http gateway
+    json_get_var skip_dns skip_dns
+    json_get_var skip_http skip_http
+    json_get_var gateway gateway
+
+    # The diagnostic probes DNS, the VPN API over HTTP, and the selected
+    # gateway's TCP/WebSocket reachability. nym-vpnc prints a JSON report on
+    # success; we pass it through verbatim for the LuCI view to parse.
+    set -- run
+    [ "$skip_dns" = "1" -o "$skip_dns" = "true" ]   && set -- "$@" --skip-dns
+    [ "$skip_http" = "1" -o "$skip_http" = "true" ] && set -- "$@" --skip-http
+    if [ -n "$gateway" ]; then
+        gateway=$(validate_input "$gateway" gateway_id)
+        [ -n "$gateway" ] && set -- "$@" --gateway "$gateway"
+    fi
+
+    local report
+    report=$($VPNC diagnostic "$@" 2>&1)
+    local rc=$?
+
+    json_init
+    if [ "$rc" -ne 0 ] || [ -z "$report" ]; then
+        json_add_boolean "success" 0
+        json_add_string "error" "${report:-diagnostic failed}"
+    else
+        json_add_boolean "success" 1
+        json_add_string "report" "$report"
+    fi
+    json_dump
+}
+
 handle_daemon_status() {
     json_init
 
@@ -1333,8 +1465,15 @@ handle_daemon_status() {
 handle_daemon_restart() {
     json_init
 
-    /etc/init.d/nym-vpnd restart >/dev/null 2>&1
-    sleep 2
+    # An in-place `restart` re-launches the daemon too quickly: it can come
+    # back before the previous instance has released its socket/state, which
+    # leaves the account controller wedged (the 1.27.1 reports where "restart
+    # does not work" but stop → wait → start does). Sequence it explicitly with
+    # a gap so the old instance fully tears down first.
+    /etc/init.d/nym-vpnd stop >/dev/null 2>&1
+    sleep 3
+    /etc/init.d/nym-vpnd start >/dev/null 2>&1
+    sleep 3
 
     local status=$(/etc/init.d/nym-vpnd status 2>&1)
 
@@ -1424,6 +1563,7 @@ case "$1" in
     "account_get": {},
     "account_set": { "mnemonic": "str", "mode": "str" },
     "account_forget": {},
+    "account_reset": {},
     "account_rotate_keys": {},
     "network_get": {},
     "network_set": { "network": "str" },
@@ -1441,6 +1581,7 @@ case "$1" in
     "daemon_start": {},
     "daemon_stop": {},
     "logs_get": { "lines": "int" },
+    "diagnostic_run": { "skip_dns": "bool", "skip_http": "bool", "gateway": "str" },
     "watchdog_get": {},
     "watchdog_set": { "always_on": "bool", "interval": "int" }
 }
@@ -1463,6 +1604,7 @@ EOF
             account_get)             handle_account_get ;;
             account_set)             handle_account_set ;;
             account_forget)          handle_account_forget ;;
+            account_reset)           handle_account_reset ;;
             account_rotate_keys)     handle_account_rotate_keys ;;
             network_get)             handle_network_get ;;
             network_set)             handle_network_set ;;
@@ -1480,6 +1622,7 @@ EOF
             daemon_start)            handle_daemon_start ;;
             daemon_stop)             handle_daemon_stop ;;
             logs_get)                handle_logs_get ;;
+            diagnostic_run)          handle_diagnostic_run ;;
             watchdog_get)            handle_watchdog_get ;;
             watchdog_set)            handle_watchdog_set ;;
             *)

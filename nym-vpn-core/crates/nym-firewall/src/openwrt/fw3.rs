@@ -55,6 +55,27 @@ pub fn apply(rs: &RuleSet) -> Result<()> {
     Ok(())
 }
 
+/// Install only the LAN↔tunnel forwarding plane (masquerade), dropping any
+/// kill-switch blocking chains. Used when the kill-switch is off: routing into
+/// the tunnel is unconditional, so forwarded LAN traffic must still be NAT'd to
+/// the tunnel source address, but nothing is fenced off from the WAN.
+pub fn apply_forwarding_only(rs: &RuleSet) -> Result<()> {
+    tracing::debug!("Applying tunnel forwarding plane (kill-switch off) via fw3/iptables");
+
+    // Lift any blocking left over from a previous kill-switch-on state.
+    cleanup_filter(AddrFamily::V4);
+    cleanup_mangle(AddrFamily::V4);
+    if is_ipv6_enabled() {
+        cleanup_filter(AddrFamily::V6);
+        cleanup_mangle(AddrFamily::V6);
+    }
+
+    add_masquerade_rules(&rs.tunnel_interfaces)?;
+
+    tracing::debug!("Tunnel forwarding plane applied successfully");
+    Ok(())
+}
+
 /// Tear down the jumps and our chains. Best-effort throughout.
 pub fn reset() -> Result<()> {
     tracing::debug!("Resetting firewall policy via fw3/iptables backend");

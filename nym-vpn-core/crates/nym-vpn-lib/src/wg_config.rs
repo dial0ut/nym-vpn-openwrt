@@ -8,7 +8,7 @@ use std::{
 
 use ipnetwork::{IpNetwork, Ipv4Network, Ipv6Network};
 use nym_registration_common::WireguardConfiguration;
-use nym_wg_gotatun::{PrivateKey, PublicKey, amnezia::AmneziaConfig};
+use nym_wg_gotatun::{PresharedKey, PrivateKey, PublicKey, amnezia::AmneziaConfig};
 use nym_wg_gotatun::PeerConfig;
 use nym_wg_gotatun::wireguard_go;
 
@@ -72,13 +72,27 @@ pub enum AllowedIps {
     Specific(Vec<IpNetwork>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct WgPeer {
     /// Gateway public key.
     pub public_key: PublicKey,
 
+    /// Optional WireGuard pre-shared key. Populated only on the Lewes Protocol
+    /// path (the post-quantum PSK derived by nym-lp); `None` on the legacy path.
+    pub preshared_key: Option<PresharedKey>,
+
     /// Gateway endpoint
     pub endpoint: SocketAddr,
+}
+
+impl fmt::Debug for WgPeer {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("WgPeer")
+            .field("public_key", &self.public_key)
+            .field("preshared_key", &self.preshared_key.as_ref().map(|_| "(hidden)"))
+            .field("endpoint", &self.endpoint)
+            .finish()
+    }
 }
 
 impl WgNodeConfig {
@@ -94,7 +108,7 @@ impl WgNodeConfig {
             },
             peers: vec![PeerConfig {
                 public_key: self.peer.public_key,
-                preshared_key: None,
+                preshared_key: self.peer.preshared_key,
                 endpoint: self.peer.endpoint,
                 allowed_ips,
             }],
@@ -121,8 +135,10 @@ impl WgNodeConfig {
 }
 
 impl WgNodeConfig {
+    #[allow(clippy::too_many_arguments)]
     pub fn with_gateway_data(
-        gateway_data: WireguardConfiguration,
+        gateway_data: &WireguardConfiguration,
+        endpoint: SocketAddr,
         private_key: &nym_crypto::asymmetric::encryption::PrivateKey,
         allowed_ips: AllowedIps,
         dns: Vec<IpAddr>,
@@ -150,7 +166,13 @@ impl WgNodeConfig {
             },
             peer: WgPeer {
                 public_key: PublicKey::from(*gateway_data.public_key.as_bytes()),
-                endpoint: gateway_data.endpoint,
+                // Carries the post-quantum PSK on the Lewes path; None on legacy
+                // (gateway_data.psk is None until LP registration is enabled).
+                preshared_key: gateway_data
+                    .psk
+                    .as_ref()
+                    .map(|psk| PresharedKey::from(*psk.as_bytes())),
+                endpoint,
             },
             allowed_ips,
         }

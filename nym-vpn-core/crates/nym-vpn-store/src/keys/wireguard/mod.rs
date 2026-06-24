@@ -41,6 +41,16 @@ impl WireguardKeysDb {
         };
         Ok(db)
     }
+
+    /// Close the underlying store, flushing and releasing the on-disk SQLite
+    /// pool's file handles. No-op for the in-memory ephemeral variant. Called on
+    /// daemon shutdown to avoid WireGuard-keys DB corruption on abrupt
+    /// termination (upstream #5360).
+    pub async fn close(&self) {
+        if let WireguardKeysDb::OnDisk(on_disk_keys) = self {
+            on_disk_keys.close().await;
+        }
+    }
 }
 
 #[async_trait::async_trait]

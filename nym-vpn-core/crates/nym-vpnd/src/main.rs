@@ -57,7 +57,7 @@ async fn run_vpn_service(args: CliArgs) -> anyhow::Result<()> {
         verbosity_level: args.verbosity_level(),
         enable_file_log: run_as_service,
         enable_stdout_log: !run_as_service,
-        enable_json_log: args.json_output || run_as_service,
+        enable_json_log: args.json_output,
         sentry: sentry_enabled,
     };
     let logging_setup =
@@ -189,7 +189,8 @@ async fn setup_vpn_service(
         tunnel_event_rx,
         command_shutdown_token.child_token(),
     )
-    .await?;
+    .await
+    .with_context(|| "failed to start command interface")?;
 
     let vpn_service_handle = NymVpnService::spawn(
         vpn_command_rx,

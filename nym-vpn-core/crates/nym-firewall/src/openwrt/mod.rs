@@ -72,6 +72,25 @@ impl Firewall {
         }
     }
 
+    /// Install only the LAN↔tunnel forwarding plane (masquerade + forward
+    /// accepts) and remove any kill-switch *blocking* rules. Used when the
+    /// kill-switch is disabled: the tunnel still carries forwarded LAN traffic
+    /// (routing into the tunnel is unconditional), it just isn't fenced off
+    /// from the WAN. Without this, forwarded LAN packets reach the tunnel but
+    /// are never NAT'd to the tunnel source address and the exit gateway drops
+    /// them.
+    pub fn apply_forwarding_only(&mut self, policy: FirewallPolicy) -> Result<()> {
+        let ruleset = policy::compile(&policy);
+        match self.system {
+            FirewallSystem::Fw3 => fw3::apply_forwarding_only(&ruleset),
+            FirewallSystem::Fw4 => fw4::apply_forwarding_only(&ruleset),
+            FirewallSystem::Unknown => {
+                tracing::warn!("Unknown firewall system, falling back to fw3/iptables");
+                fw3::apply_forwarding_only(&ruleset)
+            }
+        }
+    }
+
     pub fn reset_policy(&mut self) -> Result<()> {
         match self.system {
             FirewallSystem::Fw3 => fw3::reset(),

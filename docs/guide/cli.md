@@ -73,7 +73,7 @@ nym-vpnc tunnel get
 # Configure tunnel options
 nym-vpnc tunnel set --ipv6 on --two-hop on
 
-# Disable kill-switch (for PBR compatibility)
+# Disable kill-switch (allow WAN fallback / split-tunnel carve-outs)
 nym-vpnc tunnel set --killswitch off
 
 # Re-enable kill-switch

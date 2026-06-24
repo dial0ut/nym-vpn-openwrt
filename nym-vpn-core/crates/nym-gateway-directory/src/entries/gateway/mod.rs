@@ -7,7 +7,7 @@ mod tests;
 use itertools::Itertools;
 use nym_sdk::mixnet::NodeIdentity;
 use nym_topology::{NodeId, RoutingNode};
-use nym_validator_client::models::{KeyRotationId, NymNodeDescriptionV1};
+use nym_validator_client::models::{KeyRotationId, LewesProtocolDetailsV1, NymNodeDescriptionV2};
 use nym_vpn_api_client::{
     response::{BridgeInformation, BridgeParameters},
     types::Percent,
@@ -64,11 +64,13 @@ pub struct Gateway {
     pub performance: Option<Performance>,
     #[builder(default)]
     pub version: Option<String>,
+    #[builder(default)]
+    pub lewes_protocol_details: Option<LewesProtocolDetailsV1>,
 }
 
 impl Gateway {
     pub fn try_from_node_description(
-        node_description: NymNodeDescriptionV1,
+        node_description: NymNodeDescriptionV2,
         current_key_rotation: KeyRotationId,
     ) -> Result<Self> {
         let identity = node_description.description.host_information.keys.ed25519;
@@ -105,6 +107,9 @@ impl Gateway {
             .network_requester
             .as_ref()
             .map(|nr| nr.address.clone());
+
+        let lewes_protocol_details = node_description.description.lewes_protocol.clone();
+
         let version = Some(node_description.version().to_string());
         let role = if node_description.description.declared_role.entry {
             nym_validator_client::nym_nodes::NodeRole::EntryGateway
@@ -145,6 +150,7 @@ impl Gateway {
             mixnet_performance: None,
             performance: None,
             version,
+            lewes_protocol_details,
         })
     }
 
@@ -399,6 +405,7 @@ pub struct ProbeOutcome {
     pub as_entry: Entry,
     pub as_exit: Option<Exit>,
     pub wg: Option<WgProbeResults>,
+    pub lp: Option<Lp>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -406,6 +413,14 @@ pub struct Socks5 {
     pub can_proxy_https: bool,
     pub score: Option<ScoreValue>,
     pub errors: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Lp {
+    pub can_connect: bool,
+    pub can_handshake: bool,
+    pub can_register: bool,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -514,6 +529,7 @@ impl From<nym_vpn_api_client::response::ProbeOutcome> for ProbeOutcome {
             as_entry: Entry::from(outcome.as_entry),
             as_exit,
             wg: outcome.wg.map(WgProbeResults::from),
+            lp: outcome.lp.map(From::from),
         }
     }
 }
@@ -524,6 +540,17 @@ impl From<nym_vpn_api_client::response::Socks5> for Socks5 {
             can_proxy_https: exit.can_proxy_https,
             score: exit.score.map(ScoreValue::from),
             errors: exit.errors,
+        }
+    }
+}
+
+impl From<nym_vpn_api_client::response::Lp> for Lp {
+    fn from(lp: nym_vpn_api_client::response::Lp) -> Self {
+        Lp {
+            can_connect: lp.can_connect,
+            can_handshake: lp.can_handshake,
+            can_register: lp.can_register,
+            error: lp.error,
         }
     }
 }
@@ -644,6 +671,7 @@ impl TryFrom<nym_vpn_api_client::response::NymDirectoryGateway> for Gateway {
             mixnet_performance: Some(gateway.performance),
             performance,
             version: gateway.build_information.map(|info| info.build_version),
+            lewes_protocol_details: gateway.lewes_protocol_details,
         })
     }
 }
@@ -703,6 +731,17 @@ impl GatewayList {
         self.node_with_identity(identity)
     }
 
+    pub fn gateway_with_identity_filtered(
+        &self,
+        identity: &NodeIdentity,
+        filters: &GatewayFilters,
+    ) -> Option<Gateway> {
+        self.filter(filters)
+            .iter()
+            .find(|node| &node.identity() == identity)
+            .cloned()
+    }
+
     pub fn choose_random(&self, filters: &GatewayFilters) -> Option<Gateway> {
         self.filter(filters)
             .into_iter()
@@ -749,15 +788,28 @@ impl GatewayList {
         &self,
         entry_point: &EntryPoint,
         base_filters: &GatewayFilters,
+        optional_filters: &GatewayFilters,
     ) -> Result<Gateway> {
         match &entry_point {
             EntryPoint::Gateway { identity } => {
                 tracing::debug!("Selecting gateway by identity: {identity}");
-                self.gateway_with_identity(identity)
-                    .ok_or_else(|| Error::NoMatchingGateway {
-                        requested_identity: identity.to_string(),
+
+                // An explicitly selected gateway still has to pass the mandatory
+                // (base) filters such as the blacklist; optional filters like
+                // performance score are ignored for direct selection.
+                self.gateway_with_identity_filtered(identity, base_filters)
+                    .ok_or_else(|| {
+                        if self.gateway_with_identity(identity).is_some() {
+                            Error::MatchingEntryGatewayNotWorking {
+                                identity: identity.to_string(),
+                                filters: base_filters.clone(),
+                            }
+                        } else {
+                            Error::NoMatchingGateway {
+                                requested_identity: identity.to_string(),
+                            }
+                        }
                     })
-                    .cloned()
             }
             EntryPoint::Country {
                 two_letter_iso_country_code,
@@ -767,6 +819,7 @@ impl GatewayList {
                 );
 
                 let filters = base_filters
+                    .with(optional_filters.iter())
                     .with(&[GatewayFilter::Country(two_letter_iso_country_code.clone())]);
 
                 self.choose_random(&filters).ok_or_else(|| {
@@ -780,7 +833,7 @@ impl GatewayList {
                 tracing::debug!("Selecting entry gateway by region/state: {region}");
 
                 // Currently only supported in the US
-                let filters = base_filters.with(&[
+                let filters = base_filters.with(optional_filters.iter()).with(&[
                     GatewayFilter::Country(COUNTRY_WITH_REGION_SELECTOR.to_string()),
                     GatewayFilter::Region(region.to_string()),
                 ]);
@@ -795,7 +848,9 @@ impl GatewayList {
             EntryPoint::Random => {
                 tracing::debug!("Selecting a random entry gateway");
 
-                self.choose_random(base_filters)
+                let filters = base_filters.with(optional_filters.iter());
+
+                self.choose_random(&filters)
                     .ok_or_else(|| Error::FailedToSelectGatewayRandomly)
             }
         }
@@ -811,9 +866,9 @@ impl GatewayList {
         for score in [ScoreValue::High, ScoreValue::Medium, ScoreValue::Low] {
             tracing::debug!("Looking for entry gateway with minimum score: {score}");
 
-            let filters = base_filters.with(&[GatewayFilter::MinScore(score)]);
+            let optional_filters = GatewayFilters::from(&[GatewayFilter::MinScore(score)]);
 
-            match self.find_entry_gateway(entry_point, &filters) {
+            match self.find_entry_gateway(entry_point, base_filters, &optional_filters) {
                 Ok(gateway) => {
                     return Ok(gateway);
                 }
@@ -1123,11 +1178,11 @@ pub enum GatewayFilter {
 pub struct GatewayFilters(HashSet<GatewayFilter>);
 
 impl GatewayFilters {
-    pub fn from(filters: &[GatewayFilter]) -> Self {
-        GatewayFilters(filters.iter().cloned().collect())
+    pub fn from<'a>(filters: impl IntoIterator<Item = &'a GatewayFilter>) -> Self {
+        GatewayFilters(filters.into_iter().cloned().collect())
     }
 
-    pub fn with(&self, other: &[GatewayFilter]) -> Self {
+    pub fn with<'a>(&self, other: impl IntoIterator<Item = &'a GatewayFilter>) -> Self {
         let mut new_self = self.clone();
         for filter in other {
             new_self.0.insert(filter.clone());

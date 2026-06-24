@@ -1,29 +1,29 @@
 #!/bin/bash
 # Build IPK package for OpenWrt
 #
-# Usage: build-ipk.sh <version> <openwrt_arch> <binary_dir> <luci_dir> [output_dir]
+# Usage: build-ipk.sh <version> <openwrt_arch> <binary_dir> [luci_dir] [output_dir]
 #
 # Arguments:
-#   version      - Package version (e.g., "1.21.0")
+#   version      - Package version (e.g., "1.30.0")
 #   openwrt_arch - OpenWrt architecture (e.g., "aarch64_generic")
 #   binary_dir   - Directory containing nym-vpnd and nym-vpnc binaries
-#   luci_dir     - Path to cloned nym-vpn-luci repository
+#   luci_dir     - Path to the LuCI app source (default: luci-app-nym-vpn/ in this repo)
 #   output_dir   - Output directory for IPK (default: current directory)
 #
 # Example:
-#   ./build-ipk.sh 1.21.0 aarch64_generic ./artifacts ../nym-vpn-luci .
+#   ./build-ipk.sh 1.30.0 aarch64_generic ./artifacts luci-app-nym-vpn .
 
 set -euo pipefail
 
 # --- Argument parsing ---
-if [ $# -lt 4 ]; then
-    echo "Usage: $0 <version> <openwrt_arch> <binary_dir> <luci_dir> [output_dir]"
+if [ $# -lt 3 ]; then
+    echo "Usage: $0 <version> <openwrt_arch> <binary_dir> [luci_dir] [output_dir]"
     echo ""
     echo "Arguments:"
-    echo "  version      - Package version (e.g., '1.21.0')"
+    echo "  version      - Package version (e.g., '1.30.0')"
     echo "  openwrt_arch - OpenWrt architecture (e.g., 'aarch64_generic')"
     echo "  binary_dir   - Directory containing nym-vpnd and nym-vpnc binaries"
-    echo "  luci_dir     - Path to cloned nym-vpn-luci repository"
+    echo "  luci_dir     - Path to the LuCI app source (default: luci-app-nym-vpn/ in this repo)"
     echo "  output_dir   - Output directory for IPK (default: current directory)"
     exit 1
 fi
@@ -31,11 +31,12 @@ fi
 VERSION="$1"
 OPENWRT_ARCH="$2"
 BINARY_DIR="$3"
-LUCI_DIR="$4"
+LUCI_DIR="${4:-}"
 OUTPUT_DIR="${5:-.}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+LUCI_DIR="${LUCI_DIR:-$REPO_ROOT/luci-app-nym-vpn}"
 mkdir -p "$OUTPUT_DIR"
 OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"
 
