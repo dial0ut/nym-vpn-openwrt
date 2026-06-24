@@ -80,6 +80,9 @@ return view.extend({
         var serviceInfoFrame;
         var daemonStartBtn;
         var daemonStopBtn;
+        // Inbound-exemptions section, mounted inside the Tunnel Settings card
+        // under the Kill-Switch toggle and shown only while kill-switch is on.
+        var inboundMount;
 
         // Uptime tracking
         var connectionStartTime = null;
@@ -657,7 +660,12 @@ return view.extend({
             while (select.options.length > 0) select.remove(0);
             select.appendChild(E('option', { 'value': 'none' }, '— Select Country —'));
             select.appendChild(E('option', { 'value': 'random' }, '🌐 Random'));
-            countryList.forEach(function(c) {
+            // The directory returns countries in ISO-code order; sort by the
+            // displayed name so the dropdown reads alphabetically.
+            var sorted = countryList.slice().sort(function(a, b) {
+                return countries.getDisplay(a.code).name.localeCompare(countries.getDisplay(b.code).name);
+            });
+            sorted.forEach(function(c) {
                 var info = countries.getDisplay(c.code);
                 select.appendChild(E('option', { 'value': c.code },
                     info.flag + ' ' + info.name + ' (' + c.count + ')'));
@@ -961,38 +969,116 @@ return view.extend({
             done(legacyCopy(text));
         };
 
-        // Custom DNS handler
+        // Custom DNS — managed as a list, added/removed one server at a time.
+        // The daemon replaces the whole set per call (dns set <list>, or dns
+        // clear when empty), so every add/remove re-sends the joined list.
+        var dnsServersList = (dns_config.servers || '').split(/\s+/).filter(Boolean);
+        var dnsListEl = E('div', { 'class': 'nym-dns-list' });
+
+        // Light client check (IPv4 dotted-quad, or anything colon-bearing for
+        // IPv6); the daemon validates strictly before applying.
+        var isValidDnsIp = function(s) {
+            if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(s)) {
+                return s.split('.').every(function(o) { return +o >= 0 && +o <= 255; });
+            }
+            return /^[0-9a-fA-F:]+$/.test(s) && s.indexOf(':') >= 0;
+        };
+
+        var renderDnsRow = function(ip) {
+            return E('div', { 'class': 'nym-dns-row', 'data-ip': ip }, [
+                E('div', { 'class': 'nym-dns-ip' }, [String(ip)]),
+                E('div', {
+                    'class': 'nym-exemption-delete',
+                    'title': 'Remove',
+                    'click': function() { deleteDnsServer(ip); }
+                }, '×')
+            ]);
+        };
+
+        var redrawDnsList = function() {
+            dnsListEl.innerHTML = '';
+            if (dnsServersList.length === 0) {
+                dnsListEl.appendChild(E('div', { 'class': 'nym-exemption-empty' },
+                    'Using the VPN default resolvers. Add a server below.'));
+                return;
+            }
+            dnsServersList.forEach(function(ip) { dnsListEl.appendChild(renderDnsRow(ip)); });
+        };
+
+        // Push the current enabled state + full server list to the daemon.
+        var persistDns = function() {
+            var dnsToggle = document.getElementById('dns-toggle');
+            var enabled = dnsToggle ? dnsToggle.checked : false;
+            return rpc.dnsSet(enabled, dnsServersList.join(' '));
+        };
+
+        var addDnsServer = function() {
+            var input = document.getElementById('dns-server-input');
+            var addBtn = document.getElementById('dns-add-btn');
+            if (!input) return;
+            var ip = (input.value || '').trim();
+            if (!ip) { showToast('Enter a DNS server address', 'error'); return; }
+            if (!isValidDnsIp(ip)) { showToast('Not a valid IPv4 or IPv6 address', 'error'); return; }
+            if (dnsServersList.indexOf(ip) !== -1) { showToast(ip + ' is already in the list', 'error'); return; }
+
+            dnsServersList.push(ip);
+            if (addBtn) { addBtn.disabled = true; addBtn.innerHTML = '<span class="nym-btn-spinner"></span>Adding'; }
+            persistDns().then(function(result) {
+                if (addBtn) { addBtn.disabled = false; addBtn.textContent = 'Add'; }
+                if (result && result.success) {
+                    redrawDnsList();
+                    input.value = '';
+                    showToast('Added ' + ip, 'success');
+                } else {
+                    dnsServersList.pop();
+                    showToast('Failed: ' + ((result && result.error) || 'Unknown'), 'error');
+                }
+            }).catch(function(err) {
+                if (addBtn) { addBtn.disabled = false; addBtn.textContent = 'Add'; }
+                dnsServersList.pop();
+                showToast('Error: ' + (err && err.message ? err.message : err), 'error');
+            });
+        };
+
+        var deleteDnsServer = function(ip) {
+            var idx = dnsServersList.indexOf(ip);
+            if (idx === -1) return;
+            var row = dnsListEl.querySelector('.nym-dns-row[data-ip="' + ip + '"]');
+            if (row) row.classList.add('removing');
+            dnsServersList.splice(idx, 1);
+            persistDns().then(function(result) {
+                if (result && result.success) {
+                    redrawDnsList();
+                    showToast('Removed ' + ip, 'success');
+                } else {
+                    dnsServersList.splice(idx, 0, ip);
+                    if (row) row.classList.remove('removing');
+                    showToast('Failed: ' + ((result && result.error) || 'Unknown'), 'error');
+                }
+            }).catch(function(err) {
+                dnsServersList.splice(idx, 0, ip);
+                if (row) row.classList.remove('removing');
+                showToast('Error: ' + (err && err.message ? err.message : err), 'error');
+            });
+        };
+
+        var onDnsKeydown = function(ev) {
+            if (ev.key === 'Enter') { ev.preventDefault(); addDnsServer(); }
+        };
+
         var handleDnsToggle = function(enabled) {
-            var serversInput = document.getElementById('dns-servers-input');
-            var servers = serversInput ? serversInput.value.trim() : null;
-            rpc.dnsSet(enabled, servers || null).then(function(result) {
+            persistDns().then(function(result) {
                 if (result && result.success) {
                     showToast(enabled ? 'Custom DNS enabled' : 'Custom DNS disabled', 'success');
                 } else {
-                    showToast('Failed: ' + (result.error || 'Unknown'), 'error');
+                    showToast('Failed: ' + ((result && result.error) || 'Unknown'), 'error');
                     var toggle = document.getElementById('dns-toggle');
                     if (toggle) toggle.checked = !enabled;
                 }
             }).catch(function(err) {
-                showToast('Error: ' + err.message, 'error');
+                showToast('Error: ' + (err && err.message ? err.message : err), 'error');
                 var toggle = document.getElementById('dns-toggle');
                 if (toggle) toggle.checked = !enabled;
-            });
-        };
-
-        var handleDnsSave = function() {
-            var serversInput = document.getElementById('dns-servers-input');
-            var dnsToggle = document.getElementById('dns-toggle');
-            var servers = serversInput ? serversInput.value.trim() : '';
-            var enabled = dnsToggle ? dnsToggle.checked : false;
-            rpc.dnsSet(enabled, servers || null).then(function(result) {
-                if (result && result.success) {
-                    showToast('DNS servers updated', 'success');
-                } else {
-                    showToast('Failed: ' + (result.error || 'Unknown'), 'error');
-                }
-            }).catch(function(err) {
-                showToast('Error: ' + err.message, 'error');
             });
         };
 
@@ -1047,28 +1133,40 @@ return view.extend({
                 var logoDiv = E('div', { 'class': 'nym-logo' });
                 logoDiv.innerHTML = assets.logo || '';
                 header.appendChild(logoDiv);
-                header.appendChild(E('div', { 'class': 'nym-subtitle' }, 'The world\'s most private VPN'));
                 return header;
             })(),
 
             // Status Hero with integrated gateway selection
             statusHero = E('div', { 'class': 'nym-status-hero disconnected' }, [
-                // Three-column layout: Entry selector | Status ring | Exit selector
+                // Three-column layout. Each side column hosts BOTH a picker
+                // (.nym-panel-picker, shown while disconnected) and the live
+                // connection info (.nym-panel-info, shown while connected) for
+                // that hop, so the same columns are reused in both states — the
+                // connected view fills the width instead of stranding the
+                // gateway info in a separate row below the ring.
                 E('div', { 'class': 'nym-hero-gateway-row' }, [
-                    // LEFT: Entry Gateway Selection
+                    // LEFT: Entry — picker + connected info
                     E('div', { 'class': 'nym-hero-gateway-panel' }, [
-                        E('div', { 'class': 'nym-gateway-box-title' }, 'Entry Gateway'),
-                        E('div', { 'class': 'nym-form-group', 'style': 'margin-bottom: 0' }, [
-                            E('label', { 'class': 'nym-form-label' }, 'Country'),
-                            entryCountrySelect = createCountrySelect('mixnet-entry', 'entry_country', function(ev) {
-                                loadGatewaysForCountry(ev.target.value, 'mixnet-entry', entryGatewayContainer);
-                            })
+                        E('div', { 'class': 'nym-panel-picker' }, [
+                            E('div', { 'class': 'nym-gateway-box-title' }, 'Entry Gateway'),
+                            E('div', { 'class': 'nym-form-group', 'style': 'margin-bottom: 0' }, [
+                                E('label', { 'class': 'nym-form-label' }, 'Country'),
+                                entryCountrySelect = createCountrySelect('mixnet-entry', 'entry_country', function(ev) {
+                                    loadGatewaysForCountry(ev.target.value, 'mixnet-entry', entryGatewayContainer);
+                                })
+                            ]),
+                            entryGatewayContainer = E('div', { 'class': 'nym-form-group', 'style': 'margin-bottom: 0' },
+                                E('div', { 'class': 'nym-gateway-loading' }, 'Select a country'))
                         ]),
-                        entryGatewayContainer = E('div', { 'class': 'nym-form-group', 'style': 'margin-bottom: 0' },
-                            E('div', { 'class': 'nym-gateway-loading' }, 'Select a country'))
+                        E('div', { 'class': 'nym-panel-info' }, [
+                            E('div', { 'class': 'nym-gateway-label' }, 'Entry'),
+                            entryGatewayDisplay = E('div', { 'class': 'nym-gateway-value' }, [
+                                E('div', { 'class': 'nym-gateway-empty' }, '—')
+                            ])
+                        ])
                     ]),
 
-                    // CENTER: Status Ring + Uptime
+                    // CENTER: Status Ring + Uptime + connection chain
                     E('div', { 'class': 'nym-hero-center' }, [
                         E('div', { 'class': 'nym-status-ring' }, [
                             E('div', { 'class': 'nym-status-ring-pulse' }),
@@ -1080,39 +1178,31 @@ return view.extend({
                         E('div', { 'class': 'nym-uptime' }, [
                             uptimeDisplay = E('span', {}, '--:--')
                         ]),
-                        E('div', { 'class': 'nym-uptime-label' }, 'Session Duration')
-                    ]),
-
-                    // RIGHT: Exit Gateway Selection
-                    E('div', { 'class': 'nym-hero-gateway-panel' }, [
-                        E('div', { 'class': 'nym-gateway-box-title' }, 'Exit Gateway'),
-                        E('div', { 'class': 'nym-form-group', 'style': 'margin-bottom: 0' }, [
-                            E('label', { 'class': 'nym-form-label' }, 'Country'),
-                            exitCountrySelect = createCountrySelect('mixnet-exit', 'exit_country', function(ev) {
-                                loadGatewaysForCountry(ev.target.value, 'mixnet-exit', exitGatewayContainer);
-                            })
-                        ]),
-                        exitGatewayContainer = E('div', { 'class': 'nym-form-group', 'style': 'margin-bottom: 0' },
-                            E('div', { 'class': 'nym-gateway-loading' }, 'Select a country'))
-                    ])
-                ]),
-
-                // Gateway info display (shown when connected)
-                E('div', { 'class': 'nym-gateway-display' }, [
-                    E('div', { 'class': 'nym-gateway-item' }, [
-                        E('div', { 'class': 'nym-gateway-label' }, 'Entry'),
-                        entryGatewayDisplay = E('div', { 'class': 'nym-gateway-value' }, [
-                            E('div', { 'class': 'nym-gateway-empty' }, '—')
+                        E('div', { 'class': 'nym-uptime-label' }, 'Session Duration'),
+                        E('div', { 'class': 'nym-connection-wrapper' }, [
+                            modeLabel = E('div', { 'class': 'nym-mode-label' }),
+                            connectionChain = E('div', { 'class': 'nym-connection-chain' })
                         ])
                     ]),
-                    E('div', { 'class': 'nym-connection-wrapper' }, [
-                        modeLabel = E('div', { 'class': 'nym-mode-label' }),
-                        connectionChain = E('div', { 'class': 'nym-connection-chain' })
-                    ]),
-                    E('div', { 'class': 'nym-gateway-item' }, [
-                        E('div', { 'class': 'nym-gateway-label' }, 'Exit'),
-                        exitGatewayDisplay = E('div', { 'class': 'nym-gateway-value' }, [
-                            E('div', { 'class': 'nym-gateway-empty' }, '—')
+
+                    // RIGHT: Exit — picker + connected info
+                    E('div', { 'class': 'nym-hero-gateway-panel' }, [
+                        E('div', { 'class': 'nym-panel-picker' }, [
+                            E('div', { 'class': 'nym-gateway-box-title' }, 'Exit Gateway'),
+                            E('div', { 'class': 'nym-form-group', 'style': 'margin-bottom: 0' }, [
+                                E('label', { 'class': 'nym-form-label' }, 'Country'),
+                                exitCountrySelect = createCountrySelect('mixnet-exit', 'exit_country', function(ev) {
+                                    loadGatewaysForCountry(ev.target.value, 'mixnet-exit', exitGatewayContainer);
+                                })
+                            ]),
+                            exitGatewayContainer = E('div', { 'class': 'nym-form-group', 'style': 'margin-bottom: 0' },
+                                E('div', { 'class': 'nym-gateway-loading' }, 'Select a country'))
+                        ]),
+                        E('div', { 'class': 'nym-panel-info' }, [
+                            E('div', { 'class': 'nym-gateway-label' }, 'Exit'),
+                            exitGatewayDisplay = E('div', { 'class': 'nym-gateway-value' }, [
+                                E('div', { 'class': 'nym-gateway-empty' }, '—')
+                            ])
                         ])
                     ])
                 ]),
@@ -1170,7 +1260,7 @@ return view.extend({
                     E('div', { 'class': 'nym-toggle-row' }, [
                         E('div', { 'class': 'nym-toggle-info' }, [
                             E('div', { 'class': 'nym-toggle-title' }, 'Circumvention Transports'),
-                            E('div', { 'class': 'nym-toggle-desc' }, 'Wrap the entry gateway connection to evade censorship. Applies to two-hop mode.')
+                            E('div', { 'class': 'nym-toggle-desc' }, 'Wrap the entry gateway connection in a QUIC transport to evade censorship. Applies to two-hop mode.')
                         ]),
                         E('label', { 'class': 'nym-toggle' }, [
                             E('input', {
@@ -1286,6 +1376,7 @@ return view.extend({
                                 'change': function(ev) {
                                     var warn = ev.target.closest('.nym-toggle-row').querySelector('.nym-toggle-warning');
                                     if (warn) warn.style.display = ev.target.checked ? 'none' : 'block';
+                                    if (inboundMount) inboundMount.style.display = ev.target.checked ? 'block' : 'none';
                                     saveTunnelSettings();
                                 }
                             }),
@@ -1293,6 +1384,10 @@ return view.extend({
                         ])
                     ])
                 ]),
+                inboundMount = E('div', {
+                    'class': 'nym-inbound-section',
+                    'style': 'display: ' + (tunnel_config.killswitch !== 'off' ? 'block' : 'none')
+                })
             ])
         ]);
         container.appendChild(tunnelCard);
@@ -1430,30 +1525,19 @@ return view.extend({
             });
         };
 
-        var inboundCard = E('div', { 'class': 'nym-card' }, [
-            E('div', { 'class': 'nym-card-header', 'click': function() { toggleCard(inboundCard); } }, [
-                E('div', { 'class': 'nym-card-title' }, [
-                    svgIcon(assets.iconServer),
-                    'Inbound Services'
-                ]),
-                E('div', { 'class': 'nym-card-chevron' }, '▼')
-            ]),
-            E('div', { 'class': 'nym-card-body' }, [
-                E('div', { 'class': 'nym-card-description' },
-                    'Declare ports that bypass the tunnel for reply traffic. Useful for ' +
-                    'hosted services (HTTPS, WireGuard, SSH) reached from the WAN while ' +
-                    'the kill-switch is on. For LAN-hosted services, set up the port ' +
-                    'forward in Network → Firewall → Port Forwards first, then add ' +
-                    'the matching port here.'),
-                (tunnel_config.killswitch === 'off') ? E('div', { 'class': 'nym-error-strip warning' }, [
-                    E('div', { 'class': 'nym-error-icon' }, '⚠'),
-                    E('div', { 'class': 'nym-error-body' }, [
-                        E('div', { 'class': 'nym-error-heading' }, 'Kill-switch is off'),
-                        E('div', {}, 'Exemptions are inert. Services are already reachable directly via WAN.')
-                    ])
-                ]) : E('div', { 'style': 'display:none' }),
-                inboundListEl,
-                E('div', { 'class': 'nym-divider' }),
+        // Inbound exemptions render inside the Tunnel Settings card, beneath the
+        // Kill-Switch toggle (they only matter while the kill-switch is on). The
+        // daemon stores exemptions independently of the kill-switch, so toggling
+        // it off/on never loses them — see handle_inbound_* vs handle_tunnel_set.
+        dom.content(inboundMount, [
+            E('div', { 'class': 'nym-divider' }),
+            E('div', { 'class': 'nym-toggle-title', 'style': 'margin-bottom: 6px' }, 'Inbound Services'),
+            E('div', { 'class': 'nym-card-description' },
+                'Ports that stay reachable from the WAN while the kill-switch is on ' +
+                '(e.g. hosted HTTPS, WireGuard, SSH). For LAN services, add the ' +
+                'Network → Firewall port forward first, then the matching port here.'),
+            inboundListEl,
+            E('div', { 'class': 'nym-exemption-add' }, [
                 E('div', { 'class': 'nym-form-label' }, 'Add Exemption'),
                 E('div', { 'class': 'nym-exemption-addrow' }, [
                     E('select', { 'class': 'nym-select', 'id': 'nym-inbound-proto' }, [
@@ -1478,7 +1562,7 @@ return view.extend({
                         'keydown': onAddRowKeydown
                     }),
                     E('button', {
-                        'class': 'nym-btn nym-btn-primary nym-btn-small',
+                        'class': 'nym-btn nym-btn-primary',
                         'id': 'nym-inbound-save',
                         'click': addInbound
                     }, 'Save')
@@ -1486,12 +1570,10 @@ return view.extend({
             ])
         ]);
         redrawInboundList();
-        container.appendChild(inboundCard);
 
         // DNS & Ad Blocking Card
         var adBlockEnabled = ad_block.enabled ? true : false;
         var dnsEnabled = dns_config.enabled ? true : false;
-        var dnsServers = dns_config.servers || '';
         var dnsCard = E('div', { 'class': 'nym-card' }, [
             E('div', { 'class': 'nym-card-header', 'click': function() { toggleCard(dnsCard); } }, [
                 E('div', { 'class': 'nym-card-title' }, [
@@ -1523,28 +1605,32 @@ return view.extend({
                     ])
                 ]),
 
-                // DNS servers input
-                E('div', { 'style': 'margin-top: 12px' }, [
-                    E('div', { 'class': 'nym-toggle-desc', 'style': 'margin-bottom: 8px' },
-                        'Space-separated IP addresses (e.g. 1.1.1.1 8.8.8.8)'),
-                    E('div', { 'style': 'display: flex; gap: 8px' }, [
+                // Current servers list (above) + single-server add panel (below),
+                // mirroring the Inbound exemptions add-one-at-a-time layout.
+                dnsListEl,
+                E('div', { 'class': 'nym-form-panel' }, [
+                    E('div', { 'class': 'nym-form-label' }, 'Add DNS Server'),
+                    E('div', { 'class': 'nym-form-row' }, [
                         E('input', {
                             'type': 'text',
-                            'id': 'dns-servers-input',
+                            'id': 'dns-server-input',
                             'class': 'nym-input',
-                            'placeholder': '1.1.1.1 8.8.8.8',
-                            'value': dnsServers,
-                            'style': 'flex: 1'
+                            'placeholder': 'e.g. 1.1.1.1 or 2606:4700:4700::1111',
+                            'autocomplete': 'off',
+                            'autocapitalize': 'off',
+                            'spellcheck': 'false',
+                            'keydown': onDnsKeydown
                         }),
                         E('button', {
-                            'class': 'nym-btn nym-btn-primary nym-btn-small',
-                            'click': handleDnsSave
-                        }, 'Save')
+                            'class': 'nym-btn nym-btn-primary',
+                            'id': 'dns-add-btn',
+                            'click': addDnsServer
+                        }, 'Add')
                     ])
                 ]),
 
                 // Divider
-                E('div', { 'style': 'border-top: 1px solid var(--border-color); margin: 16px 0' }),
+                E('div', { 'class': 'nym-divider' }),
 
                 // Ad Blocking toggle
                 E('div', { 'class': 'nym-toggle-row' }, [
@@ -1567,6 +1653,7 @@ return view.extend({
             ])
         ]);
         container.appendChild(dnsCard);
+        redrawDnsList();
 
         // Account Card. The body is rebuilt from a fresh `account get` each
         // time refreshAccountCard() runs, so a recovered account clears the
@@ -2096,7 +2183,8 @@ return view.extend({
                 logViewer
             ])
         ]);
-        container.appendChild(logsCard);
+        // Troubleshooting group appended last (Diagnostics → Logs); logsCard is
+        // appended after diagCard below.
 
         // Diagnostics Card — surfaces the daemon's connectivity self-test
         // (`nym-vpnc diagnostic run`): DNS resolution, VPN API reachability over
@@ -2289,7 +2377,7 @@ return view.extend({
         var diagCard = E('div', { 'class': 'nym-card' }, [
             E('div', { 'class': 'nym-card-header', 'click': function() { toggleCard(diagCard); } }, [
                 E('div', { 'class': 'nym-card-title' }, [
-                    svgIcon(assets.iconShield),
+                    svgIcon(assets.iconDiagnostic),
                     'Diagnostics'
                 ]),
                 E('div', { 'class': 'nym-card-chevron' }, '▼')
@@ -2306,6 +2394,7 @@ return view.extend({
             ])
         ]);
         container.appendChild(diagCard);
+        container.appendChild(logsCard);
 
         // Footer
         var footer = E('div', { 'class': 'nym-footer' }, [
