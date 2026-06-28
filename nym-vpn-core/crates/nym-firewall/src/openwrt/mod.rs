@@ -199,6 +199,11 @@ mod e2e_tests {
         // NTP escape hatch present.
         assert!(script.contains("udp dport 123 limit rate 12/minute burst 8 packets accept"));
 
+        // DNS escape hatch present (so NTP-pool hostnames can resolve) and
+        // rate-capped on both UDP and TCP.
+        assert!(script.contains("udp dport 53 limit rate 30/minute burst 20 packets accept"));
+        assert!(script.contains("tcp dport 53 limit rate 30/minute burst 20 packets accept"));
+
         // LAN allows.
         assert!(script.contains("ip saddr 10.0.0.0/8 accept"));
         assert!(script.contains("ip daddr 192.168.0.0/16 accept"));
