@@ -32,6 +32,9 @@ return view.extend({
         var dns_config = data.dns || {};
         var watchdog = data.watchdog || {};
         var inbound_exemptions = data.inbound_exemptions || [];
+        var split_exclusions = data.split_exclusions || [];
+        var split_status = data.split_status || {};
+        var lan_clients = data.clients || [];
 
         var self = this;
         var E = dom.create.bind(dom);
@@ -83,6 +86,7 @@ return view.extend({
         // Inbound-exemptions section, mounted inside the Tunnel Settings card
         // under the Kill-Switch toggle and shown only while kill-switch is on.
         var inboundMount;
+        var splitMount;
 
         // Uptime tracking
         var connectionStartTime = null;
@@ -1387,7 +1391,8 @@ return view.extend({
                 inboundMount = E('div', {
                     'class': 'nym-inbound-section',
                     'style': 'display: ' + (tunnel_config.killswitch !== 'off' ? 'block' : 'none')
-                })
+                }),
+                splitMount = E('div', { 'class': 'nym-split-section' })
             ])
         ]);
         container.appendChild(tunnelCard);
@@ -1482,7 +1487,7 @@ return view.extend({
 
             rpc.inboundAdd(proto, dport, label || '').then(function(result) {
                 saveBtn.disabled = false;
-                saveBtn.textContent = 'Save';
+                saveBtn.textContent = 'Add';
                 if (result && result.success) {
                     inboundState.push(pending);
                     redrawInboundList();
@@ -1496,7 +1501,7 @@ return view.extend({
                 }
             }).catch(function(err) {
                 saveBtn.disabled = false;
-                saveBtn.textContent = 'Save';
+                saveBtn.textContent = 'Add';
                 pendingRow.parentNode && pendingRow.parentNode.removeChild(pendingRow);
                 if (inboundState.length === 0) redrawInboundList();
                 showToast('Failed: ' + (err && err.message ? err.message : err), 'error');
@@ -1565,11 +1570,212 @@ return view.extend({
                         'class': 'nym-btn nym-btn-primary',
                         'id': 'nym-inbound-save',
                         'click': addInbound
-                    }, 'Save')
+                    }, 'Add')
                 ])
             ])
         ]);
         redrawInboundList();
+
+        // Split Tunnelling — carve specific devices/domains out of the tunnel,
+        // straight to the WAN. Mounts in the Tunnel Settings card beneath inbound
+        // services. Exclusions are marked with fwmark 0x14e and only take effect
+        // while the kill-switch is OFF (when ON the firewall drops non-tunnel
+        // egress). Stored in UCI independently, so toggling the kill-switch keeps
+        // them. See docs/guide/split-tunneling.md and handle_split_* in the rpcd.
+        var splitState = split_exclusions.slice();
+        var nftsetSupported = !!split_status.nftset_supported;
+
+        var splitValue = function(ex) {
+            if (ex.type === 'domain') return ex.domain || '—';
+            var c = lan_clients.filter(function(x) { return x.mac === ex.mac; })[0];
+            if (c && c.hostname) return c.hostname + ' (' + ex.mac + ')';
+            return ex.mac || '—';
+        };
+
+        var splitListEl = E('div', { 'class': 'nym-exemption-table' });
+
+        var renderSplitRow = function(ex) {
+            var on = ex.enabled !== false && ex.enabled !== 0 && ex.enabled !== '0';
+            return E('div', {
+                'class': 'nym-split-row' + (on ? '' : ' inert'),
+                'data-id': ex.id
+            }, [
+                E('div', { 'class': 'nym-exemption-proto' }, ex.type === 'domain' ? 'DOMAIN' : 'DEVICE'),
+                E('div', { 'class': 'nym-exemption-label' }, splitValue(ex)),
+                E('div', { 'class': 'nym-exemption-label' }, ex.label || '—'),
+                E('label', { 'class': 'nym-toggle nym-toggle-sm', 'title': on ? 'Enabled' : 'Disabled' }, [
+                    E('input', {
+                        'type': 'checkbox',
+                        'checked': on ? 'checked' : null,
+                        'change': function(ev) { toggleSplit(ex, ev.target.checked); }
+                    }),
+                    E('span', { 'class': 'nym-toggle-slider' })
+                ]),
+                E('div', {
+                    'class': 'nym-exemption-delete',
+                    'title': 'Remove',
+                    'click': function() { deleteSplit(ex); }
+                }, '×')
+            ]);
+        };
+
+        var redrawSplitList = function() {
+            splitListEl.innerHTML = '';
+            if (splitState.length === 0) {
+                splitListEl.appendChild(E('div', { 'class': 'nym-exemption-empty' },
+                    'No exclusions configured. Add a device or domain below.'));
+                return;
+            }
+            splitListEl.appendChild(E('div', { 'class': 'nym-split-header' }, [
+                E('div', {}, 'Type'),
+                E('div', {}, 'Device / Domain'),
+                E('div', {}, 'Label'),
+                E('div', {}, 'On'),
+                E('div', {}, '')
+            ]));
+            splitState.forEach(function(ex) {
+                splitListEl.appendChild(renderSplitRow(ex));
+            });
+        };
+
+        var deleteSplit = function(ex) {
+            var row = splitListEl.querySelector('.nym-split-row[data-id="' + ex.id + '"]');
+            if (row) row.classList.add('removing');
+            rpc.splitDel(ex.id).then(function(result) {
+                if (result && result.success) {
+                    splitState = splitState.filter(function(e) { return e.id !== ex.id; });
+                    redrawSplitList();
+                    showToast('Removed exclusion', 'success');
+                } else {
+                    if (row) row.classList.remove('removing');
+                    showToast((result && result.error) || 'Failed to delete', 'error');
+                }
+            }).catch(function(err) {
+                if (row) row.classList.remove('removing');
+                showToast('Failed: ' + (err && err.message ? err.message : err), 'error');
+            });
+        };
+
+        var toggleSplit = function(ex, enabled) {
+            rpc.splitSetEnabled(ex.id, enabled ? 1 : 0).then(function(result) {
+                if (result && result.success) {
+                    ex.enabled = enabled ? 1 : 0;
+                    redrawSplitList();
+                } else {
+                    showToast((result && result.error) || 'Failed to update', 'error');
+                    redrawSplitList();
+                }
+            }).catch(function(err) {
+                showToast('Failed: ' + (err && err.message ? err.message : err), 'error');
+                redrawSplitList();
+            });
+        };
+
+        var addSplit = function(kind) {
+            var labelId = kind === 'domain' ? 'nym-split-domain-label' : 'nym-split-client-label';
+            var btnId = kind === 'domain' ? 'nym-split-domain-save' : 'nym-split-client-save';
+            var labelInp = document.getElementById(labelId);
+            var saveBtn = document.getElementById(btnId);
+            var label = (labelInp && labelInp.value || '').trim();
+            if (label.length > 64) { showToast('Label too long (max 64 characters)', 'error'); return; }
+
+            var mac = '', domain = '';
+            if (kind === 'domain') {
+                var domInp = document.getElementById('nym-split-domain');
+                domain = (domInp && domInp.value || '').trim().toLowerCase();
+                if (!domain) { showToast('Domain is required', 'error'); return; }
+                if (splitState.some(function(e) { return e.type === 'domain' && e.domain === domain; })) {
+                    showToast(domain + ' is already excluded', 'error'); return;
+                }
+            } else {
+                var sel = document.getElementById('nym-split-client');
+                mac = sel && sel.value || '';
+                if (!mac) { showToast('Select a device', 'error'); return; }
+                if (splitState.some(function(e) { return e.type === 'client' && e.mac === mac; })) {
+                    showToast('That device is already excluded', 'error'); return;
+                }
+            }
+
+            if (saveBtn) {
+                saveBtn.disabled = true;
+                saveBtn.innerHTML = '<span class="nym-btn-spinner"></span>Saving';
+            }
+            rpc.splitAdd(kind, mac, domain, label || '').then(function(result) {
+                if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Add'; }
+                if (result && result.success) {
+                    var ex = { id: result.id, type: kind, enabled: 1 };
+                    if (kind === 'domain') ex.domain = domain; else ex.mac = mac;
+                    if (label) ex.label = label;
+                    splitState.push(ex);
+                    redrawSplitList();
+                    if (kind === 'domain') { var di = document.getElementById('nym-split-domain'); if (di) di.value = ''; }
+                    if (labelInp) labelInp.value = '';
+                    showToast('Added exclusion', 'success');
+                } else {
+                    showToast((result && result.error) || 'Failed to add exclusion', 'error');
+                }
+            }).catch(function(err) {
+                if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Add'; }
+                showToast('Failed: ' + (err && err.message ? err.message : err), 'error');
+            });
+        };
+
+        var splitDomainKeydown = function(ev) {
+            if (ev.key === 'Enter') { ev.preventDefault(); addSplit('domain'); }
+        };
+
+        // Device dropdown options from current DHCP leases.
+        var clientOptions = [E('option', { 'value': '' }, lan_clients.length ? 'Select a device…' : 'No DHCP leases found')];
+        lan_clients.forEach(function(c) {
+            var name = (c.hostname ? c.hostname + ' — ' : '') + (c.ip ? c.ip + ' — ' : '') + c.mac;
+            clientOptions.push(E('option', { 'value': c.mac }, name));
+        });
+
+        // Domain add row — disabled with a hint when dnsmasq lacks nftset support.
+        var domainAddRow = nftsetSupported
+            ? E('div', { 'class': 'nym-exemption-addrow' }, [
+                E('input', {
+                    'type': 'text', 'class': 'nym-input', 'id': 'nym-split-domain',
+                    'placeholder': 'example.com', 'maxlength': '253', 'keydown': splitDomainKeydown
+                }),
+                E('input', {
+                    'type': 'text', 'class': 'nym-input', 'id': 'nym-split-domain-label',
+                    'placeholder': 'Label (optional)', 'maxlength': '64', 'keydown': splitDomainKeydown
+                }),
+                E('button', {
+                    'class': 'nym-btn nym-btn-primary', 'id': 'nym-split-domain-save',
+                    'click': function() { addSplit('domain'); }
+                }, 'Add')
+            ])
+            : E('div', { 'class': 'nym-card-description', 'style': 'color: #e67e22' },
+                'Domain exclusions require dnsmasq-full (built with nftset support). ' +
+                'Install it with: opkg install dnsmasq-full');
+
+        dom.content(splitMount, [
+            E('div', { 'class': 'nym-divider' }),
+            E('div', { 'class': 'nym-toggle-title', 'style': 'margin-bottom: 6px' }, 'Split Tunnelling'),
+            E('div', { 'class': 'nym-card-description' },
+                'Send specific devices or domains straight to the WAN, bypassing the VPN. ' +
+                'Clients must use this router for DNS for domain rules.'),
+            splitListEl,
+            E('div', { 'class': 'nym-exemption-add' }, [
+                E('div', { 'class': 'nym-form-label' }, 'Exclude a Device'),
+                E('div', { 'class': 'nym-exemption-addrow' }, [
+                    E('select', { 'class': 'nym-select', 'id': 'nym-split-client', 'style': 'flex: 2' }, clientOptions),
+                    E('input', {
+                        'type': 'text', 'class': 'nym-input', 'id': 'nym-split-client-label',
+                        'placeholder': 'Label (optional)', 'maxlength': '64'
+                    }),
+                    E('button', {
+                        'class': 'nym-btn nym-btn-primary', 'id': 'nym-split-client-save',
+                        'click': function() { addSplit('client'); }
+                    }, 'Add')
+                ]),
+                E('div', { 'class': 'nym-form-label', 'style': 'margin-top: 10px' }, 'Exclude a Domain'),
+                domainAddRow
+            ])
+        ]);
+        redrawSplitList();
 
         // DNS & Ad Blocking Card
         var adBlockEnabled = ad_block.enabled ? true : false;

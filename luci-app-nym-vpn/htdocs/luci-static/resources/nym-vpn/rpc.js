@@ -135,6 +135,42 @@ return baseclass.extend({
         params: ['proto', 'dport']
     }),
 
+    splitList: rpc.declare({
+        object: 'nym-vpn',
+        method: 'split_list',
+        params: []
+    }),
+
+    splitAdd: rpc.declare({
+        object: 'nym-vpn',
+        method: 'split_add',
+        params: ['type', 'mac', 'domain', 'label']
+    }),
+
+    splitDel: rpc.declare({
+        object: 'nym-vpn',
+        method: 'split_del',
+        params: ['id']
+    }),
+
+    splitSetEnabled: rpc.declare({
+        object: 'nym-vpn',
+        method: 'split_set_enabled',
+        params: ['id', 'enabled']
+    }),
+
+    splitStatus: rpc.declare({
+        object: 'nym-vpn',
+        method: 'split_status',
+        params: []
+    }),
+
+    clientsList: rpc.declare({
+        object: 'nym-vpn',
+        method: 'clients_list',
+        params: []
+    }),
+
     dnsGet: rpc.declare({
         object: 'nym-vpn',
         method: 'dns_get',
