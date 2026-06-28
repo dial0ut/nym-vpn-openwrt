@@ -24,6 +24,27 @@ connected — this happens regardless of the kill-switch. Split tunnelling is th
 - Bypass the VPN for a banking or streaming destination
 - Route all traffic through the VPN *except* a few carve-outs
 
+## Managed exclusions (LuCI)
+
+The simplest way to manage carve-outs is the built-in UI — no nft, no marks, no extra
+packages for device rules. In LuCI go to **NymVPN → Tunnel Settings → Split Tunnelling** and add:
+
+- **Devices** — pick a LAN client from the DHCP-lease dropdown. Stored by MAC, so it survives
+  the client's IP changing.
+- **Domains** — type a hostname (e.g. `example.com`). The router resolves it and steers the
+  answer IPs (v4 and v6) out the WAN. Domain rules need `dnsmasq-full` (the base `dnsmasq`
+  lacks nftset support); the panel detects this and tells you if it's missing. Clients must use
+  this router as their DNS resolver.
+
+Each exclusion has an enable toggle, so you can keep a rule around without it being active. The
+panel works while connected and applies immediately. **The kill-switch can stay on:** excluded
+traffic always uses the WAN, while everything else remains protected — including during reconnects
+(see [How it works](#how-it-works)).
+
+Under the hood this just writes the same `0x14e` mark rules described below into a managed
+drop-in (`/etc/nftables.d/30-nym-split.nft`) plus dnsmasq `nftset` lines, then reloads. The rest
+of this page documents that mechanism for advanced/manual setups and for `pbr` users.
+
 ## How it works
 
 When connected, the daemon installs:
@@ -47,28 +68,31 @@ mark stays in the tunnel.
 `0x14e` is the daemon's **bypass mark** (the same mark used internally to pin
 inbound-service replies to the WAN). It is distinct from the tunnel mark `0x14d`.
 
-## Step 1: Turn the kill-switch off
+The kill-switch firewall **honours `0x14e`**: its forward chain accepts marked traffic out
+the WAN unconditionally, while still rejecting every other non-tunnel egress. So the
+routing and firewall layers agree — marked = bypass, unmarked = tunnel-or-blocked. This is
+safe because `0x14e` is router-internal netfilter metadata: a LAN client cannot set it on
+its own packets, so only the deliberate router rules below (or the managed UI) ever carry it.
 
-Carve-out traffic egresses the WAN. With the kill-switch **on**, the firewall blocks all
-non-tunnel WAN egress, so your carve-outs would be dropped. Split tunnelling therefore
-requires the kill-switch off:
+## Works with the kill-switch on
 
-```bash
-nym-vpnc tunnel set --killswitch off
-```
+Unlike earlier versions, split tunnelling **no longer requires turning the kill-switch
+off**. With the kill-switch on:
 
-Or in LuCI: **NymVPN > Tunnel Settings > Kill-Switch** → off. Reconnect after changing it.
+- your carve-outs (marked `0x14e`) egress the WAN, and
+- everything else stays blocked unless it's in the tunnel — including during reconnects,
+  when the tunnel is briefly down. Non-excluded clients never leak.
 
 !!! warning
-    With the kill-switch off, any traffic that bypasses the tunnel — your carve-outs, and
-    anything else not routed into the tunnel — goes direct over the WAN in the clear. This
-    is the expected trade-off for split tunnelling. If you need a kill-switch *and*
-    selective exposure of inbound services, use [Inbound Services](inbound-services.md).
+    Carve-out traffic egresses the WAN **in the clear** (it deliberately bypasses the VPN).
+    That is the point of an exclusion — just be aware those specific devices/destinations
+    are not protected by the tunnel. Everything you don't mark stays protected.
 
-## Step 2: Mark the traffic to exclude
+## Manual: mark the traffic to exclude
 
-The reliable, package-free method is an nftables drop-in that marks matching packets in
-the `prerouting` (mangle) hook, before the routing decision for forwarded traffic.
+If you'd rather not use the LuCI panel, the reliable, package-free method is an nftables
+drop-in that marks matching packets in the `prerouting` (mangle) hook, before the routing
+decision for forwarded traffic.
 
 Create `/etc/nftables.d/30-nymvpn-split.nft`:
 
