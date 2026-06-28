@@ -5,6 +5,21 @@
 # Enable nym-vpnd service on install
 /etc/init.d/nym-vpnd enable 2>/dev/null
 
+# Register the fw4 firewall include. A `fw4 reload` rebuilds the `inet fw4`
+# table and wipes the daemon's masquerade/forward integration (the kill-switch
+# lives in a separate `inet nym` table and survives), breaking LAN-client
+# connectivity until the daemon happens to re-apply. The include re-adds that
+# integration after every reload. type=script (NOT fw4_compatible: fw4 would
+# capture stdout as nft syntax during assembly instead of running the script's
+# `nft add` side effects post-load).
+if ! uci -q get firewall.nym_vpn >/dev/null 2>&1; then
+    uci set firewall.nym_vpn=include
+    uci set firewall.nym_vpn.type=script
+    uci set firewall.nym_vpn.path=/usr/share/nym-vpn/fw4-include.sh
+    uci set firewall.nym_vpn.enabled=1
+    uci commit firewall
+fi
+
 # Restart rpcd to register the ubus backend
 /etc/init.d/rpcd restart 2>/dev/null
 

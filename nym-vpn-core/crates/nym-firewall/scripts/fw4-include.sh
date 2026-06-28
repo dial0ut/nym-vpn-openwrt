@@ -2,7 +2,7 @@
 # Nym VPN firewall include script for OpenWrt fw4 (nftables)
 #
 # This script is called by fw4 on start and restart.
-# It re-applies Nym VPN's kill-switch rules if the daemon is running.
+# It re-applies the Nym VPN integration that lives inside fw4's own table.
 #
 # Installation:
 #   1. Copy to /usr/share/nym-vpn/fw4-include.sh
@@ -13,79 +13,107 @@
 #          option fw4_compatible '1'
 #          option enabled '1'
 #
-# How it works:
-#   - The Nym VPN daemon writes nftables rules to /tmp/nym-firewall.nft
-#   - This script re-applies those rules after fw4 restarts
-#   - The rules create a separate 'inet nym' table at priority -10
-#   - This runs before fw4's 'inet fw4' table at priority 0
-#   - It also restores masquerade and forward rules in fw4's own chains
+# Why this exists:
+#   A `fw4 reload` rebuilds the `inet fw4` table from scratch. The kill-switch
+#   blocking rules live in a SEPARATE `inet nym` table (priority filter -10) and
+#   survive a reload untouched — the daemon owns that table's lifecycle, so this
+#   script must never delete it. What does NOT survive are the daemon's tunnel
+#   integration chains, which live INSIDE `inet fw4`:
+#     - nym_postrouting  (masquerade for tunnel interfaces; jumped from srcnat)
+#     - nym_forward_lan   (LAN<->tunnel forward accepts; jumped from forward_lan)
+#   Those are wiped on every reload, breaking LAN-client connectivity until the
+#   daemon happens to re-apply. This script restores them on each reload so a
+#   reload (ours via split-tunnel regen, the user's, mwan3's, ...) is transparent.
 #
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright 2025 Nym Technologies SA <contact@nymtech.net>
 
 set -e
 
-# Path to rules file written by the daemon
+# Optional daemon-written hints (kept for forward-compatibility; the script does
+# not depend on them and falls back to live detection when absent).
 RULES_NFT="/tmp/nym-firewall.nft"
+IFACES_FILE="/tmp/nym-firewall.ifaces"
 
-# Extract tunnel interface names from the saved nft rules file.
-# Looks for oifname "xyz" accept patterns in the forward chain,
-# which indicate tunnel interfaces (e.g., wg0, tun0).
+# Chain names — kept identical to the daemon's fw4 backend (integrate_with_fw4)
+# so restore and the daemon converge on a single structure instead of two
+# competing sets of rules.
+NAT_CHAIN="nym_postrouting"
+FORWARD_CHAIN="nym_forward_lan"
+
+# Resolve the active tunnel interfaces to masquerade/forward. Order of trust:
+#   1. daemon-written iface list (authoritative, if present)
+#   2. tunnel ifaces named in a saved blocking ruleset (if present)
+#   3. live detection of nym* tunnel devices (the common case — the daemon
+#      pipes its ruleset to `nft -f -` and writes no file)
 get_tunnel_interfaces() {
-    if [ ! -f "$RULES_NFT" ]; then
+    if [ -f "$IFACES_FILE" ]; then
+        grep -v '^lo$' "$IFACES_FILE" 2>/dev/null | sort -u
         return
     fi
-    # Match lines like: oifname "wg0" accept
-    # Exclude loopback. Deduplicate results.
-    grep -o 'oifname "[^"]*" accept' "$RULES_NFT" 2>/dev/null | \
-        sed 's/oifname "//;s/" accept//' | \
-        grep -v '^lo$' | \
+    if [ -f "$RULES_NFT" ]; then
+        grep -o 'oifname "[^"]*" accept' "$RULES_NFT" 2>/dev/null | \
+            sed 's/oifname "//;s/" accept//' | \
+            grep -v '^lo$' | \
+            sort -u
+        return
+    fi
+    # Live-detect: nym tunnel devices created by the daemon (nym0, nym1, ...).
+    ip -o link show 2>/dev/null | \
+        sed -n 's/^[0-9]*: \(nym[0-9][0-9]*\)[@:].*/\1/p' | \
         sort -u
 }
 
-# Re-add masquerade and forward rules to fw4's chains for tunnel interfaces.
-# These rules are lost when fw4 restarts because fw4 recreates its table.
+# Recreate the daemon's masquerade + forward integration inside inet fw4 for the
+# active tunnel interfaces. Mirrors integrate_with_fw4 in the fw4 backend:
+# owned chains, flushed and repopulated, with jumps added only when missing.
+# Idempotent and safe to run on every reload.
 restore_fw4_tunnel_rules() {
-    for iface in $(get_tunnel_interfaces); do
-        # Masquerade for tunnel interface (NAT for LAN clients)
-        nft add rule inet fw4 srcnat \
+    local ifaces
+    ifaces="$(get_tunnel_interfaces)"
+    [ -n "$ifaces" ] || return 0
+
+    # Own chains (ignore "File exists" — these are recreated each reload).
+    nft add chain inet fw4 "$NAT_CHAIN" 2>/dev/null || true
+    nft add chain inet fw4 "$FORWARD_CHAIN" 2>/dev/null || true
+    nft flush chain inet fw4 "$NAT_CHAIN" 2>/dev/null || true
+    nft flush chain inet fw4 "$FORWARD_CHAIN" 2>/dev/null || true
+
+    local iface
+    for iface in $ifaces; do
+        nft add rule inet fw4 "$NAT_CHAIN" \
             oifname "$iface" counter masquerade \
             comment "\"nym-vpn: masquerade tunnel traffic\"" 2>/dev/null || true
-
-        # Forward LAN to tunnel
-        nft add rule inet fw4 forward_lan \
+        nft add rule inet fw4 "$FORWARD_CHAIN" \
             oifname "$iface" accept \
             comment "\"nym-vpn: forward LAN to tunnel\"" 2>/dev/null || true
-
-        # Forward tunnel to LAN
-        nft add rule inet fw4 forward_lan \
-            iifname "$iface" accept \
+        nft add rule inet fw4 "$FORWARD_CHAIN" \
+            iifname "$iface" ct state established,related accept \
             comment "\"nym-vpn: forward tunnel to LAN\"" 2>/dev/null || true
-
         logger -t nym-vpn "Restored fw4 integration rules for interface $iface"
     done
+
+    # Jumps from fw4's own chains — add only if absent (match structurally on
+    # `jump <chain>` so a comment mentioning the name can't collide).
+    nft list chain inet fw4 srcnat 2>/dev/null | grep -q "jump $NAT_CHAIN" || \
+        nft add rule inet fw4 srcnat jump "$NAT_CHAIN" 2>/dev/null || true
+    nft list chain inet fw4 forward_lan 2>/dev/null | grep -q "jump $FORWARD_CHAIN" || \
+        nft add rule inet fw4 forward_lan jump "$FORWARD_CHAIN" 2>/dev/null || true
 }
 
 # Main logic
 main() {
-    # Check if VPN daemon has written rules
+    # If the daemon ever persists its blocking ruleset, re-apply it (the inet nym
+    # table is otherwise daemon-managed and survives the reload on its own — we
+    # must NOT delete it here, or a firewall reload would silently drop the
+    # kill-switch while the daemon thinks it is still up).
     if [ -f "$RULES_NFT" ]; then
-        logger -t nym-vpn "Re-applying nftables firewall rules after fw4 restart"
-
-        # Apply the inet nym table rules atomically
-        if nft -f "$RULES_NFT"; then
-            logger -t nym-vpn "Firewall rules applied successfully"
-        else
-            logger -t nym-vpn "Failed to apply firewall rules"
-        fi
-
-        # Restore masquerade and forward rules in fw4's own chains
-        restore_fw4_tunnel_rules
-    else
-        # No rules file - ensure our table is removed if it exists
-        logger -t nym-vpn "No active rules, ensuring cleanup"
-        nft delete table inet nym 2>/dev/null || true
+        logger -t nym-vpn "Re-applying saved nftables rules after fw4 restart"
+        nft -f "$RULES_NFT" 2>/dev/null || logger -t nym-vpn "Failed to apply saved rules"
     fi
+
+    # Always restore the in-fw4 tunnel integration that the reload wiped.
+    restore_fw4_tunnel_rules
 }
 
 main "$@"

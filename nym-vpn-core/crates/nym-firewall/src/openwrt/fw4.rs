@@ -310,12 +310,19 @@ fn install_uci_config() -> Result<()> {
         return Ok(());
     }
 
+    // Register as a side-effecting script include: fw4 runs it after building
+    // its table on every start/reload, so our script can re-add the masquerade
+    // and forward jumps inside `inet fw4` that the reload wiped. Note: NOT
+    // `fw4_compatible` — that flag makes fw4 capture the script's stdout as nft
+    // syntax during ruleset assembly (when `inet fw4` doesn't exist yet), which
+    // is wrong for a script that issues `nft add rule inet fw4 ...` side effects.
+    // This matches the proven pattern used by stock OpenWrt/GL.iNet script
+    // includes. (`reload` is an fw3-ism fw4 warns about and ignores — omit it.)
     let path_setting = format!("firewall.nym_vpn.path={FW4_INCLUDE_PATH}");
     let commands: &[&[&str]] = &[
         &["set", "firewall.nym_vpn=include"],
         &["set", "firewall.nym_vpn.type=script"],
         &["set", &path_setting],
-        &["set", "firewall.nym_vpn.fw4_compatible=1"],
         &["set", "firewall.nym_vpn.enabled=1"],
         &["commit", "firewall"],
     ];
