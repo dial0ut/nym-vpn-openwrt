@@ -89,17 +89,25 @@ packages.dial0ut.org/
 └── apk/
     ├── aarch64_generic/
     │   ├── nym-vpn_1.23.0_aarch64_generic.apk
-    │   └── APKINDEX.tar.gz (signed)
+    │   └── packages.adb (signed)
     └── ...
 ```
 
 ## Feed Signing
 
-Package feeds are signed with RSA to prevent tampering. The public key (`scripts/feed/dial0ut.pub`) is included in the IPK/APK package and installed to `/etc/opkg/keys/` or `/etc/apk/keys/` during `postinst`.
+The opkg and apk feeds use different signing schemes, so each format ships its
+own public key inside the package (copied to the keystore at **build time** by
+`build-ipk.sh` / `build-apk.sh`, not in `postinst`).
 
-**opkg signing:** The `Packages` index file is signed with `openssl dgst -sha256`, producing a detached `Packages.sig`.
+**opkg signing:** The `Packages` index is signed with usign/signify (Ed25519),
+producing a detached `Packages.sig`. The public key (`scripts/feed/dial0ut.pub`)
+is installed to `/etc/opkg/keys/`.
 
-**apk signing:** The `APKINDEX` is signed with `openssl dgst -sha1`, and the signature is embedded inside `APKINDEX.tar.gz` as `.SIGN.RSA.dial0ut.pub`.
+**apk signing:** The `packages.adb` index is signed by `apk mkndx --sign-key`
+with an ECDSA P-256 key. apk matches the signature to a public key in
+`/etc/apk/keys/` **by the key's basename**, so the private key used in CI
+(`dial0ut-apk.pem`) and the shipped public key (`scripts/feed/dial0ut-apk.pem`
+→ `/etc/apk/keys/dial0ut-apk.pem`) must share that name.
 
 ## Release Artifacts
 

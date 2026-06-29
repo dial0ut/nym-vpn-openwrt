@@ -181,11 +181,12 @@ generate_apk_feed() {
             continue
         fi
 
-        # Build mkndx arguments
-        local sign_args=""
-        if [ -n "$SIGNING_KEY" ]; then
-            sign_args="--sign-key /work/key.pem"
-        fi
+        # apk embeds the *basename* of the signing key into the index
+        # signature; the device must have a public key of the same name in
+        # /etc/apk/keys/. Keep the basename stable so it matches the public
+        # key we ship (scripts/feed/dial0ut-apk.pem → /etc/apk/keys/).
+        local key_name=""
+        [ -n "$SIGNING_KEY" ] && key_name="$(basename "$SIGNING_KEY")"
 
         if command -v apk >/dev/null 2>&1 && apk mkndx --help >/dev/null 2>&1; then
             # Native apk-tools available
@@ -199,7 +200,13 @@ generate_apk_feed() {
             # Use Docker Alpine
             echo "  Using Docker Alpine for apk mkndx"
             local docker_args=(-v "$abs_arch_dir:/work/pkgs")
-            [ -n "$SIGNING_KEY" ] && docker_args+=(-v "$SIGNING_KEY:/work/key.pem:ro")
+            local sign_args=""
+            if [ -n "$SIGNING_KEY" ]; then
+                # Mount under the key's real basename so the embedded key
+                # name matches the public key shipped on-device.
+                docker_args+=(-v "$SIGNING_KEY:/work/$key_name:ro")
+                sign_args="--sign-key /work/$key_name"
+            fi
 
             # Build list of package paths inside container
             local container_pkgs=()
