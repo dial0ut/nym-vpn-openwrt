@@ -1576,7 +1576,7 @@ return view.extend({
         ]);
         redrawInboundList();
 
-        // Split Tunnelling — carve specific devices/domains out of the tunnel,
+        // Split Tunneling — carve specific devices/domains out of the tunnel,
         // straight to the WAN. Mounts in the Tunnel Settings card beneath inbound
         // services. Exclusions are marked with fwmark 0x14e and only take effect
         // while the kill-switch is OFF (when ON the firewall drops non-tunnel
@@ -1753,7 +1753,7 @@ return view.extend({
 
         dom.content(splitMount, [
             E('div', { 'class': 'nym-divider' }),
-            E('div', { 'class': 'nym-toggle-title', 'style': 'margin-bottom: 6px' }, 'Split Tunnelling'),
+            E('div', { 'class': 'nym-toggle-title', 'style': 'margin-bottom: 6px' }, 'Split Tunneling'),
             E('div', { 'class': 'nym-card-description' },
                 'Send specific devices or domains straight to the WAN, bypassing the VPN. ' +
                 'Clients must use this router for DNS for domain rules.'),

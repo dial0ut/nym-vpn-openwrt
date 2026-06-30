@@ -131,7 +131,7 @@ impl RouteHandler {
         // the tunnel is up. They are NOT gated on the kill-switch: routing traffic
         // into the tunnel is the daemon's job regardless, while the kill-switch only
         // controls whether non-tunnel WAN egress is *blocked* (see nym-firewall).
-        // Split tunnelling carves traffic back out via the exempt fwmark, not by
+        // Split tunneling carves traffic back out via the exempt fwmark, not by
         // withholding the default route. See docs/guide/split-tunneling.md.
         match routing_config {
             RoutingConfig::Mixnet {

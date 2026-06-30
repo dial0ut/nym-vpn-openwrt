@@ -1,7 +1,7 @@
 # Split Tunneling
 
 By default, **all** LAN traffic is routed through the VPN tunnel whenever NymVPN is
-connected — this happens regardless of the kill-switch. Split tunnelling is the act of
+connected — this happens regardless of the kill-switch. Split tunneling is the act of
 **carving specific traffic back out to the WAN** so it bypasses the tunnel.
 
 !!! note "This changed in recent versions"
@@ -9,7 +9,7 @@ connected — this happens regardless of the kill-switch. Split tunnelling is th
     kill-switch *off* also stopped routing traffic into the tunnel, so you had to add
     traffic back *in* with PBR. That is no longer the case. Routing into the tunnel is
     now always on when connected; the kill-switch **only** controls whether non-tunnel
-    WAN egress is blocked. Split tunnelling is now **exclusion**-based, not inclusion-based.
+    WAN egress is blocked. Split tunneling is now **exclusion**-based, not inclusion-based.
 
 !!! note "Looking to expose a service to the WAN?"
     This page covers **outbound** exclusions — sending selected LAN clients or destinations
@@ -27,7 +27,7 @@ connected — this happens regardless of the kill-switch. Split tunnelling is th
 ## Managed exclusions (LuCI)
 
 The simplest way to manage carve-outs is the built-in UI — no nft, no marks, no extra
-packages for device rules. In LuCI go to **NymVPN → Tunnel Settings → Split Tunnelling** and add:
+packages for device rules. In LuCI go to **NymVPN → Tunnel Settings → Split Tunneling** and add:
 
 - **Devices** — pick a LAN client from the DHCP-lease dropdown. Stored by MAC, so it survives
   the client's IP changing.
@@ -76,7 +76,7 @@ its own packets, so only the deliberate router rules below (or the managed UI) e
 
 ## Works with the kill-switch on
 
-Unlike earlier versions, split tunnelling **no longer requires turning the kill-switch
+Unlike earlier versions, split tunneling **no longer requires turning the kill-switch
 off**. With the kill-switch on:
 
 - your carve-outs (marked `0x14e`) egress the WAN, and
