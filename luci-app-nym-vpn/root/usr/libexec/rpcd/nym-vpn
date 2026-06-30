@@ -5,8 +5,16 @@
 # rpcd backend for nym-vpn LuCI interface
 
 . /usr/share/libubox/jshn.sh
+. /lib/functions.sh
 
 VPNC="/usr/bin/nym-vpnc"
+
+# Split-tunnel exclusions: managed nftables drop-in + dnsmasq nftset bridge.
+# Matching packets are marked with the daemon's bypass fwmark (0x14e), which the
+# always-installed priority-90 ip rule routes out the real WAN. See
+# docs/guide/split-tunneling.md.
+SPLIT_NFT="/etc/nftables.d/30-nym-split.nft"
+SPLIT_MARK="0x14e"
 
 #-------------------------------------------------------------------------------
 # Helper functions
@@ -68,6 +76,19 @@ validate_input() {
             case "$input" in
                 tcp|udp) echo "$input" ;;
             esac
+            ;;
+        mac)
+            # Colon-separated EUI-48, normalised to lowercase.
+            echo "$input" | grep -qE '^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$' && \
+                echo "$input" | tr 'A-F' 'a-f'
+            ;;
+        domain)
+            # RFC-1035-ish hostname: dotted alphanumeric/hyphen labels, max 253.
+            local len=${#input}
+            if [ "$len" -ge 1 ] && [ "$len" -le 253 ]; then
+                echo "$input" | grep -qE '^([A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,}$' && \
+                    echo "$input" | tr 'A-Z' 'a-z'
+            fi
             ;;
         port)
             # 1-65535
@@ -963,6 +984,302 @@ handle_inbound_del() {
     json_dump
 }
 
+#-------------------------------------------------------------------------------
+# Split-tunnel exclusions (managed in UCI /etc/config/nym-vpn `exclusion` sections)
+#-------------------------------------------------------------------------------
+
+_split_err() {
+    json_init
+    json_add_boolean "success" 0
+    json_add_string "error" "$1"
+    json_dump
+}
+
+# Emit one `exclusion` section as a JSON object into the open array. Used by
+# both split_list and the init batch.
+_split_emit() {
+    local section="$1"
+    local type mac domain label enabled
+    config_get type "$section" type
+    [ -n "$type" ] || return 0
+    config_get mac "$section" mac
+    config_get domain "$section" domain
+    config_get label "$section" label
+    config_get enabled "$section" enabled "1"
+    json_add_object ""
+    json_add_string "id" "$section"
+    json_add_string "type" "$type"
+    [ -n "$mac" ] && json_add_string "mac" "$mac"
+    [ -n "$domain" ] && json_add_string "domain" "$domain"
+    [ -n "$label" ] && json_add_string "label" "$label"
+    json_add_boolean "enabled" "$enabled"
+    json_close_object
+}
+
+# True (0) if dnsmasq is built with nftset support (i.e. dnsmasq-full).
+_split_nftset_supported() {
+    command -v dnsmasq >/dev/null 2>&1 || return 1
+    local opts=$(dnsmasq --version 2>&1)
+    echo "$opts" | grep -qw nftset && ! echo "$opts" | grep -qw 'no-nftset'
+}
+
+# Accumulators populated by config_foreach during regen.
+_split_clients=""
+_split_domains=""
+
+_split_collect() {
+    local section="$1"
+    local type enabled mac domain
+    config_get type "$section" type
+    config_get enabled "$section" enabled "1"
+    [ "$enabled" = "1" ] || return 0
+    case "$type" in
+        client)
+            config_get mac "$section" mac
+            [ -n "$mac" ] && _split_clients="$_split_clients $mac"
+            ;;
+        domain)
+            config_get domain "$section" domain
+            [ -n "$domain" ] && _split_domains="$_split_domains $domain"
+            ;;
+    esac
+}
+
+# Duplicate detection: sets _split_dup_found=1 if $2 already stored in field $1.
+_split_dup_found=0
+_split_dup_check() {
+    local section="$1"
+    local cur
+    config_get cur "$section" "$_split_dup_field"
+    [ "$cur" = "$_split_dup_value" ] && _split_dup_found=1
+}
+
+# Derive a stable, deterministic section name from the exclusion content.
+# Anonymous `cfgXXXX` section names are reassigned by libuci on commit and
+# renumbered when siblings change, so an id handed to the frontend at add-time
+# goes stale — later remove/toggle calls then fail with "No such exclusion"
+# while a re-add trips the dedup check ("already excluded"). A content-keyed
+# named section keeps the id stable for the life of the exclusion. MACs map to a
+# readable `cli_<hex>`; domains are hashed (`dom_<md5>`) to stay within UCI's
+# `[A-Za-z0-9_]` name charset without collisions.
+_split_section_name() {
+    case "$1" in
+        client) printf 'cli_%s' "$(echo "$2" | tr -d ':' | tr 'A-Z' 'a-z')" ;;
+        domain) printf 'dom_%s' "$(printf '%s' "$3" | md5sum | cut -c1-16)" ;;
+    esac
+}
+
+# Our managed dnsmasq set config is a single named `ipset` section, so removal
+# is just deleting it. OpenWrt's dnsmasq translates `config ipset` into both
+# --ipset and --nftset directives; on fw4 the --nftset one is what populates our
+# sets (the set name's trailing 4/6 tells dnsmasq which family to route there).
+_split_clear_dnsmasq() {
+    uci -q delete dhcp.nym_split_ipset 2>/dev/null
+}
+
+_split_write_nft() {
+    {
+        echo "# Managed by luci-app-nym-vpn — do not edit by hand."
+        echo "# Marks split-tunnel carve-outs with fwmark ${SPLIT_MARK} (priority-90"
+        echo "# ip rule routes them out the real WAN). Included into table inet fw4."
+        if [ -n "$_split_domains" ]; then
+            # Plain sets (dnsmasq adds individual host addresses as it resolves).
+            echo "set nym_bypass4 {"
+            echo "	type ipv4_addr"
+            echo "}"
+            echo "set nym_bypass6 {"
+            echo "	type ipv6_addr"
+            echo "}"
+        fi
+        echo "chain nym_split {"
+        echo "	type filter hook prerouting priority mangle - 1; policy accept;"
+        local m
+        for m in $_split_clients; do
+            echo "	ether saddr ${m} meta mark set ${SPLIT_MARK}"
+        done
+        if [ -n "$_split_domains" ]; then
+            echo "	ip daddr @nym_bypass4 meta mark set ${SPLIT_MARK}"
+            echo "	ip6 daddr @nym_bypass6 meta mark set ${SPLIT_MARK}"
+        fi
+        echo "}"
+    } > "$SPLIT_NFT"
+}
+
+# Regenerate the nft drop-in + dnsmasq nftset lines from stored exclusions and
+# reload. Idempotent; safe to call with an empty list (tears everything down).
+regen_split() {
+    _split_clients=""
+    _split_domains=""
+    config_load nym-vpn
+    config_foreach _split_collect exclusion
+
+    # dnsmasq nftset bridge (only meaningful with nftset support present).
+    _split_clear_dnsmasq
+    if [ -n "$_split_domains" ] && _split_nftset_supported; then
+        uci set dhcp.nym_split_ipset=ipset
+        uci add_list dhcp.nym_split_ipset.name='nym_bypass4'
+        uci add_list dhcp.nym_split_ipset.name='nym_bypass6'
+        local d
+        for d in $_split_domains; do
+            uci add_list dhcp.nym_split_ipset.domain="$d"
+        done
+        uci set dhcp.nym_split_ipset.table='fw4'
+        uci set dhcp.nym_split_ipset.table_family='inet'
+    fi
+    uci commit dhcp
+
+    if [ -z "$_split_clients" ] && [ -z "$_split_domains" ]; then
+        rm -f "$SPLIT_NFT"
+    else
+        _split_write_nft
+    fi
+
+    # Firewall first so the sets exist before dnsmasq references them.
+    fw4 reload >/dev/null 2>&1 || /etc/init.d/firewall reload >/dev/null 2>&1
+    /etc/init.d/dnsmasq restart >/dev/null 2>&1
+}
+
+handle_split_list() {
+    json_init
+    json_add_array "exclusions"
+    config_load nym-vpn
+    config_foreach _split_emit exclusion
+    json_close_array
+    json_dump
+}
+
+handle_split_add() {
+    read input
+    json_load "$input"
+    json_get_var type type
+    json_get_var mac mac
+    json_get_var domain domain
+    json_get_var label label
+
+    _split_dup_found=0
+    case "$type" in
+        client)
+            mac=$(validate_input "$mac" mac)
+            [ -z "$mac" ] && { _split_err "Invalid MAC address"; return; }
+            _split_dup_field=mac; _split_dup_value="$mac"
+            config_load nym-vpn; config_foreach _split_dup_check exclusion
+            [ "$_split_dup_found" = "1" ] && { _split_err "$mac is already excluded"; return; }
+            ;;
+        domain)
+            domain=$(validate_input "$domain" domain)
+            [ -z "$domain" ] && { _split_err "Invalid domain"; return; }
+            _split_dup_field=domain; _split_dup_value="$domain"
+            config_load nym-vpn; config_foreach _split_dup_check exclusion
+            [ "$_split_dup_found" = "1" ] && { _split_err "$domain is already excluded"; return; }
+            ;;
+        *)
+            _split_err "Invalid type (must be client or domain)"; return ;;
+    esac
+
+    if [ -n "$label" ]; then
+        label=$(validate_input "$label" label)
+        [ -z "$label" ] && { _split_err "Invalid label (max 64 chars, safe chars only)"; return; }
+    fi
+
+    # Ensure the package file exists so `uci set` has somewhere to append.
+    [ -f /etc/config/nym-vpn ] || : > /etc/config/nym-vpn
+    # Named (not anonymous) section so the id is stable across commit and
+    # sibling deletes — see _split_section_name. The dedup check above already
+    # guarantees this content isn't present, so the name can't clash.
+    local sid=$(_split_section_name "$type" "$mac" "$domain")
+    [ -z "$sid" ] && { _split_err "Failed to create exclusion"; return; }
+    uci set nym-vpn.$sid=exclusion
+    uci set nym-vpn.$sid.type="$type"
+    [ "$type" = "client" ] && uci set nym-vpn.$sid.mac="$mac"
+    [ "$type" = "domain" ] && uci set nym-vpn.$sid.domain="$domain"
+    [ -n "$label" ] && uci set nym-vpn.$sid.label="$label"
+    uci set nym-vpn.$sid.enabled="1"
+    uci commit nym-vpn
+
+    regen_split
+
+    json_init
+    json_add_boolean "success" 1
+    json_add_string "id" "$sid"
+    json_add_string "message" "Added exclusion"
+    json_dump
+}
+
+handle_split_del() {
+    read input
+    json_load "$input"
+    json_get_var id id
+
+    case "$id" in
+        ''|*[!A-Za-z0-9_]*) _split_err "Invalid id"; return ;;
+    esac
+    local stype=$(uci -q get nym-vpn.$id 2>/dev/null)
+    [ "$stype" = "exclusion" ] || { _split_err "No such exclusion"; return; }
+
+    uci -q delete nym-vpn.$id
+    uci commit nym-vpn
+    regen_split
+
+    json_init
+    json_add_boolean "success" 1
+    json_add_string "message" "Removed exclusion"
+    json_dump
+}
+
+handle_split_set_enabled() {
+    read input
+    json_load "$input"
+    json_get_var id id
+    json_get_var enabled enabled
+
+    case "$id" in
+        ''|*[!A-Za-z0-9_]*) _split_err "Invalid id"; return ;;
+    esac
+    case "$enabled" in
+        0|1) ;;
+        *) _split_err "Invalid enabled flag"; return ;;
+    esac
+    local stype=$(uci -q get nym-vpn.$id 2>/dev/null)
+    [ "$stype" = "exclusion" ] || { _split_err "No such exclusion"; return; }
+
+    uci set nym-vpn.$id.enabled="$enabled"
+    uci commit nym-vpn
+    regen_split
+
+    json_init
+    json_add_boolean "success" 1
+    json_dump
+}
+
+handle_split_status() {
+    local killswitch=$($VPNC tunnel get 2>&1 | grep "Kill-switch:" | sed 's/.*Kill-switch: //')
+    json_init
+    json_add_string "killswitch" "$killswitch"
+    if _split_nftset_supported; then
+        json_add_boolean "nftset_supported" 1
+    else
+        json_add_boolean "nftset_supported" 0
+    fi
+    json_dump
+}
+
+handle_clients_list() {
+    json_init
+    json_add_array "clients"
+    if [ -f /tmp/dhcp.leases ]; then
+        while read -r ts mac ip host rest; do
+            [ -n "$mac" ] || continue
+            json_add_object ""
+            json_add_string "mac" "$mac"
+            json_add_string "ip" "$ip"
+            [ -n "$host" ] && [ "$host" != "*" ] && json_add_string "hostname" "$host"
+            json_close_object
+        done < /tmp/dhcp.leases
+    fi
+    json_close_array
+    json_dump
+}
+
 handle_lan_get() {
     local policy=$($VPNC lan get 2>&1)
 
@@ -1235,6 +1552,33 @@ handle_init() {
         done <<EOF
 $inbound_raw
 EOF
+    fi
+    json_close_array
+
+    # Split-tunnel exclusions (managed in UCI) + capability/lease data for the UI.
+    json_add_array "split_exclusions"
+    config_load nym-vpn
+    config_foreach _split_emit exclusion
+    json_close_array
+
+    json_add_object "split_status"
+    if _split_nftset_supported; then
+        json_add_boolean "nftset_supported" 1
+    else
+        json_add_boolean "nftset_supported" 0
+    fi
+    json_close_object
+
+    json_add_array "clients"
+    if [ -f /tmp/dhcp.leases ]; then
+        while read -r ts mac ip host rest; do
+            [ -n "$mac" ] || continue
+            json_add_object ""
+            json_add_string "mac" "$mac"
+            json_add_string "ip" "$ip"
+            [ -n "$host" ] && [ "$host" != "*" ] && json_add_string "hostname" "$host"
+            json_close_object
+        done < /tmp/dhcp.leases
     fi
     json_close_array
 
@@ -1572,6 +1916,12 @@ case "$1" in
     "inbound_list": {},
     "inbound_add": { "proto": "str", "dport": "int", "label": "str" },
     "inbound_del": { "proto": "str", "dport": "int" },
+    "split_list": {},
+    "split_add": { "type": "str", "mac": "str", "domain": "str", "label": "str" },
+    "split_del": { "id": "str" },
+    "split_set_enabled": { "id": "str", "enabled": "int" },
+    "split_status": {},
+    "clients_list": {},
     "dns_get": {},
     "dns_set": { "enabled": "bool", "servers": "str" },
     "ad_block_get": {},
@@ -1613,6 +1963,12 @@ EOF
             inbound_list)            handle_inbound_list ;;
             inbound_add)             handle_inbound_add ;;
             inbound_del)             handle_inbound_del ;;
+            split_list)              handle_split_list ;;
+            split_add)               handle_split_add ;;
+            split_del)               handle_split_del ;;
+            split_set_enabled)       handle_split_set_enabled ;;
+            split_status)            handle_split_status ;;
+            clients_list)            handle_clients_list ;;
             dns_get)                 handle_dns_get ;;
             dns_set)                 handle_dns_set ;;
             ad_block_get)            handle_ad_block_get ;;

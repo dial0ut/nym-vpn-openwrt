@@ -16,6 +16,9 @@
           "network_get",
           "lan_get",
           "inbound_list",
+          "split_list",
+          "split_status",
+          "clients_list",
           "ad_block_get",
           "dns_get",
           "daemon_status",
@@ -46,6 +49,9 @@
           "lan_set",
           "inbound_add",
           "inbound_del",
+          "split_add",
+          "split_del",
+          "split_set_enabled",
           "ad_block_set",
           "dns_set",
           "daemon_restart",
@@ -61,7 +67,8 @@
         ]
       },
       "uci": [
-        "nym-vpn"
+        "nym-vpn",
+        "dhcp"
       ]
     }
   }

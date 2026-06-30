@@ -23,8 +23,13 @@ if [ -n "$ARCH" ]; then
         APK_REPO="/etc/apk/repositories.d/nym-vpn.list"
         if ! grep -q "nym-vpn" "$APK_REPO" 2>/dev/null; then
             mkdir -p /etc/apk/repositories.d
-            echo "${FEED_BASE}/apk/${ARCH}" > "$APK_REPO"
-            echo "Package feed registered: ${FEED_BASE}/apk/${ARCH}"
+            # OpenWrt apk expects the repo line to point directly at the
+            # packages.adb index (matching its own distfeeds.list, e.g.
+            # .../<arch>/base/packages.adb). A bare directory URL makes apk
+            # fall back to legacy Alpine resolution (<url>/<arch>/APKINDEX.tar.gz),
+            # which 404s against our feed.
+            echo "${FEED_BASE}/apk/${ARCH}/packages.adb" > "$APK_REPO"
+            echo "Package feed registered: ${FEED_BASE}/apk/${ARCH}/packages.adb"
         fi
     elif [ -f /etc/opkg.conf ]; then
         # OpenWrt <=23.05 (opkg package manager)

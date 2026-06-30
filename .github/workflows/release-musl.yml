@@ -448,8 +448,8 @@ jobs:
             # opkg
             echo "src/gz nym-vpn https://packages.dial0ut.org/opkg/$ARCH" >> /etc/opkg/customfeeds.conf
 
-            # apk
-            echo "https://packages.dial0ut.org/apk/$ARCH" > /etc/apk/repositories.d/nym-vpn.list
+            # apk (point directly at the packages.adb index, like OpenWrt's own distfeeds.list)
+            echo "https://packages.dial0ut.org/apk/$ARCH/packages.adb" > /etc/apk/repositories.d/nym-vpn.list
             ```
 
   publish-feed:
@@ -483,8 +483,10 @@ jobs:
         run: |
           echo "${{ secrets.DIAL0UT_OPKG }}" > /tmp/opkg.sec
           chmod 600 /tmp/opkg.sec
-          echo "${{ secrets.DIAL0UT_APK }}" > /tmp/apk.pem
-          chmod 600 /tmp/apk.pem
+          # Basename must match the public key shipped on-device
+          # (/etc/apk/keys/dial0ut-apk.pem) — apk matches signatures by key name.
+          echo "${{ secrets.DIAL0UT_APK }}" > /tmp/dial0ut-apk.pem
+          chmod 600 /tmp/dial0ut-apk.pem
 
       - name: Generate opkg feed
         run: |
@@ -496,11 +498,11 @@ jobs:
         run: |
           mkdir -p feed/apk
           cp artifacts/*.apk feed/apk/ 2>/dev/null || true
-          bash scripts/feed/generate-feed.sh apk feed/apk /tmp/apk.pem
+          bash scripts/feed/generate-feed.sh apk feed/apk /tmp/dial0ut-apk.pem
 
       - name: Clean up signing keys
         if: always()
-        run: rm -f /tmp/opkg.sec /tmp/apk.pem
+        run: rm -f /tmp/opkg.sec /tmp/dial0ut-apk.pem
 
       - name: Upload to Cloudflare R2
         env:

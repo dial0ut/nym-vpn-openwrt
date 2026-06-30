@@ -35,6 +35,15 @@ const NTP_PORT: u16 = 123;
 const NTP_RATE_PER_MIN: u32 = 12;
 const NTP_BURST: u32 = 8;
 
+/// Rate limit for the DNS escape hatch in `Blocked`/`Connecting`. The NTP
+/// escape hatch is useless on its own because the router has to resolve the
+/// NTP pool hostnames (`*.pool.ntp.org`) before it can reach a server, and
+/// `block_dns` would otherwise reject that lookup. Sized for a cold-boot
+/// resolution round (a handful of pool hostnames, A+AAAA, with retries) and
+/// rate-capped so it can't degrade into a general DNS leak or exfil channel.
+const DNS_RATE_PER_MIN: u32 = 30;
+const DNS_BURST: u32 = 20;
+
 /// Compile a [`FirewallPolicy`] into a backend-neutral [`RuleSet`].
 pub fn compile(policy: &FirewallPolicy) -> RuleSet {
     let mut rs = RuleSet::default();
@@ -69,6 +78,10 @@ pub fn compile(policy: &FirewallPolicy) -> RuleSet {
                 }
             }
             exemption_filter_accepts(&mut rs, inbound_exemptions);
+            bypass_mark_forward_accept(&mut rs);
+            // DNS hatch must precede block_dns so the NTP-pool lookup the NTP
+            // hatch depends on isn't rejected.
+            dns_escape_hatch(&mut rs);
             block_dns(&mut rs);
             // A clockless router that boots straight into a connect attempt
             // needs NTP to reach a server before TLS to the API/gateway can
@@ -114,6 +127,7 @@ pub fn compile(policy: &FirewallPolicy) -> RuleSet {
                 }
             }
             exemption_filter_accepts(&mut rs, inbound_exemptions);
+            bypass_mark_forward_accept(&mut rs);
             block_dns(&mut rs);
             if *allow_lan {
                 allow_lan_traffic(&mut rs);
@@ -132,11 +146,17 @@ pub fn compile(policy: &FirewallPolicy) -> RuleSet {
             for dns in dns_servers {
                 allow_dns_server(&mut rs, *dns, None);
             }
+            // DNS hatch must precede block_dns so the NTP-pool lookup the NTP
+            // hatch depends on isn't rejected.
+            dns_escape_hatch(&mut rs);
             block_dns(&mut rs);
             ntp_escape_hatch(&mut rs);
             if *allow_lan {
                 allow_lan_traffic(&mut rs);
             }
+            // Keep split-tunnel carve-outs alive while disconnected/reconnecting:
+            // marked traffic egresses the WAN, everything else stays blocked.
+            bypass_mark_forward_accept(&mut rs);
         }
     }
 
@@ -260,18 +280,31 @@ fn base_rules(rs: &mut RuleSet) {
     }
 }
 
-/// Filter accepts for the inbound-exemption mark. Slotted **after** tunnel
-/// allows (so tunnel traffic still runs through normal filter logic) and
-/// **before** `block_dns` (so a DNAT'd inbound DNS service on an exempt port
-/// isn't rejected). Anchored on the mark alone — port matching happened in
-/// the mangle prerouting chain, so by the time we see this we know the
-/// packet belongs to an exempted flow.
+/// Input/output filter accepts for the inbound-exemption mark. Slotted
+/// **after** tunnel allows (so tunnel traffic still runs through normal filter
+/// logic) and **before** `block_dns` (so a DNAT'd inbound DNS service on an
+/// exempt port isn't rejected). Anchored on the mark alone — port matching
+/// happened in the mangle prerouting chain, so by the time we see this we know
+/// the packet belongs to an exempted flow. The **forward** accept is emitted
+/// separately and unconditionally (see `bypass_mark_forward_accept`).
 fn exemption_filter_accepts(rs: &mut RuleSet, exemptions: &[InboundExemption]) {
     if exemptions.is_empty() {
         return;
     }
     rs.filter.input.push(Rule::accept(Family::Inet).mark_eq(common::EXEMPT_FWMARK));
     rs.filter.output.push(Rule::accept(Family::Inet).mark_eq(common::EXEMPT_FWMARK));
+}
+
+/// Forward accept for the bypass fwmark (`0x14e`), emitted **unconditionally**
+/// whenever a kill-switch policy is in force. This lets split-tunnel carve-outs
+/// — and any admin-marked bypass (manual nft / PBR / inbound-service replies) —
+/// egress the WAN while the kill-switch still rejects every other non-tunnel
+/// forward. It mirrors the routing layer, which already honours `0x14e`
+/// unconditionally (pri-90 ip rule). Safe because the mark is router-internal
+/// netfilter metadata: a LAN client cannot set it on its own packets, so only
+/// deliberate router rules ever carry it. This is what makes split tunnelling
+/// work with the kill-switch *on* — no leak window during reconnects.
+fn bypass_mark_forward_accept(rs: &mut RuleSet) {
     rs.filter.forward.push(Rule::accept(Family::Inet).mark_eq(common::EXEMPT_FWMARK));
 }
 
@@ -418,6 +451,24 @@ fn ntp_escape_hatch(rs: &mut RuleSet) {
     );
 }
 
+/// Rate-limited DNS escape hatch: the NTP hatch needs the router's own resolver
+/// to look up the NTP pool hostnames (and the API/gateway) before the tunnel is
+/// up. Without this, `block_dns` rejects that lookup and the NTP hatch never
+/// resolves a server — the cold-boot `DeviceTimeDesynced` deadlock the kill
+/// switch is otherwise blamed for. OUTPUT-only (router-originated; LAN clients
+/// stay fenced off via the forward-chain `block_dns` reject) and rate-capped so
+/// it can't become a general DNS leak or exfil channel while disconnected.
+fn dns_escape_hatch(rs: &mut RuleSet) {
+    for proto in [Proto::Udp, Proto::Tcp] {
+        rs.filter.output.push(
+            Rule::accept(Family::Inet)
+                .proto(proto)
+                .dport(DNS_PORT)
+                .rate_limit(DNS_RATE_PER_MIN, DNS_BURST),
+        );
+    }
+}
+
 fn allow_lan_traffic(rs: &mut RuleSet) {
     for net in LAN_NETS_V4 {
         let n: IpNetwork = net.parse().expect("static LAN_NETS_V4 entry is valid");
@@ -542,6 +593,56 @@ mod tests {
             .iter()
             .any(|r| r.matches.dport == Some(NTP_PORT) && r.verdict == Verdict::Accept);
         assert!(has_ntp, "Connecting policy is missing the NTP escape hatch");
+    }
+
+    #[test]
+    fn blocked_and_connecting_emit_dns_escape_hatch_before_block() {
+        // The NTP hatch is useless unless the router can resolve the NTP pool
+        // hostnames first, so a rate-limited DNS accept must sit in OUTPUT
+        // ahead of the block_dns reject. Verify for both states.
+        let connecting = FirewallPolicy::Connecting {
+            peer_endpoints: vec![],
+            tunnel: None,
+            allow_lan: false,
+            dns_config: dns_config(&[], &[]),
+            allowed_endpoints: vec![],
+            allowed_entry_tunnel_traffic: AllowedTunnelTraffic::All,
+            allowed_exit_tunnel_traffic: AllowedTunnelTraffic::All,
+            inbound_exemptions: vec![],
+        };
+        let blocked = FirewallPolicy::Blocked {
+            allow_lan: false,
+            allowed_endpoints: vec![],
+            dns_servers: vec![],
+        };
+        for policy in [connecting, blocked] {
+            let rs = compile(&policy);
+            let out = &rs.filter.output.rules;
+            let hatch = out.iter().position(|r| {
+                r.matches.dport == Some(DNS_PORT)
+                    && r.matches.rate_limit.is_some()
+                    && r.verdict == Verdict::Accept
+            });
+            let reject = out
+                .iter()
+                .position(|r| r.matches.dport == Some(DNS_PORT) && r.verdict == Verdict::Reject);
+            assert!(hatch.is_some(), "missing rate-limited DNS escape hatch");
+            assert!(reject.is_some(), "missing block_dns reject");
+            assert!(
+                hatch.unwrap() < reject.unwrap(),
+                "DNS hatch must precede block_dns reject"
+            );
+            // The hatch is router-only: no forward-chain DNS accept should leak
+            // LAN client resolution out the WAN while disconnected.
+            assert!(
+                !rs.filter
+                    .forward
+                    .rules
+                    .iter()
+                    .any(|r| r.matches.dport == Some(DNS_PORT) && r.verdict == Verdict::Accept),
+                "DNS hatch must not open the forward chain"
+            );
+        }
     }
 
     #[test]
@@ -679,6 +780,99 @@ mod tests {
             // mark accept must precede the final reject in OUTPUT/FORWARD.
             if matches!(last.verdict, Verdict::Reject) {
                 assert!(mark_pos.unwrap() < chain.rules.len() - 1);
+            }
+        }
+    }
+
+    // Build each kill-switch policy variant with NO inbound exemptions, so any
+    // forward mark accept comes solely from `bypass_mark_forward_accept`.
+    fn killswitch_states_without_exemptions() -> Vec<(&'static str, FirewallPolicy)> {
+        vec![
+            (
+                "connecting",
+                FirewallPolicy::Connecting {
+                    peer_endpoints: vec![ep([1, 2, 3, 4], 443)],
+                    tunnel: None,
+                    allow_lan: true,
+                    dns_config: dns_config(&[], &["8.8.8.8".parse().unwrap()]),
+                    allowed_endpoints: vec![],
+                    allowed_entry_tunnel_traffic: AllowedTunnelTraffic::All,
+                    allowed_exit_tunnel_traffic: AllowedTunnelTraffic::All,
+                    inbound_exemptions: vec![],
+                },
+            ),
+            (
+                "connected",
+                FirewallPolicy::Connected {
+                    peer_endpoints: vec![],
+                    tunnel: tunnel_iface("wg0", [10, 64, 0, 2]),
+                    allow_lan: true,
+                    dns_config: dns_config(&[], &[]),
+                    allowed_endpoints: vec![],
+                    inbound_exemptions: vec![],
+                },
+            ),
+            (
+                "blocked",
+                FirewallPolicy::Blocked {
+                    allow_lan: true,
+                    allowed_endpoints: vec![],
+                    dns_servers: vec![],
+                },
+            ),
+        ]
+    }
+
+    #[test]
+    fn bypass_mark_accepted_in_forward_without_exemptions() {
+        // The split-tunnel-coexistence invariant: every kill-switch state accepts
+        // the bypass fwmark in FORWARD even with zero inbound exemptions, and that
+        // accept precedes the terminal reject. This is what lets carve-outs egress
+        // the WAN with the kill-switch on, including mid-reconnect (Connecting /
+        // Blocked).
+        for (name, policy) in killswitch_states_without_exemptions() {
+            let rs = compile(&policy);
+            let pos = rs
+                .filter
+                .forward
+                .rules
+                .iter()
+                .position(|r| r.matches.mark == Some(common::EXEMPT_FWMARK));
+            assert!(pos.is_some(), "{name}: missing bypass-mark forward accept");
+            assert!(
+                rs.forward_terminates_in_block(),
+                "{name}: forward must still terminate in reject"
+            );
+            assert!(
+                pos.unwrap() < rs.filter.forward.rules.len() - 1,
+                "{name}: bypass-mark accept must precede the final reject"
+            );
+        }
+    }
+
+    #[test]
+    fn unmarked_lan_to_wan_still_rejected_with_bypass_accept() {
+        // Safety backstop: making the bypass accept unconditional must NOT open a
+        // hole for unmarked traffic. The only new forward accept is mark-gated;
+        // no unmarked/saddr-LAN forward accept may be introduced, and forward
+        // still ends in reject — so non-excluded LAN clients stay blocked
+        // (no leak during reconnects).
+        for (name, policy) in killswitch_states_without_exemptions() {
+            let rs = compile(&policy);
+            assert!(
+                rs.forward_terminates_in_block(),
+                "{name}: forward chain must terminate in reject"
+            );
+            for r in &rs.filter.forward.rules {
+                if matches!(r.verdict, Verdict::Accept) && r.matches.mark != Some(common::EXEMPT_FWMARK) {
+                    // The only unmarked forward accepts allowed are ct-established
+                    // (return traffic) and daddr-LAN (into-LAN). An saddr-LAN or
+                    // bare accept would be the leak.
+                    assert!(
+                        r.matches.saddr.is_none(),
+                        "{name}: unexpected saddr-matched forward accept (potential leak): {r:?}"
+                    );
+                }
             }
         }
     }

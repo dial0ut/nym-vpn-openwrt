@@ -131,11 +131,16 @@ if [ -f "$FW_SCRIPTS_DIR/fw4-include.sh" ]; then
 fi
 
 # === DATA: Feed signing public key ===
+# apk verifies feed indexes with an ECDSA P-256 public key (PEM). apk looks
+# the key up by the name it embedded at signing time, which is the basename
+# of the private key passed to `apk mkndx --sign-key` in CI (dial0ut-apk.pem).
+# Ship the matching public half under the same basename into /etc/apk/keys/.
+# (The signify key dial0ut.pub is opkg-only; apk cannot use it.)
 echo "=== Adding feed signing key ==="
-FEED_KEY="$REPO_ROOT/scripts/feed/dial0ut.pub"
+FEED_KEY="$REPO_ROOT/scripts/feed/dial0ut-apk.pem"
 if [ -f "$FEED_KEY" ]; then
     mkdir -p "$DATA_DIR/etc/apk/keys"
-    cp "$FEED_KEY" "$DATA_DIR/etc/apk/keys/dial0ut.pub"
+    cp "$FEED_KEY" "$DATA_DIR/etc/apk/keys/dial0ut-apk.pem"
 fi
 
 # === Install scripts ===
