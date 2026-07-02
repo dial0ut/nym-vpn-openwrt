@@ -135,7 +135,7 @@ location = "BE"
 "#;
 
     let json_content = r#"{
-  "version": "v7",
+  "version": "v8",
   "entry_point": {
     "country": {
       "two_letter_iso_country_code": "FR"
@@ -146,7 +146,7 @@ location = "BE"
       "two_letter_iso_country_code": "BE"
     }
   },
-  "allow_lan": false,
+  "allow_lan": true,
   "disable_ipv6": false,
   "enable_two_hop": true,
   "enable_bridges": false,
@@ -169,7 +169,10 @@ location = "BE"
   "network_stats": {
     "enabled": true,
     "allow_disconnected": false
-  }
+  },
+  "killswitch": false,
+  "legacy_split_tunnel": false,
+  "inbound_exemptions": []
 }"#;
 
     let entry_point = nym_vpn_lib_types::EntryPoint::Country {
@@ -194,7 +197,7 @@ identity = [ 99, 23, 98, 234, 66, 161, 195, 63, 155, 161, 250, 207, 17, 158, 136
 "#;
 
     let json_content = r#"{
-  "version": "v7",
+  "version": "v8",
   "entry_point": {
     "gateway": {
       "identity": "7CWjY3QFoA9dgE535u9bQiXCfzgMZvSpJu842GA1Wn42"
@@ -205,7 +208,7 @@ identity = [ 99, 23, 98, 234, 66, 161, 195, 63, 155, 161, 250, 207, 17, 158, 136
       "identity": "7fp3cmzCvgeRgbB1ycTnK6RokjHNqPmCCSBG23gyxshj"
     }
   },
-  "allow_lan": false,
+  "allow_lan": true,
   "disable_ipv6": false,
   "enable_two_hop": true,
   "enable_bridges": false,
@@ -228,7 +231,10 @@ identity = [ 99, 23, 98, 234, 66, 161, 195, 63, 155, 161, 250, 207, 17, 158, 136
   "network_stats": {
     "enabled": true,
     "allow_disconnected": false
-  }
+  },
+  "killswitch": false,
+  "legacy_split_tunnel": false,
+  "inbound_exemptions": []
 }"#;
 
     let entry_point = nym_vpn_lib_types::EntryPoint::Gateway {
@@ -260,7 +266,7 @@ address = [5, 56, 84, 195, 94, 238, 210, 124, 65, 143, 209, 144, 22, 255, 91, 18
 "#;
 
     let json_content = r#"{
-  "version": "v7",
+  "version": "v8",
   "entry_point": {
     "gateway": {
       "identity": "7CWjY3QFoA9dgE535u9bQiXCfzgMZvSpJu842GA1Wn42"
@@ -291,7 +297,10 @@ address = [5, 56, 84, 195, 94, 238, 210, 124, 65, 143, 209, 144, 22, 255, 91, 18
   "network_stats": {
     "enabled": true,
     "allow_disconnected": false
-  }
+  },
+  "killswitch": false,
+  "legacy_split_tunnel": false,
+  "inbound_exemptions": []
 }"#;
 
     let entry_point = nym_vpn_lib_types::EntryPoint::Gateway {
@@ -318,10 +327,10 @@ exit_point = "Random"
 "#;
 
     let json_content = r#"{
-  "version": "v7",
+  "version": "v8",
   "entry_point": "random",
   "exit_point": "random",
-  "allow_lan": false,
+  "allow_lan": true,
   "disable_ipv6": false,
   "enable_two_hop": true,
   "enable_bridges": false,
@@ -344,7 +353,10 @@ exit_point = "Random"
   "network_stats": {
     "enabled": true,
     "allow_disconnected": false
-  }
+  },
+  "killswitch": false,
+  "legacy_split_tunnel": false,
+  "inbound_exemptions": []
 }"#;
 
     let entry_point = nym_vpn_lib_types::EntryPoint::Random;
@@ -370,7 +382,7 @@ async fn test_service_config_migrate_from_v1() {
 }"#;
 
     let json_latest_content = r#"{
-  "version": "v7",
+  "version": "v8",
   "entry_point": {
     "gateway": {
       "identity": "7CWjY3QFoA9dgE535u9bQiXCfzgMZvSpJu842GA1Wn42"
@@ -381,7 +393,7 @@ async fn test_service_config_migrate_from_v1() {
       "address": "MNrmKzuKjNdbEhfPUzVNfjw63oBQNSayqoQKGL4JjAV.6fDcSN6faGpvA3pd3riCwjpzXc7RQfWmGMa82UVoEwKE@d5adfJNtcdZW2XwK85JAAU8nXAs9JCPYn2RNvDLZn4e"
     }
   },
-  "allow_lan": false,
+  "allow_lan": true,
   "disable_ipv6": false,
   "enable_two_hop": true,
   "enable_bridges": false,
@@ -404,7 +416,10 @@ async fn test_service_config_migrate_from_v1() {
   "network_stats": {
     "enabled": true,
     "allow_disconnected": false
-  }
+  },
+  "killswitch": false,
+  "legacy_split_tunnel": false,
+  "inbound_exemptions": []
 }"#;
 
     run_migrate_json_test(json_v1_content, json_latest_content).await;
@@ -439,7 +454,7 @@ async fn test_service_config_migrate_from_v2() {
 }"#;
 
     let json_latest_content = r#"{
-  "version": "v7",
+  "version": "v8",
   "entry_point": {
     "gateway": {
       "identity": "7CWjY3QFoA9dgE535u9bQiXCfzgMZvSpJu842GA1Wn42"
@@ -473,7 +488,10 @@ async fn test_service_config_migrate_from_v2() {
   "network_stats": {
     "enabled": true,
     "allow_disconnected": false
-  }
+  },
+  "killswitch": true,
+  "legacy_split_tunnel": false,
+  "inbound_exemptions": []
 }"#;
 
     run_migrate_json_test(json_v2_content, json_latest_content).await;
@@ -511,7 +529,7 @@ async fn test_service_config_migrate_from_v3() {
 }"#;
 
     let json_latest_content = r#"{
-  "version": "v7",
+  "version": "v8",
   "entry_point": {
     "gateway": {
       "identity": "7CWjY3QFoA9dgE535u9bQiXCfzgMZvSpJu842GA1Wn42"
@@ -548,7 +566,10 @@ async fn test_service_config_migrate_from_v3() {
   "network_stats": {
     "enabled": true,
     "allow_disconnected": false
-  }
+  },
+  "killswitch": false,
+  "legacy_split_tunnel": false,
+  "inbound_exemptions": []
 }"#;
 
     run_migrate_json_test(json_v3_content, json_latest_content).await;
@@ -591,7 +612,7 @@ async fn test_service_config_migrate_from_v4() {
 }"#;
 
     let json_latest_content = r#"{
-  "version": "v7",
+  "version": "v8",
   "entry_point": {
     "gateway": {
       "identity": "7CWjY3QFoA9dgE535u9bQiXCfzgMZvSpJu842GA1Wn42"
@@ -628,7 +649,10 @@ async fn test_service_config_migrate_from_v4() {
   "network_stats": {
     "enabled": true,
     "allow_disconnected": false
-  }
+  },
+  "killswitch": false,
+  "legacy_split_tunnel": false,
+  "inbound_exemptions": []
 }"#;
 
     run_migrate_json_test(json_v4_content, json_latest_content).await;
@@ -677,7 +701,7 @@ async fn test_service_config_migrate_from_v5() {
 }"#;
 
     let json_latest_content = r#"{
-  "version": "v7",
+  "version": "v8",
   "entry_point": {
     "gateway": {
       "identity": "7CWjY3QFoA9dgE535u9bQiXCfzgMZvSpJu842GA1Wn42"
@@ -714,7 +738,10 @@ async fn test_service_config_migrate_from_v5() {
   "network_stats": {
     "enabled": true,
     "allow_disconnected": false
-  }
+  },
+  "killswitch": false,
+  "legacy_split_tunnel": false,
+  "inbound_exemptions": []
 }"#;
 
     run_migrate_json_test(json_v5_content, json_latest_content).await;
@@ -760,7 +787,7 @@ async fn test_service_config_migrate_from_v6() {
 }"#;
 
     let json_latest_content = r#"{
-  "version": "v7",
+  "version": "v8",
   "entry_point": {
     "country": {
       "two_letter_iso_country_code": "CH"
@@ -794,7 +821,10 @@ async fn test_service_config_migrate_from_v6() {
   "network_stats": {
     "enabled": true,
     "allow_disconnected": false
-  }
+  },
+  "killswitch": false,
+  "legacy_split_tunnel": false,
+  "inbound_exemptions": []
 }"#;
 
     run_migrate_json_test(json_v6_content, json_latest_content).await;
@@ -924,6 +954,35 @@ async fn test_service_config_serialize_defaults() {
     run_serialize_test(config).await;
 }
 
+// Legacy split tunneling and the kill-switch are mutually exclusive: enabling
+// legacy mode must force the *effective* kill-switch off in the generated tunnel
+// settings, even when the stored kill-switch is on. Otherwise the firewall would
+// block the very WAN egress that legacy/PBR mode depends on.
+#[tokio::test]
+async fn test_legacy_split_tunnel_forces_killswitch_off() {
+    let temp_dir = tempdir().unwrap();
+    let network_config_path = temp_dir.path().join("tulips");
+
+    let mut config_manager = VpnServiceConfigManager::new(&network_config_path, None)
+        .await
+        .unwrap();
+    config_manager.set_killswitch(true).await;
+    config_manager.set_legacy_split_tunnel(true).await;
+
+    let settings = config_manager.generate_tunnel_settings();
+    assert!(settings.legacy_split_tunnel);
+    assert!(
+        !settings.killswitch,
+        "kill-switch must be forced off while legacy split tunneling is enabled"
+    );
+
+    // Disabling legacy mode restores the stored kill-switch value.
+    config_manager.set_legacy_split_tunnel(false).await;
+    let settings = config_manager.generate_tunnel_settings();
+    assert!(!settings.legacy_split_tunnel);
+    assert!(settings.killswitch);
+}
+
 #[tokio::test]
 async fn test_service_config_serialize_full() {
     let config = nym_vpn_lib_types::VpnServiceConfig {
@@ -964,6 +1023,12 @@ async fn test_service_config_serialize_full() {
             allow_disconnected: false,
         },
         killswitch: true,
+        legacy_split_tunnel: true,
+        inbound_exemptions: vec![nym_vpn_lib_types::InboundExemption {
+            proto: nym_vpn_lib_types::InboundExemptionProtocol::Tcp,
+            dport: 8096,
+            label: Some("jellyfin".to_string()),
+        }],
     };
     run_serialize_test(config).await;
 }

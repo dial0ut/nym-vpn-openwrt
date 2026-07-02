@@ -211,6 +211,25 @@ impl NymVpnService for CommandInterface {
         Ok(tonic::Response::new(()))
     }
 
+    async fn set_legacy_split_tunnel(
+        &self,
+        request: tonic::Request<bool>,
+    ) -> Result<tonic::Response<()>> {
+        let legacy_split_tunnel = request.into_inner();
+
+        let _ = self
+            .send_and_wait(
+                VpnServiceCommand::SetLegacySplitTunnel,
+                legacy_split_tunnel,
+            )
+            .await
+            .map_err(|e| {
+                tonic::Status::internal(format!("Failed to set legacy split tunnel: {e}"))
+            })?;
+
+        Ok(tonic::Response::new(()))
+    }
+
     async fn set_inbound_exemptions(
         &self,
         request: tonic::Request<proto::InboundExemptionList>,

@@ -168,6 +168,13 @@ impl VpnServiceConfigManager {
         }
     }
 
+    pub async fn set_legacy_split_tunnel(&mut self, legacy_split_tunnel: bool) {
+        if self.config.legacy_split_tunnel != legacy_split_tunnel {
+            self.config.legacy_split_tunnel = legacy_split_tunnel;
+            self.save_config_and_send_event().await;
+        }
+    }
+
     pub async fn set_inbound_exemptions(
         &mut self,
         exemptions: Vec<nym_vpn_lib_types::InboundExemption>,
@@ -416,7 +423,13 @@ impl VpnServiceConfigManager {
             entry_point: Box::new(self.config.entry_point.clone()),
             exit_point: Box::new(self.config.exit_point.clone()),
             dns,
-            killswitch: self.config.killswitch,
+            // Legacy split tunneling and the kill-switch are mutually exclusive:
+            // in legacy/PBR mode the daemon must not block non-tunnel WAN egress
+            // (that traffic is the whole point), so force the effective kill-switch
+            // off regardless of the stored value. The UI also greys out the toggle,
+            // but this is the authoritative backstop.
+            killswitch: self.config.killswitch && !self.config.legacy_split_tunnel,
+            legacy_split_tunnel: self.config.legacy_split_tunnel,
             inbound_exemptions: self
                 .config
                 .inbound_exemptions

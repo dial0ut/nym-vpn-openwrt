@@ -42,6 +42,11 @@ pub struct VpnServiceConfig {
     pub mixnet_traffic: MixnetTrafficConfig,
     pub network_stats: NetworkStatisticsConfig,
     pub killswitch: bool,
+    /// Legacy (inclusive) split tunneling: hand routing to `luci-app-pbr`.
+    /// When enabled, the daemon withholds the default route into the tunnel so
+    /// only PBR-selected traffic is routed in. Mutually exclusive with the
+    /// kill-switch (which is forced off in this mode).
+    pub legacy_split_tunnel: bool,
     pub inbound_exemptions: Vec<InboundExemption>,
 }
 
@@ -113,6 +118,7 @@ impl fmt::Display for VpnServiceConfig {
         )?;
         writeln!(f, "enable_ad_blocking: {}", self.enable_ad_blocking)?;
         writeln!(f, "killswitch: {}", self.killswitch)?;
+        writeln!(f, "legacy_split_tunnel: {}", self.legacy_split_tunnel)?;
         writeln!(f, "mixnet traffic config: {}", self.mixnet_traffic)?;
         writeln!(f, "networks stats config: {}", self.network_stats)?;
 
@@ -143,6 +149,7 @@ impl Default for VpnServiceConfig {
             network_stats: Default::default(),
             mixnet_traffic: MixnetTrafficConfig::default(),
             killswitch: true,
+            legacy_split_tunnel: false,
             inbound_exemptions: Vec::new(),
         }
     }

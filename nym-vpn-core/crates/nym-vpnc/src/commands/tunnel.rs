@@ -42,6 +42,12 @@ pub struct SetParams {
     #[arg(long, value_parser = clap::value_parser!(BooleanOption))]
     killswitch: Option<BooleanOption>,
 
+    /// Enable or disable legacy (inclusive) split tunneling. When enabled the
+    /// default route into the tunnel is withheld so only PBR-selected traffic is
+    /// routed in. Mutually exclusive with the kill-switch (forced off).
+    #[arg(long, value_parser = clap::value_parser!(BooleanOption))]
+    legacy_split_tunnel: Option<BooleanOption>,
+
     /// Enable Circumvention Transport (CT) wrapping for the connection to the entry gateway in two hop wireguard mode.
     #[arg(long, alias = "ct", value_parser = clap::value_parser!(BooleanOption))]
     circumvention_transports: Option<BooleanOption>,
@@ -100,6 +106,10 @@ impl Command {
                     display_on_off(config.enable_bridges)
                 );
                 println!("Kill-switch: {}", display_on_off(config.killswitch));
+                println!(
+                    "Legacy-split-tunnel: {}",
+                    display_on_off(config.legacy_split_tunnel)
+                );
                 if config.inbound_exemptions.is_empty() {
                     println!("Inbound exemptions: none");
                 } else {
@@ -118,6 +128,12 @@ impl Command {
             Command::Set(params) => {
                 if let Some(killswitch) = params.killswitch {
                     rpc_client.set_killswitch(*killswitch).await?;
+                }
+
+                if let Some(legacy_split_tunnel) = params.legacy_split_tunnel {
+                    rpc_client
+                        .set_legacy_split_tunnel(*legacy_split_tunnel)
+                        .await?;
                 }
 
                 if let Some(two_hop) = params.two_hop {

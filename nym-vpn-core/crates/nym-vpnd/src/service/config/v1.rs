@@ -34,6 +34,7 @@ impl TryFrom<VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
             entry_point,
             exit_point,
             killswitch: false,
+            legacy_split_tunnel: false,
             ..Default::default()
         };
         Ok(config)

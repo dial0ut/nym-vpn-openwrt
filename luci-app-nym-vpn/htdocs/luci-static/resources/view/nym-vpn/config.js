@@ -749,14 +749,19 @@ return view.extend({
             var twoHopEl = document.getElementById('two-hop-toggle');
             var killswitchEl = document.getElementById('killswitch-toggle');
             var circumventionEl = document.getElementById('circumvention-toggle');
+            var legacySplitEl = document.getElementById('legacy-split-toggle');
             if (!ipv6El || !twoHopEl || !killswitchEl || !circumventionEl) return;
 
             var ipv6 = ipv6El.checked ? 'on' : 'off';
             var two_hop = twoHopEl.checked ? 'on' : 'off';
-            var killswitch = killswitchEl.checked ? 'on' : 'off';
+            var legacy_split_tunnel = legacySplitEl && legacySplitEl.checked ? 'on' : 'off';
+            // Legacy split tunneling and the kill-switch are mutually exclusive.
+            // When legacy mode is on the daemon forces the kill-switch off anyway,
+            // but send 'off' so the stored value and the (greyed) toggle agree.
+            var killswitch = (legacy_split_tunnel === 'on') ? 'off' : (killswitchEl.checked ? 'on' : 'off');
             var circumvention = circumventionEl.checked ? 'on' : 'off';
 
-            rpc.tunnelSet(ipv6, two_hop, killswitch, circumvention).then(function(result) {
+            rpc.tunnelSet(ipv6, two_hop, killswitch, circumvention, legacy_split_tunnel).then(function(result) {
                 if (result && result.success) {
                     isTwoHopMode = (two_hop === 'on');
                     showToast('Tunnel settings saved', 'success');
@@ -1365,6 +1370,39 @@ return view.extend({
                     ]),
                     E('div', { 'class': 'nym-toggle-row' }, [
                         E('div', { 'class': 'nym-toggle-info' }, [
+                            E('div', { 'class': 'nym-toggle-title' }, 'Legacy Split Tunneling (PBR)'),
+                            E('div', { 'class': 'nym-toggle-desc' }, 'Hand routing to luci-app-pbr: only the traffic you select in PBR is sent through the VPN, everything else uses the normal WAN in the clear. Mutually exclusive with the kill-switch and the exclusion list below. Requires reconnect.')
+                        ]),
+                        E('label', { 'class': 'nym-toggle' }, [
+                            E('input', {
+                                'type': 'checkbox',
+                                'id': 'legacy-split-toggle',
+                                'checked': tunnel_config.legacy_split_tunnel === 'on' ? 'checked' : null,
+                                'change': function(ev) {
+                                    var on = ev.target.checked;
+                                    var ksEl = document.getElementById('killswitch-toggle');
+                                    var ksRow = document.getElementById('killswitch-row');
+                                    if (ksEl) {
+                                        ksEl.disabled = on;
+                                        if (on) ksEl.checked = false;
+                                        var warn = ksRow ? ksRow.querySelector('.nym-toggle-warning') : null;
+                                        if (warn) warn.style.display = (on || ksEl.checked) ? 'none' : 'block';
+                                    }
+                                    if (ksRow) ksRow.style.opacity = on ? '0.5' : '';
+                                    if (inboundMount) inboundMount.style.display = (!on && ksEl && ksEl.checked) ? 'block' : 'none';
+                                    if (splitMount) splitMount.style.display = on ? 'none' : 'block';
+                                    saveTunnelSettings();
+                                }
+                            }),
+                            E('span', { 'class': 'nym-toggle-slider' })
+                        ])
+                    ]),
+                    E('div', {
+                        'class': 'nym-toggle-row',
+                        'id': 'killswitch-row',
+                        'style': tunnel_config.legacy_split_tunnel === 'on' ? 'opacity: 0.5' : ''
+                    }, [
+                        E('div', { 'class': 'nym-toggle-info' }, [
                             E('div', { 'class': 'nym-toggle-title' }, 'Kill-Switch'),
                             E('div', { 'class': 'nym-toggle-desc' }, 'Block LAN clients from reaching the internet unless the VPN is connected.'),
                             E('div', {
@@ -1377,6 +1415,7 @@ return view.extend({
                                 'type': 'checkbox',
                                 'id': 'killswitch-toggle',
                                 'checked': tunnel_config.killswitch !== 'off' ? 'checked' : null,
+                                'disabled': tunnel_config.legacy_split_tunnel === 'on' ? 'disabled' : null,
                                 'change': function(ev) {
                                     var warn = ev.target.closest('.nym-toggle-row').querySelector('.nym-toggle-warning');
                                     if (warn) warn.style.display = ev.target.checked ? 'none' : 'block';
@@ -1390,9 +1429,12 @@ return view.extend({
                 ]),
                 inboundMount = E('div', {
                     'class': 'nym-inbound-section',
-                    'style': 'display: ' + (tunnel_config.killswitch !== 'off' ? 'block' : 'none')
+                    'style': 'display: ' + (tunnel_config.killswitch !== 'off' && tunnel_config.legacy_split_tunnel !== 'on' ? 'block' : 'none')
                 }),
-                splitMount = E('div', { 'class': 'nym-split-section' })
+                splitMount = E('div', {
+                    'class': 'nym-split-section',
+                    'style': 'display: ' + (tunnel_config.legacy_split_tunnel === 'on' ? 'none' : 'block')
+                })
             ])
         ]);
         container.appendChild(tunnelCard);
