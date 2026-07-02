@@ -149,6 +149,15 @@ impl RpcClient {
         Ok(())
     }
 
+    pub async fn set_legacy_split_tunnel(&mut self, legacy_split_tunnel: bool) -> Result<()> {
+        self.0
+            .set_legacy_split_tunnel(legacy_split_tunnel)
+            .await
+            .map_err(Error::Rpc)?
+            .into_inner();
+        Ok(())
+    }
+
     pub async fn set_inbound_exemptions(
         &mut self,
         exemptions: Vec<nym_vpn_lib_types::InboundExemption>,

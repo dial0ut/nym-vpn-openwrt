@@ -302,7 +302,7 @@ fn exemption_filter_accepts(rs: &mut RuleSet, exemptions: &[InboundExemption]) {
 /// forward. It mirrors the routing layer, which already honours `0x14e`
 /// unconditionally (pri-90 ip rule). Safe because the mark is router-internal
 /// netfilter metadata: a LAN client cannot set it on its own packets, so only
-/// deliberate router rules ever carry it. This is what makes split tunnelling
+/// deliberate router rules ever carry it. This is what makes split tunneling
 /// work with the kill-switch *on* — no leak window during reconnects.
 fn bypass_mark_forward_accept(rs: &mut RuleSet) {
     rs.filter.forward.push(Rule::accept(Family::Inet).mark_eq(common::EXEMPT_FWMARK));

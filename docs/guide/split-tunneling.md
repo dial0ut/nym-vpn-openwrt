@@ -1,15 +1,18 @@
 # Split Tunneling
 
 By default, **all** LAN traffic is routed through the VPN tunnel whenever NymVPN is
-connected — this happens regardless of the kill-switch. Split tunnelling is the act of
+connected — this happens regardless of the kill-switch. Split tunneling is the act of
 **carving specific traffic back out to the WAN** so it bypasses the tunnel.
 
 !!! note "This changed in recent versions"
     Earlier builds tied the in-tunnel default route to the kill-switch: turning the
     kill-switch *off* also stopped routing traffic into the tunnel, so you had to add
-    traffic back *in* with PBR. That is no longer the case. Routing into the tunnel is
-    now always on when connected; the kill-switch **only** controls whether non-tunnel
-    WAN egress is blocked. Split tunnelling is now **exclusion**-based, not inclusion-based.
+    traffic back *in* with PBR. By default that is no longer the case — routing into the
+    tunnel is now always on when connected, the kill-switch **only** controls whether
+    non-tunnel WAN egress is blocked, and split tunneling is **exclusion**-based.
+
+    If you specifically want the old **inclusive** behaviour back (route only what you
+    select, via PBR), enable [Legacy split tunneling](#legacy-split-tunneling-inclusive-pbr).
 
 !!! note "Looking to expose a service to the WAN?"
     This page covers **outbound** exclusions — sending selected LAN clients or destinations
@@ -27,7 +30,7 @@ connected — this happens regardless of the kill-switch. Split tunnelling is th
 ## Managed exclusions (LuCI)
 
 The simplest way to manage carve-outs is the built-in UI — no nft, no marks, no extra
-packages for device rules. In LuCI go to **NymVPN → Tunnel Settings → Split Tunnelling** and add:
+packages for device rules. In LuCI go to **NymVPN → Tunnel Settings → Split Tunneling** and add:
 
 - **Devices** — pick a LAN client from the DHCP-lease dropdown. Stored by MAC, so it survives
   the client's IP changing.
@@ -76,7 +79,7 @@ its own packets, so only the deliberate router rules below (or the managed UI) e
 
 ## Works with the kill-switch on
 
-Unlike earlier versions, split tunnelling **no longer requires turning the kill-switch
+Unlike earlier versions, split tunneling **no longer requires turning the kill-switch
 off**. With the kill-switch on:
 
 - your carve-outs (marked `0x14e`) egress the WAN, and
@@ -144,6 +147,46 @@ your `pbr` resolver/priority settings it may be intercepted by rule 200 and tunn
 ```bash
 opkg update && opkg install pbr luci-app-pbr
 ```
+
+## Legacy split tunneling (inclusive / PBR)
+
+Everything above is **exclusion**-based: all traffic is tunnelled and you carve specific
+flows back out. Some setups want the opposite — **inclusive** routing, where *nothing* is
+tunnelled by default and you pick the few clients/destinations that should go through the
+VPN. That is what **Legacy split tunneling** restores.
+
+Enable it in LuCI under **NymVPN → Tunnel Settings**, with the **Legacy Split Tunneling
+(PBR)** toggle (directly above the kill-switch), or from the CLI:
+
+```bash
+nym-vpnc tunnel set --legacy-split-tunnel on
+```
+
+When enabled:
+
+- The daemon **withholds the default route** into the tunnel (`0.0.0.0/0` / `::/0`). The
+  tunnel still comes up, but nothing is routed into it until *you* send it there.
+- You select what to route in with the OpenWrt [`pbr`](https://docs.openwrt.melmac.net/pbr/)
+  package — per device, per destination, or per port — pointing those policies at the
+  tunnel interface.
+- It is **mutually exclusive** with the kill-switch and with the managed exclusion panel
+  above. Turning it on forces the kill-switch off (the daemon enforces this regardless of
+  the stored setting) and hides the exclusion list; your exclusion entries are preserved
+  and reappear if you turn legacy mode back off.
+
+!!! warning
+    In this mode every client you do **not** route into the VPN reaches the internet over
+    the normal WAN **in the clear**. There is no kill-switch backstop — that is the
+    inherent trade-off of inclusive routing. Only use this if you deliberately want most
+    traffic on the WAN and a selected subset in the tunnel.
+
+```bash
+opkg update && opkg install pbr luci-app-pbr
+```
+
+Then add policies routing your chosen sources/destinations to the tunnel device. Confirm
+with `ip route get <dest> from <client>` that selected traffic resolves to the tunnel
+device and everything else to the WAN.
 
 ## Troubleshooting
 

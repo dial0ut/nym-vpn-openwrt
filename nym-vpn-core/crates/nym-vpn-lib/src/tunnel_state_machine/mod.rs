@@ -140,6 +140,11 @@ pub struct TunnelSettings {
     /// When disabled, firewall policy and default route are skipped (for PBR compatibility).
     pub killswitch: bool,
 
+    /// Legacy (inclusive) split tunneling. When enabled, the default route into
+    /// the tunnel is withheld so only externally-selected traffic (e.g. via
+    /// `luci-app-pbr`) is routed in. Mutually exclusive with the kill-switch.
+    pub legacy_split_tunnel: bool,
+
     /// Inbound services exempted from the tunnel. Reply traffic for these
     /// `{proto, dport}` pairs is routed via the real WAN instead of the VPN,
     /// so port-forwarded services remain reachable while the kill-switch is on.
@@ -228,6 +233,9 @@ impl TunnelSettings {
         if self.killswitch != other.killswitch {
             diff.add(TunnelSettingsDiffFields::Killswitch);
         }
+        if self.legacy_split_tunnel != other.legacy_split_tunnel {
+            diff.add(TunnelSettingsDiffFields::LegacySplitTunnel);
+        }
         if self.inbound_exemptions != other.inbound_exemptions {
             diff.add(TunnelSettingsDiffFields::InboundExemptions);
         }
@@ -251,6 +259,7 @@ pub enum TunnelSettingsDiffFields {
     ExitPoint,
     Dns,
     Killswitch,
+    LegacySplitTunnel,
     InboundExemptions,
 }
 

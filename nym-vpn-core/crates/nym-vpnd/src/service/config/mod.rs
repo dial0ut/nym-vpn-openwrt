@@ -222,6 +222,7 @@ impl TryFrom<&nym_vpn_lib_types::VpnServiceConfig> for VpnServiceConfigExt {
             mixnet_traffic,
             network_stats,
             killswitch: value.killswitch,
+            legacy_split_tunnel: value.legacy_split_tunnel,
             inbound_exemptions,
         };
 

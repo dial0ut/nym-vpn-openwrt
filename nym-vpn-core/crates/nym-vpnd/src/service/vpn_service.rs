@@ -69,6 +69,7 @@ pub enum VpnServiceCommand {
     SetNetstack(oneshot::Sender<()>, bool),
     SetAllowLan(oneshot::Sender<()>, bool),
     SetKillswitch(oneshot::Sender<()>, bool),
+    SetLegacySplitTunnel(oneshot::Sender<()>, bool),
     SetInboundExemptions(
         oneshot::Sender<()>,
         Vec<nym_vpn_lib_types::InboundExemption>,
@@ -812,6 +813,10 @@ impl NymVpnService {
                 self.handle_set_killswitch(killswitch).await;
                 let _ = tx.send(());
             }
+            VpnServiceCommand::SetLegacySplitTunnel(tx, legacy_split_tunnel) => {
+                self.handle_set_legacy_split_tunnel(legacy_split_tunnel).await;
+                let _ = tx.send(());
+            }
             VpnServiceCommand::SetInboundExemptions(tx, exemptions) => {
                 self.handle_set_inbound_exemptions(exemptions).await;
                 let _ = tx.send(());
@@ -1055,6 +1060,13 @@ impl NymVpnService {
 
     async fn handle_set_killswitch(&mut self, killswitch: bool) {
         self.config_manager.set_killswitch(killswitch).await;
+        self.update_tunnel_settings_with_throttle();
+    }
+
+    async fn handle_set_legacy_split_tunnel(&mut self, legacy_split_tunnel: bool) {
+        self.config_manager
+            .set_legacy_split_tunnel(legacy_split_tunnel)
+            .await;
         self.update_tunnel_settings_with_throttle();
     }
 

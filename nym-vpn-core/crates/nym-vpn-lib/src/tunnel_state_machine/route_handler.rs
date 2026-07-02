@@ -71,8 +71,9 @@ impl RouteHandler {
         &mut self,
         routing_config: RoutingConfig,
         enable_ipv6: bool,
+        legacy_split_tunnel: bool,
     ) -> Result<()> {
-        let routes = Self::get_routes(routing_config, enable_ipv6);
+        let routes = Self::get_routes(routing_config, enable_ipv6, legacy_split_tunnel);
 
         // The exempt rule (fwmark 0x14e -> main, pri 90) is always installed while
         // the tunnel is up, not just when inbound exemptions exist. It honours any
@@ -124,21 +125,29 @@ impl RouteHandler {
     fn get_routes(
         routing_config: RoutingConfig,
         enable_ipv6: bool,
+        legacy_split_tunnel: bool,
     ) -> HashSet<RequiredRoute> {
         let mut routes = HashSet::new();
 
-        // The default routes into the tunnel are installed unconditionally whenever
+        // By default the tunnel's `0.0.0.0/0` / `::/0` routes are installed whenever
         // the tunnel is up. They are NOT gated on the kill-switch: routing traffic
         // into the tunnel is the daemon's job regardless, while the kill-switch only
         // controls whether non-tunnel WAN egress is *blocked* (see nym-firewall).
-        // Split tunnelling carves traffic back out via the exempt fwmark, not by
+        // Split tunneling carves traffic back out via the exempt fwmark, not by
         // withholding the default route. See docs/guide/split-tunneling.md.
+        //
+        // In legacy (inclusive) split tunneling the default routes are withheld:
+        // nothing enters the tunnel by default and the user selects traffic to
+        // route in externally (e.g. via `luci-app-pbr`). The tunnel device and the
+        // WireGuard gateway/exit routes still come up so PBR has a device to target.
         match routing_config {
             RoutingConfig::Mixnet {
                 tun_name,
                 tun_mtu,
             } => {
-                routes.extend(Self::get_default_routes(tun_name, tun_mtu, enable_ipv6));
+                if !legacy_split_tunnel {
+                    routes.extend(Self::get_default_routes(tun_name, tun_mtu, enable_ipv6));
+                }
             }
             RoutingConfig::Wireguard {
                 entry_tun_name,
@@ -158,11 +167,13 @@ impl RouteHandler {
                     entry_tun_name,
                     entry_tun_mtu,
                 ));
-                routes.extend(Self::get_default_routes(
-                    exit_tun_name,
-                    exit_tun_mtu,
-                    enable_ipv6,
-                ));
+                if !legacy_split_tunnel {
+                    routes.extend(Self::get_default_routes(
+                        exit_tun_name,
+                        exit_tun_mtu,
+                        enable_ipv6,
+                    ));
+                }
             }
         }
 
@@ -241,3 +252,52 @@ impl fmt::Display for Error {
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::Ipv4Addr;
+
+    fn mixnet_config() -> RoutingConfig {
+        RoutingConfig::Mixnet {
+            tun_name: "nym0".to_string(),
+            tun_mtu: 1500,
+        }
+    }
+
+    fn wireguard_config() -> RoutingConfig {
+        RoutingConfig::Wireguard {
+            entry_tun_name: "nymwg".to_string(),
+            exit_tun_name: "nymwg1".to_string(),
+            entry_tun_mtu: 1420,
+            exit_tun_mtu: 1340,
+            private_entry_gateway_address: IpAddr::V4(Ipv4Addr::new(10, 71, 0, 1)),
+            exit_gateway_address: IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)),
+        }
+    }
+
+    #[test]
+    fn mixnet_default_routes_installed_by_default() {
+        // Not legacy mode: the tunnel's default routes are present.
+        let routes = RouteHandler::get_routes(mixnet_config(), false, false);
+        assert!(!routes.is_empty());
+    }
+
+    #[test]
+    fn mixnet_default_routes_withheld_in_legacy_mode() {
+        // Legacy (inclusive) split tunneling: no default route into the tunnel,
+        // so nothing is routed in until PBR selects it.
+        let routes = RouteHandler::get_routes(mixnet_config(), false, true);
+        assert!(routes.is_empty());
+    }
+
+    #[test]
+    fn wireguard_keeps_gateway_routes_but_drops_defaults_in_legacy_mode() {
+        // The entry-gateway and multihop-exit routes are required for the tunnel
+        // itself, so they remain; only the `0.0.0.0/0` defaults are withheld.
+        let with_defaults = RouteHandler::get_routes(wireguard_config(), false, false);
+        let legacy = RouteHandler::get_routes(wireguard_config(), false, true);
+        assert_eq!(legacy.len(), 2);
+        assert!(with_defaults.len() > legacy.len());
+    }
+}

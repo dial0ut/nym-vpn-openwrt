@@ -33,6 +33,8 @@ pub struct VpnServiceConfig {
     #[serde(default = "default_killswitch")]
     pub killswitch: bool,
     #[serde(default)]
+    pub legacy_split_tunnel: bool,
+    #[serde(default)]
     pub inbound_exemptions: Vec<InboundExemption>,
 }
 
@@ -99,6 +101,7 @@ impl TryFrom<VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
             enable_ad_blocking: value.enable_ad_blocking,
             network_stats,
             killswitch: value.killswitch,
+            legacy_split_tunnel: value.legacy_split_tunnel,
             inbound_exemptions: value
                 .inbound_exemptions
                 .into_iter()

@@ -1233,8 +1233,12 @@ impl TunnelMonitor {
     }
 
     async fn set_routes(&mut self, routing_config: RoutingConfig, enable_ipv6: bool) -> Result<()> {
+        let legacy_split_tunnel = self
+            .tunnel_parameters
+            .tunnel_settings
+            .legacy_split_tunnel;
         self.route_handler
-            .add_routes(routing_config, enable_ipv6)
+            .add_routes(routing_config, enable_ipv6, legacy_split_tunnel)
             .await
             .map_err(Error::AddRoutes)?;
 

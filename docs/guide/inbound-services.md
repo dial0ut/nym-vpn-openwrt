@@ -160,6 +160,7 @@ iptables -L NYM_OUTPUT -v -n | grep '0x14e'
 ## Caveats
 
 - **Single WAN only in v1.** If `mwan3` reports more than one enabled WAN, the daemon logs a warning and the exemption may apply to the wrong egress.
+- **PPPoE / tunnelled WANs are handled.** The exemption anchors its `iif` match to the WAN's real L3 device (e.g. `pppoe-wan`), resolved from `ubus call network.interface.wan status`, not the underlying ethernet. Confirm with the `mangle_prerouting` command under [Verification](#verification) that the `iifname` matches `ip route get 1.1.1.1`'s device.
 - **Kernel module `kmod-ipt-conntrack-extra`.** The IPK declares this as a hard dependency on `fw3` builds; if you've manually stripped it, exemption rule application will fail at `iptables-restore` time with a clear error.
 - **Hot-apply takes ~1s.** When you `add` or `del` while connected, the daemon debounces the tunnel-settings update by ~1s and then reconnects to re-apply the firewall/routing — connections may briefly drop. Existing in-flight flows keep their original routing (no retroactive marking).
 - **Exemption is not a port forward.** If you `add tcp:8096` without an OpenWrt port forward for `8096`, nothing forwards traffic to your LAN host — the exemption only fixes the reply path.

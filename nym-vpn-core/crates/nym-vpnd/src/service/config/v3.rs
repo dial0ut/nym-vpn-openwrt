@@ -81,6 +81,7 @@ impl TryFrom<VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
             enable_custom_dns: !custom_dns.is_empty(),
             custom_dns,
             killswitch: false,
+            legacy_split_tunnel: false,
             ..Default::default()
         };
 

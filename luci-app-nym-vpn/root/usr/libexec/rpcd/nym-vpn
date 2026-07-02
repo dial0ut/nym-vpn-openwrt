@@ -601,6 +601,7 @@ handle_tunnel_get() {
     local lewes=$(echo "$config" | grep "Lewes protocol:" | sed 's/.*Lewes protocol: //')
     local circumvention=$(echo "$config" | grep "Circumvention transports:" | sed 's/.*Circumvention transports: //')
     local killswitch=$(echo "$config" | grep "Kill-switch:" | sed 's/.*Kill-switch: //')
+    local legacy_split_tunnel=$(echo "$config" | grep "Legacy-split-tunnel:" | sed 's/.*Legacy-split-tunnel: //')
 
     json_init
     json_add_string "ipv6" "$ipv6"
@@ -609,6 +610,7 @@ handle_tunnel_get() {
     json_add_string "lewes_protocol" "$lewes"
     json_add_string "circumvention_transports" "$circumvention"
     json_add_string "killswitch" "$killswitch"
+    json_add_string "legacy_split_tunnel" "$legacy_split_tunnel"
     json_add_string "raw_config" "$config"
     json_dump
 }
@@ -637,6 +639,12 @@ handle_tunnel_set() {
         [ -n "$killswitch" ] && args="$args --killswitch $killswitch"
     fi
 
+    json_get_var legacy_split_tunnel legacy_split_tunnel
+    if [ -n "$legacy_split_tunnel" ]; then
+        legacy_split_tunnel=$(validate_input "$legacy_split_tunnel" onoff)
+        [ -n "$legacy_split_tunnel" ] && args="$args --legacy-split-tunnel $legacy_split_tunnel"
+    fi
+
     json_get_var circumvention circumvention
     if [ -n "$circumvention" ]; then
         circumvention=$(validate_input "$circumvention" onoff)
@@ -663,6 +671,7 @@ handle_tunnel_set() {
         local netstack_new=$(echo "$updated_config" | grep "Netstack:" | sed 's/.*Netstack: //')
         local circumvention_new=$(echo "$updated_config" | grep "Circumvention transports:" | sed 's/.*Circumvention transports: //')
         local killswitch_new=$(echo "$updated_config" | grep "Kill-switch:" | sed 's/.*Kill-switch: //')
+        local legacy_split_tunnel_new=$(echo "$updated_config" | grep "Legacy-split-tunnel:" | sed 's/.*Legacy-split-tunnel: //')
 
         json_add_object "config"
         json_add_string "ipv6" "$ipv6_new"
@@ -670,6 +679,7 @@ handle_tunnel_set() {
         json_add_string "netstack" "$netstack_new"
         json_add_string "circumvention_transports" "$circumvention_new"
         json_add_string "killswitch" "$killswitch_new"
+        json_add_string "legacy_split_tunnel" "$legacy_split_tunnel_new"
         json_close_object
     else
         json_add_boolean "success" 0
@@ -1252,9 +1262,12 @@ handle_split_set_enabled() {
 }
 
 handle_split_status() {
-    local killswitch=$($VPNC tunnel get 2>&1 | grep "Kill-switch:" | sed 's/.*Kill-switch: //')
+    local tunnel_cfg=$($VPNC tunnel get 2>&1)
+    local killswitch=$(echo "$tunnel_cfg" | grep "Kill-switch:" | sed 's/.*Kill-switch: //')
+    local legacy_split_tunnel=$(echo "$tunnel_cfg" | grep "Legacy-split-tunnel:" | sed 's/.*Legacy-split-tunnel: //')
     json_init
     json_add_string "killswitch" "$killswitch"
+    json_add_string "legacy_split_tunnel" "$legacy_split_tunnel"
     if _split_nftset_supported; then
         json_add_boolean "nftset_supported" 1
     else
@@ -1509,11 +1522,13 @@ handle_init() {
     local t_netstack=$(echo "$tunnel_raw" | grep "Netstack:" | sed 's/.*Netstack: //')
     local t_circumvention=$(echo "$tunnel_raw" | grep "Circumvention transports:" | sed 's/.*Circumvention transports: //')
     local t_killswitch=$(echo "$tunnel_raw" | grep "Kill-switch:" | sed 's/.*Kill-switch: //')
+    local t_legacy_split_tunnel=$(echo "$tunnel_raw" | grep "Legacy-split-tunnel:" | sed 's/.*Legacy-split-tunnel: //')
     json_add_string "ipv6" "$t_ipv6"
     json_add_string "two_hop" "$t_two_hop"
     json_add_string "netstack" "$t_netstack"
     json_add_string "circumvention_transports" "$t_circumvention"
     json_add_string "killswitch" "$t_killswitch"
+    json_add_string "legacy_split_tunnel" "$t_legacy_split_tunnel"
     json_close_object
 
     # Account
@@ -1903,7 +1918,7 @@ case "$1" in
     "gateway_list_countries": { "gateway_type": "str" },
     "gateway_list_by_country": { "gateway_type": "str", "country_code": "str" },
     "tunnel_get": {},
-    "tunnel_set": { "ipv6": "str", "two_hop": "str", "killswitch": "str" },
+    "tunnel_set": { "ipv6": "str", "two_hop": "str", "killswitch": "str", "legacy_split_tunnel": "str" },
     "account_get": {},
     "account_set": { "mnemonic": "str", "mode": "str" },
     "account_forget": {},
