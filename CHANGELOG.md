@@ -11,6 +11,8 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+## [1.30.3] - 2026-07-03
+
 ### Fixed
 
 - .apk packages (OpenWrt 25.x+) now ship the always-on watchdog
