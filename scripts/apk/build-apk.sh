@@ -97,17 +97,24 @@ cp "$LUCI_DIR/root/usr/share/luci/menu.d/luci-app-nym-vpn.json" \
 cp "$LUCI_DIR/root/usr/share/rpcd/acl.d/luci-app-nym-vpn.json" \
    "$DATA_DIR/usr/share/rpcd/acl.d/"
 
-# === DATA: Init script ===
-echo "=== Adding init script ==="
+# === DATA: Init scripts ===
+echo "=== Adding init scripts ==="
 mkdir -p "$DATA_DIR/etc/init.d"
 cp "$LUCI_DIR/root/etc/init.d/nym-vpnd" "$DATA_DIR/etc/init.d/"
 chmod 755 "$DATA_DIR/etc/init.d/nym-vpnd"
+cp "$LUCI_DIR/root/etc/init.d/nym-vpn-watchdog" "$DATA_DIR/etc/init.d/"
+chmod 755 "$DATA_DIR/etc/init.d/nym-vpn-watchdog"
+
+# === DATA: Watchdog script ===
+echo "=== Adding watchdog script ==="
+cp "$IPK_SCRIPT_DIR/nym-vpn-watchdog" "$DATA_DIR/usr/sbin/"
+chmod 755 "$DATA_DIR/usr/sbin/nym-vpn-watchdog"
 
 # === DATA: Config and UCI defaults ===
 echo "=== Adding config and UCI defaults ==="
 mkdir -p "$DATA_DIR/etc/config"
 mkdir -p "$DATA_DIR/etc/uci-defaults"
-mkdir -p "$DATA_DIR/var/lib/nym-vpn"
+mkdir -p "$DATA_DIR/etc/nym/data"
 
 cp "$IPK_SCRIPT_DIR/nym-vpn.conf" "$DATA_DIR/etc/config/nym-vpn"
 
@@ -169,6 +176,7 @@ MKPKG_INFO_ARGS=(
     -I "depends:kmod-tun"
     -I "depends:libmnl"
     -I "depends:libnftnl"
+    -I "depends:kmod-ipt-conntrack-extra"
     -I "depends:luci-base"
     -I "depends:rpcd"
 )
@@ -203,6 +211,7 @@ elif command -v docker >/dev/null 2>&1; then
             -I "depends:kmod-tun" \
             -I "depends:libmnl" \
             -I "depends:libnftnl" \
+            -I "depends:kmod-ipt-conntrack-extra" \
             -I "depends:luci-base" \
             -I "depends:rpcd" \
             -s "post-install:/work/scripts/postinst" \
