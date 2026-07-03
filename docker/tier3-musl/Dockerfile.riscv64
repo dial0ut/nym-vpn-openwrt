@@ -35,17 +35,17 @@ RUN ARCH=$(uname -m) && \
 
 # Install Linux kernel headers for RISC-V cross-compilation
 # The riscv64gc-musl toolchain is missing linux/ headers, so we need to install them
-# Fetched from Google's kernel.org git mirror: cdn.kernel.org prunes old point
-# releases (linux-6.1.119.tar.xz is gone), while googlesource serves any tag.
-# Note: googlesource +archive tarballs have no top-level directory.
-ARG KERNEL_VERSION=6.1.119
-RUN cd /tmp && mkdir linux-src && \
+# Fetched from GitHub's kernel mirror: cdn.kernel.org pruned old point-release
+# tarballs and kernel.googlesource.com rate-limits GitHub runner IPs (503).
+# Mainline v6.1 UAPI headers are identical to 6.1.x for userspace builds.
+ARG KERNEL_TAG=v6.1
+RUN cd /tmp && \
     curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
-      "https://kernel.googlesource.com/pub/scm/linux/kernel/git/stable/linux/+archive/refs/tags/v${KERNEL_VERSION}.tar.gz" -o linux.tar.gz && \
-    tar xzf linux.tar.gz -C linux-src && \
-    cd linux-src && \
+      "https://github.com/torvalds/linux/archive/refs/tags/${KERNEL_TAG}.tar.gz" -o linux.tar.gz && \
+    tar xzf linux.tar.gz && \
+    cd linux-6.1 && \
     make ARCH=riscv INSTALL_HDR_PATH=/usr/local/musl/riscv64-unknown-linux-musl headers_install && \
-    cd /tmp && rm -rf linux-src linux.tar.gz
+    cd /tmp && rm -rf linux-6.1 linux.tar.gz
 
 # Create empty libunwind.a stub (satisfies -lunwind when using panic=abort)
 RUN riscv64-unknown-linux-musl-ar rcs /usr/local/musl/riscv64-unknown-linux-musl/lib/libunwind.a

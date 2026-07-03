@@ -15,7 +15,7 @@ the GitHub release notes.
 
 ### Fixed
 
-- riscv64 builds: fetch kernel headers from Google's kernel.org git mirror —
+- riscv64 builds: fetch kernel headers from GitHub's kernel mirror —
   cdn.kernel.org removed the pinned 6.1.119 tarball, which broke the release
   pipeline.
 - .apk packages (OpenWrt 25.x+) now ship the always-on watchdog
