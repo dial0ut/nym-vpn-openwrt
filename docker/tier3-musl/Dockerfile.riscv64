@@ -35,13 +35,17 @@ RUN ARCH=$(uname -m) && \
 
 # Install Linux kernel headers for RISC-V cross-compilation
 # The riscv64gc-musl toolchain is missing linux/ headers, so we need to install them
+# Fetched from Google's kernel.org git mirror: cdn.kernel.org prunes old point
+# releases (linux-6.1.119.tar.xz is gone), while googlesource serves any tag.
+# Note: googlesource +archive tarballs have no top-level directory.
 ARG KERNEL_VERSION=6.1.119
-RUN cd /tmp && \
-    curl -fsSL "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${KERNEL_VERSION}.tar.xz" -o linux.tar.xz && \
-    tar xJf linux.tar.xz && \
-    cd linux-${KERNEL_VERSION} && \
+RUN cd /tmp && mkdir linux-src && \
+    curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
+      "https://kernel.googlesource.com/pub/scm/linux/kernel/git/stable/linux/+archive/refs/tags/v${KERNEL_VERSION}.tar.gz" -o linux.tar.gz && \
+    tar xzf linux.tar.gz -C linux-src && \
+    cd linux-src && \
     make ARCH=riscv INSTALL_HDR_PATH=/usr/local/musl/riscv64-unknown-linux-musl headers_install && \
-    cd /tmp && rm -rf linux-${KERNEL_VERSION} linux.tar.xz
+    cd /tmp && rm -rf linux-src linux.tar.gz
 
 # Create empty libunwind.a stub (satisfies -lunwind when using panic=abort)
 RUN riscv64-unknown-linux-musl-ar rcs /usr/local/musl/riscv64-unknown-linux-musl/lib/libunwind.a
