@@ -16,8 +16,49 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  verify:
+    name: Verify release invariants
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Verify tag, version, and branches
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          VERSION="${TAG#v}"
+          echo "Verifying $TAG (version $VERSION)"
+
+          git rev-parse -q --verify "refs/tags/$TAG" >/dev/null \
+            || { echo "::error::tag $TAG does not exist"; exit 1; }
+
+          CARGO_VERSION=$(git show "$TAG:nym-vpn-core/Cargo.toml" | grep -m1 '^version = ' | cut -d'"' -f2)
+          if [ "$CARGO_VERSION" != "$VERSION" ]; then
+            echo "::error::tag $TAG does not match workspace version $CARGO_VERSION in nym-vpn-core/Cargo.toml"
+            exit 1
+          fi
+
+          git fetch origin develop openwrt
+          git merge-base --is-ancestor "$TAG" origin/develop \
+            || { echo "::error::tagged commit is not on develop"; exit 1; }
+          git merge-base --is-ancestor "$TAG" origin/openwrt \
+            || { echo "::error::tagged commit is not on openwrt"; exit 1; }
+
+          git show "$TAG:CHANGELOG.md" | grep -q "^## \[$VERSION\]" \
+            || { echo "::error::CHANGELOG.md has no section for $VERSION"; exit 1; }
+
+          echo "All release invariants hold."
+
   build:
     name: Build ${{ matrix.arch }}
+    needs: verify
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -86,6 +127,7 @@ jobs:
 
   build-tier3:
     name: Build ${{ matrix.arch }} (Tier 3)
+    needs: verify
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -297,51 +339,24 @@ jobs:
         run: |
           echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
-      - name: Generate changelog
+      - name: Extract changelog
         id: changelog
         run: |
-          # Find previous tag
-          CURRENT_TAG="${GITHUB_REF#refs/tags/}"
-          PREV_TAG=$(git tag --sort=-v:refname | grep -A1 "^${CURRENT_TAG}$" | tail -1)
+          VERSION="${GITHUB_REF#refs/tags/}"
+          VERSION="${VERSION#v}"
 
-          if [ -z "$PREV_TAG" ] || [ "$PREV_TAG" = "$CURRENT_TAG" ]; then
-            # First release or no previous tag
-            PREV_TAG=$(git rev-list --max-parents=0 HEAD)
+          # Print the "## [VERSION]" section of CHANGELOG.md (up to the next "## [")
+          awk -v ver="$VERSION" '
+            $0 ~ "^## \\[" ver "\\]" { found=1; next }
+            /^## \[/ { if (found) exit }
+            found
+          ' CHANGELOG.md > /tmp/changelog.md
+
+          if [ ! -s /tmp/changelog.md ]; then
+            echo "::error::CHANGELOG.md has no section for $VERSION"
+            exit 1
           fi
 
-          echo "Generating changelog from $PREV_TAG to $CURRENT_TAG"
-
-          # Build changelog grouped by type
-          {
-            echo "### What's New"
-            echo ""
-
-            # Features
-            FEATS=$(git log "${PREV_TAG}..${CURRENT_TAG}" --pretty=format:"%s" | grep -E "^feat" | sed 's/^feat(\([^)]*\)): /- **\1:** /' | sed 's/^feat: /- /' || true)
-            if [ -n "$FEATS" ]; then
-              echo "**Features**"
-              echo "$FEATS"
-              echo ""
-            fi
-
-            # Fixes
-            FIXES=$(git log "${PREV_TAG}..${CURRENT_TAG}" --pretty=format:"%s" | grep -E "^fix" | sed 's/^fix(\([^)]*\)): /- **\1:** /' | sed 's/^fix: /- /' || true)
-            if [ -n "$FIXES" ]; then
-              echo "**Bug Fixes**"
-              echo "$FIXES"
-              echo ""
-            fi
-
-            # Other changes (docs, chore, refactor, ci, etc.)
-            OTHER=$(git log "${PREV_TAG}..${CURRENT_TAG}" --pretty=format:"%s" | grep -vE "^(feat|fix)" | sed 's/^\([^(]*\)(\([^)]*\)): /- **\2:** /' | sed 's/^\([a-z]*\): /- /' || true)
-            if [ -n "$OTHER" ]; then
-              echo "**Other Changes**"
-              echo "$OTHER"
-              echo ""
-            fi
-          } > /tmp/changelog.md
-
-          # Store as multiline output
           {
             echo "changelog<<CHANGELOG_EOF"
             cat /tmp/changelog.md

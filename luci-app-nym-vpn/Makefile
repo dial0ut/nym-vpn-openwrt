@@ -4,6 +4,8 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-nym-vpn
+# Only used by external OpenWrt-buildroot builds; release packages are
+# stamped with the git tag version by scripts/ipk/build-ipk.sh / apk/build-apk.sh.
 PKG_VERSION:=1.0.0
 PKG_RELEASE:=1
 
