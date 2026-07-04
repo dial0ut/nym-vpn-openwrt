@@ -11,6 +11,13 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+### Fixed
+
+- postinst now scrubs stale apk feed lines (pre-1.30.1 bare directory URLs)
+  from /etc/apk/repositories and always rewrites the canonical
+  packages.adb repo line, fixing "APKINDEX.tar.gz: unexpected end of file"
+  warnings on every apk operation.
+
 ## [1.30.3] - 2026-07-03
 
 ### Fixed

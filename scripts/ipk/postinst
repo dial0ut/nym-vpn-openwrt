@@ -21,15 +21,26 @@ if [ -n "$ARCH" ]; then
     if command -v apk >/dev/null 2>&1; then
         # OpenWrt 24.10+ (apk package manager)
         APK_REPO="/etc/apk/repositories.d/nym-vpn.list"
-        if ! grep -q "nym-vpn" "$APK_REPO" 2>/dev/null; then
-            mkdir -p /etc/apk/repositories.d
-            # OpenWrt apk expects the repo line to point directly at the
-            # packages.adb index (matching its own distfeeds.list, e.g.
-            # .../<arch>/base/packages.adb). A bare directory URL makes apk
-            # fall back to legacy Alpine resolution (<url>/<arch>/APKINDEX.tar.gz),
-            # which 404s against our feed.
-            echo "${FEED_BASE}/apk/${ARCH}/packages.adb" > "$APK_REPO"
-            echo "Package feed registered: ${FEED_BASE}/apk/${ARCH}/packages.adb"
+        APK_LINE="${FEED_BASE}/apk/${ARCH}/packages.adb"
+        mkdir -p /etc/apk/repositories.d
+        # Scrub stale feed lines outside our canonical file. Pre-1.30.1
+        # installs wrote a bare directory URL, which makes apk fall back to
+        # legacy Alpine resolution (<url>/<arch>/APKINDEX.tar.gz) and 404
+        # on every apk operation.
+        for f in /etc/apk/repositories /etc/apk/repositories.d/*.list; do
+            [ -f "$f" ] || continue
+            [ "$f" = "$APK_REPO" ] && continue
+            if grep -q "packages\.dial0ut\.org" "$f" 2>/dev/null; then
+                grep -v "packages\.dial0ut\.org" "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+                echo "Removed stale nym-vpn feed line from $f"
+            fi
+        done
+        # OpenWrt apk expects the repo line to point directly at the
+        # packages.adb index (matching its own distfeeds.list, e.g.
+        # .../<arch>/base/packages.adb).
+        if [ "$(cat "$APK_REPO" 2>/dev/null)" != "$APK_LINE" ]; then
+            echo "$APK_LINE" > "$APK_REPO"
+            echo "Package feed registered: $APK_LINE"
         fi
     elif [ -f /etc/opkg.conf ]; then
         # OpenWrt <=23.05 (opkg package manager)
