@@ -11,6 +11,13 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+### Fixed
+
+- .apk packages now register pre-upgrade/post-upgrade scripts: apk (unlike
+  opkg) does not run post-install or pre-deinstall on upgrades, so apk-based
+  upgrades silently skipped the service refresh, rpcd ACL reload, watchdog
+  re-enable, and feed self-heal.
+
 ## [1.30.4] - 2026-07-03
 
 ### Fixed

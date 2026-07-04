@@ -157,6 +157,18 @@ chmod 755 "$SCRIPTS_DIR/postinst"
 cp "$IPK_SCRIPT_DIR/prerm" "$SCRIPTS_DIR/prerm"
 chmod 755 "$SCRIPTS_DIR/prerm"
 
+# apk (unlike opkg) does NOT run post-install/pre-deinstall on upgrades — it
+# runs pre-upgrade/post-upgrade instead, so both must be registered or
+# upgrades skip service/feed/ACL refresh entirely. postinst is idempotent and
+# doubles as post-upgrade. prerm doubles as pre-upgrade, but its destructive
+# branch is guarded by opkg's PKG_UPGRADE=1, which apk never sets — wrap it.
+{
+    echo '#!/bin/sh'
+    echo 'export PKG_UPGRADE=1'
+    tail -n +2 "$IPK_SCRIPT_DIR/prerm"
+} > "$SCRIPTS_DIR/preupgrade"
+chmod 755 "$SCRIPTS_DIR/preupgrade"
+
 # === Build APK using apk mkpkg ===
 echo "=== Building APK ==="
 
@@ -187,6 +199,8 @@ if command -v apk >/dev/null 2>&1 && apk mkpkg --help >/dev/null 2>&1; then
     apk mkpkg \
         "${MKPKG_INFO_ARGS[@]}" \
         -s "post-install:${SCRIPTS_DIR}/postinst" \
+        -s "post-upgrade:${SCRIPTS_DIR}/postinst" \
+        -s "pre-upgrade:${SCRIPTS_DIR}/preupgrade" \
         -s "pre-deinstall:${SCRIPTS_DIR}/prerm" \
         -F "$DATA_DIR" \
         -o "$OUTPUT_FILE"
@@ -215,6 +229,8 @@ elif command -v docker >/dev/null 2>&1; then
             -I "depends:luci-base" \
             -I "depends:rpcd" \
             -s "post-install:/work/scripts/postinst" \
+            -s "post-upgrade:/work/scripts/postinst" \
+            -s "pre-upgrade:/work/scripts/preupgrade" \
             -s "pre-deinstall:/work/scripts/prerm" \
             -F /work/data \
             -o /work/out/output.apk
