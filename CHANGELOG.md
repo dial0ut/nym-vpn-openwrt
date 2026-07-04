@@ -11,6 +11,8 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+## [1.30.5] - 2026-07-03
+
 ### Fixed
 
 - .apk packages now register pre-upgrade/post-upgrade scripts: apk (unlike
