@@ -11,10 +11,14 @@
 # Register package feed for updates
 FEED_BASE="https://packages.dial0ut.org"
 
-# Detect architecture
+# Detect architecture (openwrt_release first, os-release as fallback —
+# not all OpenWrt/apk images ship both)
 ARCH=""
 if [ -f /etc/openwrt_release ]; then
     ARCH=$(. /etc/openwrt_release; echo "$DISTRIB_ARCH")
+fi
+if [ -z "$ARCH" ] && [ -f /etc/os-release ]; then
+    ARCH=$(grep '^OPENWRT_ARCH=' /etc/os-release | cut -d'"' -f2)
 fi
 
 if [ -n "$ARCH" ]; then
