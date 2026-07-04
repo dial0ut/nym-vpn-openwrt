@@ -11,6 +11,8 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+## [1.30.4] - 2026-07-03
+
 ### Fixed
 
 - postinst now scrubs stale apk feed lines (pre-1.30.1 bare directory URLs)
