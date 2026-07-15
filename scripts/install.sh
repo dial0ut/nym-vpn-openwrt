@@ -138,6 +138,14 @@ main() {
     step "Downloading ${filename}..."
     download "$url" "/tmp/${filename}"
 
+    # Refresh package lists so dependencies (kmod-tun, luci-base, ...) can be
+    # resolved from the OpenWrt feeds when installing the local package.
+    step "Updating package lists..."
+    case "$pkg_mgr" in
+        opkg) opkg update || warn "opkg update failed; dependency installation may fail" ;;
+        apk)  apk update || warn "apk update failed; dependency installation may fail" ;;
+    esac
+
     step "Installing..."
     case "$pkg_mgr" in
         opkg) opkg install "/tmp/${filename}" ;;
@@ -145,6 +153,17 @@ main() {
     esac
 
     rm -f "/tmp/${filename}"
+
+    # Belt and braces: nym-vpnd cannot create its tunnel without the TUN
+    # driver. If the module isn't present (e.g. older package versions that
+    # failed to declare the dependency), install it explicitly.
+    if [ ! -e /dev/net/tun ] && ! grep -q '^tun ' /proc/modules 2>/dev/null; then
+        warn "TUN device not available; installing kmod-tun..."
+        case "$pkg_mgr" in
+            opkg) opkg install kmod-tun ;;
+            apk)  apk add kmod-tun ;;
+        esac
+    fi
 
     echo ""
     printf "${GREEN}NymVPN installed successfully!${NC}\n"

@@ -11,6 +11,18 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+### Fixed
+
+- .apk packages shipped with only `rpcd` in their dependency list: repeated
+  `-I depends:` flags to `apk mkpkg` overwrite each other, so `kmod-tun` and
+  the other dependencies were silently dropped and fresh apk-based installs
+  ended up without the TUN driver (`Error state: TunDevice`). All dependencies
+  are now passed as a single space-separated `depends:` value.
+- install.sh now runs `opkg update`/`apk update` before installing so
+  dependencies resolve on routers with stale package lists, and verifies the
+  TUN device is available after install (installing `kmod-tun` explicitly if
+  not).
+
 ## [1.30.5] - 2026-07-03
 
 ### Fixed

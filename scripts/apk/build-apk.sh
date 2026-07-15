@@ -184,13 +184,9 @@ MKPKG_INFO_ARGS=(
     -I "license:GPL-3.0"
     -I "origin:nym-vpn"
     -I "maintainer:dial0ut"
-    -I "depends:libc"
-    -I "depends:kmod-tun"
-    -I "depends:libmnl"
-    -I "depends:libnftnl"
-    -I "depends:kmod-ipt-conntrack-extra"
-    -I "depends:luci-base"
-    -I "depends:rpcd"
+    # Repeated -I "depends:" flags OVERWRITE each other (last one wins) —
+    # all deps must go in a single space-separated value.
+    -I "depends:libc kmod-tun libmnl libnftnl kmod-ipt-conntrack-extra luci-base rpcd"
 )
 
 if command -v apk >/dev/null 2>&1 && apk mkpkg --help >/dev/null 2>&1; then
@@ -221,13 +217,7 @@ elif command -v docker >/dev/null 2>&1; then
             -I "license:GPL-3.0" \
             -I "origin:nym-vpn" \
             -I "maintainer:dial0ut" \
-            -I "depends:libc" \
-            -I "depends:kmod-tun" \
-            -I "depends:libmnl" \
-            -I "depends:libnftnl" \
-            -I "depends:kmod-ipt-conntrack-extra" \
-            -I "depends:luci-base" \
-            -I "depends:rpcd" \
+            -I "depends:libc kmod-tun libmnl libnftnl kmod-ipt-conntrack-extra luci-base rpcd" \
             -s "post-install:/work/scripts/postinst" \
             -s "post-upgrade:/work/scripts/postinst" \
             -s "pre-upgrade:/work/scripts/preupgrade" \
