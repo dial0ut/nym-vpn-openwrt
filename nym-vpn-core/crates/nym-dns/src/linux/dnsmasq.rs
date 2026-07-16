@@ -19,6 +19,16 @@ use std::{
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Prefer IPv4 upstream resolvers when both families are present. IPv6
+/// upstreams are only reachable when the exit gateway actually carries IPv6,
+/// which cannot be verified from the router; unreachable IPv6 upstreams cause
+/// per-lookup timeouts in dnsmasq. AAAA records still resolve fine over IPv4
+/// transport, so dropping the IPv6 upstreams loses nothing.
+fn prefer_ipv4_upstreams(servers: &[std::net::IpAddr]) -> Vec<std::net::IpAddr> {
+    let v4: Vec<std::net::IpAddr> = servers.iter().copied().filter(|ip| ip.is_ipv4()).collect();
+    if v4.is_empty() { servers.to_vec() } else { v4 }
+}
+
 const OPENWRT_RELEASE: &str = "/etc/openwrt_release";
 const BACKUP_MARKER: &str = "/tmp/nym-dns-backup";
 const RESOLV_CONF: &str = "/etc/resolv.conf";
@@ -91,6 +101,9 @@ impl Dnsmasq {
             self.save_backup()?;
             self.configured = true;
         }
+
+        let servers = prefer_ipv4_upstreams(servers);
+        let servers = servers.as_slice();
 
         // Set noresolv so dnsmasq ignores /tmp/resolv.conf.d/resolv.conf.auto
         uci_set("dhcp.@dnsmasq[0].noresolv", "1")?;
@@ -277,4 +290,31 @@ fn restart_dnsmasq() -> Result<()> {
         return Err(Error::DnsmasqRestart(stderr.to_string()));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::prefer_ipv4_upstreams;
+    use std::net::IpAddr;
+
+    #[test]
+    fn prefers_ipv4_upstreams_when_mixed() {
+        let servers: Vec<IpAddr> = vec![
+            "2620:fe::fe".parse().unwrap(),
+            "9.9.9.9".parse().unwrap(),
+            "2606:4700:4700::1111".parse().unwrap(),
+            "1.1.1.1".parse().unwrap(),
+        ];
+        let got = prefer_ipv4_upstreams(&servers);
+        assert_eq!(
+            got,
+            vec!["9.9.9.9".parse::<IpAddr>().unwrap(), "1.1.1.1".parse().unwrap()]
+        );
+    }
+
+    #[test]
+    fn keeps_ipv6_when_no_ipv4_available() {
+        let servers: Vec<IpAddr> = vec!["2620:fe::fe".parse().unwrap()];
+        assert_eq!(prefer_ipv4_upstreams(&servers), servers);
+    }
 }
