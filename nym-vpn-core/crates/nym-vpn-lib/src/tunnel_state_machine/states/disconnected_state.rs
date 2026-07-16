@@ -55,6 +55,10 @@ impl TunnelStateHandler for DisconnectedState {
                     TunnelCommand::Disconnect => NextTunnelState::SameState(self),
                     TunnelCommand::SetTunnelSettings(tunnel_settings) => {
                         shared_state.tunnel_settings = tunnel_settings;
+                        // Re-apply so enabling/disabling the kill-switch while
+                        // disconnected installs/removes the Blocked table now,
+                        // instead of silently waiting for the next connect.
+                        shared_state.apply_killswitch_policy();
                         NextTunnelState::SameState(self)
                     }
                 }

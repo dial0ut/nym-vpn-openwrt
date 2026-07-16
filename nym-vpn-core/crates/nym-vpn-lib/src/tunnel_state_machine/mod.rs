@@ -624,6 +624,10 @@ impl SharedState {
     /// itself can self-recover. Otherwise reset the firewall to open so
     /// transient errors cannot deadlock the daemon out of its own API.
     fn apply_killswitch_policy(&mut self) {
+        // The firewall caches the kill-switch flag; sync it from live settings
+        // so a runtime toggle (LuCI / `tunnel set`) takes effect without a
+        // daemon restart.
+        self.firewall.set_killswitch(self.tunnel_settings.killswitch);
         if self.tunnel_settings.killswitch && !self.api_endpoints.is_empty() {
             let enable_ipv6 = self.tunnel_settings.enable_ipv6;
             let allowed_endpoints = self

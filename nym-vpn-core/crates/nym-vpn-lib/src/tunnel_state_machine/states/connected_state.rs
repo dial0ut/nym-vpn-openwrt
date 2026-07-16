@@ -116,6 +116,9 @@ impl ConnectedState {
 
         shared_state
             .firewall
+            .set_killswitch(shared_state.tunnel_settings.killswitch);
+        shared_state
+            .firewall
             .apply_policy(policy)
             .map_err(Error::SetFirewallPolicy)
     }

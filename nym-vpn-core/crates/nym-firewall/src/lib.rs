@@ -406,6 +406,14 @@ impl Firewall {
         })
     }
 
+    /// Update whether the kill-switch (blocking rules) is enforced. The value
+    /// is read on every `apply_policy` call, so callers must sync this from the
+    /// live tunnel settings whenever they change — the constructor value is
+    /// only the initial state.
+    pub fn set_killswitch(&mut self, on: bool) {
+        self.killswitch = on;
+    }
+
     /// Creates a new firewall instance. `fwmark` is accepted for API
     /// compatibility but unused on OpenWrt — routers don't do split tunneling
     /// or fwmark-based filtering.
@@ -446,4 +454,22 @@ pub enum FirewallPolicyError {
     /// General firewall failure
     #[error("failed to set firewall policy")]
     Generic,
+}
+
+#[cfg(test)]
+mod killswitch_toggle_tests {
+    use super::*;
+
+    #[test]
+    fn set_killswitch_updates_the_flag() {
+        let mut fw = Firewall {
+            inner: openwrt::Firewall::new().expect("construct"),
+            killswitch: false,
+        };
+        assert!(!fw.killswitch);
+        fw.set_killswitch(true);
+        assert!(fw.killswitch, "set_killswitch(true) must update the cached flag");
+        fw.set_killswitch(false);
+        assert!(!fw.killswitch);
+    }
 }
