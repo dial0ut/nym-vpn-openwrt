@@ -128,6 +128,20 @@ fn integrate_with_fw4(interfaces: &[String]) -> Result<()> {
         add_rule(&[
             "add", "rule", "inet", "fw4", NAT_CHAIN, "oifname", iface, "counter", "masquerade",
         ])?;
+        // Clamp TCP MSS to the path MTU for flows entering/leaving the tunnel.
+        // The 2-hop WG tun runs at 1340 bytes; without clamping, LAN clients
+        // negotiate MSS 1460 against their own 1500 link and full-size segments
+        // blackhole whenever ICMP frag-needed is lost (PMTU blackhole: pages
+        // hang, bulk transfers limp). `rt mtu` uses the packet's route MTU, so
+        // this is inert for the 1500-MTU mixnet tun. Must precede the accepts.
+        add_rule(&[
+            "add", "rule", "inet", "fw4", FORWARD_CHAIN, "oifname", iface, "tcp", "flags",
+            "syn", "tcp", "option", "maxseg", "size", "set", "rt", "mtu",
+        ])?;
+        add_rule(&[
+            "add", "rule", "inet", "fw4", FORWARD_CHAIN, "iifname", iface, "tcp", "flags",
+            "syn", "tcp", "option", "maxseg", "size", "set", "rt", "mtu",
+        ])?;
         add_rule(&[
             "add", "rule", "inet", "fw4", FORWARD_CHAIN, "oifname", iface, "accept",
         ])?;

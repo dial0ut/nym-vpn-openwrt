@@ -87,6 +87,12 @@ pub struct SetParams {
         value_parser = clap::value_parser!(BooleanOption),
     )]
     disable_real_traffic_poisson_rate: Option<BooleanOption>,
+    #[arg(
+        long,
+        help = "Disable background loop cover (decoy) traffic",
+        value_parser = clap::value_parser!(BooleanOption),
+    )]
+    disable_background_cover_traffic: Option<BooleanOption>,
 }
 
 impl Command {
@@ -162,6 +168,7 @@ impl Command {
                     || params.average_packet_delay.is_some()
                     || params.message_sending_delay.is_some()
                     || params.disable_real_traffic_poisson_rate.is_some()
+                    || params.disable_background_cover_traffic.is_some()
                 {
                     let mut config = rpc_client.get_config().await?;
 
@@ -182,6 +189,13 @@ impl Command {
 
                     if let Some(disable_poisson_rate) = params.disable_real_traffic_poisson_rate {
                         config.mixnet_traffic.disable_poisson_rate = *disable_poisson_rate;
+                    }
+
+                    if let Some(disable_background_cover_traffic) =
+                        params.disable_background_cover_traffic
+                    {
+                        config.mixnet_traffic.disable_background_cover_traffic =
+                            *disable_background_cover_traffic;
                     }
 
                     rpc_client

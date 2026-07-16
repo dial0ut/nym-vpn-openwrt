@@ -85,6 +85,12 @@ restore_fw4_tunnel_rules() {
             oifname "$iface" counter masquerade \
             comment "\"nym-vpn: masquerade tunnel traffic\"" 2>/dev/null || true
         nft add rule inet fw4 "$FORWARD_CHAIN" \
+            oifname "$iface" tcp flags syn tcp option maxseg size set rt mtu \
+            comment "\"nym-vpn: clamp MSS to tunnel PMTU\"" 2>/dev/null || true
+        nft add rule inet fw4 "$FORWARD_CHAIN" \
+            iifname "$iface" tcp flags syn tcp option maxseg size set rt mtu \
+            comment "\"nym-vpn: clamp MSS to tunnel PMTU\"" 2>/dev/null || true
+        nft add rule inet fw4 "$FORWARD_CHAIN" \
             oifname "$iface" accept \
             comment "\"nym-vpn: forward LAN to tunnel\"" 2>/dev/null || true
         nft add rule inet fw4 "$FORWARD_CHAIN" \

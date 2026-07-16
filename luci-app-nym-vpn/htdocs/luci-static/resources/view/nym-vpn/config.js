@@ -773,6 +773,47 @@ return view.extend({
             });
         };
 
+        // Save mixnet tuning knobs. Numeric fields are optional: empty input
+        // means "leave as-is" (the daemon keeps its current/default value).
+        var saveMixnetTuning = function() {
+            var poissonEl = document.getElementById('tuning-poisson-toggle');
+            var coverEl = document.getElementById('tuning-cover-toggle');
+            var loopEl = document.getElementById('tuning-loop-cover');
+            var packetEl = document.getElementById('tuning-packet-delay');
+            var messageEl = document.getElementById('tuning-message-delay');
+            if (!poissonEl || !coverEl) return;
+
+            var inRange = function(el, min, max) {
+                if (!el || el.value === '') return '';
+                var n = parseInt(el.value, 10);
+                if (isNaN(n) || n < min || n > max) return null;
+                return String(n);
+            };
+
+            var loop_cover = inRange(loopEl, 0, 200);
+            var packet = inRange(packetEl, 0, 200);
+            var message = inRange(messageEl, 5, 50);
+            if (loop_cover === null || packet === null || message === null) {
+                showToast('Tuning values out of range (cover 0-200, mixing 0-200, sending 5-50 ms)', 'error');
+                return;
+            }
+
+            // disable_poisson = toggle says "disable Poisson delays"
+            var disable_poisson = poissonEl.checked ? 'on' : 'off';
+            var disable_cover = coverEl.checked ? 'on' : 'off';
+
+            rpc.mixnetTuningSet(loop_cover, packet, message, disable_poisson, disable_cover)
+                .then(function(result) {
+                    if (result && result.success) {
+                        showToast('Mixnet tuning saved', 'success');
+                    } else {
+                        showToast('Failed: ' + (result.error || 'Unknown'), 'error');
+                    }
+                }).catch(function(err) {
+                    showToast('Error: ' + err.message, 'error');
+                });
+        };
+
         // Account handlers
         var handleAccountLogin = function(ev) {
             ev.preventDefault();
@@ -1438,6 +1479,90 @@ return view.extend({
             ])
         ]);
         container.appendChild(tunnelCard);
+
+        // Mixnet Tuning Card — Sphinx traffic knobs (mixnet/5-hop mode).
+        // These trade anonymity for performance; the daemon validates ranges.
+        var mixnetTuningCard = E('div', { 'class': 'nym-card' }, [
+            E('div', { 'class': 'nym-card-header', 'click': function() { toggleCard(mixnetTuningCard); } }, [
+                E('div', { 'class': 'nym-card-title' }, [
+                    svgIcon(assets.iconTunnel),
+                    'Mixnet Tuning'
+                ]),
+                E('div', { 'class': 'nym-card-chevron' }, '▼')
+            ]),
+            E('div', { 'class': 'nym-card-body' }, [
+                E('div', { 'class': 'nym-tuning-warning' },
+                    'These settings trade anonymity for performance and only apply to ' +
+                    'mixnet (5-hop) mode. Defaults give the strongest privacy; disabling ' +
+                    'delays or cover traffic makes traffic analysis easier.'),
+                E('div', { 'class': 'nym-toggle-row' }, [
+                    E('div', { 'class': 'nym-toggle-info' }, [
+                        E('div', { 'class': 'nym-toggle-title' }, 'Disable Poisson Delays'),
+                        E('div', { 'class': 'nym-toggle-desc' }, 'Send real traffic immediately instead of on a randomized schedule. Much faster, less private.')
+                    ]),
+                    E('label', { 'class': 'nym-toggle' }, [
+                        E('input', {
+                            'type': 'checkbox',
+                            'id': 'tuning-poisson-toggle',
+                            'checked': tunnel_config.disable_poisson === 'true' ? 'checked' : null,
+                            'change': saveMixnetTuning
+                        }),
+                        E('span', { 'class': 'nym-toggle-slider' })
+                    ])
+                ]),
+                E('div', { 'class': 'nym-toggle-row' }, [
+                    E('div', { 'class': 'nym-toggle-info' }, [
+                        E('div', { 'class': 'nym-toggle-title' }, 'Disable Background Cover Traffic'),
+                        E('div', { 'class': 'nym-toggle-desc' }, 'Stop sending decoy traffic. Saves bandwidth and CPU, less private.')
+                    ]),
+                    E('label', { 'class': 'nym-toggle' }, [
+                        E('input', {
+                            'type': 'checkbox',
+                            'id': 'tuning-cover-toggle',
+                            'checked': tunnel_config.disable_cover === 'true' ? 'checked' : null,
+                            'change': saveMixnetTuning
+                        }),
+                        E('span', { 'class': 'nym-toggle-slider' })
+                    ])
+                ]),
+                E('div', { 'class': 'nym-tuning-grid' }, [
+                    E('div', { 'class': 'nym-form-group' }, [
+                        E('label', { 'class': 'nym-form-label' }, 'Cover traffic delay (ms, 0-200)'),
+                        E('input', {
+                            'type': 'number', 'min': '0', 'max': '200',
+                            'id': 'tuning-loop-cover', 'class': 'nym-input nym-tuning-num',
+                            'value': tunnel_config.loop_cover_delay || '',
+                            'placeholder': 'default'
+                        })
+                    ]),
+                    E('div', { 'class': 'nym-form-group' }, [
+                        E('label', { 'class': 'nym-form-label' }, 'Mixing delay per hop (ms, 0-200)'),
+                        E('input', {
+                            'type': 'number', 'min': '0', 'max': '200',
+                            'id': 'tuning-packet-delay', 'class': 'nym-input nym-tuning-num',
+                            'value': tunnel_config.packet_delay || '',
+                            'placeholder': 'default'
+                        })
+                    ]),
+                    E('div', { 'class': 'nym-form-group' }, [
+                        E('label', { 'class': 'nym-form-label' }, 'Sending delay (ms, 5-50)'),
+                        E('input', {
+                            'type': 'number', 'min': '5', 'max': '50',
+                            'id': 'tuning-message-delay', 'class': 'nym-input nym-tuning-num',
+                            'value': tunnel_config.message_delay || '',
+                            'placeholder': 'default'
+                        })
+                    ])
+                ]),
+                E('div', { 'class': 'nym-action-buttons' }, [
+                    E('button', {
+                        'class': 'nym-btn nym-btn-secondary',
+                        'click': saveMixnetTuning
+                    }, 'Apply Tuning')
+                ])
+            ])
+        ]);
+        container.appendChild(mixnetTuningCard);
 
         // Inbound Services Card
         var inboundState = inbound_exemptions.slice();

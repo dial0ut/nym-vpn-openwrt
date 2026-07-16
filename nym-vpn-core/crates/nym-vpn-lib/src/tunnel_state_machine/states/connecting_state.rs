@@ -34,7 +34,8 @@ use nym_firewall::{
 use nym_gateway_directory::ResolvedConfig;
 use nym_vpn_lib_types::TunnelConnectionData;
 use nym_vpn_lib_types::{
-    EstablishConnectionData, EstablishConnectionState, GatewayLightInfo, TunnelType,
+    AccountControllerErrorStateReason, AccountControllerState, EstablishConnectionData,
+    EstablishConnectionState, GatewayLightInfo, TunnelType,
 };
 
 /// Initial delay between retry attempts.
@@ -306,8 +307,37 @@ impl ConnectingState {
         // Allow networking now when firewall and resolver overrides are configured.
         shared_state.allow_networking().await;
 
+        Self::force_account_refresh_if_time_desynced(self.retry_attempt, shared_state).await;
+
         self.start_tunnel_monitor(Some(resolved_gateway_config), shared_state)
             .await
+    }
+
+    /// Requests account summary refresh on the very first connection attempt if the
+    /// account controller is stuck in the device-time-desynced error state. This is
+    /// an escape hatch so a disconnect/reconnect can leave the error state instead
+    /// of failing indefinitely.
+    async fn force_account_refresh_if_time_desynced(
+        retry_attempt: u32,
+        shared_state: &SharedState,
+    ) {
+        if retry_attempt == 0
+            && let AccountControllerState::Error(
+                AccountControllerErrorStateReason::DeviceTimeDesynced,
+            ) = shared_state.account_controller_state.get_state()
+        {
+            tracing::info!("Forcing account state refresh due to device time being desynced");
+            if let Err(err) = shared_state
+                .account_command_tx
+                .background_refresh_account_state()
+                .await
+            {
+                trace_err_chain!(
+                    err,
+                    "failed to request background refresh for account state"
+                );
+            }
+        }
     }
 
     async fn start_tunnel_monitor(

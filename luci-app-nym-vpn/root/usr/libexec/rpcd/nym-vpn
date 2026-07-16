@@ -603,6 +603,12 @@ handle_tunnel_get() {
     local killswitch=$(echo "$config" | grep "Kill-switch:" | sed 's/.*Kill-switch: //')
     local legacy_split_tunnel=$(echo "$config" | grep "Legacy-split-tunnel:" | sed 's/.*Legacy-split-tunnel: //')
 
+    local loop_cover=$(echo "$config" | sed -n 's/.*poisson_parameter_for_loop_cover_stream: Some(\([0-9]*\)).*/\1/p')
+    local packet_delay=$(echo "$config" | sed -n 's/.*, average_packet_delay: Some(\([0-9]*\)).*/\1/p')
+    local message_delay=$(echo "$config" | sed -n 's/.*message_sending_average_delay: Some(\([0-9]*\)).*/\1/p')
+    local disable_poisson=$(echo "$config" | sed -n 's/.*disable_poisson_rate: \([a-z]*\).*/\1/p')
+    local disable_cover=$(echo "$config" | sed -n 's/.*disable_background_cover_traffic: \([a-z]*\).*/\1/p')
+
     json_init
     json_add_string "ipv6" "$ipv6"
     json_add_string "two_hop" "$two_hop"
@@ -611,6 +617,11 @@ handle_tunnel_get() {
     json_add_string "circumvention_transports" "$circumvention"
     json_add_string "killswitch" "$killswitch"
     json_add_string "legacy_split_tunnel" "$legacy_split_tunnel"
+    json_add_string "loop_cover_delay" "$loop_cover"
+    json_add_string "packet_delay" "$packet_delay"
+    json_add_string "message_delay" "$message_delay"
+    json_add_string "disable_poisson" "$disable_poisson"
+    json_add_string "disable_cover" "$disable_cover"
     json_add_string "raw_config" "$config"
     json_dump
 }
@@ -649,6 +660,37 @@ handle_tunnel_set() {
     if [ -n "$circumvention" ]; then
         circumvention=$(validate_input "$circumvention" onoff)
         [ -n "$circumvention" ] && args="$args --circumvention-transports $circumvention"
+    fi
+
+    # Mixnet tuning (numeric ranges mirror daemon-side validation)
+    json_get_var loop_cover_delay loop_cover_delay
+    if [ -n "$loop_cover_delay" ] && echo "$loop_cover_delay" | grep -qE '^[0-9]+$' && \
+       [ "$loop_cover_delay" -le 200 ]; then
+        args="$args --loop-cover-stream-average-delay $loop_cover_delay"
+    fi
+
+    json_get_var packet_delay packet_delay
+    if [ -n "$packet_delay" ] && echo "$packet_delay" | grep -qE '^[0-9]+$' && \
+       [ "$packet_delay" -le 200 ]; then
+        args="$args --average-packet-delay $packet_delay"
+    fi
+
+    json_get_var message_delay message_delay
+    if [ -n "$message_delay" ] && echo "$message_delay" | grep -qE '^[0-9]+$' && \
+       [ "$message_delay" -ge 5 ] && [ "$message_delay" -le 50 ]; then
+        args="$args --message-sending-delay $message_delay"
+    fi
+
+    json_get_var disable_poisson disable_poisson
+    if [ -n "$disable_poisson" ]; then
+        disable_poisson=$(validate_input "$disable_poisson" onoff)
+        [ -n "$disable_poisson" ] && args="$args --disable-real-traffic-poisson-rate $disable_poisson"
+    fi
+
+    json_get_var disable_cover disable_cover
+    if [ -n "$disable_cover" ]; then
+        disable_cover=$(validate_input "$disable_cover" onoff)
+        [ -n "$disable_cover" ] && args="$args --disable-background-cover-traffic $disable_cover"
     fi
 
     if [ -n "$args" ]; then
@@ -1523,12 +1565,22 @@ handle_init() {
     local t_circumvention=$(echo "$tunnel_raw" | grep "Circumvention transports:" | sed 's/.*Circumvention transports: //')
     local t_killswitch=$(echo "$tunnel_raw" | grep "Kill-switch:" | sed 's/.*Kill-switch: //')
     local t_legacy_split_tunnel=$(echo "$tunnel_raw" | grep "Legacy-split-tunnel:" | sed 's/.*Legacy-split-tunnel: //')
+    local t_loop_cover=$(echo "$tunnel_raw" | sed -n 's/.*poisson_parameter_for_loop_cover_stream: Some(\([0-9]*\)).*/\1/p')
+    local t_packet_delay=$(echo "$tunnel_raw" | sed -n 's/.*, average_packet_delay: Some(\([0-9]*\)).*/\1/p')
+    local t_message_delay=$(echo "$tunnel_raw" | sed -n 's/.*message_sending_average_delay: Some(\([0-9]*\)).*/\1/p')
+    local t_disable_poisson=$(echo "$tunnel_raw" | sed -n 's/.*disable_poisson_rate: \([a-z]*\).*/\1/p')
+    local t_disable_cover=$(echo "$tunnel_raw" | sed -n 's/.*disable_background_cover_traffic: \([a-z]*\).*/\1/p')
     json_add_string "ipv6" "$t_ipv6"
     json_add_string "two_hop" "$t_two_hop"
     json_add_string "netstack" "$t_netstack"
     json_add_string "circumvention_transports" "$t_circumvention"
     json_add_string "killswitch" "$t_killswitch"
     json_add_string "legacy_split_tunnel" "$t_legacy_split_tunnel"
+    json_add_string "loop_cover_delay" "$t_loop_cover"
+    json_add_string "packet_delay" "$t_packet_delay"
+    json_add_string "message_delay" "$t_message_delay"
+    json_add_string "disable_poisson" "$t_disable_poisson"
+    json_add_string "disable_cover" "$t_disable_cover"
     json_close_object
 
     # Account
@@ -1918,7 +1970,7 @@ case "$1" in
     "gateway_list_countries": { "gateway_type": "str" },
     "gateway_list_by_country": { "gateway_type": "str", "country_code": "str" },
     "tunnel_get": {},
-    "tunnel_set": { "ipv6": "str", "two_hop": "str", "killswitch": "str", "legacy_split_tunnel": "str" },
+    "tunnel_set": { "ipv6": "str", "two_hop": "str", "killswitch": "str", "legacy_split_tunnel": "str", "circumvention": "str", "loop_cover_delay": "str", "packet_delay": "str", "message_delay": "str", "disable_poisson": "str", "disable_cover": "str" },
     "account_get": {},
     "account_set": { "mnemonic": "str", "mode": "str" },
     "account_forget": {},
