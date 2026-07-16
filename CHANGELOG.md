@@ -23,9 +23,10 @@ the GitHub release notes.
 ### Changed
 
 - Fresh installs now default IPv6-into-tunnel to off. Tunneled IPv6 toward
-  exits without IPv6 egress was silently blackholed, stalling dual-stack
-  LAN clients on every new connection (Happy Eyeballs timeouts). Existing
-  installs keep their stored setting; the LuCI toggle still enables IPv6.
+  exits without IPv6 egress was silently dropped, so dual-stack LAN clients
+  tried IPv6 first and waited out a timeout before falling back to IPv4 on
+  every new connection. Existing installs keep their stored setting; the
+  LuCI toggle still enables IPv6.
 
 ### Fixed
 
