@@ -136,7 +136,14 @@ impl Default for VpnServiceConfig {
                 two_letter_iso_country_code: "CH".to_owned(),
             },
             allow_lan: true,
-            disable_ipv6: false,
+            // OpenWrt port default: IPv6-into-tunnel OFF. On dual-stack WANs
+            // where the exit gateway has no IPv6 egress, accepted-then-dropped
+            // IPv6 causes per-connection Happy-Eyeballs stalls for LAN clients;
+            // with it off, forwarded IPv6 is rejected fast and clients fall back
+            // to IPv4 immediately. Re-enable via LuCI or
+            // `nym-vpnc tunnel set --ipv6 on`. Existing config files keep their
+            // stored value — this only affects fresh installs.
+            disable_ipv6: true,
             enable_two_hop: true,
             enable_bridges: false,
             enable_lewes_protocol: false,

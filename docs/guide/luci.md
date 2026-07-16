@@ -20,7 +20,10 @@ The main view shows:
 
 Configure tunnel behavior:
 
-- **IPv6** — enable or disable IPv6 support (on/off)
+- **IPv6** — Enable IPv6 connectivity through the tunnel. Off by default:
+  most exit gateways have no IPv6 egress, and tunneled-then-dropped IPv6
+  makes dual-stack clients stall on every new connection. Turn on only if
+  your chosen exit demonstrably carries IPv6.
 - **Two-Hop Mode** — toggle between 2-hop (faster) and 5-hop mixnet routing (on/off)
 - **Kill-Switch** — block all non-tunnel WAN egress (on/off). This is *only* a firewall block; traffic is routed through the tunnel whenever connected regardless of this setting. Turn it off to allow WAN fallback or [split-tunnel carve-outs](split-tunneling.md). Shows a warning when disabled. Requires reconnect to take effect.
 

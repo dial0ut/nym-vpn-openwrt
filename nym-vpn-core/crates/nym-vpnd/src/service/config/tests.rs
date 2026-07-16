@@ -147,7 +147,7 @@ location = "BE"
     }
   },
   "allow_lan": true,
-  "disable_ipv6": false,
+  "disable_ipv6": true,
   "enable_two_hop": true,
   "enable_bridges": false,
   "enable_lewes_protocol": false,
@@ -209,7 +209,7 @@ identity = [ 99, 23, 98, 234, 66, 161, 195, 63, 155, 161, 250, 207, 17, 158, 136
     }
   },
   "allow_lan": true,
-  "disable_ipv6": false,
+  "disable_ipv6": true,
   "enable_two_hop": true,
   "enable_bridges": false,
   "enable_lewes_protocol": false,
@@ -277,7 +277,7 @@ address = [5, 56, 84, 195, 94, 238, 210, 124, 65, 143, 209, 144, 22, 255, 91, 18
             "address": "MNrmKzuKjNdbEhfPUzVNfjw63oBQNSayqoQKGL4JjAV.6fDcSN6faGpvA3pd3riCwjpzXc7RQfWmGMa82UVoEwKE@d5adfJNtcdZW2XwK85JAAU8nXAs9JCPYn2RNvDLZn4e"
     }
   },
-  "disable_ipv6": false,
+  "disable_ipv6": true,
   "enable_two_hop": true,
   "enable_bridges": false,
   "enable_lewes_protocol": false,
@@ -331,7 +331,7 @@ exit_point = "Random"
   "entry_point": "random",
   "exit_point": "random",
   "allow_lan": true,
-  "disable_ipv6": false,
+  "disable_ipv6": true,
   "enable_two_hop": true,
   "enable_bridges": false,
   "enable_lewes_protocol": false,
@@ -394,7 +394,7 @@ async fn test_service_config_migrate_from_v1() {
     }
   },
   "allow_lan": true,
-  "disable_ipv6": false,
+  "disable_ipv6": true,
   "enable_two_hop": true,
   "enable_bridges": false,
   "enable_lewes_protocol": false,
