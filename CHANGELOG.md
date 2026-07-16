@@ -11,7 +11,41 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+### Added
+
+- Mixnet Tuning card in LuCI: adjust Sphinx traffic knobs (Poisson delays,
+  background cover traffic, cover/mixing/sending delays) for mixnet mode —
+  the daemon-side support existed; this exposes it on the router, matching
+  the upstream apps' new Mixnet Tuning screens. Includes a new
+  `nym-vpnc tunnel set --disable-background-cover-traffic` flag and a short
+  `-l` alias for `nym-vpnc status --listen`.
+
+### Changed
+
+- Fresh installs now default IPv6-into-tunnel to off. Tunneled IPv6 toward
+  exits without IPv6 egress was silently blackholed, stalling dual-stack
+  LAN clients on every new connection (Happy Eyeballs timeouts). Existing
+  installs keep their stored setting; the LuCI toggle still enables IPv6.
+
 ### Fixed
+
+- TCP MSS is now clamped to the tunnel path MTU for forwarded LAN traffic
+  (both in the daemon's fw4 integration and the reload-restore script). The
+  2-hop WireGuard tun runs at MTU 1340; without clamping, LAN clients hit
+  PMTU blackholes — web pages stalled while bulk transfers still passed.
+- dnsmasq now gets only IPv4 upstream resolvers when any are available.
+  IPv6 upstreams (half of the default set) are unreachable through exits
+  without IPv6 egress and added per-lookup timeout stalls; AAAA records
+  still resolve over IPv4 transport.
+- Explicitly selected gateways are no longer dropped by the failure
+  blacklist — a transient failure on your chosen entry no longer forces
+  "switch gateways" errors (upstream #5529).
+- QUIC bridge connections are bounded by a 10 s timeout instead of hanging
+  the connect (upstream #5740).
+- A reconnect can no longer race a throttled settings update and re-run
+  with stale tunnel settings (upstream #5686, #5817).
+- Reconnecting now retries account sync when the account controller is
+  stuck on device-time-desync (upstream #5551).
 
 - .apk packages shipped with only `rpcd` in their dependency list: repeated
   `-I depends:` flags to `apk mkpkg` overwrite each other, so `kmod-tun` and
