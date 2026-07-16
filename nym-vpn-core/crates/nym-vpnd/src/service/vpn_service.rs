@@ -1,7 +1,11 @@
 // Copyright 2024 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
-use futures::{FutureExt, StreamExt, future::Fuse, pin_mut};
+use futures::{
+    FutureExt, StreamExt,
+    future::{Fuse, FusedFuture},
+    pin_mut,
+};
 use nym_diagnostic::DiagnosticHandler;
 use std::{net::IpAddr, path::PathBuf, pin::Pin, sync::Arc};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
@@ -664,9 +668,17 @@ impl NymVpnService {
         }
     }
 
-    async fn reconnect_tunnel(&self) -> bool {
+    async fn reconnect_tunnel(&mut self) -> bool {
         match self.target_state {
             TargetState::Secured => {
+                // Flush any settings update that is still pending behind the
+                // throttle timer so the upcoming Connect uses the latest config.
+                // Otherwise a reconnect can race ahead of the throttled
+                // SetTunnelSettings and re-run with stale settings
+                if !self.tunnel_settings_update_timer.is_terminated() {
+                    self.tunnel_settings_update_timer.set(Fuse::terminated());
+                    self.update_tunnel_settings();
+                }
                 self.statistics_event_sender.report_connection_request();
                 let _ = self.command_sender.send(TunnelCommand::Connect);
                 true
