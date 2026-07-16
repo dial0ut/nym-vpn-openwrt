@@ -190,6 +190,12 @@ impl ConnectingState {
             return Ok(());
         }
 
+        // The firewall caches the kill-switch flag; sync it from live settings
+        // so a runtime toggle (LuCI / `tunnel set`) takes effect without a
+        // daemon restart.
+        shared_state
+            .firewall
+            .set_killswitch(shared_state.tunnel_settings.killswitch);
         shared_state
             .firewall
             .apply_policy(policy)
@@ -660,25 +666,28 @@ impl TunnelStateHandler for ConnectingState {
                             return NextTunnelState::SameState(self);
                         };
 
+                        // Assign before re-applying so the firewall sync inside
+                        // set_firewall_policy picks up the new killswitch/
+                        // allow_lan/inbound_exemptions values, not stale ones.
+                        shared_state.tunnel_settings = tunnel_settings;
+
                         // Hot-apply path — mirrors connected_state. The exempt
                         // routing rule is permanent for the tunnel lifetime, so only
                         // the firewall mark-set rules are re-applied here.
                         if diff.allow_lan_changed() {
-                            self.firewall_policy_params.allow_lan = tunnel_settings.allow_lan;
+                            self.firewall_policy_params.allow_lan = shared_state.tunnel_settings.allow_lan;
                         }
                         if diff.inbound_exemptions_changed() {
                             self.firewall_policy_params.inbound_exemptions =
-                                tunnel_settings.inbound_exemptions.clone();
+                                shared_state.tunnel_settings.inbound_exemptions.clone();
                         }
 
-                        if diff.allow_lan_changed() || diff.inbound_exemptions_changed() {
+                        if diff.allow_lan_changed() || diff.inbound_exemptions_changed() || diff.killswitch_changed() {
                             if let Err(e) = Self::set_firewall_policy(shared_state, &self.firewall_policy_params) {
                                 trace_err_chain!(e, "failed to set firewall policy");
                                 return NextTunnelState::NewState(ErrorState::enter(ErrorStateReason::SetFirewallPolicy, shared_state).await);
                             }
                         }
-
-                        shared_state.tunnel_settings = tunnel_settings;
 
                         // Not all changes require the tunnel to be reconnected
                         if diff.only_hot_appliable_changed() || (diff.only_mixnet_performance_options_changed() && shared_state.tunnel_settings.tunnel_type == TunnelType::Wireguard) {

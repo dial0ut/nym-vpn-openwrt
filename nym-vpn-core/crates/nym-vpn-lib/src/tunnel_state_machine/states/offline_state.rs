@@ -74,6 +74,12 @@ impl OfflineState {
     ) -> Result<()> {
         let policy = params.as_policy();
 
+        // The firewall caches the kill-switch flag; sync it from live settings
+        // so a runtime toggle (LuCI / `tunnel set`) takes effect without a
+        // daemon restart.
+        shared_state
+            .firewall
+            .set_killswitch(shared_state.tunnel_settings.killswitch);
         shared_state
             .firewall
             .apply_policy(policy)
@@ -128,19 +134,25 @@ impl TunnelStateHandler for OfflineState {
                             return NextTunnelState::SameState(self);
                         };
 
-                        if diff.allow_lan_changed() {
-                            self.firewall_policy_params.allow_lan = tunnel_settings.allow_lan;
+                        if diff.entry_point_changed() || diff.exit_point_changed() || diff.quic_changed() {
+                            self.selected_gateways = None;
+                        };
 
+                        // Assign before re-applying so the firewall sync below
+                        // (inside set_firewall_policy) picks up the new
+                        // killswitch/allow_lan values, not the stale ones.
+                        shared_state.tunnel_settings = tunnel_settings;
+
+                        if diff.allow_lan_changed() {
+                            self.firewall_policy_params.allow_lan = shared_state.tunnel_settings.allow_lan;
+                        }
+
+                        if diff.allow_lan_changed() || diff.killswitch_changed() {
                             if let Err(e) = Self::set_firewall_policy(shared_state, &self.firewall_policy_params) {
                                 trace_err_chain!(e, "failed to set firewall policy");
                             }
                         }
 
-                        if diff.entry_point_changed() || diff.exit_point_changed() || diff.quic_changed() {
-                            self.selected_gateways = None;
-                        };
-
-                        shared_state.tunnel_settings = tunnel_settings;
                         NextTunnelState::SameState(self)
                     }
                 }

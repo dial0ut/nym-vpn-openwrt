@@ -299,6 +299,10 @@ impl TunnelSettingsDiff {
         self.is_field_changed(&TunnelSettingsDiffFields::InboundExemptions)
     }
 
+    pub fn killswitch_changed(&self) -> bool {
+        self.is_field_changed(&TunnelSettingsDiffFields::Killswitch)
+    }
+
     pub fn only_inbound_exemptions_changed(&self) -> bool {
         self.only_field_changed(&TunnelSettingsDiffFields::InboundExemptions)
     }
