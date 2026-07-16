@@ -30,6 +30,19 @@ the GitHub release notes.
 
 ### Fixed
 
+- Kill-switch no longer leaks established IPv6 (or IPv4) flows out the WAN
+  during tunnel reconnects. The firewall's established-connection accept was
+  unqualified; it is now scoped to the tunnel interface, so only genuine
+  tunnel return traffic is allowed while new and pre-existing WAN-bound flows
+  are blocked. Most visible with circumvention (QUIC) transports, which
+  reconnect frequently.
+- Toggling the kill-switch in LuCI (or `nym-vpnc tunnel set --killswitch`) now
+  takes effect immediately instead of silently doing nothing until the daemon
+  was restarted.
+- The firewall backend is re-detected instead of caching an early "unknown"
+  result, so the kill-switch installs correctly even if the firewall service
+  starts late or is restarted (previously surfaced as `Error state:
+  SetFirewallPolicy`).
 - TCP MSS is now clamped to the tunnel path MTU for forwarded LAN traffic
   (both in the daemon's fw4 integration and the reload-restore script). The
   2-hop WireGuard tun runs at MTU 1340; without clamping, LAN clients hit
