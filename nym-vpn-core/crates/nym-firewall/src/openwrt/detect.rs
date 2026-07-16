@@ -19,31 +19,48 @@ pub enum FirewallSystem {
 
 static DETECTED_SYSTEM: OnceLock<FirewallSystem> = OnceLock::new();
 
-/// Detect which firewall system is in use.
-///
-/// This function caches the result for subsequent calls.
+/// Detect which firewall system is in use. A definitive result (fw3/fw4) is
+/// cached for the process lifetime; an `Unknown` result is NOT cached, so a
+/// later call re-probes once the firewall has actually come up (e.g. after a
+/// firewall restart or slow boot). This prevents a transient early `Unknown`
+/// from permanently disabling the kill-switch.
 pub fn detect_system() -> FirewallSystem {
-    *DETECTED_SYSTEM.get_or_init(|| {
-        if !is_openwrt() {
-            tracing::debug!("Not running on OpenWrt");
-            return FirewallSystem::Unknown;
-        }
+    if let Some(&cached) = DETECTED_SYSTEM.get() {
+        return cached;
+    }
+    let detected = detect_uncached();
+    if detected != FirewallSystem::Unknown {
+        let _ = DETECTED_SYSTEM.set(detected);
+    }
+    detected
+}
 
-        // Check for fw4 first (newer)
-        if is_fw4_available() {
-            tracing::debug!("Detected fw4 (nftables-based firewall)");
-            return FirewallSystem::Fw4;
-        }
+/// Test-only view of the cache (None until a definitive result is stored).
+#[cfg(test)]
+fn cached_system() -> Option<FirewallSystem> {
+    DETECTED_SYSTEM.get().copied()
+}
 
-        // Check for fw3
-        if is_fw3_available() {
-            tracing::debug!("Detected fw3 (iptables-based firewall)");
-            return FirewallSystem::Fw3;
-        }
+fn detect_uncached() -> FirewallSystem {
+    if !is_openwrt() {
+        tracing::debug!("Not running on OpenWrt");
+        return FirewallSystem::Unknown;
+    }
 
-        tracing::warn!("OpenWrt detected but no known firewall system found");
-        FirewallSystem::Unknown
-    })
+    // Check for fw4 first (newer)
+    if is_fw4_available() {
+        tracing::debug!("Detected fw4 (nftables-based firewall)");
+        return FirewallSystem::Fw4;
+    }
+
+    // Check for fw3
+    if is_fw3_available() {
+        tracing::debug!("Detected fw3 (iptables-based firewall)");
+        return FirewallSystem::Fw3;
+    }
+
+    tracing::warn!("OpenWrt detected but no known firewall system found");
+    FirewallSystem::Unknown
 }
 
 /// Check if we're running on OpenWrt.
@@ -134,5 +151,21 @@ mod tests {
         // This test will behave differently on OpenWrt vs other systems
         let system = detect_system();
         println!("Detected system: {:?}", system);
+    }
+
+    #[test]
+    fn unknown_is_not_cached() {
+        // Two calls that both resolve Unknown (non-OpenWrt CI host) must each
+        // re-probe rather than freeze the first Unknown forever. We assert the
+        // cache only ever holds a definitive value.
+        let _ = detect_system();
+        let _ = detect_system();
+        if let Some(cached) = cached_system() {
+            assert_ne!(
+                cached,
+                FirewallSystem::Unknown,
+                "Unknown must never be cached"
+            );
+        }
     }
 }

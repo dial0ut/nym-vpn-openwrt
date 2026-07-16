@@ -38,9 +38,10 @@ pub enum Error {
     InstallError(String),
 }
 
-/// OpenWrt firewall handle. Detects whether the host runs fw3 or fw4 once
-/// at construction and dispatches every `apply` / `reset` to the matching
-/// backend.
+/// OpenWrt firewall handle. Detects whether the host runs fw3 or fw4 at
+/// construction and dispatches every `apply` / `reset` to the matching
+/// backend. An `Unknown` detection (firewall not up yet) is re-probed on
+/// each apply until it resolves to a definitive backend.
 pub struct Firewall {
     system: FirewallSystem,
 }
@@ -60,7 +61,21 @@ impl Firewall {
         Ok(Firewall { system })
     }
 
+    /// If the backend was detected as Unknown at construction (firewall not up
+    /// yet), re-probe now — a definitive result means the firewall has since
+    /// come up and we can install real rules instead of the fw3 fallback.
+    fn refresh_system_if_unknown(&mut self) {
+        if self.system == FirewallSystem::Unknown {
+            let redetected = detect_system();
+            if redetected != FirewallSystem::Unknown {
+                tracing::info!("Firewall system re-detected: {:?}", redetected);
+                self.system = redetected;
+            }
+        }
+    }
+
     pub fn apply_policy(&mut self, policy: FirewallPolicy) -> Result<()> {
+        self.refresh_system_if_unknown();
         let ruleset = policy::compile(&policy);
         match self.system {
             FirewallSystem::Fw3 => fw3::apply(&ruleset),
@@ -80,6 +95,7 @@ impl Firewall {
     /// are never NAT'd to the tunnel source address and the exit gateway drops
     /// them.
     pub fn apply_forwarding_only(&mut self, policy: FirewallPolicy) -> Result<()> {
+        self.refresh_system_if_unknown();
         let ruleset = policy::compile(&policy);
         match self.system {
             FirewallSystem::Fw3 => fw3::apply_forwarding_only(&ruleset),
