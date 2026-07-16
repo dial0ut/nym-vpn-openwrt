@@ -172,10 +172,12 @@ fn base_rules(rs: &mut RuleSet) {
     rs.filter.input.push(Rule::accept(Family::Inet).iif("lo"));
     rs.filter.output.push(Rule::accept(Family::Inet).oif("lo"));
 
-    // Established/related — covers return traffic on every chain.
+    // Established/related on INPUT only — this is return traffic *to* the
+    // router, not egress, so it is not a kill-switch bypass. Output/forward
+    // established accepts are scoped to the tunnel interface in allow_tunnel;
+    // a blanket accept there let WAN-bound established flows (notably IPv6
+    // during reconnects) leak past the kill-switch.
     rs.filter.input.push(Rule::accept(Family::Inet).ct_established());
-    rs.filter.output.push(Rule::accept(Family::Inet).ct_established());
-    rs.filter.forward.push(Rule::accept(Family::Inet).ct_established());
 
     // DHCPv4 — router as client and as server.
     rs.filter.input.push(
@@ -412,9 +414,12 @@ fn allow_dns_server(rs: &mut RuleSet, dns: IpAddr, iface: Option<&str>) {
 fn allow_tunnel(rs: &mut RuleSet, iface: &str) {
     rs.filter.input.push(Rule::accept(Family::Inet).iif(iface));
     rs.filter.output.push(Rule::accept(Family::Inet).oif(iface));
-    // Forward LAN traffic out the tunnel. Return traffic is handled by the
-    // ct established rule at the top of the forward chain.
+    // LAN -> tunnel (new + established). The exit never initiates into the LAN,
+    // so the return direction is scoped to established/related entering FROM
+    // the tunnel. This replaces the old blanket forward established accept,
+    // which also matched WAN egress and leaked on tunnel teardown.
     rs.filter.forward.push(Rule::accept(Family::Inet).oif(iface));
+    rs.filter.forward.push(Rule::accept(Family::Inet).iif(iface).ct_established());
 }
 
 /// CVE-2019-14899: an attacker on the local network can probe whether a host

@@ -314,6 +314,38 @@ mod e2e_tests {
     }
 
     #[test]
+    fn connected_forward_output_have_no_unqualified_established_accept() {
+        let policy = connected_lan();
+        let rs = policy::compile(&policy);
+        let nft = render_nft::render(&rs);
+
+        // The exact bug: a bare `ct state established,related accept` with no
+        // iifname/oifname in the forward or output chain lets WAN-bound
+        // established flows (esp. IPv6 on reconnect) leak past the kill-switch.
+        for chain in ["chain forward", "chain output"] {
+            let body = extract_chain(&nft, chain);
+            for line in body.lines().map(str::trim) {
+                if line == "ct state established,related accept" {
+                    panic!("unqualified established accept in {chain}:\n{body}");
+                }
+            }
+        }
+        // Return traffic must still be allowed, but scoped to a tunnel iface.
+        assert!(
+            nft.contains("iifname \"wg0\" ct state established,related accept"),
+            "expected tunnel-scoped established accept in forward chain:\n{nft}"
+        );
+    }
+
+    fn extract_chain<'a>(nft: &'a str, header: &str) -> &'a str {
+        let start = nft.find(header).expect("chain present");
+        let after = &nft[start..];
+        let brace = after.find('{').expect("chain body");
+        let end = after[brace..].find('}').expect("chain close") + brace;
+        &after[brace + 1..end]
+    }
+
+    #[test]
     fn drop_verdicts_only_appear_in_cve_protection() {
         // The only `drop` rules our policy emits are the CVE-2019-14899
         // guards: traffic to a tunnel IP from a non-tunnel interface.
