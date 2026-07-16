@@ -167,6 +167,9 @@ return baseclass.extend({
     .nym-toggle-slider::before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background: var(--text-muted); border-radius: 50%; transition: all 0.3s ease; }\
     .nym-toggle input:checked + .nym-toggle-slider { background: var(--nym-green-dim); border-color: var(--nym-green); }\
     .nym-toggle input:checked + .nym-toggle-slider::before { transform: translateX(22px); background: var(--nym-green); }\
+    .nym-tuning-warning { font-size: 12px; opacity: 0.75; margin-bottom: 12px; line-height: 1.5; }\
+    .nym-tuning-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 12px 0; }\
+    .nym-tuning-num { width: 100%; }\
     .nym-gateway-section { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }\
     @media (max-width: 600px) { .nym-gateway-section { grid-template-columns: 1fr; } }\
     .nym-gateway-box { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; }\
