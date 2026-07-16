@@ -38,9 +38,10 @@ pub enum Error {
     InstallError(String),
 }
 
-/// OpenWrt firewall handle. Detects whether the host runs fw3 or fw4 once
-/// at construction and dispatches every `apply` / `reset` to the matching
-/// backend.
+/// OpenWrt firewall handle. Detects whether the host runs fw3 or fw4 at
+/// construction and dispatches every `apply` / `reset` to the matching
+/// backend. An `Unknown` detection (firewall not up yet) is re-probed on
+/// each apply until it resolves to a definitive backend.
 pub struct Firewall {
     system: FirewallSystem,
 }
@@ -60,7 +61,21 @@ impl Firewall {
         Ok(Firewall { system })
     }
 
+    /// If the backend was detected as Unknown at construction (firewall not up
+    /// yet), re-probe now — a definitive result means the firewall has since
+    /// come up and we can install real rules instead of the fw3 fallback.
+    fn refresh_system_if_unknown(&mut self) {
+        if self.system == FirewallSystem::Unknown {
+            let redetected = detect_system();
+            if redetected != FirewallSystem::Unknown {
+                tracing::info!("Firewall system re-detected: {:?}", redetected);
+                self.system = redetected;
+            }
+        }
+    }
+
     pub fn apply_policy(&mut self, policy: FirewallPolicy) -> Result<()> {
+        self.refresh_system_if_unknown();
         let ruleset = policy::compile(&policy);
         match self.system {
             FirewallSystem::Fw3 => fw3::apply(&ruleset),
@@ -80,6 +95,7 @@ impl Firewall {
     /// are never NAT'd to the tunnel source address and the exit gateway drops
     /// them.
     pub fn apply_forwarding_only(&mut self, policy: FirewallPolicy) -> Result<()> {
+        self.refresh_system_if_unknown();
         let ruleset = policy::compile(&policy);
         match self.system {
             FirewallSystem::Fw3 => fw3::apply_forwarding_only(&ruleset),
@@ -311,6 +327,38 @@ mod e2e_tests {
         let restore_pos = pre_chain.find("meta mark set ct mark").unwrap();
         let set_pos = pre_chain.find("ct mark set 0x14e").unwrap();
         assert!(restore_pos < set_pos, "restore must come before set in mangle_prerouting");
+    }
+
+    #[test]
+    fn connected_forward_output_have_no_unqualified_established_accept() {
+        let policy = connected_lan();
+        let rs = policy::compile(&policy);
+        let nft = render_nft::render(&rs);
+
+        // The exact bug: a bare `ct state established,related accept` with no
+        // iifname/oifname in the forward or output chain lets WAN-bound
+        // established flows (esp. IPv6 on reconnect) leak past the kill-switch.
+        for chain in ["chain forward", "chain output"] {
+            let body = extract_chain(&nft, chain);
+            for line in body.lines().map(str::trim) {
+                if line == "ct state established,related accept" {
+                    panic!("unqualified established accept in {chain}:\n{body}");
+                }
+            }
+        }
+        // Return traffic must still be allowed, but scoped to a tunnel iface.
+        assert!(
+            nft.contains("iifname \"wg0\" ct state established,related accept"),
+            "expected tunnel-scoped established accept in forward chain:\n{nft}"
+        );
+    }
+
+    fn extract_chain<'a>(nft: &'a str, header: &str) -> &'a str {
+        let start = nft.find(header).expect("chain present");
+        let after = &nft[start..];
+        let brace = after.find('{').expect("chain body");
+        let end = after[brace..].find('}').expect("chain close") + brace;
+        &after[brace + 1..end]
     }
 
     #[test]
