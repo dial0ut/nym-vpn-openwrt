@@ -793,23 +793,11 @@ impl GatewayList {
         match &entry_point {
             EntryPoint::Gateway { identity } => {
                 tracing::debug!("Selecting gateway by identity: {identity}");
-
-                // An explicitly selected gateway still has to pass the mandatory
-                // (base) filters such as the blacklist; optional filters like
-                // performance score are ignored for direct selection.
-                self.gateway_with_identity_filtered(identity, base_filters)
-                    .ok_or_else(|| {
-                        if self.gateway_with_identity(identity).is_some() {
-                            Error::MatchingEntryGatewayNotWorking {
-                                identity: identity.to_string(),
-                                filters: base_filters.clone(),
-                            }
-                        } else {
-                            Error::NoMatchingGateway {
-                                requested_identity: identity.to_string(),
-                            }
-                        }
+                self.gateway_with_identity(identity)
+                    .ok_or_else(|| Error::NoMatchingGateway {
+                        requested_identity: identity.to_string(),
                     })
+                    .cloned()
             }
             EntryPoint::Country {
                 two_letter_iso_country_code,
