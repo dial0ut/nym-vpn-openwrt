@@ -169,7 +169,7 @@ return baseclass.extend({
     .nym-toggle input:checked + .nym-toggle-slider::before { transform: translateX(22px); background: var(--nym-green); }\
     .nym-tuning-warning { font-size: 12px; opacity: 0.75; margin-bottom: 12px; line-height: 1.5; }\
     .nym-tuning-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 12px 0; }\
-    .nym-tuning-num { width: 100%; }\
+    .nym-tuning-num { width: 100%; height: 44px; padding-top: 0; padding-bottom: 0; }\
     .nym-gateway-section { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }\
     @media (max-width: 600px) { .nym-gateway-section { grid-template-columns: 1fr; } }\
     .nym-gateway-box { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; }\

@@ -1485,7 +1485,7 @@ return view.extend({
         var mixnetTuningCard = E('div', { 'class': 'nym-card' }, [
             E('div', { 'class': 'nym-card-header', 'click': function() { toggleCard(mixnetTuningCard); } }, [
                 E('div', { 'class': 'nym-card-title' }, [
-                    svgIcon(assets.iconTunnel),
+                    svgIcon(assets.iconSliders),
                     'Mixnet Tuning'
                 ]),
                 E('div', { 'class': 'nym-card-chevron' }, '▼')
@@ -1556,7 +1556,7 @@ return view.extend({
                 ]),
                 E('div', { 'class': 'nym-action-buttons' }, [
                     E('button', {
-                        'class': 'nym-btn nym-btn-secondary',
+                        'class': 'nym-btn nym-btn-primary',
                         'click': saveMixnetTuning
                     }, 'Apply Tuning')
                 ])
