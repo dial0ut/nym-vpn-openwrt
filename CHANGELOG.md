@@ -11,6 +11,8 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+## [1.31.0] - 2026-07-16
+
 ### Added
 
 - Mixnet Tuning card in LuCI: adjust Sphinx traffic knobs (Poisson delays,
