@@ -37,11 +37,14 @@ impl<E: Error> ErrorExt for E {
 
 #[macro_export]
 macro_rules! trace_err_chain {
+    // No trailing semicolon: the expansion must be a valid expression so the
+    // macro can be used in expression position (closures, match arms) —
+    // newer rustc denies semicolon_in_expressions_from_macros.
     ($err:expr) => {
-        tracing::error!("{}", $crate::ErrorExt::display_chain(&$err));
+        tracing::error!("{}", $crate::ErrorExt::display_chain(&$err))
     };
     ($err:expr, $($args:tt)*) => {
-        tracing::error!("{}", $crate::ErrorExt::display_chain_with_msg(&$err, ::std::format!($($args)*)));
+        tracing::error!("{}", $crate::ErrorExt::display_chain_with_msg(&$err, ::std::format!($($args)*)))
     };
 }
 
