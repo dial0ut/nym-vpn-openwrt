@@ -89,7 +89,10 @@ async fn wait_for_exit_handshake(
     shutdown_token: &CancellationToken,
 ) {
     const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
-    const POLL_INTERVAL: Duration = Duration::from_millis(500);
+    // 50ms: actual exit handshakes complete in 190-350ms; the read is an
+    // in-process stats peek, so a tight advisory poll costs nothing and
+    // avoids quantizing the connect path to a coarse interval.
+    const POLL_INTERVAL: Duration = Duration::from_millis(50);
 
     let started = std::time::Instant::now();
     let wait = async {
