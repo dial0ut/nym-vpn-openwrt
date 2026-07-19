@@ -524,6 +524,20 @@ fn migrate_legacy_state() {
 
 static ACTOR: OnceLock<mpsc::Sender<Cmd>> = OnceLock::new();
 
+/// Eagerly spawn the actor at daemon startup so the one-time converge — and
+/// its possible single dnsmasq restart — happens off the connect path. A
+/// no-op off OpenWrt or outside a tokio runtime (then the actor spawns
+/// lazily on first use instead).
+pub fn warm_up() {
+    if tokio::runtime::Handle::try_current().is_err() {
+        return;
+    }
+    match Dnsmasq::new() {
+        Ok(_) | Err(Error::NotOpenWrt) => {}
+        Err(e) => tracing::debug!("dnsmasq warm-up skipped: {}", e),
+    }
+}
+
 /// Thin client handle; one is created per connect (see linux/mod.rs), all of
 /// them talking to the same daemon-lifetime actor.
 pub struct Dnsmasq {

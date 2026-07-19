@@ -57,6 +57,10 @@ impl super::DnsMonitorT for DnsMonitor {
     type Error = Error;
 
     fn new(route_manager: RouteManagerHandle) -> Result<Self> {
+        // On OpenWrt, spawn the dnsmasq actor now so its one-time converge
+        // (possibly one dnsmasq restart) runs at daemon startup, not inside
+        // the first connect.
+        dnsmasq::warm_up();
         Ok(DnsMonitor {
             route_manager,
             inner: None,
