@@ -192,7 +192,11 @@ nym-vpn-network-config = { path = "crates/nym-vpn-network-config" }
 nym-vpn-proto = { path = "crates/nym-vpn-proto" }
 nym-vpn-store = { path = "crates/nym-vpn-store" }
 nym-wg-gotatun = { path = "crates/nym-wg-gotatun" }
-gotatun = { git = "https://github.com/mullvad/gotatun", features = ["device", "tun"] }
+# Pinned past a89bba82 ("Fix clearing of expected incoming handshake early"):
+# the prior pin (3969d36) purged in-flight handshake indices every 250ms,
+# silently dropping exit-hop handshake responses and forcing a 5s rekey wait
+# on nearly every two-hop connect.
+gotatun = { git = "https://github.com/mullvad/gotatun", rev = "a89bba825c1f4154eb0b5f0ef2ee4fe7888b4378", features = ["device", "tun"] }
 nym-wg-metadata-client = { path = "crates/nym-wg-metadata-client" }
 
 # For normal development

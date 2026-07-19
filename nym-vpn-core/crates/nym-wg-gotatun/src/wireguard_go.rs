@@ -6,7 +6,7 @@
 //! This module provides the same `Tunnel` API as `nym-wg-go::wireguard_go`
 //! but uses gotatun instead of wireguard-go + CGo FFI.
 
-use std::fmt;
+use std::{fmt, sync::Arc, time::Duration};
 
 use gotatun::device::{self, Peer};
 use gotatun::tun::tun_async_device::TunDevice;
@@ -61,7 +61,7 @@ type DeviceTransports = device::DefaultDeviceTransports;
 
 /// WireGuard tunnel backed by gotatun.
 pub struct Tunnel {
-    device: device::Device<DeviceTransports>,
+    device: Arc<tokio::sync::RwLock<Option<device::Device<DeviceTransports>>>>,
 }
 
 impl fmt::Debug for Tunnel {
@@ -124,13 +124,24 @@ impl Tunnel {
             .map_err(|e| Error::DeviceBuild(e.to_string()))?;
 
         tracing::info!("gotatun WireGuard tunnel started");
-        Ok(Self { device })
+        Ok(Self {
+            device: Arc::new(tokio::sync::RwLock::new(Some(device))),
+        })
     }
 
     /// Stop the tunnel.
+    ///
+    /// Always stops the underlying device, no matter how many `StatsReader`
+    /// clones are still alive; readers observe the stop and report
+    /// "not handshaken" from then on. The `None` arm is defensive and
+    /// not reachable via the current API since `stop` consumes `self`.
     pub async fn stop(self) {
         tracing::info!("Stopping gotatun WireGuard tunnel");
-        self.device.stop().await;
+        let device = self.device.write().await.take();
+        match device {
+            Some(device) => device.stop().await,
+            None => tracing::debug!("gotatun device already stopped"),
+        }
     }
 
     /// Update the endpoints of peers matched by public key.
@@ -139,7 +150,11 @@ impl Tunnel {
             let pub_key =
                 x25519_dalek::PublicKey::from(*update.public_key.as_bytes());
             let endpoint = update.endpoint;
-            self.device.write(async |device| {
+            let guard = self.device.read().await;
+            let Some(device) = guard.as_ref() else {
+                return Err(Error::UpdatePeers("device already stopped".to_string()));
+            };
+            device.write(async |device| {
                 device.modify_peer(&pub_key, |peer_mut| {
                     peer_mut.set_endpoint(Some(endpoint));
                 }).await;
@@ -147,6 +162,61 @@ impl Tunnel {
         }
         Ok(())
     }
+
+    /// Create a read-only stats handle sharing this tunnel's device.
+    pub fn stats_reader(&self) -> StatsReader {
+        StatsReader {
+            device: Arc::clone(&self.device),
+        }
+    }
+}
+
+/// Read-only handle for querying live peer stats off a running tunnel.
+///
+/// Holds a clone of the `Arc` around the same shared, take-able device slot
+/// as the `Tunnel`, so it stays usable after the `Tunnel` itself has moved
+/// into the tunnel event-handler task. Once `Tunnel::stop` takes the device
+/// out of the slot, every `StatsReader` clone reports "not handshaken" from
+/// then on rather than keeping the device alive.
+#[derive(Clone)]
+pub struct StatsReader {
+    device: Arc<tokio::sync::RwLock<Option<device::Device<DeviceTransports>>>>,
+}
+
+impl StatsReader {
+    /// Returns true once every peer on the device has completed a handshake.
+    ///
+    /// An empty peer list or an already-stopped device counts as not
+    /// handshaken — callers treat "unknown" as "not yet".
+    pub async fn all_peers_have_handshake(&self) -> bool {
+        let guard = self.device.read().await;
+        let Some(device) = guard.as_ref() else {
+            return false;
+        };
+        let last_handshakes = device
+            .read(async |device| {
+                device
+                    .peers()
+                    .await
+                    .into_iter()
+                    .map(|peer_stats| peer_stats.stats.last_handshake)
+                    .collect::<Vec<_>>()
+            })
+            .await;
+        all_peers_handshaken(last_handshakes)
+    }
+}
+
+/// True iff the list is non-empty and every entry has a handshake timestamp.
+fn all_peers_handshaken(last_handshakes: impl IntoIterator<Item = Option<Duration>>) -> bool {
+    let mut any = false;
+    for last_handshake in last_handshakes {
+        if last_handshake.is_none() {
+            return false;
+        }
+        any = true;
+    }
+    any
 }
 
 /// Convert our PeerConfig to gotatun's Peer type.
@@ -162,4 +232,42 @@ fn convert_peer(peer_config: &PeerConfig) -> Peer {
     }
 
     peer
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::all_peers_handshaken;
+
+    #[test]
+    fn no_peers_is_not_handshaken() {
+        assert!(!all_peers_handshaken(Vec::<Option<Duration>>::new()));
+    }
+
+    #[test]
+    fn peer_without_handshake_is_not_handshaken() {
+        assert!(!all_peers_handshaken([None::<Duration>]));
+    }
+
+    #[test]
+    fn all_peers_with_handshake_is_handshaken() {
+        assert!(all_peers_handshaken([
+            Some(Duration::from_secs(1)),
+            Some(Duration::from_secs(2)),
+        ]));
+    }
+
+    #[test]
+    fn mixed_peers_are_not_handshaken() {
+        assert!(!all_peers_handshaken([Some(Duration::from_secs(1)), None]));
+    }
+
+    #[tokio::test]
+    async fn stopped_device_reports_not_handshaken() {
+        let reader = super::StatsReader {
+            device: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        };
+        assert!(!reader.all_peers_have_handshake().await);
+    }
 }

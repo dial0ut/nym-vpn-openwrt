@@ -11,6 +11,33 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+### Changed
+
+- Faster connects, from two fixes working together. Connectivity probing now
+  starts the moment the exit WireGuard handshake completes, instead of on a
+  fixed 3-second probe grid (port of upstream #5571 adapted to gotatun). And
+  the gotatun dependency is now explicitly pinned past mullvad/gotatun@a89bba8,
+  which fixes in-flight handshake indices being purged every 250 ms — the bug
+  that silently discarded the exit hop's first handshake response and forced a
+  5-second WireGuard retry on nearly every connect. Time-to-Connected drops
+  from ~11.5 s to ~5.5-7 s on the reference router.
+- Connecting and disconnecting no longer restart dnsmasq. Upstream DNS now
+  switches through a daemon-managed resolv file
+  (`/tmp/resolv.conf.d/nym-resolv.conf`) that dnsmasq reloads via inotify,
+  removing the ~3.3 s `/etc/init.d/dnsmasq restart` from every connect and
+  the LAN-wide DNS outage window at teardown. dnsmasq is restarted at most
+  once per boot (the first daemon start repoints its `resolvfile`; staged
+  uci only, so a reboot reverts to stock automatically) and never by a
+  crash-looping daemon. While the VPN is disconnected the daemon mirrors
+  netifd's WAN resolvers into the managed file, tracking WAN DHCP renewals.
+- Exit WireGuard handshake detection now polls every 50 ms (was 500 ms),
+  shaving the poll-quantization delay — typically 150-300 ms — off connects.
+- Behavior change: user-configured `dhcp.@dnsmasq[0].server` entries (e.g.
+  `server=/corp.example/10.0.0.1` domain forwards) are no longer overridden
+  while the VPN is connected — they stay active, with queries routed through
+  the tunnel. Previous releases replaced the whole server list for the
+  session.
+
 ## [1.31.0] - 2026-07-16
 
 ### Added

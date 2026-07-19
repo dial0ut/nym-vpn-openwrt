@@ -23,6 +23,8 @@ tokio = { workspace = true, features = [
     "process",
     "sync",
     "io-util",
+    "rt",
+    "time",
 ] }
 futures.workspace = true
 triggered.workspace = true
@@ -35,3 +37,7 @@ which.workspace = true
 inotify.workspace = true
 resolv-conf.workspace = true
 duct.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "test-util"] }
+tempfile.workspace = true

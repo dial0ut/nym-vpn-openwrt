@@ -1,0 +1,688 @@
+[2m2026-07-19T17:25:13.690447Z[0m [32m INFO[0m [2mnym_vpnd[0m[2m:[0m nym-vpnd 1.30.5 (VERGEN_IDEMPOTENT_OUTPUT)
+[2m2026-07-19T17:25:13.690844Z[0m [32m INFO[0m [2mnym_vpnd[0m[2m:[0m OS information: Linux (OpenWrt 25.12.4) (x86_64), kernel: 6.8.12-20-pve
+[2m2026-07-19T17:25:13.693877Z[0m [32m INFO[0m [2mnym_vpnd::environment[0m[2m:[0m Setting up environment by discovering the network: mainnet
+[2m2026-07-19T17:25:13.694245Z[0m [32m INFO[0m [2mnym_vpnd::command_interface[0m[2m:[0m Starting socket listener on: /var/run/nym-vpn.sock
+[2m2026-07-19T17:25:13.696403Z[0m [32m INFO[0m [2mnym_vpn_account_controller::controller[0m[2m:[0m Initializing account controller: data_dir: /etc/nym/data/mainnet
+[2m2026-07-19T17:25:13.714270Z[0m [32m INFO[0m [2mnym_vpn_account_controller::controller[0m[2m:[0m Initial account controller state: Syncing
+[2m2026-07-19T17:25:13.714332Z[0m [32m INFO[0m [2mnym_vpn_account_controller::controller[0m[2m:[0m Account id: n1zrhc82au0gc3jjk4vjj05sgjr4gud4ftwt2zj3
+[2m2026-07-19T17:25:13.714338Z[0m [32m INFO[0m [2mnym_vpn_account_controller::controller[0m[2m:[0m Device id: Bk4yS5rPUgdDBXjMHRcGHX5HWczz5aooYHZehhBkZi7w
+[2m2026-07-19T17:25:13.714421Z[0m [32m INFO[0m [2mnym_http_api_client[0m[2m:[0m Initializing shared HTTP client
+[2m2026-07-19T17:25:13.714693Z[0m [32m INFO[0m [2mnym_vpnd::service::config::config_manager[0m[2m:[0m Read service config version v8 from /etc/nym/nym-vpnd.json
+[2m2026-07-19T17:25:13.716584Z[0m [32m INFO[0m [2mnym_vpnd::service::config::config_manager[0m[2m:[0m Using config: VpnServiceConfig { entry_point: Random, exit_point: Random, allow_lan: true, disable_ipv6: false, enable_two_hop: true, enable_bridges: false, enable_lewes_protocol: false, netstack: false, min_gateway_vpn_performance: None, residential_exit: false, enable_custom_dns: false, custom_dns: [], enable_ad_blocking: false, mixnet_traffic: MixnetTrafficConfig { poisson_parameter_for_loop_cover_stream: Some(45), average_packet_delay: None, message_sending_average_delay: Some(12), disable_poisson_rate: true, disable_background_cover_traffic: false, min_mixnode_performance: None, min_gateway_mixnet_performance: None }, network_stats: NetworkStatisticsConfig { enabled: true, allow_disconnected: false }, killswitch: false, legacy_split_tunnel: false, inbound_exemptions: [] }
+[2m2026-07-19T17:25:13.716932Z[0m [32m INFO[0m [2mnym_vpn_lib::mixnet::topology_service[0m[2m:[0m No topology cache found. Fetching from network...
+[2m2026-07-19T17:25:13.719312Z[0m [32m INFO[0m [2mnym_http_api_client::dns[0m[2m:[0m building new configured resolver
+[2m2026-07-19T17:25:13.725192Z[0m [32m INFO[0m [2mnym_firewall::openwrt[0m[2m:[0m Detected OpenWrt firewall system: Fw4
+[2m2026-07-19T17:25:13.725252Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::api_endpoints_cache[0m[2m:[0m Restored 7 api_endpoint(s) from on-disk cache
+[2m2026-07-19T17:25:13.725451Z[0m [32m INFO[0m [2mnym_firewall[0m[2m:[0m Resetting firewall policy
+[2m2026-07-19T17:25:13.775237Z[0m [32m INFO[0m [1mset_resolver_overrides[0m[1m{[0m[3mself[0m[2m=[0mAccountCommandSender { command_tx: UnboundedSender { chan: Tx { inner: Chan { tx: Tx { block_tail: 0x7ebd8b8f3020, tail_position: 0 }, semaphore: Semaphore(0), rx_waker: AtomicWaker, tx_count: 3, rx_fields: "..." } } } } [3mresolver_overrides[0m[2m=[0mNone[1m}[0m[2m:[0m [2mnym_vpn_account_controller::command_sender[0m[2m:[0m close [3mtime.busy[0m[2m=[0m25.1µs [3mtime.idle[0m[2m=[0m148µs
+[2m2026-07-19T17:25:13.775339Z[0m [32m INFO[0m [1mset_vpn_api_firewall_down[0m[1m{[0m[3mself[0m[2m=[0mAccountCommandSender { command_tx: UnboundedSender { chan: Tx { inner: Chan { tx: Tx { block_tail: 0x7ebd8b8f3020, tail_position: 1 }, semaphore: Semaphore(0), rx_waker: AtomicWaker, tx_count: 3, rx_fields: "..." } } } }[1m}[0m[2m:[0m [2mnym_vpn_account_controller::command_sender[0m[2m:[0m close [3mtime.busy[0m[2m=[0m1.36µs [3mtime.idle[0m[2m=[0m4.61µs
+[2m2026-07-19T17:25:14.628678Z[0m [32m INFO[0m [2mnym_vpn_lib::mixnet::topology_service[0m[2m:[0m Updated topology
+[2m2026-07-19T17:25:20.331165Z[0m [32m INFO[0m [2mnym_vpn_account_controller::controller[0m[2m:[0m New AccountController state: Requesting zk-nyms
+[2m2026-07-19T17:25:20.331671Z[0m [32m INFO[0m [2mnym_vpn_account_controller::state_machine::syncing_state::requesting_zknym_state[0m[2m:[0m All ticket types have sufficient bandwidth, no zk-nym request needed
+[2m2026-07-19T17:25:20.331715Z[0m [32m INFO[0m [2mnym_vpn_account_controller::controller[0m[2m:[0m New AccountController state: Ready to connect
+[2m2026-07-19T17:25:24.067711Z[0m [32m INFO[0m [1mset_vpn_api_firewall_up[0m[1m{[0m[3mself[0m[2m=[0mAccountCommandSender { command_tx: UnboundedSender { chan: Tx { inner: Chan { tx: Tx { block_tail: 0x7ebd8b8f3020, tail_position: 2 }, semaphore: Semaphore(0), rx_waker: AtomicWaker, tx_count: 3, rx_fields: "..." } } } }[1m}[0m[2m:[0m [2mnym_vpn_account_controller::command_sender[0m[2m:[0m close [3mtime.busy[0m[2m=[0m8.95µs [3mtime.idle[0m[2m=[0m17.0µs
+[2m2026-07-19T17:25:24.067928Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::states::connecting_state[0m[2m:[0m Skipping firewall apply: Connecting state with no peers/endpoints yet
+[2m2026-07-19T17:25:24.067941Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Connecting wg, resolving api addresses, try #0
+[2m2026-07-19T17:25:24.286765Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::states::connecting_state[0m[2m:[0m Resolved gateway config: ResolvedConfig { nyxd_socket_addrs: [91.92.200.116:443], nym_api_resolver_overrides: ResolverOverrides { overrides: {"yelp.global.ssl.fastly.net": {151.101.129.194:443}, "nym-frontdoor.global.ssl.fastly.net": {151.101.1.194:443}, "validator.nymtech.net": {92.39.63.14:443}} }, nym_vpn_api_resolver_overrides: ResolverOverrides { overrides: {"nymvpn.com": {76.76.21.21:443}, "yelp.global.ssl.fastly.net": {151.101.129.194:443}, "nymvpn-frontdoor.global.ssl.fastly.net": {151.101.1.194:443}} } }
+[2m2026-07-19T17:25:24.291204Z[0m [32m INFO[0m [2mnym_firewall[0m[2m:[0m Kill-switch disabled: installing tunnel forwarding plane only (no blocking)
+[2m2026-07-19T17:25:24.323436Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for nymvpn.com: 76.76.21.21:443
+[2m2026-07-19T17:25:24.323467Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for yelp.global.ssl.fastly.net: 151.101.129.194:443
+[2m2026-07-19T17:25:24.323475Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for nymvpn-frontdoor.global.ssl.fastly.net: 151.101.1.194:443
+[2m2026-07-19T17:25:24.323469Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for nymvpn.com: 76.76.21.21:443
+[2m2026-07-19T17:25:24.323495Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for yelp.global.ssl.fastly.net: 151.101.129.194:443
+[2m2026-07-19T17:25:24.323503Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for nymvpn-frontdoor.global.ssl.fastly.net: 151.101.1.194:443
+[2m2026-07-19T17:25:24.327017Z[0m [32m INFO[0m [1mset_resolver_overrides[0m[1m{[0m[3mself[0m[2m=[0mAccountCommandSender { command_tx: UnboundedSender { chan: Tx { inner: Chan { tx: Tx { block_tail: 0x7ebd8b8f3020, tail_position: 3 }, semaphore: Semaphore(0), rx_waker: AtomicWaker, tx_count: 3, rx_fields: "..." } } } } [3mresolver_overrides[0m[2m=[0mSome(ResolverOverrides { overrides: {"nymvpn.com": {76.76.21.21:443}, "yelp.global.ssl.fastly.net": {151.101.129.194:443}, "nymvpn-frontdoor.global.ssl.fastly.net": {151.101.1.194:443}} })[1m}[0m[2m:[0m [2mnym_vpn_account_controller::command_sender[0m[2m:[0m close [3mtime.busy[0m[2m=[0m14.1µs [3mtime.idle[0m[2m=[0m3.64ms
+[2m2026-07-19T17:25:24.327051Z[0m [32m INFO[0m [1mset_vpn_api_firewall_down[0m[1m{[0m[3mself[0m[2m=[0mAccountCommandSender { command_tx: UnboundedSender { chan: Tx { inner: Chan { tx: Tx { block_tail: 0x7ebd8b8f3020, tail_position: 4 }, semaphore: Semaphore(0), rx_waker: AtomicWaker, tx_count: 3, rx_fields: "..." } } } }[1m}[0m[2m:[0m [2mnym_vpn_account_controller::command_sender[0m[2m:[0m close [3mtime.busy[0m[2m=[0m700ns [3mtime.idle[0m[2m=[0m4.38µs
+[2m2026-07-19T17:25:24.327409Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for yelp.global.ssl.fastly.net: 151.101.129.194:443
+[2m2026-07-19T17:25:24.327421Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for nym-frontdoor.global.ssl.fastly.net: 151.101.1.194:443
+[2m2026-07-19T17:25:24.327427Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for validator.nymtech.net: 92.39.63.14:443
+[2m2026-07-19T17:25:24.330309Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for nymvpn.com: 76.76.21.21:443
+[2m2026-07-19T17:25:24.330318Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for yelp.global.ssl.fastly.net: 151.101.129.194:443
+[2m2026-07-19T17:25:24.330324Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for nymvpn-frontdoor.global.ssl.fastly.net: 151.101.1.194:443
+[2m2026-07-19T17:25:24.332974Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Connecting wg, awaiting account readiness, try #0
+[2m2026-07-19T17:25:24.332990Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Connecting wg, refreshing gateways, try #0
+[2m2026-07-19T17:25:24.332996Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Connecting wg, selecting gateways, try #0
+[2m2026-07-19T17:25:24.702048Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel::gateway_selector[0m[2m:[0m Found 325 entry gateways
+[2m2026-07-19T17:25:24.702067Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel::gateway_selector[0m[2m:[0m Found 325 exit gateways
+[2m2026-07-19T17:25:24.712171Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel::gateway_selector[0m[2m:[0m Using entry gateway: EWkKy6myMHbaQfptREEQac6XdPvFnHmZ2rdFg3ugQQ6F, location: FR, performance: 94%
+[2m2026-07-19T17:25:24.712183Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel::gateway_selector[0m[2m:[0m Using exit gateway: nuMerN7ahqsptK8zDUZhnxMyDqePza8vWDf8k171EEs, location: SE, performance: 94%
+[2m2026-07-19T17:25:24.712196Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel::gateway_selector[0m[2m:[0m Using exit router address CLQG6eR1jo5cEH6QZriETBzmBvEZ3pDikjXN2v7eMH96.G9Eyz9hazLrV2U7TAgMSQfqzwMRRDmWPUhamvNwLrLmb@nuMerN7ahqsptK8zDUZhnxMyDqePza8vWDf8k171EEs
+[2m2026-07-19T17:25:24.713689Z[0m [32m INFO[0m [2mnym_firewall[0m[2m:[0m Kill-switch disabled: installing tunnel forwarding plane only (no blocking)
+[2m2026-07-19T17:25:24.762448Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Connecting wg, registering with gateways, try #0
+[2m2026-07-19T17:25:24.770439Z[0m [32m INFO[0m [2mnym_registration_client::clients::lp[0m[2m:[0m Establishing outer session with entry gateway
+[2m2026-07-19T17:25:25.215947Z[0m [32m INFO[0m [2mnym_registration_client::clients::lp[0m[2m:[0m Outer session with entry gateway established
+[2m2026-07-19T17:25:25.215964Z[0m [32m INFO[0m [2mnym_registration_client::clients::lp[0m[2m:[0m Registering with exit gateway via entry forwarding
+[2m2026-07-19T17:25:26.141710Z[0m [32m INFO[0m [2mnym_registration_client::clients::lp[0m[2m:[0m Exit gateway registration completed via forwarding
+[2m2026-07-19T17:25:26.141731Z[0m [32m INFO[0m [2mnym_registration_client::clients::lp[0m[2m:[0m Registering with entry gateway
+[2m2026-07-19T17:25:26.570085Z[0m [32m INFO[0m [2mnym_registration_client::clients::lp[0m[2m:[0m Entry gateway registration successful
+[2m2026-07-19T17:25:26.570103Z[0m [32m INFO[0m [2mnym_registration_client::clients::lp[0m[2m:[0m LP registration successful for both gateways
+[2m2026-07-19T17:25:26.570287Z[0m [32m INFO[0m [2mnym_firewall[0m[2m:[0m Kill-switch disabled: installing tunnel forwarding plane only (no blocking)
+[2m2026-07-19T17:25:26.620333Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Connecting wg to 207.180.217.26:51822 [EWkKy6myMHbaQfptREEQac6XdPvFnHmZ2rdFg3ugQQ6F] → 185.213.24.168:51822 [nuMerN7ahqsptK8zDUZhnxMyDqePza8vWDf8k171EEs], connecting tunnel, try #0
+[2m2026-07-19T17:25:26.623346Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel_monitor[0m[2m:[0m Created entry tun device: nym0
+[2m2026-07-19T17:25:26.625137Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel_monitor[0m[2m:[0m Created exit tun device: nym1
+[2m2026-07-19T17:25:26.625841Z[0m [32m INFO[0m [2mnym_wg_gotatun::amnezia_udp[0m[2m:[0m AmneziaWG obfuscation enabled
+[2m2026-07-19T17:25:26.626043Z[0m [32m INFO[0m [2mgotatun::device[0m[2m:[0m Peer added
+[2m2026-07-19T17:25:26.638889Z[0m [32m INFO[0m [2mnym_wg_gotatun::wireguard_go[0m[2m:[0m gotatun WireGuard tunnel started
+[2m2026-07-19T17:25:26.639137Z[0m [32m INFO[0m [2mgotatun::device[0m[2m:[0m Peer added
+[2m2026-07-19T17:25:26.651898Z[0m [32m INFO[0m [2mnym_wg_gotatun::wireguard_go[0m[2m:[0m gotatun WireGuard tunnel started
+[2m2026-07-19T17:25:26.652000Z[0m [32m INFO[0m [2mnym_firewall[0m[2m:[0m Kill-switch disabled: installing tunnel forwarding plane only (no blocking)
+[2m2026-07-19T17:25:26.652162Z[0m [34mDEBUG[0m [2mgotatun::noise[0m[2m:[0m Sending handshake_initiation
+[2m2026-07-19T17:25:26.652394Z[0m [34mDEBUG[0m [2mgotatun::noise[0m[2m:[0m Sending handshake_initiation
+[2m2026-07-19T17:25:26.734772Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Connecting wg to 207.180.217.26:51822 [EWkKy6myMHbaQfptREEQac6XdPvFnHmZ2rdFg3ugQQ6F] → 185.213.24.168:51822 [nuMerN7ahqsptK8zDUZhnxMyDqePza8vWDf8k171EEs], connecting tunnel, try #0
+[2m2026-07-19T17:25:26.734920Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Sending initial probe with 3000 ms timeout
+[2m2026-07-19T17:25:26.800612Z[0m [34mDEBUG[0m [2mgotatun::noise[0m[2m:[0m Received handshake_response: 85183204 2775432647
+[2m2026-07-19T17:25:26.800886Z[0m [34mDEBUG[0m [2mgotatun::noise[0m[2m:[0m Sending keepalive
+[2m2026-07-19T17:25:29.737003Z[0m [31mERROR[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Error: failed to send icmp packet
+Caused by: Request timeout for icmp_seq 0
+[2m2026-07-19T17:25:29.737032Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Next probe is now
+[2m2026-07-19T17:25:29.737038Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Sending next probe with 3000 ms timeout
+[2m2026-07-19T17:25:29.737096Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel_monitor[0m[2m:[0m Tunnel connection is failing (retry: 1)
+[2m2026-07-19T17:25:31.673744Z[0m [33m WARN[0m [2mgotatun::noise::timers[0m[2m:[0m HANDSHAKE(REKEY_TIMEOUT)
+[2m2026-07-19T17:25:31.673987Z[0m [34mDEBUG[0m [2mgotatun::noise[0m[2m:[0m Sending handshake_initiation
+[2m2026-07-19T17:25:31.857317Z[0m [34mDEBUG[0m [2mgotatun::noise[0m[2m:[0m Received handshake_response: 1770569257 664041194
+[2m2026-07-19T17:25:31.857599Z[0m [34mDEBUG[0m [2mgotatun::noise[0m[2m:[0m Sending keepalive
+[2m2026-07-19T17:25:32.043166Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Probe succeeded in 2306 ms
+[2m2026-07-19T17:25:32.043182Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Next probe in 10000 ms
+[2m2026-07-19T17:25:32.043204Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel_monitor[0m[2m:[0m Tunnel connection is viable
+[2m2026-07-19T17:25:32.043235Z[0m [32m INFO[0m [2mnym_firewall[0m[2m:[0m Kill-switch disabled: installing tunnel forwarding plane only (no blocking)
+[2m2026-07-19T17:25:32.149927Z[0m [32m INFO[0m [2mnym_dns[0m[2m:[0m Setting DNS servers: Tunnel DNS: {9.9.9.9, 149.112.112.112, 2620:fe::fe, 2620:fe::fe:9, 1.1.1.1, 1.0.0.1, 2606:4700:4700::1111, 2606:4700:4700::1001} Non-tunnel DNS: {}
+[2m2026-07-19T17:25:32.150480Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Bandwidth query for entry gateway: 500000000 bytes, upgrade_mode=Some(false)
+[2m2026-07-19T17:25:32.704269Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Bandwidth query for exit gateway: 499999760 bytes, upgrade_mode=Some(false)
+[2m2026-07-19T17:25:35.377666Z[0m [32m INFO[0m [2mnym_dns::imp::dnsmasq[0m[2m:[0m Configured dnsmasq with VPN DNS servers: [9.9.9.9, 149.112.112.112, 1.1.1.1, 1.0.0.1]
+[2m2026-07-19T17:25:35.377872Z[0m [32m INFO[0m [1mset_resolver_overrides[0m[1m{[0m[3mself[0m[2m=[0mAccountCommandSender { command_tx: UnboundedSender { chan: Tx { inner: Chan { tx: Tx { block_tail: 0x7ebd8b8f3020, tail_position: 5 }, semaphore: Semaphore(0), rx_waker: AtomicWaker, tx_count: 5, rx_fields: "..." } } } } [3mresolver_overrides[0m[2m=[0mNone[1m}[0m[2m:[0m [2mnym_vpn_account_controller::command_sender[0m[2m:[0m close [3mtime.busy[0m[2m=[0m14.0µs [3mtime.idle[0m[2m=[0m136µs
+[2m2026-07-19T17:25:35.377897Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Connected wg to 207.180.217.26:51822 [EWkKy6myMHbaQfptREEQac6XdPvFnHmZ2rdFg3ugQQ6F] → 185.213.24.168:51822 [nuMerN7ahqsptK8zDUZhnxMyDqePza8vWDf8k171EEs]
+[2m2026-07-19T17:25:37.852213Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Bandwidth query for entry gateway: 499999360 bytes, upgrade_mode=Some(false)
+[2m2026-07-19T17:25:37.852297Z[0m [32m INFO[0m [1mquery_upgrade_mode_enabled[0m[1m{[0m[3mself[0m[2m=[0mAccountCommandSender { command_tx: UnboundedSender { chan: Tx { inner: Chan { tx: Tx { block_tail: 0x7ebd8b8f3020, tail_position: 6 }, semaphore: Semaphore(0), rx_waker: AtomicWaker, tx_count: 5, rx_fields: "..." } } } }[1m}[0m[2m:[0m [2mnym_vpn_account_controller::command_sender[0m[2m:[0m close [3mtime.busy[0m[2m=[0m10.5µs [3mtime.idle[0m[2m=[0m15.7µs
+[2m2026-07-19T17:25:37.852317Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Topping up bandwidth for entry gateway (type: v1-wireguard-entry)
+[2m2026-07-19T17:25:37.939873Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Ecash ticket self-verification PASSED for entry (epoch 0)
+[2m2026-07-19T17:25:37.939897Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Sending bandwidth topup to gateway EWkKy6myMHbaQfptREEQac6XdPvFnHmZ2rdFg3ugQQ6F (type: v1-wireguard-entry, client: metadata)
+[2m2026-07-19T17:25:38.142804Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Gateway topup response: remaining=999999360 bytes, upgrade_mode=Some(false)
+[2m2026-07-19T17:25:38.142823Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Topup successful for entry gateway: remaining=999999360 bytes, upgrade_mode=Some(false)
+[2m2026-07-19T17:25:38.326240Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Bandwidth query for exit gateway: 499997360 bytes, upgrade_mode=Some(false)
+[2m2026-07-19T17:25:38.326296Z[0m [32m INFO[0m [1mquery_upgrade_mode_enabled[0m[1m{[0m[3mself[0m[2m=[0mAccountCommandSender { command_tx: UnboundedSender { chan: Tx { inner: Chan { tx: Tx { block_tail: 0x7ebd8b8f3020, tail_position: 8 }, semaphore: Semaphore(0), rx_waker: AtomicWaker, tx_count: 5, rx_fields: "..." } } } }[1m}[0m[2m:[0m [2mnym_vpn_account_controller::command_sender[0m[2m:[0m close [3mtime.busy[0m[2m=[0m8.94µs [3mtime.idle[0m[2m=[0m13.0µs
+[2m2026-07-19T17:25:38.326314Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Topping up bandwidth for exit gateway (type: v1-wireguard-exit)
+[2m2026-07-19T17:25:38.412558Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Ecash ticket self-verification PASSED for exit (epoch 0)
+[2m2026-07-19T17:25:38.412569Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Sending bandwidth topup to gateway nuMerN7ahqsptK8zDUZhnxMyDqePza8vWDf8k171EEs (type: v1-wireguard-exit, client: metadata)
+[2m2026-07-19T17:25:38.642982Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Gateway topup response: remaining=999997360 bytes, upgrade_mode=Some(false)
+[2m2026-07-19T17:25:38.642993Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Topup successful for exit gateway: remaining=999997360 bytes, upgrade_mode=Some(false)
+[2m2026-07-19T17:25:42.044122Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Sending next probe with 5000 ms timeout
+[2m2026-07-19T17:25:42.225752Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Probe succeeded in 181 ms
+[2m2026-07-19T17:25:42.225767Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Next probe in 10000 ms
+[2m2026-07-19T17:25:42.850674Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Bandwidth query for entry gateway: 999990016 bytes, upgrade_mode=Some(false)
+[2m2026-07-19T17:25:43.034719Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Bandwidth query for exit gateway: 999990860 bytes, upgrade_mode=Some(false)
+[2m2026-07-19T17:25:48.182235Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Bandwidth query for entry gateway: 999975052 bytes, upgrade_mode=Some(false)
+[2m2026-07-19T17:25:48.369719Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Bandwidth query for exit gateway: 999979884 bytes, upgrade_mode=Some(false)
+[2m2026-07-19T17:25:48.827770Z[0m [33m WARN[0m [2mhickory_proto::h2::h2_client_stream[0m[2m:[0m h2 connection failed: connection reset
+[2m2026-07-19T17:25:52.226131Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Sending next probe with 5000 ms timeout
+[2m2026-07-19T17:25:52.410194Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Probe succeeded in 184 ms
+[2m2026-07-19T17:25:52.410210Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Next probe in 10000 ms
+[2m2026-07-19T17:26:02.411789Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Sending next probe with 5000 ms timeout
+[2m2026-07-19T17:26:02.596928Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Probe succeeded in 185 ms
+[2m2026-07-19T17:26:02.596938Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Next probe in 10000 ms
+[2m2026-07-19T17:26:12.598309Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Sending next probe with 5000 ms timeout
+[2m2026-07-19T17:26:12.780600Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Probe succeeded in 182 ms
+[2m2026-07-19T17:26:12.780616Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Next probe in 10000 ms
+[2m2026-07-19T17:26:18.515420Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Bandwidth query for entry gateway: 999923548 bytes, upgrade_mode=Some(false)
+[2m2026-07-19T17:26:18.698651Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Bandwidth query for exit gateway: 999957756 bytes, upgrade_mode=Some(false)
+[2m2026-07-19T17:26:22.781026Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Sending next probe with 5000 ms timeout
+[2m2026-07-19T17:26:22.966298Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Probe succeeded in 185 ms
+[2m2026-07-19T17:26:22.966328Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Next probe in 10000 ms
+[2m2026-07-19T17:26:25.039480Z[0m [32m INFO[0m [2mnym_dns[0m[2m:[0m Resetting DNS
+[2m2026-07-19T17:26:28.269346Z[0m [32m INFO[0m [2mnym_dns::imp::dnsmasq[0m[2m:[0m Restored dnsmasq to original DNS configuration
+[2m2026-07-19T17:26:28.269941Z[0m [32m INFO[0m [1mset_vpn_api_firewall_up[0m[1m{[0m[3mself[0m[2m=[0mAccountCommandSender { command_tx: UnboundedSender { chan: Tx { inner: Chan { tx: Tx { block_tail: 0x7ebd8b8f3020, tail_position: 10 }, semaphore: Semaphore(0), rx_waker: AtomicWaker, tx_count: 5, rx_fields: "..." } } } }[1m}[0m[2m:[0m [2mnym_vpn_account_controller::command_sender[0m[2m:[0m close [3mtime.busy[0m[2m=[0m7.43µs [3mtime.idle[0m[2m=[0m14.7µs
+[2m2026-07-19T17:26:28.269960Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel_monitor[0m[2m:[0m Cancelling tunnel monitor handle
+[2m2026-07-19T17:26:28.269990Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Disconnecting
+[2m2026-07-19T17:26:28.270008Z[0m [33m WARN[0m [2mnym_sqlx_pool_guard[0m[2m:[0m SqlitePoolGuard dropped without explicit close(); path=/etc/nym/data/mainnet/credentials_database.db
+[2m2026-07-19T17:26:28.270004Z[0m [34mDEBUG[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Connection monitor is cancelled
+[2m2026-07-19T17:26:28.270026Z[0m [32m INFO[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Exiting connection monitor
+[2m2026-07-19T17:26:28.270716Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel_monitor[0m[2m:[0m Waiting for tunnel to exit
+[2m2026-07-19T17:26:28.270733Z[0m [32m INFO[0m [2mnym_wg_gotatun::wireguard_go[0m[2m:[0m Stopping gotatun WireGuard tunnel
+[2m2026-07-19T17:26:28.270739Z[0m [34mDEBUG[0m [2mgotatun::device[0m[2m:[0m Stopping gotatun device
+[2m2026-07-19T17:26:28.270758Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered IP recv
+[2m2026-07-19T17:26:28.270769Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m stopped task handle_timers
+[2m2026-07-19T17:26:28.270775Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m stopped task handle_outgoing
+[2m2026-07-19T17:26:28.270783Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered UDP receive
+[2m2026-07-19T17:26:28.270782Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered UDP receive
+[2m2026-07-19T17:26:28.270809Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered UDP send
+[2m2026-07-19T17:26:28.270793Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered UDP send
+[2m2026-07-19T17:26:28.270826Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered IP send
+[2m2026-07-19T17:26:28.270831Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m stopped task handle_incoming ipv6
+[2m2026-07-19T17:26:28.270850Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m stopped task handle_incoming ipv4
+[2m2026-07-19T17:26:28.270861Z[0m [34mDEBUG[0m [2mgotatun::device[0m[2m:[0m Dropping gotatun device
+[2m2026-07-19T17:26:28.270866Z[0m [34mDEBUG[0m [2mgotatun::device[0m[2m:[0m DeviceHandle strong count: 1
+[2m2026-07-19T17:26:28.270871Z[0m [34mDEBUG[0m [2mgotatun::device[0m[2m:[0m DeviceHandle weak count: 0
+[2m2026-07-19T17:26:28.270877Z[0m [32m INFO[0m [2mnym_wg_gotatun::wireguard_go[0m[2m:[0m Stopping gotatun WireGuard tunnel
+[2m2026-07-19T17:26:28.270882Z[0m [34mDEBUG[0m [2mgotatun::device[0m[2m:[0m Stopping gotatun device
+[2m2026-07-19T17:26:28.270894Z[0m [34mDEBUG[0m [2mgotatun::device[0m[2m:[0m Stopping gotatun device
+[2m2026-07-19T17:26:28.270900Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered IP recv
+[2m2026-07-19T17:26:28.270900Z[0m [32m INFO[0m [2mgotatun::device[0m[2m:[0m Stopping Device
+[2m2026-07-19T17:26:28.270913Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m stopped task handle_outgoing
+[2m2026-07-19T17:26:28.270941Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered UDP receive
+[2m2026-07-19T17:26:28.270949Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered UDP send
+[2m2026-07-19T17:26:28.270951Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m stopped task handle_timers
+[2m2026-07-19T17:26:28.270968Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m stopped task handle_incoming ipv4
+[2m2026-07-19T17:26:28.270926Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered UDP receive
+[2m2026-07-19T17:26:28.270989Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered UDP send
+[2m2026-07-19T17:26:28.271002Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered IP send
+[2m2026-07-19T17:26:28.271014Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m stopped task handle_incoming ipv6
+[2m2026-07-19T17:26:28.271020Z[0m [34mDEBUG[0m [2mgotatun::device[0m[2m:[0m Dropping gotatun device
+[2m2026-07-19T17:26:28.271025Z[0m [34mDEBUG[0m [2mgotatun::device[0m[2m:[0m DeviceHandle strong count: 1
+[2m2026-07-19T17:26:28.271030Z[0m [34mDEBUG[0m [2mgotatun::device[0m[2m:[0m DeviceHandle weak count: 0
+[2m2026-07-19T17:26:28.271064Z[0m [34mDEBUG[0m [2mgotatun::device[0m[2m:[0m Stopping gotatun device
+[2m2026-07-19T17:26:28.271072Z[0m [32m INFO[0m [2mgotatun::device[0m[2m:[0m Stopping Device
+[2m2026-07-19T17:26:28.271405Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel_monitor[0m[2m:[0m Tunnel monitor finished
+[2m2026-07-19T17:26:28.271995Z[0m [32m INFO[0m [1mset_vpn_api_firewall_up[0m[1m{[0m[3mself[0m[2m=[0mAccountCommandSender { command_tx: UnboundedSender { chan: Tx { inner: Chan { tx: Tx { block_tail: 0x7ebd8b8f3020, tail_position: 11 }, semaphore: Semaphore(0), rx_waker: AtomicWaker, tx_count: 3, rx_fields: "..." } } } }[1m}[0m[2m:[0m [2mnym_vpn_account_controller::command_sender[0m[2m:[0m close [3mtime.busy[0m[2m=[0m4.35µs [3mtime.idle[0m[2m=[0m38.9µs
+[2m2026-07-19T17:26:28.272275Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::states::connecting_state[0m[2m:[0m Skipping firewall apply: Connecting state with no peers/endpoints yet
+[2m2026-07-19T17:26:28.272290Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Connecting wg, resolving api addresses, try #0
+[2m2026-07-19T17:26:28.273115Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::states::connecting_state[0m[2m:[0m Resolved gateway config: ResolvedConfig { nyxd_socket_addrs: [91.92.200.116:443], nym_api_resolver_overrides: ResolverOverrides { overrides: {"yelp.global.ssl.fastly.net": {151.101.129.194:443}, "validator.nymtech.net": {92.39.63.14:443}, "nym-frontdoor.global.ssl.fastly.net": {151.101.1.194:443}} }, nym_vpn_api_resolver_overrides: ResolverOverrides { overrides: {"nymvpn-frontdoor.global.ssl.fastly.net": {151.101.1.194:443}, "nymvpn.com": {76.76.21.21:443}, "yelp.global.ssl.fastly.net": {151.101.129.194:443}} } }
+[2m2026-07-19T17:26:28.273602Z[0m [32m INFO[0m [2mnym_firewall[0m[2m:[0m Kill-switch disabled: installing tunnel forwarding plane only (no blocking)
+[2m2026-07-19T17:26:28.315569Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task tun_mtu_monitor
+[2m2026-07-19T17:26:28.315578Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task tun_mtu_monitor
+[2m2026-07-19T17:26:28.366474Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for nymvpn-frontdoor.global.ssl.fastly.net: 151.101.1.194:443
+[2m2026-07-19T17:26:28.366499Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for nymvpn.com: 76.76.21.21:443
+[2m2026-07-19T17:26:28.366535Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for yelp.global.ssl.fastly.net: 151.101.129.194:443
+[2m2026-07-19T17:26:28.366566Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for nymvpn-frontdoor.global.ssl.fastly.net: 151.101.1.194:443
+[2m2026-07-19T17:26:28.366596Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for nymvpn.com: 76.76.21.21:443
+[2m2026-07-19T17:26:28.366610Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for yelp.global.ssl.fastly.net: 151.101.129.194:443
+[2m2026-07-19T17:26:28.369765Z[0m [32m INFO[0m [1mset_resolver_overrides[0m[1m{[0m[3mself[0m[2m=[0mAccountCommandSender { command_tx: UnboundedSender { chan: Tx { inner: Chan { tx: Tx { block_tail: 0x7ebd8b8f3020, tail_position: 12 }, semaphore: Semaphore(0), rx_waker: AtomicWaker, tx_count: 3, rx_fields: "..." } } } } [3mresolver_overrides[0m[2m=[0mSome(ResolverOverrides { overrides: {"nymvpn-frontdoor.global.ssl.fastly.net": {151.101.1.194:443}, "nymvpn.com": {76.76.21.21:443}, "yelp.global.ssl.fastly.net": {151.101.129.194:443}} })[1m}[0m[2m:[0m [2mnym_vpn_account_controller::command_sender[0m[2m:[0m close [3mtime.busy[0m[2m=[0m13.2µs [3mtime.idle[0m[2m=[0m3.33ms
+[2m2026-07-19T17:26:28.369798Z[0m [32m INFO[0m [1mset_vpn_api_firewall_down[0m[1m{[0m[3mself[0m[2m=[0mAccountCommandSender { command_tx: UnboundedSender { chan: Tx { inner: Chan { tx: Tx { block_tail: 0x7ebd8b8f3020, tail_position: 13 }, semaphore: Semaphore(0), rx_waker: AtomicWaker, tx_count: 3, rx_fields: "..." } } } }[1m}[0m[2m:[0m [2mnym_vpn_account_controller::command_sender[0m[2m:[0m close [3mtime.busy[0m[2m=[0m6.70µs [3mtime.idle[0m[2m=[0m4.20µs
+[2m2026-07-19T17:26:28.370205Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for yelp.global.ssl.fastly.net: 151.101.129.194:443
+[2m2026-07-19T17:26:28.370217Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for validator.nymtech.net: 92.39.63.14:443
+[2m2026-07-19T17:26:28.370224Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for nym-frontdoor.global.ssl.fastly.net: 151.101.1.194:443
+[2m2026-07-19T17:26:28.372807Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for nymvpn-frontdoor.global.ssl.fastly.net: 151.101.1.194:443
+[2m2026-07-19T17:26:28.372817Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for nymvpn.com: 76.76.21.21:443
+[2m2026-07-19T17:26:28.372824Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for yelp.global.ssl.fastly.net: 151.101.129.194:443
+[2m2026-07-19T17:26:28.375460Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Connecting wg, awaiting account readiness, try #0
+[2m2026-07-19T17:26:28.375481Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Connecting wg, refreshing gateways, try #0
+[2m2026-07-19T17:26:28.375494Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Connecting wg, selecting gateways, try #0
+[2m2026-07-19T17:26:28.380439Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel::gateway_selector[0m[2m:[0m Found 325 entry gateways
+[2m2026-07-19T17:26:28.380451Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel::gateway_selector[0m[2m:[0m Found 325 exit gateways
+[2m2026-07-19T17:26:28.385082Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel::gateway_selector[0m[2m:[0m Using entry gateway: D395HZNtubk78zgPC1uAArtHLpxrM7Kv1Qk9g9eW5UC7, location: GB, performance: 93%
+[2m2026-07-19T17:26:28.385095Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel::gateway_selector[0m[2m:[0m Using exit gateway: 9Dv3cRjaLgLNZM1zV4XNwjsjEqMmJ43VMbBabkDXwMff, location: US, performance: 92%
+[2m2026-07-19T17:26:28.385116Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel::gateway_selector[0m[2m:[0m Using exit router address 4ofMGjW3hy7CFhuHrLZpmk8Jgb5fTuh4Xns1J8Y42Q8F.EuZXEDBVwFRYwWtRWyjfPqDg7oUZPcqxBRrutotNrXdE@9Dv3cRjaLgLNZM1zV4XNwjsjEqMmJ43VMbBabkDXwMff
+[2m2026-07-19T17:26:28.388358Z[0m [32m INFO[0m [2mnym_firewall[0m[2m:[0m Kill-switch disabled: installing tunnel forwarding plane only (no blocking)
+[2m2026-07-19T17:26:28.443837Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Connecting wg, registering with gateways, try #0
+[2m2026-07-19T17:26:28.458709Z[0m [32m INFO[0m [2mnym_registration_client::clients::lp[0m[2m:[0m Establishing outer session with entry gateway
+[2m2026-07-19T17:26:28.859634Z[0m [32m INFO[0m [2mnym_registration_client::clients::lp[0m[2m:[0m Outer session with entry gateway established
+[2m2026-07-19T17:26:28.859655Z[0m [32m INFO[0m [2mnym_registration_client::clients::lp[0m[2m:[0m Registering with exit gateway via entry forwarding
+[2m2026-07-19T17:26:30.034217Z[0m [32m INFO[0m [2mnym_registration_client::clients::lp[0m[2m:[0m Exit gateway registration completed via forwarding
+[2m2026-07-19T17:26:30.034240Z[0m [32m INFO[0m [2mnym_registration_client::clients::lp[0m[2m:[0m Registering with entry gateway
+[2m2026-07-19T17:26:30.391675Z[0m [32m INFO[0m [2mnym_registration_client::clients::lp[0m[2m:[0m Entry gateway registration successful
+[2m2026-07-19T17:26:30.391693Z[0m [32m INFO[0m [2mnym_registration_client::clients::lp[0m[2m:[0m LP registration successful for both gateways
+[2m2026-07-19T17:26:30.391849Z[0m [32m INFO[0m [2mnym_firewall[0m[2m:[0m Kill-switch disabled: installing tunnel forwarding plane only (no blocking)
+[2m2026-07-19T17:26:30.446083Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Connecting wg to 176.20.130.154:51822 [D395HZNtubk78zgPC1uAArtHLpxrM7Kv1Qk9g9eW5UC7] → 134.195.89.74:51822 [9Dv3cRjaLgLNZM1zV4XNwjsjEqMmJ43VMbBabkDXwMff], connecting tunnel, try #0
+[2m2026-07-19T17:26:30.448783Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel_monitor[0m[2m:[0m Created entry tun device: nym0
+[2m2026-07-19T17:26:30.450432Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel_monitor[0m[2m:[0m Created exit tun device: nym1
+[2m2026-07-19T17:26:30.450998Z[0m [32m INFO[0m [2mnym_wg_gotatun::amnezia_udp[0m[2m:[0m AmneziaWG obfuscation enabled
+[2m2026-07-19T17:26:30.451178Z[0m [32m INFO[0m [2mgotatun::device[0m[2m:[0m Peer added
+[2m2026-07-19T17:26:30.463914Z[0m [32m INFO[0m [2mnym_wg_gotatun::wireguard_go[0m[2m:[0m gotatun WireGuard tunnel started
+[2m2026-07-19T17:26:30.464179Z[0m [32m INFO[0m [2mgotatun::device[0m[2m:[0m Peer added
+[2m2026-07-19T17:26:30.477489Z[0m [32m INFO[0m [2mnym_wg_gotatun::wireguard_go[0m[2m:[0m gotatun WireGuard tunnel started
+[2m2026-07-19T17:26:30.477610Z[0m [32m INFO[0m [2mnym_firewall[0m[2m:[0m Kill-switch disabled: installing tunnel forwarding plane only (no blocking)
+[2m2026-07-19T17:26:30.477664Z[0m [34mDEBUG[0m [2mgotatun::noise[0m[2m:[0m Sending handshake_initiation
+[2m2026-07-19T17:26:30.477886Z[0m [34mDEBUG[0m [2mgotatun::noise[0m[2m:[0m Sending handshake_initiation
+[2m2026-07-19T17:26:30.554154Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Connecting wg to 176.20.130.154:51822 [D395HZNtubk78zgPC1uAArtHLpxrM7Kv1Qk9g9eW5UC7] → 134.195.89.74:51822 [9Dv3cRjaLgLNZM1zV4XNwjsjEqMmJ43VMbBabkDXwMff], connecting tunnel, try #0
+[2m2026-07-19T17:26:30.554452Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Sending initial probe with 3000 ms timeout
+[2m2026-07-19T17:26:30.613368Z[0m [34mDEBUG[0m [2mgotatun::noise[0m[2m:[0m Received handshake_response: 840081354 2390891750
+[2m2026-07-19T17:26:30.613612Z[0m [34mDEBUG[0m [2mgotatun::noise[0m[2m:[0m Sending keepalive
+[2m2026-07-19T17:26:33.555831Z[0m [31mERROR[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Error: failed to send icmp packet
+Caused by: Request timeout for icmp_seq 0
+[2m2026-07-19T17:26:33.555862Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Next probe is now
+[2m2026-07-19T17:26:33.555875Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Sending next probe with 3000 ms timeout
+[2m2026-07-19T17:26:33.555959Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel_monitor[0m[2m:[0m Tunnel connection is failing (retry: 1)
+[2m2026-07-19T17:26:35.498015Z[0m [33m WARN[0m [2mgotatun::noise::timers[0m[2m:[0m HANDSHAKE(REKEY_TIMEOUT)
+[2m2026-07-19T17:26:35.498174Z[0m [34mDEBUG[0m [2mgotatun::noise[0m[2m:[0m Sending handshake_initiation
+[2m2026-07-19T17:26:35.724371Z[0m [34mDEBUG[0m [2mgotatun::noise[0m[2m:[0m Received handshake_response: 3190226412 1210387893
+[2m2026-07-19T17:26:35.724547Z[0m [34mDEBUG[0m [2mgotatun::noise[0m[2m:[0m Sending keepalive
+[2m2026-07-19T17:26:35.847901Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Bandwidth query for entry gateway: 500000000 bytes, upgrade_mode=Some(false)
+[2m2026-07-19T17:26:35.954231Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Probe succeeded in 2398 ms
+[2m2026-07-19T17:26:35.954241Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Next probe in 10000 ms
+[2m2026-07-19T17:26:35.954250Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel_monitor[0m[2m:[0m Tunnel connection is viable
+[2m2026-07-19T17:26:35.954276Z[0m [32m INFO[0m [2mnym_firewall[0m[2m:[0m Kill-switch disabled: installing tunnel forwarding plane only (no blocking)
+[2m2026-07-19T17:26:36.062906Z[0m [32m INFO[0m [2mnym_dns[0m[2m:[0m Setting DNS servers: Tunnel DNS: {9.9.9.9, 149.112.112.112, 2620:fe::fe, 2620:fe::fe:9, 1.1.1.1, 1.0.0.1, 2606:4700:4700::1111, 2606:4700:4700::1001} Non-tunnel DNS: {}
+[2m2026-07-19T17:26:36.532944Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Bandwidth query for exit gateway: 499999760 bytes, upgrade_mode=Some(false)
+[2m2026-07-19T17:26:38.445098Z[0m [32m INFO[0m [2mnym_dns::imp::dnsmasq[0m[2m:[0m Configured dnsmasq with VPN DNS servers: [9.9.9.9, 149.112.112.112, 1.1.1.1, 1.0.0.1]
+[2m2026-07-19T17:26:38.445289Z[0m [32m INFO[0m [1mset_resolver_overrides[0m[1m{[0m[3mself[0m[2m=[0mAccountCommandSender { command_tx: UnboundedSender { chan: Tx { inner: Chan { tx: Tx { block_tail: 0x7ebd8b8f3020, tail_position: 14 }, semaphore: Semaphore(0), rx_waker: AtomicWaker, tx_count: 5, rx_fields: "..." } } } } [3mresolver_overrides[0m[2m=[0mNone[1m}[0m[2m:[0m [2mnym_vpn_account_controller::command_sender[0m[2m:[0m close [3mtime.busy[0m[2m=[0m11.4µs [3mtime.idle[0m[2m=[0m122µs
+[2m2026-07-19T17:26:38.445311Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Connected wg to 176.20.130.154:51822 [D395HZNtubk78zgPC1uAArtHLpxrM7Kv1Qk9g9eW5UC7] → 134.195.89.74:51822 [9Dv3cRjaLgLNZM1zV4XNwjsjEqMmJ43VMbBabkDXwMff]
+[2m2026-07-19T17:26:38.608568Z[0m [32m INFO[0m [2mnym_dns[0m[2m:[0m Resetting DNS
+[2m2026-07-19T17:26:41.668071Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Bandwidth query for entry gateway: 499999360 bytes, upgrade_mode=Some(false)
+[2m2026-07-19T17:26:41.668133Z[0m [32m INFO[0m [1mquery_upgrade_mode_enabled[0m[1m{[0m[3mself[0m[2m=[0mAccountCommandSender { command_tx: UnboundedSender { chan: Tx { inner: Chan { tx: Tx { block_tail: 0x7ebd8b8f3020, tail_position: 15 }, semaphore: Semaphore(0), rx_waker: AtomicWaker, tx_count: 5, rx_fields: "..." } } } }[1m}[0m[2m:[0m [2mnym_vpn_account_controller::command_sender[0m[2m:[0m close [3mtime.busy[0m[2m=[0m11.8µs [3mtime.idle[0m[2m=[0m14.2µs
+[2m2026-07-19T17:26:41.668152Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Topping up bandwidth for entry gateway (type: v1-wireguard-entry)
+[2m2026-07-19T17:26:41.756212Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Ecash ticket self-verification PASSED for entry (epoch 0)
+[2m2026-07-19T17:26:41.756235Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Sending bandwidth topup to gateway D395HZNtubk78zgPC1uAArtHLpxrM7Kv1Qk9g9eW5UC7 (type: v1-wireguard-entry, client: metadata)
+[2m2026-07-19T17:26:41.847533Z[0m [32m INFO[0m [2mnym_dns::imp::dnsmasq[0m[2m:[0m Restored dnsmasq to original DNS configuration
+[2m2026-07-19T17:26:41.848231Z[0m [32m INFO[0m [1mset_vpn_api_firewall_up[0m[1m{[0m[3mself[0m[2m=[0mAccountCommandSender { command_tx: UnboundedSender { chan: Tx { inner: Chan { tx: Tx { block_tail: 0x7ebd8b8f3020, tail_position: 17 }, semaphore: Semaphore(0), rx_waker: AtomicWaker, tx_count: 5, rx_fields: "..." } } } }[1m}[0m[2m:[0m [2mnym_vpn_account_controller::command_sender[0m[2m:[0m close [3mtime.busy[0m[2m=[0m9.29µs [3mtime.idle[0m[2m=[0m21.9µs
+[2m2026-07-19T17:26:41.848252Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel_monitor[0m[2m:[0m Cancelling tunnel monitor handle
+[2m2026-07-19T17:26:41.848286Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Disconnecting
+[2m2026-07-19T17:26:41.848299Z[0m [34mDEBUG[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Connection monitor is cancelled
+[2m2026-07-19T17:26:41.848316Z[0m [32m INFO[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Exiting connection monitor
+[2m2026-07-19T17:26:41.915746Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Gateway topup response: remaining=999999360 bytes, upgrade_mode=Some(false)
+[2m2026-07-19T17:26:41.915767Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Topup successful for entry gateway: remaining=999999360 bytes, upgrade_mode=Some(false)
+[2m2026-07-19T17:26:41.915869Z[0m [33m WARN[0m [2mnym_sqlx_pool_guard[0m[2m:[0m SqlitePoolGuard dropped without explicit close(); path=/etc/nym/data/mainnet/credentials_database.db
+[2m2026-07-19T17:26:41.916630Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel_monitor[0m[2m:[0m Waiting for tunnel to exit
+[2m2026-07-19T17:26:41.916657Z[0m [32m INFO[0m [2mnym_wg_gotatun::wireguard_go[0m[2m:[0m Stopping gotatun WireGuard tunnel
+[2m2026-07-19T17:26:41.916672Z[0m [34mDEBUG[0m [2mgotatun::device[0m[2m:[0m Stopping gotatun device
+[2m2026-07-19T17:26:41.916693Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered IP recv
+[2m2026-07-19T17:26:41.916703Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m stopped task handle_outgoing
+[2m2026-07-19T17:26:41.916703Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered UDP receive
+[2m2026-07-19T17:26:41.916736Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered UDP send
+[2m2026-07-19T17:26:41.916723Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m stopped task handle_timers
+[2m2026-07-19T17:26:41.916759Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m stopped task handle_incoming ipv6
+[2m2026-07-19T17:26:41.916732Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered UDP receive
+[2m2026-07-19T17:26:41.916779Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered UDP send
+[2m2026-07-19T17:26:41.916794Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered IP send
+[2m2026-07-19T17:26:41.916804Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m stopped task handle_incoming ipv4
+[2m2026-07-19T17:26:41.916810Z[0m [34mDEBUG[0m [2mgotatun::device[0m[2m:[0m Dropping gotatun device
+[2m2026-07-19T17:26:41.916815Z[0m [34mDEBUG[0m [2mgotatun::device[0m[2m:[0m DeviceHandle strong count: 1
+[2m2026-07-19T17:26:41.916820Z[0m [34mDEBUG[0m [2mgotatun::device[0m[2m:[0m DeviceHandle weak count: 0
+[2m2026-07-19T17:26:41.916833Z[0m [32m INFO[0m [2mnym_wg_gotatun::wireguard_go[0m[2m:[0m Stopping gotatun WireGuard tunnel
+[2m2026-07-19T17:26:41.916838Z[0m [34mDEBUG[0m [2mgotatun::device[0m[2m:[0m Stopping gotatun device
+[2m2026-07-19T17:26:41.916852Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered IP recv
+[2m2026-07-19T17:26:41.916862Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m stopped task handle_outgoing
+[2m2026-07-19T17:26:41.916864Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered UDP receive
+[2m2026-07-19T17:26:41.916871Z[0m [34mDEBUG[0m [2mgotatun::device[0m[2m:[0m Stopping gotatun device
+[2m2026-07-19T17:26:41.916881Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m stopped task handle_incoming ipv4
+[2m2026-07-19T17:26:41.916885Z[0m [32m INFO[0m [2mgotatun::device[0m[2m:[0m Stopping Device
+[2m2026-07-19T17:26:41.916868Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered UDP receive
+[2m2026-07-19T17:26:41.916901Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered UDP send
+[2m2026-07-19T17:26:41.916890Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered UDP send
+[2m2026-07-19T17:26:41.916925Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m stopped task handle_timers
+[2m2026-07-19T17:26:41.916912Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered IP send
+[2m2026-07-19T17:26:41.916956Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m stopped task handle_incoming ipv6
+[2m2026-07-19T17:26:41.916962Z[0m [34mDEBUG[0m [2mgotatun::device[0m[2m:[0m Dropping gotatun device
+[2m2026-07-19T17:26:41.916967Z[0m [34mDEBUG[0m [2mgotatun::device[0m[2m:[0m DeviceHandle strong count: 1
+[2m2026-07-19T17:26:41.916971Z[0m [34mDEBUG[0m [2mgotatun::device[0m[2m:[0m DeviceHandle weak count: 0
+[2m2026-07-19T17:26:41.916994Z[0m [34mDEBUG[0m [2mgotatun::device[0m[2m:[0m Stopping gotatun device
+[2m2026-07-19T17:26:41.917002Z[0m [32m INFO[0m [2mgotatun::device[0m[2m:[0m Stopping Device
+[2m2026-07-19T17:26:41.917017Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel_monitor[0m[2m:[0m Tunnel monitor finished
+[2m2026-07-19T17:26:41.917464Z[0m [32m INFO[0m [1mset_vpn_api_firewall_up[0m[1m{[0m[3mself[0m[2m=[0mAccountCommandSender { command_tx: UnboundedSender { chan: Tx { inner: Chan { tx: Tx { block_tail: 0x7ebd8b8f3020, tail_position: 18 }, semaphore: Semaphore(0), rx_waker: AtomicWaker, tx_count: 3, rx_fields: "..." } } } }[1m}[0m[2m:[0m [2mnym_vpn_account_controller::command_sender[0m[2m:[0m close [3mtime.busy[0m[2m=[0m1.81µs [3mtime.idle[0m[2m=[0m109µs
+[2m2026-07-19T17:26:41.917773Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::states::connecting_state[0m[2m:[0m Skipping firewall apply: Connecting state with no peers/endpoints yet
+[2m2026-07-19T17:26:41.917787Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Connecting wg, resolving api addresses, try #0
+[2m2026-07-19T17:26:41.918493Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::states::connecting_state[0m[2m:[0m Resolved gateway config: ResolvedConfig { nyxd_socket_addrs: [91.92.200.116:443], nym_api_resolver_overrides: ResolverOverrides { overrides: {"yelp.global.ssl.fastly.net": {151.101.129.194:443}, "nym-frontdoor.global.ssl.fastly.net": {151.101.1.194:443}, "validator.nymtech.net": {92.39.63.14:443}} }, nym_vpn_api_resolver_overrides: ResolverOverrides { overrides: {"nymvpn-frontdoor.global.ssl.fastly.net": {151.101.1.194:443}, "nymvpn.com": {76.76.21.21:443}, "yelp.global.ssl.fastly.net": {151.101.129.194:443}} } }
+[2m2026-07-19T17:26:41.918834Z[0m [32m INFO[0m [2mnym_firewall[0m[2m:[0m Kill-switch disabled: installing tunnel forwarding plane only (no blocking)
+[2m2026-07-19T17:26:41.947601Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task tun_mtu_monitor
+[2m2026-07-19T17:26:41.954569Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task tun_mtu_monitor
+[2m2026-07-19T17:26:42.011630Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for nymvpn-frontdoor.global.ssl.fastly.net: 151.101.1.194:443
+[2m2026-07-19T17:26:42.011648Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for nymvpn.com: 76.76.21.21:443
+[2m2026-07-19T17:26:42.011655Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for yelp.global.ssl.fastly.net: 151.101.129.194:443
+[2m2026-07-19T17:26:42.011817Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for nymvpn-frontdoor.global.ssl.fastly.net: 151.101.1.194:443
+[2m2026-07-19T17:26:42.011843Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for nymvpn.com: 76.76.21.21:443
+[2m2026-07-19T17:26:42.011856Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for yelp.global.ssl.fastly.net: 151.101.129.194:443
+[2m2026-07-19T17:26:42.014778Z[0m [32m INFO[0m [1mset_resolver_overrides[0m[1m{[0m[3mself[0m[2m=[0mAccountCommandSender { command_tx: UnboundedSender { chan: Tx { inner: Chan { tx: Tx { block_tail: 0x7ebd8b8f3020, tail_position: 19 }, semaphore: Semaphore(0), rx_waker: AtomicWaker, tx_count: 3, rx_fields: "..." } } } } [3mresolver_overrides[0m[2m=[0mSome(ResolverOverrides { overrides: {"nymvpn-frontdoor.global.ssl.fastly.net": {151.101.1.194:443}, "nymvpn.com": {76.76.21.21:443}, "yelp.global.ssl.fastly.net": {151.101.129.194:443}} })[1m}[0m[2m:[0m [2mnym_vpn_account_controller::command_sender[0m[2m:[0m close [3mtime.busy[0m[2m=[0m8.15µs [3mtime.idle[0m[2m=[0m3.18ms
+[2m2026-07-19T17:26:42.014812Z[0m [32m INFO[0m [1mset_vpn_api_firewall_down[0m[1m{[0m[3mself[0m[2m=[0mAccountCommandSender { command_tx: UnboundedSender { chan: Tx { inner: Chan { tx: Tx { block_tail: 0x7ebd8b8f3020, tail_position: 20 }, semaphore: Semaphore(0), rx_waker: AtomicWaker, tx_count: 3, rx_fields: "..." } } } }[1m}[0m[2m:[0m [2mnym_vpn_account_controller::command_sender[0m[2m:[0m close [3mtime.busy[0m[2m=[0m6.38µs [3mtime.idle[0m[2m=[0m4.46µs
+[2m2026-07-19T17:26:42.015163Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for yelp.global.ssl.fastly.net: 151.101.129.194:443
+[2m2026-07-19T17:26:42.015173Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for nym-frontdoor.global.ssl.fastly.net: 151.101.1.194:443
+[2m2026-07-19T17:26:42.015179Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for validator.nymtech.net: 92.39.63.14:443
+[2m2026-07-19T17:26:42.017904Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for nymvpn-frontdoor.global.ssl.fastly.net: 151.101.1.194:443
+[2m2026-07-19T17:26:42.017912Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for nymvpn.com: 76.76.21.21:443
+[2m2026-07-19T17:26:42.017918Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for yelp.global.ssl.fastly.net: 151.101.129.194:443
+[2m2026-07-19T17:26:42.020477Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Connecting wg, awaiting account readiness, try #0
+[2m2026-07-19T17:26:42.020495Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Connecting wg, refreshing gateways, try #0
+[2m2026-07-19T17:26:42.020502Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Connecting wg, selecting gateways, try #0
+[2m2026-07-19T17:26:42.025373Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel::gateway_selector[0m[2m:[0m Found 325 entry gateways
+[2m2026-07-19T17:26:42.025390Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel::gateway_selector[0m[2m:[0m Found 325 exit gateways
+[2m2026-07-19T17:26:42.030372Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel::gateway_selector[0m[2m:[0m Using entry gateway: FLg2Bu8q7CAmBHUNrmn9XmRAo3QsdxLeUmnSCUAVeyko, location: LT, performance: 91%
+[2m2026-07-19T17:26:42.030396Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel::gateway_selector[0m[2m:[0m Using exit gateway: BnE33PptGNnNKQ85NcwwRDrWfBy2jUTywPZxo9MdWgZh, location: GR, performance: 89%
+[2m2026-07-19T17:26:42.030419Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel::gateway_selector[0m[2m:[0m Using exit router address J4oi1FrnF5ierERJoFqEke4RiU6wzfWjxGniueazPGK2.HCUCJkAaHJ9o1pAR2R3jodXqozQsanQRNRp2gXsHZ5Lh@BnE33PptGNnNKQ85NcwwRDrWfBy2jUTywPZxo9MdWgZh
+[2m2026-07-19T17:26:42.033556Z[0m [32m INFO[0m [2mnym_firewall[0m[2m:[0m Kill-switch disabled: installing tunnel forwarding plane only (no blocking)
+[2m2026-07-19T17:26:42.086782Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Connecting wg, registering with gateways, try #0
+[2m2026-07-19T17:26:42.098500Z[0m [32m INFO[0m [2mnym_registration_client::clients::lp[0m[2m:[0m Establishing outer session with entry gateway
+[2m2026-07-19T17:26:42.613026Z[0m [32m INFO[0m [2mnym_registration_client::clients::lp[0m[2m:[0m Outer session with entry gateway established
+[2m2026-07-19T17:26:42.613051Z[0m [32m INFO[0m [2mnym_registration_client::clients::lp[0m[2m:[0m Registering with exit gateway via entry forwarding
+[2m2026-07-19T17:26:43.801262Z[0m [32m INFO[0m [2mnym_registration_client::clients::lp[0m[2m:[0m Exit gateway registration completed via forwarding
+[2m2026-07-19T17:26:43.801279Z[0m [32m INFO[0m [2mnym_registration_client::clients::lp[0m[2m:[0m Registering with entry gateway
+[2m2026-07-19T17:26:44.252200Z[0m [32m INFO[0m [2mnym_registration_client::clients::lp[0m[2m:[0m Entry gateway registration successful
+[2m2026-07-19T17:26:44.252209Z[0m [32m INFO[0m [2mnym_registration_client::clients::lp[0m[2m:[0m LP registration successful for both gateways
+[2m2026-07-19T17:26:44.252306Z[0m [32m INFO[0m [2mnym_firewall[0m[2m:[0m Kill-switch disabled: installing tunnel forwarding plane only (no blocking)
+[2m2026-07-19T17:26:44.294150Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Connecting wg to 77.37.54.162:51822 [FLg2Bu8q7CAmBHUNrmn9XmRAo3QsdxLeUmnSCUAVeyko] → 83.212.79.67:51822 [BnE33PptGNnNKQ85NcwwRDrWfBy2jUTywPZxo9MdWgZh], connecting tunnel, try #0
+[2m2026-07-19T17:26:44.296723Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel_monitor[0m[2m:[0m Created entry tun device: nym0
+[2m2026-07-19T17:26:44.298359Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel_monitor[0m[2m:[0m Created exit tun device: nym1
+[2m2026-07-19T17:26:44.298969Z[0m [32m INFO[0m [2mnym_wg_gotatun::amnezia_udp[0m[2m:[0m AmneziaWG obfuscation enabled
+[2m2026-07-19T17:26:44.299142Z[0m [32m INFO[0m [2mgotatun::device[0m[2m:[0m Peer added
+[2m2026-07-19T17:26:44.311532Z[0m [32m INFO[0m [2mnym_wg_gotatun::wireguard_go[0m[2m:[0m gotatun WireGuard tunnel started
+[2m2026-07-19T17:26:44.311769Z[0m [32m INFO[0m [2mgotatun::device[0m[2m:[0m Peer added
+[2m2026-07-19T17:26:44.324799Z[0m [32m INFO[0m [2mnym_wg_gotatun::wireguard_go[0m[2m:[0m gotatun WireGuard tunnel started
+[2m2026-07-19T17:26:44.324941Z[0m [32m INFO[0m [2mnym_firewall[0m[2m:[0m Kill-switch disabled: installing tunnel forwarding plane only (no blocking)
+[2m2026-07-19T17:26:44.324961Z[0m [34mDEBUG[0m [2mgotatun::noise[0m[2m:[0m Sending handshake_initiation
+[2m2026-07-19T17:26:44.325163Z[0m [34mDEBUG[0m [2mgotatun::noise[0m[2m:[0m Sending handshake_initiation
+[2m2026-07-19T17:26:44.404991Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Connecting wg to 77.37.54.162:51822 [FLg2Bu8q7CAmBHUNrmn9XmRAo3QsdxLeUmnSCUAVeyko] → 83.212.79.67:51822 [BnE33PptGNnNKQ85NcwwRDrWfBy2jUTywPZxo9MdWgZh], connecting tunnel, try #0
+[2m2026-07-19T17:26:44.405231Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Sending initial probe with 3000 ms timeout
+[2m2026-07-19T17:26:44.502776Z[0m [34mDEBUG[0m [2mgotatun::noise[0m[2m:[0m Received handshake_response: 3549059959 130527015
+[2m2026-07-19T17:26:44.503070Z[0m [34mDEBUG[0m [2mgotatun::noise[0m[2m:[0m Sending keepalive
+[2m2026-07-19T17:26:47.406222Z[0m [31mERROR[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Error: failed to send icmp packet
+Caused by: Request timeout for icmp_seq 0
+[2m2026-07-19T17:26:47.406255Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Next probe is now
+[2m2026-07-19T17:26:47.406267Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Sending next probe with 3000 ms timeout
+[2m2026-07-19T17:26:47.406328Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel_monitor[0m[2m:[0m Tunnel connection is failing (retry: 1)
+[2m2026-07-19T17:26:49.346214Z[0m [33m WARN[0m [2mgotatun::noise::timers[0m[2m:[0m HANDSHAKE(REKEY_TIMEOUT)
+[2m2026-07-19T17:26:49.346427Z[0m [34mDEBUG[0m [2mgotatun::noise[0m[2m:[0m Sending handshake_initiation
+[2m2026-07-19T17:26:49.572109Z[0m [34mDEBUG[0m [2mgotatun::noise[0m[2m:[0m Received handshake_response: 3979633026 2325625035
+[2m2026-07-19T17:26:49.572386Z[0m [34mDEBUG[0m [2mgotatun::noise[0m[2m:[0m Sending keepalive
+[2m2026-07-19T17:26:49.808337Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Bandwidth query for entry gateway: 499999360 bytes, upgrade_mode=Some(false)
+[2m2026-07-19T17:26:50.407126Z[0m [31mERROR[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Error: failed to send icmp packet
+Caused by: Request timeout for icmp_seq 1
+[2m2026-07-19T17:26:50.407155Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Next probe is now
+[2m2026-07-19T17:26:50.407165Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Sending next probe with 3000 ms timeout
+[2m2026-07-19T17:26:50.407221Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel_monitor[0m[2m:[0m Tunnel connection is failing (retry: 2)
+[2m2026-07-19T17:26:50.487411Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Bandwidth query for exit gateway: 499999760 bytes, upgrade_mode=Some(false)
+[2m2026-07-19T17:26:50.641223Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Probe succeeded in 234 ms
+[2m2026-07-19T17:26:50.641256Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Next probe in 10000 ms
+[2m2026-07-19T17:26:50.641272Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel_monitor[0m[2m:[0m Tunnel connection is viable
+[2m2026-07-19T17:26:50.641317Z[0m [32m INFO[0m [2mnym_firewall[0m[2m:[0m Kill-switch disabled: installing tunnel forwarding plane only (no blocking)
+[2m2026-07-19T17:26:50.734153Z[0m [32m INFO[0m [2mnym_dns[0m[2m:[0m Setting DNS servers: Tunnel DNS: {9.9.9.9, 149.112.112.112, 2620:fe::fe, 2620:fe::fe:9, 1.1.1.1, 1.0.0.1, 2606:4700:4700::1111, 2606:4700:4700::1001} Non-tunnel DNS: {}
+[2m2026-07-19T17:26:53.952087Z[0m [32m INFO[0m [2mnym_dns::imp::dnsmasq[0m[2m:[0m Configured dnsmasq with VPN DNS servers: [9.9.9.9, 149.112.112.112, 1.1.1.1, 1.0.0.1]
+[2m2026-07-19T17:26:53.952254Z[0m [32m INFO[0m [1mset_resolver_overrides[0m[1m{[0m[3mself[0m[2m=[0mAccountCommandSender { command_tx: UnboundedSender { chan: Tx { inner: Chan { tx: Tx { block_tail: 0x7ebd8b8f3020, tail_position: 21 }, semaphore: Semaphore(0), rx_waker: AtomicWaker, tx_count: 5, rx_fields: "..." } } } } [3mresolver_overrides[0m[2m=[0mNone[1m}[0m[2m:[0m [2mnym_vpn_account_controller::command_sender[0m[2m:[0m close [3mtime.busy[0m[2m=[0m9.62µs [3mtime.idle[0m[2m=[0m111µs
+[2m2026-07-19T17:26:53.952281Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Connected wg to 77.37.54.162:51822 [FLg2Bu8q7CAmBHUNrmn9XmRAo3QsdxLeUmnSCUAVeyko] → 83.212.79.67:51822 [BnE33PptGNnNKQ85NcwwRDrWfBy2jUTywPZxo9MdWgZh]
+[2m2026-07-19T17:26:54.172426Z[0m [32m INFO[0m [2mnym_dns[0m[2m:[0m Resetting DNS
+[2m2026-07-19T17:26:55.657752Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Bandwidth query for entry gateway: 499989056 bytes, upgrade_mode=Some(false)
+[2m2026-07-19T17:26:55.657818Z[0m [32m INFO[0m [1mquery_upgrade_mode_enabled[0m[1m{[0m[3mself[0m[2m=[0mAccountCommandSender { command_tx: UnboundedSender { chan: Tx { inner: Chan { tx: Tx { block_tail: 0x7ebd8b8f3020, tail_position: 22 }, semaphore: Semaphore(0), rx_waker: AtomicWaker, tx_count: 5, rx_fields: "..." } } } }[1m}[0m[2m:[0m [2mnym_vpn_account_controller::command_sender[0m[2m:[0m close [3mtime.busy[0m[2m=[0m10.7µs [3mtime.idle[0m[2m=[0m15.3µs
+[2m2026-07-19T17:26:55.657841Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Topping up bandwidth for entry gateway (type: v1-wireguard-entry)
+[2m2026-07-19T17:26:55.744500Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Ecash ticket self-verification PASSED for entry (epoch 0)
+[2m2026-07-19T17:26:55.744523Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Sending bandwidth topup to gateway FLg2Bu8q7CAmBHUNrmn9XmRAo3QsdxLeUmnSCUAVeyko (type: v1-wireguard-entry, client: metadata)
+[2m2026-07-19T17:26:55.960299Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Gateway topup response: remaining=999989056 bytes, upgrade_mode=Some(false)
+[2m2026-07-19T17:26:55.960314Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Topup successful for entry gateway: remaining=999989056 bytes, upgrade_mode=Some(false)
+[2m2026-07-19T17:26:56.185126Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Bandwidth query for exit gateway: 499997296 bytes, upgrade_mode=Some(false)
+[2m2026-07-19T17:26:56.185205Z[0m [32m INFO[0m [1mquery_upgrade_mode_enabled[0m[1m{[0m[3mself[0m[2m=[0mAccountCommandSender { command_tx: UnboundedSender { chan: Tx { inner: Chan { tx: Tx { block_tail: 0x7ebd8b8f3020, tail_position: 24 }, semaphore: Semaphore(0), rx_waker: AtomicWaker, tx_count: 5, rx_fields: "..." } } } }[1m}[0m[2m:[0m [2mnym_vpn_account_controller::command_sender[0m[2m:[0m close [3mtime.busy[0m[2m=[0m12.4µs [3mtime.idle[0m[2m=[0m19.2µs
+[2m2026-07-19T17:26:56.185225Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Topping up bandwidth for exit gateway (type: v1-wireguard-exit)
+[2m2026-07-19T17:26:56.271827Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Ecash ticket self-verification PASSED for exit (epoch 0)
+[2m2026-07-19T17:26:56.271838Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Sending bandwidth topup to gateway BnE33PptGNnNKQ85NcwwRDrWfBy2jUTywPZxo9MdWgZh (type: v1-wireguard-exit, client: metadata)
+[2m2026-07-19T17:26:56.604092Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Gateway topup response: remaining=999997296 bytes, upgrade_mode=Some(false)
+[2m2026-07-19T17:26:56.604111Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Topup successful for exit gateway: remaining=999997296 bytes, upgrade_mode=Some(false)
+[2m2026-07-19T17:26:57.994324Z[0m [32m INFO[0m [2mnym_dns::imp::dnsmasq[0m[2m:[0m Restored dnsmasq to original DNS configuration
+[2m2026-07-19T17:26:57.995022Z[0m [32m INFO[0m [1mset_vpn_api_firewall_up[0m[1m{[0m[3mself[0m[2m=[0mAccountCommandSender { command_tx: UnboundedSender { chan: Tx { inner: Chan { tx: Tx { block_tail: 0x7ebd8b8f3020, tail_position: 26 }, semaphore: Semaphore(0), rx_waker: AtomicWaker, tx_count: 5, rx_fields: "..." } } } }[1m}[0m[2m:[0m [2mnym_vpn_account_controller::command_sender[0m[2m:[0m close [3mtime.busy[0m[2m=[0m9.82µs [3mtime.idle[0m[2m=[0m17.5µs
+[2m2026-07-19T17:26:57.995055Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel_monitor[0m[2m:[0m Cancelling tunnel monitor handle
+[2m2026-07-19T17:26:57.995086Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Disconnecting
+[2m2026-07-19T17:26:57.995090Z[0m [34mDEBUG[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Connection monitor is cancelled
+[2m2026-07-19T17:26:57.995102Z[0m [33m WARN[0m [2mnym_sqlx_pool_guard[0m[2m:[0m SqlitePoolGuard dropped without explicit close(); path=/etc/nym/data/mainnet/credentials_database.db
+[2m2026-07-19T17:26:57.995105Z[0m [32m INFO[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Exiting connection monitor
+[2m2026-07-19T17:26:57.995769Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel_monitor[0m[2m:[0m Waiting for tunnel to exit
+[2m2026-07-19T17:26:57.995785Z[0m [32m INFO[0m [2mnym_wg_gotatun::wireguard_go[0m[2m:[0m Stopping gotatun WireGuard tunnel
+[2m2026-07-19T17:26:57.995794Z[0m [34mDEBUG[0m [2mgotatun::device[0m[2m:[0m Stopping gotatun device
+[2m2026-07-19T17:26:57.995820Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered IP recv
+[2m2026-07-19T17:26:57.995825Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered UDP receive
+[2m2026-07-19T17:26:57.995829Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered UDP receive
+[2m2026-07-19T17:26:57.995837Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered UDP send
+[2m2026-07-19T17:26:57.995841Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered UDP send
+[2m2026-07-19T17:26:57.995847Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered IP send
+[2m2026-07-19T17:26:57.995849Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m stopped task handle_timers
+[2m2026-07-19T17:26:57.995863Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m stopped task handle_outgoing
+[2m2026-07-19T17:26:57.995871Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m stopped task handle_incoming ipv4
+[2m2026-07-19T17:26:57.995887Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m stopped task handle_incoming ipv6
+[2m2026-07-19T17:26:57.995895Z[0m [34mDEBUG[0m [2mgotatun::device[0m[2m:[0m Dropping gotatun device
+[2m2026-07-19T17:26:57.995902Z[0m [34mDEBUG[0m [2mgotatun::device[0m[2m:[0m DeviceHandle strong count: 1
+[2m2026-07-19T17:26:57.995910Z[0m [34mDEBUG[0m [2mgotatun::device[0m[2m:[0m DeviceHandle weak count: 0
+[2m2026-07-19T17:26:57.995917Z[0m [32m INFO[0m [2mnym_wg_gotatun::wireguard_go[0m[2m:[0m Stopping gotatun WireGuard tunnel
+[2m2026-07-19T17:26:57.995923Z[0m [34mDEBUG[0m [2mgotatun::device[0m[2m:[0m Stopping gotatun device
+[2m2026-07-19T17:26:57.995942Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered IP recv
+[2m2026-07-19T17:26:57.995952Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m stopped task handle_outgoing
+[2m2026-07-19T17:26:57.995955Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered UDP receive
+[2m2026-07-19T17:26:57.995950Z[0m [34mDEBUG[0m [2mgotatun::device[0m[2m:[0m Stopping gotatun device
+[2m2026-07-19T17:26:57.995972Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered UDP receive
+[2m2026-07-19T17:26:57.995977Z[0m [32m INFO[0m [2mgotatun::device[0m[2m:[0m Stopping Device
+[2m2026-07-19T17:26:57.995963Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered UDP send
+[2m2026-07-19T17:26:57.995961Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m stopped task handle_timers
+[2m2026-07-19T17:26:57.995981Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered UDP send
+[2m2026-07-19T17:26:57.996011Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m stopped task handle_incoming ipv6
+[2m2026-07-19T17:26:57.996033Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task buffered IP send
+[2m2026-07-19T17:26:57.996071Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m stopped task handle_incoming ipv4
+[2m2026-07-19T17:26:57.996078Z[0m [34mDEBUG[0m [2mgotatun::device[0m[2m:[0m Dropping gotatun device
+[2m2026-07-19T17:26:57.996085Z[0m [34mDEBUG[0m [2mgotatun::device[0m[2m:[0m DeviceHandle strong count: 1
+[2m2026-07-19T17:26:57.996090Z[0m [34mDEBUG[0m [2mgotatun::device[0m[2m:[0m DeviceHandle weak count: 0
+[2m2026-07-19T17:26:57.996107Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel_monitor[0m[2m:[0m Tunnel monitor finished
+[2m2026-07-19T17:26:57.996117Z[0m [34mDEBUG[0m [2mgotatun::device[0m[2m:[0m Stopping gotatun device
+[2m2026-07-19T17:26:57.996126Z[0m [32m INFO[0m [2mgotatun::device[0m[2m:[0m Stopping Device
+[2m2026-07-19T17:26:57.996434Z[0m [32m INFO[0m [1mset_vpn_api_firewall_up[0m[1m{[0m[3mself[0m[2m=[0mAccountCommandSender { command_tx: UnboundedSender { chan: Tx { inner: Chan { tx: Tx { block_tail: 0x7ebd8b8f3020, tail_position: 27 }, semaphore: Semaphore(0), rx_waker: AtomicWaker, tx_count: 3, rx_fields: "..." } } } }[1m}[0m[2m:[0m [2mnym_vpn_account_controller::command_sender[0m[2m:[0m close [3mtime.busy[0m[2m=[0m3.76µs [3mtime.idle[0m[2m=[0m20.8µs
+[2m2026-07-19T17:26:57.996752Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::states::connecting_state[0m[2m:[0m Skipping firewall apply: Connecting state with no peers/endpoints yet
+[2m2026-07-19T17:26:57.996778Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Connecting wg, resolving api addresses, try #0
+[2m2026-07-19T17:26:57.997283Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::states::connecting_state[0m[2m:[0m Resolved gateway config: ResolvedConfig { nyxd_socket_addrs: [91.92.200.116:443], nym_api_resolver_overrides: ResolverOverrides { overrides: {"nym-frontdoor.global.ssl.fastly.net": {151.101.1.194:443}, "validator.nymtech.net": {92.39.63.14:443}, "yelp.global.ssl.fastly.net": {151.101.129.194:443}} }, nym_vpn_api_resolver_overrides: ResolverOverrides { overrides: {"nymvpn-frontdoor.global.ssl.fastly.net": {151.101.1.194:443}, "nymvpn.com": {76.76.21.21:443}, "yelp.global.ssl.fastly.net": {151.101.129.194:443}} } }
+[2m2026-07-19T17:26:57.997803Z[0m [32m INFO[0m [2mnym_firewall[0m[2m:[0m Kill-switch disabled: installing tunnel forwarding plane only (no blocking)
+[2m2026-07-19T17:26:58.051610Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task tun_mtu_monitor
+[2m2026-07-19T17:26:58.051622Z[0m [34mDEBUG[0m [2mgotatun::task[0m[2m:[0m dropped task tun_mtu_monitor
+[2m2026-07-19T17:26:58.104448Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for nymvpn-frontdoor.global.ssl.fastly.net: 151.101.1.194:443
+[2m2026-07-19T17:26:58.104463Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for nymvpn.com: 76.76.21.21:443
+[2m2026-07-19T17:26:58.104469Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for yelp.global.ssl.fastly.net: 151.101.129.194:443
+[2m2026-07-19T17:26:58.104548Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for nymvpn-frontdoor.global.ssl.fastly.net: 151.101.1.194:443
+[2m2026-07-19T17:26:58.104571Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for nymvpn.com: 76.76.21.21:443
+[2m2026-07-19T17:26:58.104582Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for yelp.global.ssl.fastly.net: 151.101.129.194:443
+[2m2026-07-19T17:26:58.107652Z[0m [32m INFO[0m [1mset_resolver_overrides[0m[1m{[0m[3mself[0m[2m=[0mAccountCommandSender { command_tx: UnboundedSender { chan: Tx { inner: Chan { tx: Tx { block_tail: 0x7ebd8b8f3020, tail_position: 28 }, semaphore: Semaphore(0), rx_waker: AtomicWaker, tx_count: 3, rx_fields: "..." } } } } [3mresolver_overrides[0m[2m=[0mSome(ResolverOverrides { overrides: {"nymvpn-frontdoor.global.ssl.fastly.net": {151.101.1.194:443}, "nymvpn.com": {76.76.21.21:443}, "yelp.global.ssl.fastly.net": {151.101.129.194:443}} })[1m}[0m[2m:[0m [2mnym_vpn_account_controller::command_sender[0m[2m:[0m close [3mtime.busy[0m[2m=[0m9.56µs [3mtime.idle[0m[2m=[0m3.24ms
+[2m2026-07-19T17:26:58.107692Z[0m [32m INFO[0m [1mset_vpn_api_firewall_down[0m[1m{[0m[3mself[0m[2m=[0mAccountCommandSender { command_tx: UnboundedSender { chan: Tx { inner: Chan { tx: Tx { block_tail: 0x7ebd8b8f3020, tail_position: 29 }, semaphore: Semaphore(0), rx_waker: AtomicWaker, tx_count: 3, rx_fields: "..." } } } }[1m}[0m[2m:[0m [2mnym_vpn_account_controller::command_sender[0m[2m:[0m close [3mtime.busy[0m[2m=[0m6.36µs [3mtime.idle[0m[2m=[0m6.56µs
+[2m2026-07-19T17:26:58.108073Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for nym-frontdoor.global.ssl.fastly.net: 151.101.1.194:443
+[2m2026-07-19T17:26:58.108087Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for validator.nymtech.net: 92.39.63.14:443
+[2m2026-07-19T17:26:58.108099Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for yelp.global.ssl.fastly.net: 151.101.129.194:443
+[2m2026-07-19T17:26:58.110747Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for nymvpn-frontdoor.global.ssl.fastly.net: 151.101.1.194:443
+[2m2026-07-19T17:26:58.110756Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for nymvpn.com: 76.76.21.21:443
+[2m2026-07-19T17:26:58.110763Z[0m [32m INFO[0m [2mnym_vpn_api_client::fronted_http_client[0m[2m:[0m Enabling Resolver override for yelp.global.ssl.fastly.net: 151.101.129.194:443
+[2m2026-07-19T17:26:58.113302Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Connecting wg, awaiting account readiness, try #0
+[2m2026-07-19T17:26:58.113320Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Connecting wg, refreshing gateways, try #0
+[2m2026-07-19T17:26:58.113327Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Connecting wg, selecting gateways, try #0
+[2m2026-07-19T17:26:58.118229Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel::gateway_selector[0m[2m:[0m Found 325 entry gateways
+[2m2026-07-19T17:26:58.118239Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel::gateway_selector[0m[2m:[0m Found 325 exit gateways
+[2m2026-07-19T17:26:58.122404Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel::gateway_selector[0m[2m:[0m Using entry gateway: RYYAWkXv1YBZAdS5H8gFpotiYMRjF95mit39TvX7pXL, location: ES, performance: 98%
+[2m2026-07-19T17:26:58.122422Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel::gateway_selector[0m[2m:[0m Using exit gateway: 8MScQyENaj6W75TdL2hQmkvfpeXXyUfKfzaV8VTSzNPa, location: GB, performance: 94%
+[2m2026-07-19T17:26:58.122437Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel::gateway_selector[0m[2m:[0m Using exit router address Ak5KFryEY57JUixXYNBFBGdSkMdn5vtaw832R7QmLqwe.C28YLmXeBanYqks6sBdDzcZDMgQ5kA3NjKjbf38Fhnpo@8MScQyENaj6W75TdL2hQmkvfpeXXyUfKfzaV8VTSzNPa
+[2m2026-07-19T17:26:58.125427Z[0m [32m INFO[0m [2mnym_firewall[0m[2m:[0m Kill-switch disabled: installing tunnel forwarding plane only (no blocking)
+[2m2026-07-19T17:26:58.172390Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Connecting wg, registering with gateways, try #0
+[2m2026-07-19T17:26:58.180021Z[0m [32m INFO[0m [2mnym_registration_client::clients::lp[0m[2m:[0m Establishing outer session with entry gateway
+[2m2026-07-19T17:26:58.628979Z[0m [32m INFO[0m [2mnym_registration_client::clients::lp[0m[2m:[0m Outer session with entry gateway established
+[2m2026-07-19T17:26:58.629000Z[0m [32m INFO[0m [2mnym_registration_client::clients::lp[0m[2m:[0m Registering with exit gateway via entry forwarding
+[2m2026-07-19T17:26:59.526834Z[0m [32m INFO[0m [2mnym_registration_client::clients::lp[0m[2m:[0m Exit gateway registration completed via forwarding
+[2m2026-07-19T17:26:59.526857Z[0m [32m INFO[0m [2mnym_registration_client::clients::lp[0m[2m:[0m Registering with entry gateway
+[2m2026-07-19T17:26:59.726974Z[0m [32m INFO[0m [2mnym_registration_client::clients::lp[0m[2m:[0m Entry gateway registration successful
+[2m2026-07-19T17:26:59.726989Z[0m [32m INFO[0m [2mnym_registration_client::clients::lp[0m[2m:[0m LP registration successful for both gateways
+[2m2026-07-19T17:26:59.727122Z[0m [32m INFO[0m [2mnym_firewall[0m[2m:[0m Kill-switch disabled: installing tunnel forwarding plane only (no blocking)
+[2m2026-07-19T17:26:59.785792Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Connecting wg to 213.165.69.154:51822 [RYYAWkXv1YBZAdS5H8gFpotiYMRjF95mit39TvX7pXL] → 96.9.215.34:51822 [8MScQyENaj6W75TdL2hQmkvfpeXXyUfKfzaV8VTSzNPa], connecting tunnel, try #0
+[2m2026-07-19T17:26:59.787966Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel_monitor[0m[2m:[0m Created entry tun device: nym0
+[2m2026-07-19T17:26:59.789610Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel_monitor[0m[2m:[0m Created exit tun device: nym1
+[2m2026-07-19T17:26:59.790326Z[0m [32m INFO[0m [2mnym_wg_gotatun::amnezia_udp[0m[2m:[0m AmneziaWG obfuscation enabled
+[2m2026-07-19T17:26:59.790524Z[0m [32m INFO[0m [2mgotatun::device[0m[2m:[0m Peer added
+[2m2026-07-19T17:26:59.803991Z[0m [32m INFO[0m [2mnym_wg_gotatun::wireguard_go[0m[2m:[0m gotatun WireGuard tunnel started
+[2m2026-07-19T17:26:59.804222Z[0m [32m INFO[0m [2mgotatun::device[0m[2m:[0m Peer added
+[2m2026-07-19T17:26:59.817002Z[0m [32m INFO[0m [2mnym_wg_gotatun::wireguard_go[0m[2m:[0m gotatun WireGuard tunnel started
+[2m2026-07-19T17:26:59.817146Z[0m [32m INFO[0m [2mnym_firewall[0m[2m:[0m Kill-switch disabled: installing tunnel forwarding plane only (no blocking)
+[2m2026-07-19T17:26:59.817148Z[0m [34mDEBUG[0m [2mgotatun::noise[0m[2m:[0m Sending handshake_initiation
+[2m2026-07-19T17:26:59.817377Z[0m [34mDEBUG[0m [2mgotatun::noise[0m[2m:[0m Sending handshake_initiation
+[2m2026-07-19T17:26:59.912355Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Connecting wg to 213.165.69.154:51822 [RYYAWkXv1YBZAdS5H8gFpotiYMRjF95mit39TvX7pXL] → 96.9.215.34:51822 [8MScQyENaj6W75TdL2hQmkvfpeXXyUfKfzaV8VTSzNPa], connecting tunnel, try #0
+[2m2026-07-19T17:26:59.912522Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Sending initial probe with 3000 ms timeout
+[2m2026-07-19T17:26:59.967329Z[0m [34mDEBUG[0m [2mgotatun::noise[0m[2m:[0m Received handshake_response: 2538353763 1753983537
+[2m2026-07-19T17:26:59.967632Z[0m [34mDEBUG[0m [2mgotatun::noise[0m[2m:[0m Sending keepalive
+[2m2026-07-19T17:27:02.913802Z[0m [31mERROR[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Error: failed to send icmp packet
+Caused by: Request timeout for icmp_seq 0
+[2m2026-07-19T17:27:02.913832Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Next probe is now
+[2m2026-07-19T17:27:02.913842Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Sending next probe with 3000 ms timeout
+[2m2026-07-19T17:27:02.913897Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel_monitor[0m[2m:[0m Tunnel connection is failing (retry: 1)
+[2m2026-07-19T17:27:04.840305Z[0m [33m WARN[0m [2mgotatun::noise::timers[0m[2m:[0m HANDSHAKE(REKEY_TIMEOUT)
+[2m2026-07-19T17:27:04.840529Z[0m [34mDEBUG[0m [2mgotatun::noise[0m[2m:[0m Sending handshake_initiation
+[2m2026-07-19T17:27:05.019729Z[0m [34mDEBUG[0m [2mgotatun::noise[0m[2m:[0m Received handshake_response: 2288168481 1477180555
+[2m2026-07-19T17:27:05.019954Z[0m [34mDEBUG[0m [2mgotatun::noise[0m[2m:[0m Sending keepalive
+[2m2026-07-19T17:27:05.206751Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Probe succeeded in 2292 ms
+[2m2026-07-19T17:27:05.206763Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Next probe in 10000 ms
+[2m2026-07-19T17:27:05.206773Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine::tunnel_monitor[0m[2m:[0m Tunnel connection is viable
+[2m2026-07-19T17:27:05.206802Z[0m [32m INFO[0m [2mnym_firewall[0m[2m:[0m Kill-switch disabled: installing tunnel forwarding plane only (no blocking)
+[2m2026-07-19T17:27:05.304841Z[0m [32m INFO[0m [2mnym_dns[0m[2m:[0m Setting DNS servers: Tunnel DNS: {9.9.9.9, 149.112.112.112, 2620:fe::fe, 2620:fe::fe:9, 1.1.1.1, 1.0.0.1, 2606:4700:4700::1111, 2606:4700:4700::1001} Non-tunnel DNS: {}
+[2m2026-07-19T17:27:05.305384Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Bandwidth query for entry gateway: 999798228 bytes, upgrade_mode=Some(false)
+[2m2026-07-19T17:27:05.849149Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Bandwidth query for exit gateway: 499999760 bytes, upgrade_mode=Some(false)
+[2m2026-07-19T17:27:08.801464Z[0m [32m INFO[0m [2mnym_dns::imp::dnsmasq[0m[2m:[0m Configured dnsmasq with VPN DNS servers: [9.9.9.9, 149.112.112.112, 1.1.1.1, 1.0.0.1]
+[2m2026-07-19T17:27:08.801743Z[0m [32m INFO[0m [1mset_resolver_overrides[0m[1m{[0m[3mself[0m[2m=[0mAccountCommandSender { command_tx: UnboundedSender { chan: Tx { inner: Chan { tx: Tx { block_tail: 0x7ebd8b8f3020, tail_position: 30 }, semaphore: Semaphore(0), rx_waker: AtomicWaker, tx_count: 5, rx_fields: "..." } } } } [3mresolver_overrides[0m[2m=[0mNone[1m}[0m[2m:[0m [2mnym_vpn_account_controller::command_sender[0m[2m:[0m close [3mtime.busy[0m[2m=[0m13.1µs [3mtime.idle[0m[2m=[0m155µs
+[2m2026-07-19T17:27:08.801773Z[0m [32m INFO[0m [2mnym_vpn_lib::tunnel_state_machine[0m[2m:[0m New tunnel state: Connected wg to 213.165.69.154:51822 [RYYAWkXv1YBZAdS5H8gFpotiYMRjF95mit39TvX7pXL] → 96.9.215.34:51822 [8MScQyENaj6W75TdL2hQmkvfpeXXyUfKfzaV8VTSzNPa]
+[2m2026-07-19T17:27:10.996731Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Bandwidth query for entry gateway: 999797588 bytes, upgrade_mode=Some(false)
+[2m2026-07-19T17:27:11.178044Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Bandwidth query for exit gateway: 499996704 bytes, upgrade_mode=Some(false)
+[2m2026-07-19T17:27:11.178104Z[0m [32m INFO[0m [1mquery_upgrade_mode_enabled[0m[1m{[0m[3mself[0m[2m=[0mAccountCommandSender { command_tx: UnboundedSender { chan: Tx { inner: Chan { tx: Tx { block_tail: 0x7ebd8b8f3020, tail_position: 31 }, semaphore: Semaphore(0), rx_waker: AtomicWaker, tx_count: 5, rx_fields: "..." } } } }[1m}[0m[2m:[0m [2mnym_vpn_account_controller::command_sender[0m[2m:[0m close [3mtime.busy[0m[2m=[0m10.6µs [3mtime.idle[0m[2m=[0m17.6µs
+[2m2026-07-19T17:27:11.178128Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Topping up bandwidth for exit gateway (type: v1-wireguard-exit)
+[2m2026-07-19T17:27:11.264782Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Ecash ticket self-verification PASSED for exit (epoch 0)
+[2m2026-07-19T17:27:11.264791Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Sending bandwidth topup to gateway 8MScQyENaj6W75TdL2hQmkvfpeXXyUfKfzaV8VTSzNPa (type: v1-wireguard-exit, client: metadata)
+[2m2026-07-19T17:27:11.508875Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Gateway topup response: remaining=999996704 bytes, upgrade_mode=Some(false)
+[2m2026-07-19T17:27:11.508890Z[0m [32m INFO[0m [2mnym_vpn_lib::bandwidth_controller[0m[2m:[0m Topup successful for exit gateway: remaining=999996704 bytes, upgrade_mode=Some(false)
+[2m2026-07-19T17:27:15.207916Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Sending next probe with 5000 ms timeout
+[2m2026-07-19T17:27:15.391642Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Probe succeeded in 183 ms
+[2m2026-07-19T17:27:15.391663Z[0m [35mTRACE[0m [2mnym_connection_monitor::connection_monitor[0m[2m:[0m Next probe in 10000 ms
+[2m2026-07-19T17:27:20.332157Z[0m [32m INFO[0m [2mnym_vpn_account_controller::controller[0m[2m:[0m New AccountController state: Syncing
+#
+# ============================================================================
+# ANALYSIS — Phase 0 diagnosis (before-numbers), 2026-07-19
+# ============================================================================
+#
+# Setup notes / gotchas hit during capture (see task-1-report.md for full
+# writeup):
+#   - BusyBox `nohup` is not present on this router; used `setsid ... &` instead.
+#   - CRITICAL: `/usr/sbin/nym-vpn-watchdog` (a separate procd "always-on"
+#     service, watchdog_interval=30s) polls `/etc/init.d/nym-vpnd status` and
+#     calls `/etc/init.d/nym-vpnd start` whenever it doesn't see a procd-owned
+#     instance running. Since the manually-launched instrumented daemon is NOT
+#     a procd instance, the watchdog kept starting a competing plain (no
+#     RUST_LOG) nym-vpnd, which unlinks + rebinds /var/run/nym-vpn.sock,
+#     silently stealing all subsequent nym-vpnc traffic away from the
+#     instrumented process. First two capture attempts produced empty/no-op
+#     logs (0 probe/handshake/tunnel-state lines) because of this — NOT an
+#     env-quoting failure (verified RUST_LOG was correctly present in
+#     /proc/<pid>/environ throughout). Fix: `/etc/init.d/nym-vpn-watchdog stop`
+#     before starting the instrumented daemon; restarted it during restore.
+#   - RUST_LOG="info,nym_connection_monitor=trace,gotatun=debug" confirmed
+#     correct and sufficient once the watchdog was out of the way.
+#
+# Log contains one untimed smoke-test cycle (~17:25:24, used to validate the
+# instrumented daemon before the timed run) followed by the three brief-spec
+# `time nym-vpnc connect -w` cycles. No connect failures / no retries needed
+# across all 4 cycles.
+#
+# --- SMOKE-TEST CYCLE (untimed validation run, not one of the 3 official) ---
+#   Connecting start (resolving api addrs): 17:25:24.067941
+#   Tunnel-up (2nd "connecting tunnel" transition, entry+exit named):
+#                                            17:25:26.734772
+#   Handshake initiations sent (entry+exit, back-to-back):
+#                                            17:25:26.652162 / 17:25:26.652394
+#   1st handshake_response received (one hop only): 17:25:26.800612
+#   Initial probe sent (3000ms timeout):    17:25:26.734920
+#   Retry probe sent (cadence, +3000ms):    17:25:29.737038
+#   HANDSHAKE(REKEY_TIMEOUT) fired:         17:25:31.673744  (+5.021s after
+#                                            first handshake_initiation)
+#   2nd handshake_initiation (post-rekey):  17:25:31.673987
+#   2nd handshake_response received:        17:25:31.857317  (184ms RTT)
+#   Probe succeeded (186ms after 2nd handshake_response):
+#                                            17:25:32.043166  (2306ms after the
+#                                            retry probe was sent)
+#   New tunnel state: Connected:            17:25:35.377897  (+3.335s after
+#                                            probe success — extra tail
+#                                            latency before state flips)
+#   Total connect (Connecting->Connected):  11.310s
+#   Tunnel-up -> viable (2nd "connecting tunnel" -> Connected): 8.643s
+#   VERDICT: REKEY_TIMEOUT-bound. The first (initial) handshake_initiation
+#     pair only yields ONE handshake_response; the probe only succeeds after
+#     the REKEY_TIMEOUT-forced re-handshake completes, ~5.0s in.
+#
+# --- CYCLE 1 (shell: real 0m 10.40s) ---
+#   Connecting start:                       17:26:28.272290
+#   Tunnel-up (2nd connecting-tunnel line):  17:26:30.554154
+#   Handshake initiations sent:             17:26:30.477664 / 17:26:30.477886
+#   1st handshake_response:                 17:26:30.613368
+#   Initial probe sent (3000ms):            17:26:30.554452
+#   Retry probe sent (+3000ms cadence):     17:26:33.555875
+#   HANDSHAKE(REKEY_TIMEOUT):               17:26:35.498015  (+5.020s after
+#                                            first handshake_initiation)
+#   2nd handshake_initiation:               17:26:35.498174
+#   2nd handshake_response:                 17:26:35.724371  (226ms RTT)
+#   Probe succeeded:                        17:26:35.954231  (230ms after 2nd
+#                                            handshake_response; 2398ms after
+#                                            the retry probe was sent)
+#   New tunnel state: Connected:            17:26:38.445311  (+2.491s tail)
+#   Total connect (log-derived):            10.173s  (shell measured 10.40s;
+#                                            ~0.23s CLI/RPC overhead)
+#   Tunnel-up -> viable:                    7.891s
+#   VERDICT: REKEY_TIMEOUT-bound (same pattern as smoke test).
+#
+# --- CYCLE 2 (shell: real 0m 12.34s) ---
+#   Connecting start:                       17:26:41.917787
+#   Tunnel-up (2nd connecting-tunnel line):  17:26:44.404991
+#   Handshake initiations sent:             17:26:44.324961 / 17:26:44.325163
+#   1st handshake_response:                 17:26:44.502776
+#   Initial probe sent (3000ms):            17:26:44.405231
+#   Retry probe #1 sent (+3000ms cadence):  17:26:47.406267
+#   HANDSHAKE(REKEY_TIMEOUT):               17:26:49.346214  (+5.021s after
+#                                            first handshake_initiation)
+#   2nd handshake_initiation:               17:26:49.346427
+#   2nd handshake_response:                 17:26:49.572109  (226ms RTT)
+#   Retry probe #2 sent (+3000ms cadence, still after rekey):
+#                                            17:26:50.407165
+#   Probe succeeded:                        17:26:50.641223  (234ms after
+#                                            retry probe #2 was sent, 1069ms
+#                                            after 2nd handshake_response —
+#                                            probe #2, sent BEFORE the 2nd
+#                                            handshake_response landed, is the
+#                                            one that timed the success here,
+#                                            not the very next cadence tick)
+#   New tunnel state: Connected:            17:26:53.952281  (+3.311s tail)
+#   Total connect (log-derived):            12.034s  (shell measured 12.34s;
+#                                            ~0.3s overhead)
+#   Tunnel-up -> viable:                    9.547s
+#   VERDICT: REKEY_TIMEOUT-bound, with one extra idle cadence tick layered on
+#     top (the retry-probe-#1-at-47.4s attempt still fell before the rekey
+#     landed, so it also failed; success needed BOTH the rekey AND the next
+#     cadence slot at 50.4s). This is the slowest of the 3 cycles.
+#
+# --- CYCLE 3 (shell: real 0m 11.62s) ---
+#   Connecting start:                       17:26:57.996778
+#   Tunnel-up (2nd connecting-tunnel line):  17:26:59.912355
+#   Handshake initiations sent:             17:26:59.817148 / 17:26:59.817377
+#   1st handshake_response:                 17:26:59.967329
+#   Initial probe sent (3000ms):            17:26:59.912522
+#   Retry probe sent (+3000ms cadence):     17:27:02.913842
+#   HANDSHAKE(REKEY_TIMEOUT):               17:27:04.840305  (+5.023s after
+#                                            first handshake_initiation)
+#   2nd handshake_initiation:               17:27:04.840529
+#   2nd handshake_response:                 17:27:05.019729  (179ms RTT)
+#   Probe succeeded:                        17:27:05.206751  (187ms after 2nd
+#                                            handshake_response; 2292ms after
+#                                            the retry probe was sent)
+#   New tunnel state: Connected:            17:27:08.801773  (+3.595s tail)
+#   Total connect (log-derived):            10.805s  (shell measured 11.62s;
+#                                            ~0.8s overhead — CLI/RPC + gateway
+#                                            selection API round trips, not
+#                                            captured by these in-tunnel
+#                                            timestamps)
+#   Tunnel-up -> viable:                    8.889s
+#   VERDICT: REKEY_TIMEOUT-bound (same pattern).
+#
+# --- OVERALL VERDICT ---
+# All 4 sampled cycles (1 smoke test + 3 timed) show the SAME pattern,
+# clustering extremely tightly:
+#   - Two handshake_initiation packets go out back-to-back when the tunnel
+#     enters "connecting tunnel" (2-hop WG: one to entry, one to exit).
+#   - Only ONE handshake_response comes back on the first attempt (entry hop).
+#   - The exit hop's handshake does NOT complete until gotatun's
+#     HANDSHAKE(REKEY_TIMEOUT) fires and forces a fresh handshake_initiation,
+#     at a strikingly consistent +5.020s / +5.021s / +5.020s / +5.023s after
+#     the FIRST handshake_initiation (WireGuard's standard 5s REKEY_TIMEOUT
+#     constant, not randomly distributed — 100% reproduction, 4/4 cycles).
+#   - The connection_monitor's probe only ever succeeds AT OR AFTER that
+#     post-rekey handshake_response (within 0.2-1.1s), never before it, even
+#     though probes are already firing on a ~3s cadence well before the
+#     rekey lands (initial probe ~80-180ms after tunnel-up, one retry at
+#     +3s that always still fails).
+#   - This is REKEY_TIMEOUT-bound, NOT cadence-bound. The originally
+#     "expected" finding (handshake completing well before the successful
+#     probe, i.e. we're just waiting out the probe's own cadence timer) does
+#     NOT hold here: the exit-hop handshake genuinely isn't usable until the
+#     forced rekey retry, ~5s in.
+#   - Implication for the planned fix (gate probing on exit WG handshake
+#     rather than on probe cadence): gating on "handshake initiated" won't
+#     help, since the first initiation reliably fails to elicit an exit-hop
+#     response. Gating on "handshake_response received" (the SECOND one) is
+#     the correct target — but note the ~5s REKEY_TIMEOUT wait itself is an
+#     inherent floor this specific fix does NOT remove; it will only remove
+#     the cadence-driven idle gaps layered around it (e.g. cycle 2's extra
+#     probe-cadence tick, and possibly some of the ~2.5-3.6s tail between
+#     probe success and the "Connected" state flip, if that tail is itself
+#     probe-interval-driven). Worth flagging to whoever designs the
+#     handshake-gated probing change: the root cause of the exit hop's FIRST
+#     handshake attempt failing (not just "nobody's listening yet, so gate on
+#     handshake") may itself be worth a follow-up investigation, since fixing
+#     that would remove the ~5s REKEY_TIMEOUT wait entirely rather than just
+#     avoiding redundant cadence delay around it.
+#
+# Per-cycle totals (shell `time`, official 3-cycle run only):
+#   Cycle 1: real 0m 10.40s   (tunnel-up->viable 7.891s)
+#   Cycle 2: real 0m 12.34s   (tunnel-up->viable 9.547s)
+#   Cycle 3: real 0m 11.62s   (tunnel-up->viable 8.889s)
+#   Mean:    real ~11.45s     (mean tunnel-up->viable ~8.78s)
+# Matches the ~11s total / ~8.7s viability-gate baseline cited in the task
+# background.
+# ============================================================================

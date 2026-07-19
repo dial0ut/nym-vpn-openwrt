@@ -23,3 +23,7 @@ base64.workspace = true
 bytes.workspace = true
 zeroize = { workspace = true, features = ["derive"] }
 rand.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
