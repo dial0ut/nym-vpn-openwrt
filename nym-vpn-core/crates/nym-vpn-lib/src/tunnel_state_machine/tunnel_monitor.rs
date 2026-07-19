@@ -79,6 +79,44 @@ const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
 /// generous timeout to avoid a connect/timeout/reconnect loop.
 const REGISTRATION_CLIENT_STARTUP_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// Poll the exit WireGuard tunnel's peer stats until the handshake completes.
+///
+/// Advisory only: on timeout or shutdown this logs and returns, and the
+/// caller proceeds to connectivity probing exactly as before. Ported from
+/// upstream #5571, adapted to gotatun's native stats API.
+async fn wait_for_exit_handshake(
+    tunnel_handle: &tunnel::wireguard::connected_tunnel::TunnelHandle,
+    shutdown_token: &CancellationToken,
+) {
+    const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+    const POLL_INTERVAL: Duration = Duration::from_millis(500);
+
+    let started = std::time::Instant::now();
+    let wait = async {
+        loop {
+            if tunnel_handle.exit_handshake_complete().await {
+                return;
+            }
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    };
+
+    tokio::select! {
+        result = tokio::time::timeout(HANDSHAKE_TIMEOUT, wait) => match result {
+            Ok(()) => tracing::info!(
+                "Exit WireGuard handshake completed after {} ms",
+                started.elapsed().as_millis()
+            ),
+            Err(_) => tracing::warn!(
+                "Exit WireGuard handshake not observed within {HANDSHAKE_TIMEOUT:?}; proceeding to connectivity probing"
+            ),
+        },
+        _ = shutdown_token.cancelled() => {
+            tracing::debug!("Shutdown requested while waiting for exit handshake");
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum TunnelMonitorEvent {
     /// Checking account
@@ -707,6 +745,13 @@ impl TunnelMonitor {
 
         if tokio::time::timeout(REPLY_TIMEOUT, reply_rx).await.is_err() {
             tracing::warn!("Interface up reply timeout");
+        }
+
+        // Routes and firewall are up. Wait for the exit WG handshake so the
+        // first connectivity probe isn't lost to the handshake window (which
+        // otherwise quantizes time-to-Connected to the 3s probe cadence).
+        if let Some(wg_handle) = tunnel_handle.as_wireguard() {
+            wait_for_exit_handshake(wg_handle, &self.shutdown_token).await;
         }
 
         // Send metadata endpoint data to the bandwidth controller
