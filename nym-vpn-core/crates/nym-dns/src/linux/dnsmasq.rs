@@ -81,6 +81,18 @@ fn committed_has_managed_path(committed_dhcp: &str) -> bool {
     committed_dhcp.contains("nym-resolv.conf")
 }
 
+/// First uci section id of type dnsmasq from `uci -X show dhcp` output.
+fn parse_dnsmasq_section(uci_show: &str) -> Option<String> {
+    uci_show.lines().find_map(|line| {
+        let (key, value) = line.split_once('=')?;
+        if value == "dnsmasq" {
+            key.strip_prefix("dhcp.").map(str::to_owned)
+        } else {
+            None
+        }
+    })
+}
+
 /// Minimal extraction of the instance pid from `ubus call service list` output.
 /// Deliberately not a JSON parser: the shape is stable procd output and we
 /// only need one integer; a serde dependency isn't warranted. The pid procd
@@ -190,16 +202,10 @@ impl Sys for RealSys {
     }
 
     fn dnsmasq_section(&self) -> Option<String> {
-        let output = Command::new("uci").args(["show", "dhcp"]).output().ok()?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        stdout.lines().find_map(|line| {
-            let (key, value) = line.split_once('=')?;
-            if value == "dnsmasq" {
-                key.strip_prefix("dhcp.").map(str::to_owned)
-            } else {
-                None
-            }
-        })
+        // -X: raw section ids (cfg01411c), not extended syntax (@dnsmasq[0]).
+        // procd keys its service instances by the raw id.
+        let output = Command::new("uci").args(["-X", "show", "dhcp"]).output().ok()?;
+        parse_dnsmasq_section(&String::from_utf8_lossy(&output.stdout))
     }
 
     fn generated_conf(&self, section: &str) -> Option<String> {
@@ -913,6 +919,15 @@ mod tests {
         assert!(super::committed_has_managed_path(dirty));
         let clean = "config dnsmasq\n\toption resolvfile '/tmp/resolv.conf.d/resolv.conf.auto'\n";
         assert!(!super::committed_has_managed_path(clean));
+    }
+
+    #[test]
+    fn parses_dnsmasq_section_from_raw_uci_show() {
+        // `uci -X show dhcp` emits raw ids; the extended default (@dnsmasq[0])
+        // would not match procd's instance key.
+        let show = "dhcp.cfg01411c=dnsmasq\ndhcp.cfg01411c.domainneeded='1'\ndhcp.lan=dhcp\n";
+        assert_eq!(super::parse_dnsmasq_section(show), Some("cfg01411c".into()));
+        assert_eq!(super::parse_dnsmasq_section("dhcp.lan=dhcp\n"), None);
     }
 
     #[test]
