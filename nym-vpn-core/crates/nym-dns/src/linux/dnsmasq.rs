@@ -83,6 +83,213 @@ fn extract_instance_pid(service_json: &str, section: &str) -> Option<u32> {
     digits.parse().ok()
 }
 
+/// System interaction boundary, mockable for tests.
+trait Sys: Send + Sync + 'static {
+    /// Targeted `uci revert` of a single option. Best-effort: reverting an
+    /// option that has no staged delta fails harmlessly.
+    fn uci_revert_option(&self, key: &str);
+    /// `uci set` — staged only, never committed.
+    fn uci_set(&self, key: &str, value: &str) -> Result<()>;
+    /// The ONE allowed commit: delete an accidentally-committed resolvfile
+    /// option (restores the stock default) and commit dhcp.
+    fn repair_committed_resolvfile(&self) -> Result<()>;
+    /// Contents of the committed /etc/config/dhcp ("" if unreadable).
+    fn committed_dhcp(&self) -> String;
+    /// First uci section of type dnsmasq, e.g. "cfg01411c".
+    fn dnsmasq_section(&self) -> Option<String>;
+    /// Contents of the generated /var/etc/dnsmasq.conf.<section>.
+    fn generated_conf(&self, section: &str) -> Option<String>;
+    fn restart_dnsmasq(&self) -> Result<()>;
+    /// `ubus call service list '{"name":"dnsmasq"}'` output.
+    fn service_json(&self) -> String;
+    /// SIGHUP the ujail wrapper (cache flush only — with polling on, dnsmasq
+    /// does NOT re-read resolv files on SIGHUP; reload is carried by inotify.
+    /// Side effects: re-reads /etc/hosts and runs the lease script per lease).
+    fn send_hup(&self, pid: u32);
+}
+
+impl<T: Sys> Sys for std::sync::Arc<T> {
+    fn uci_revert_option(&self, key: &str) {
+        (**self).uci_revert_option(key)
+    }
+    fn uci_set(&self, key: &str, value: &str) -> Result<()> {
+        (**self).uci_set(key, value)
+    }
+    fn repair_committed_resolvfile(&self) -> Result<()> {
+        (**self).repair_committed_resolvfile()
+    }
+    fn committed_dhcp(&self) -> String {
+        (**self).committed_dhcp()
+    }
+    fn dnsmasq_section(&self) -> Option<String> {
+        (**self).dnsmasq_section()
+    }
+    fn generated_conf(&self, section: &str) -> Option<String> {
+        (**self).generated_conf(section)
+    }
+    fn restart_dnsmasq(&self) -> Result<()> {
+        (**self).restart_dnsmasq()
+    }
+    fn service_json(&self) -> String {
+        (**self).service_json()
+    }
+    fn send_hup(&self, pid: u32) {
+        (**self).send_hup(pid)
+    }
+}
+
+struct RealSys;
+
+impl Sys for RealSys {
+    fn uci_revert_option(&self, key: &str) {
+        let output = Command::new("uci").args(["revert", key]).output();
+        if let Err(e) = output {
+            tracing::warn!("uci revert {} failed to execute: {}", key, e);
+        }
+    }
+
+    fn uci_set(&self, key: &str, value: &str) -> Result<()> {
+        uci_set(key, value)
+    }
+
+    fn repair_committed_resolvfile(&self) -> Result<()> {
+        let run = |args: &[&str]| -> Result<()> {
+            let output = Command::new("uci")
+                .args(args)
+                .output()
+                .map_err(|e| Error::UciCommand(e.to_string()))?;
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(Error::UciCommand(format!("uci {:?} failed: {}", args, stderr)));
+            }
+            Ok(())
+        };
+        run(&["delete", "dhcp.@dnsmasq[0].resolvfile"])?;
+        run(&["commit", "dhcp"])
+    }
+
+    fn committed_dhcp(&self) -> String {
+        fs::read_to_string("/etc/config/dhcp").unwrap_or_default()
+    }
+
+    fn dnsmasq_section(&self) -> Option<String> {
+        let output = Command::new("uci").args(["show", "dhcp"]).output().ok()?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        stdout.lines().find_map(|line| {
+            let (key, value) = line.split_once('=')?;
+            if value == "dnsmasq" {
+                key.strip_prefix("dhcp.").map(str::to_owned)
+            } else {
+                None
+            }
+        })
+    }
+
+    fn generated_conf(&self, section: &str) -> Option<String> {
+        fs::read_to_string(format!("/var/etc/dnsmasq.conf.{}", section)).ok()
+    }
+
+    fn restart_dnsmasq(&self) -> Result<()> {
+        restart_dnsmasq()
+    }
+
+    fn service_json(&self) -> String {
+        Command::new("ubus")
+            .args(["call", "service", "list", r#"{"name":"dnsmasq"}"#])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+            .unwrap_or_default()
+    }
+
+    fn send_hup(&self, pid: u32) {
+        // BusyBox kill; avoids a libc dependency for one signal.
+        let result = Command::new("kill").args(["-HUP", &pid.to_string()]).output();
+        match result {
+            Ok(o) if o.status.success() => {}
+            Ok(o) => tracing::warn!(
+                "kill -HUP {} failed: {}",
+                pid,
+                String::from_utf8_lossy(&o.stderr)
+            ),
+            Err(e) => tracing::warn!("kill -HUP {} failed to execute: {}", pid, e),
+        }
+    }
+}
+
+enum ConvergeOutcome {
+    /// dnsmasq is running and its generated config points at the managed file.
+    Ready,
+    /// The repoint is staged but dnsmasq is administratively stopped; we leave
+    /// it stopped (it will pick up the staged config whenever it starts).
+    DnsmasqStopped,
+}
+
+/// Idempotently converge system state onto the managed-resolv-file scheme.
+/// Safe to run on every daemon start: it only restarts dnsmasq when the
+/// running instance's generated config does not already point at the managed
+/// file, so a crash-looping daemon cannot turn into a dnsmasq restart storm.
+/// This is also the crash-recovery path — there is no separate marker.
+fn converge<S: Sys>(sys: &S, managed_file: &str) -> Result<ConvergeOutcome> {
+    // Targeted reverts: clears the legacy (≤1.31) staged noresolv/server-list
+    // scheme and any stale repoint of our own, without discarding the user's
+    // unrelated staged dhcp edits (never `uci revert dhcp` wholesale).
+    sys.uci_revert_option("dhcp.@dnsmasq[0].noresolv");
+    sys.uci_revert_option("dhcp.@dnsmasq[0].server");
+    sys.uci_revert_option("dhcp.@dnsmasq[0].resolvfile");
+
+    // Repair an accidentally-committed repoint (LuCI Save&Apply on the DHCP
+    // page commits staged deltas wholesale). Deleting the option restores the
+    // stock default; without this, a reboot with the daemon disabled would
+    // leave dnsmasq pointing at a file nothing maintains.
+    if committed_has_managed_path(&sys.committed_dhcp()) {
+        tracing::warn!(
+            "Our resolvfile repoint was found committed in /etc/config/dhcp \
+             (likely an unrelated dhcp commit); repairing to stock default"
+        );
+        sys.repair_committed_resolvfile()?;
+    }
+
+    let section = sys.dnsmasq_section().ok_or(Error::NoDnsmasq)?;
+
+    for attempt in 0..2u8 {
+        sys.uci_set("dhcp.@dnsmasq[0].resolvfile", managed_file)?;
+
+        if extract_instance_pid(&sys.service_json(), &section).is_none() {
+            tracing::warn!(
+                "dnsmasq is not running; leaving it stopped \
+                 (repoint staged for whenever it starts)"
+            );
+            return Ok(ConvergeOutcome::DnsmasqStopped);
+        }
+
+        if sys
+            .generated_conf(&section)
+            .is_some_and(|conf| generated_conf_points_at(&conf, managed_file))
+        {
+            return Ok(ConvergeOutcome::Ready);
+        }
+
+        sys.restart_dnsmasq()?;
+
+        if sys
+            .generated_conf(&section)
+            .is_some_and(|conf| generated_conf_points_at(&conf, managed_file))
+        {
+            return Ok(ConvergeOutcome::Ready);
+        }
+        // A third-party restart may have raced between our revert and re-stage,
+        // regenerating the config from an intermediate state. Retry once.
+        tracing::warn!(
+            "dnsmasq generated config did not converge after restart (attempt {}), retrying",
+            attempt + 1
+        );
+    }
+
+    Err(Error::DnsmasqRestart(
+        "generated config does not point at managed resolv file after restart".into(),
+    ))
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("not running on OpenWrt")]
@@ -339,6 +546,147 @@ fn restart_dnsmasq() -> Result<()> {
         return Err(Error::DnsmasqRestart(stderr.to_string()));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod converge_tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    pub(super) struct FakeSys {
+        pub calls: Mutex<Vec<String>>,
+        pub committed: String,
+        pub section: Option<String>,
+        // queue of generated-conf reads, popped front on each generated_conf()
+        pub generated: Mutex<Vec<Option<String>>>,
+        pub running: bool,
+        pub wan_content: Mutex<Option<String>>,
+    }
+
+    impl Sys for FakeSys {
+        fn uci_revert_option(&self, key: &str) {
+            self.calls.lock().unwrap().push(format!("revert {key}"));
+        }
+        fn uci_set(&self, key: &str, value: &str) -> Result<()> {
+            self.calls.lock().unwrap().push(format!("set {key}={value}"));
+            Ok(())
+        }
+        fn repair_committed_resolvfile(&self) -> Result<()> {
+            self.calls.lock().unwrap().push("repair-commit".into());
+            Ok(())
+        }
+        fn committed_dhcp(&self) -> String {
+            self.committed.clone()
+        }
+        fn dnsmasq_section(&self) -> Option<String> {
+            self.section.clone()
+        }
+        fn generated_conf(&self, _section: &str) -> Option<String> {
+            let mut q = self.generated.lock().unwrap();
+            if q.is_empty() { None } else { q.remove(0) }
+        }
+        fn restart_dnsmasq(&self) -> Result<()> {
+            self.calls.lock().unwrap().push("restart".into());
+            Ok(())
+        }
+        fn service_json(&self) -> String {
+            if self.running {
+                r#"{"dnsmasq":{"instances":{"cfg01411c":{"running":true,"pid":42}}}}"#.into()
+            } else {
+                r#"{"dnsmasq":{"instances":{}}}"#.into()
+            }
+        }
+        fn send_hup(&self, pid: u32) {
+            self.calls.lock().unwrap().push(format!("hup {pid}"));
+        }
+    }
+
+    pub(super) fn managed_line() -> String {
+        format!("resolv-file={}\n", MANAGED_FILE)
+    }
+
+    #[test]
+    fn converge_skips_restart_when_already_pointed() {
+        let sys = FakeSys {
+            section: Some("cfg01411c".into()),
+            generated: Mutex::new(vec![Some(managed_line())]),
+            running: true,
+            ..Default::default()
+        };
+        let out = converge(&sys, MANAGED_FILE).unwrap();
+        assert!(matches!(out, ConvergeOutcome::Ready));
+        let calls = sys.calls.lock().unwrap();
+        assert!(
+            !calls.iter().any(|c| c == "restart"),
+            "must not restart when converged: {calls:?}"
+        );
+        assert!(calls.iter().any(|c| c.starts_with("revert dhcp.@dnsmasq[0].noresolv")));
+    }
+
+    #[test]
+    fn converge_restarts_once_and_asserts() {
+        let sys = FakeSys {
+            section: Some("cfg01411c".into()),
+            generated: Mutex::new(vec![
+                Some("resolv-file=/tmp/resolv.conf.d/resolv.conf.auto\n".into()), // pre-restart read
+                Some(managed_line()),                                             // post-restart assert
+            ]),
+            running: true,
+            ..Default::default()
+        };
+        assert!(matches!(converge(&sys, MANAGED_FILE).unwrap(), ConvergeOutcome::Ready));
+        assert_eq!(
+            sys.calls.lock().unwrap().iter().filter(|c| *c == "restart").count(),
+            1
+        );
+    }
+
+    #[test]
+    fn converge_leaves_stopped_dnsmasq_stopped() {
+        let sys = FakeSys {
+            section: Some("cfg01411c".into()),
+            generated: Mutex::new(vec![None]),
+            running: false,
+            ..Default::default()
+        };
+        assert!(matches!(
+            converge(&sys, MANAGED_FILE).unwrap(),
+            ConvergeOutcome::DnsmasqStopped
+        ));
+        assert!(!sys.calls.lock().unwrap().iter().any(|c| c == "restart"));
+    }
+
+    #[test]
+    fn converge_repairs_committed_accident() {
+        let sys = FakeSys {
+            committed: "option resolvfile '/tmp/resolv.conf.d/nym-resolv.conf'".into(),
+            section: Some("cfg01411c".into()),
+            generated: Mutex::new(vec![Some(managed_line())]),
+            running: true,
+            ..Default::default()
+        };
+        converge(&sys, MANAGED_FILE).unwrap();
+        assert!(sys.calls.lock().unwrap().iter().any(|c| c == "repair-commit"));
+    }
+
+    #[test]
+    fn converge_reverts_only_targeted_options() {
+        let sys = FakeSys {
+            section: Some("cfg01411c".into()),
+            generated: Mutex::new(vec![Some(managed_line())]),
+            running: true,
+            ..Default::default()
+        };
+        converge(&sys, MANAGED_FILE).unwrap();
+        let calls = sys.calls.lock().unwrap();
+        let reverts: Vec<_> = calls.iter().filter(|c| c.starts_with("revert")).collect();
+        assert_eq!(reverts.len(), 3, "exactly noresolv/server/resolvfile: {reverts:?}");
+        assert!(
+            !calls.iter().any(|c| *c == "revert dhcp"),
+            "wholesale revert forbidden"
+        );
+    }
 }
 
 #[cfg(test)]
