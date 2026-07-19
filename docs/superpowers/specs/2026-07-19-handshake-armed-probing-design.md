@@ -41,10 +41,15 @@ connection monitor. The first probe then fires when the tunnel can actually
 carry it.
 
 Our fork uses gotatun, which makes the port easier than upstream had it:
-`gotatun::device::Device` is `#[derive(Clone)]` (Arc-backed handle), and
 `device.read(async |d| d.peers().await)` returns `Vec<PeerStats>` with
 `last_handshake: Option<Duration>`. No FFI handle-sharing workarounds needed.
 Only our `nym-wg-gotatun` wrapper fails to surface it today.
+
+(Implementation correction: `Device` derives `Clone` but the bound requires
+the transport tuple to be `Clone`, which our UDP factories are not — so the
+built design shares an `Arc<tokio::sync::RwLock<Option<Device>>>` slot between
+`Tunnel` and `StatsReader` instead of cloning `Device`; `stop()` takes the
+slot, readers treat a stopped device as "not handshaken".)
 
 ## Design
 
