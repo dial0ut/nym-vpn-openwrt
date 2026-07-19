@@ -6471,6 +6471,7 @@ dependencies = [
  "ipnetwork",
  "rand 0.8.5",
  "thiserror 2.0.18",
+ "tokio",
  "tracing",
  "tun",
  "x25519-dalek",
