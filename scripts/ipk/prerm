@@ -65,6 +65,26 @@ rm -f /tmp/dnsmasq.d/nym-adblock.conf 2>/dev/null
 rm -f /tmp/nym-dns-backup /tmp/resolv.conf.nymbackup 2>/dev/null
 rm -f /tmp/nym-watchdog.state 2>/dev/null
 
+# DNS: on full removal, return dnsmasq to stock resolv handling. On upgrade,
+# leave everything in place — the new daemon reconverges without a restart
+# and a dnsmasq restart here would be a pointless LAN-wide DNS outage.
+if [ "$PKG_UPGRADE" != "1" ]; then
+    # Staged (uncommitted) repoint: targeted revert only — never wholesale,
+    # so the user's own staged dhcp edits survive.
+    uci -q revert dhcp.@dnsmasq[0].resolvfile
+    # Accidentally-committed repoint (LuCI Save&Apply commits staged deltas):
+    # deleting the option restores the stock default resolvfile.
+    if grep -q "nym-resolv.conf" /etc/config/dhcp 2>/dev/null; then
+        uci -q delete dhcp.@dnsmasq[0].resolvfile
+        uci -q commit dhcp
+    fi
+    rm -f /tmp/resolv.conf.d/nym-resolv.conf /tmp/resolv.conf.d/.nym-resolv.tmp 2>/dev/null
+    # Restart only if the running instance still points at our (now removed) file.
+    if grep -qs "resolv-file=.*nym-resolv.conf" /var/etc/dnsmasq.conf.* 2>/dev/null; then
+        /etc/init.d/dnsmasq restart 2>/dev/null
+    fi
+fi
+
 # Only do destructive cleanup on full removal, not upgrades.
 # opkg sets PKG_UPGRADE=1 when upgrading.
 if [ "$PKG_UPGRADE" != "1" ]; then
