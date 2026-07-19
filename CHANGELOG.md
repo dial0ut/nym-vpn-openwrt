@@ -11,6 +11,15 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+### Changed
+
+- Connectivity probing now starts the moment the exit WireGuard handshake
+  completes, instead of on a fixed 3-second probe grid (port of upstream
+  #5571 adapted to gotatun). When the exit gateway answers the first
+  handshake, time-to-Connected drops from ~11 s to ~5.5 s; when the first
+  handshake goes unanswered (under investigation separately), WireGuard's
+  5-second retry still dominates and totals are unchanged.
+
 ## [1.31.0] - 2026-07-16
 
 ### Added
