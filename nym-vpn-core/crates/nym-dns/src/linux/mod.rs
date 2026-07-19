@@ -159,7 +159,7 @@ impl DnsMonitorHolder {
     ) -> Result<()> {
         use self::DnsMonitorHolder::*;
         match self {
-            Dnsmasq(dnsmasq) => dnsmasq.set_dns(servers)?,
+            Dnsmasq(dnsmasq) => dnsmasq.set_dns(servers).await?,
             Resolvconf(resolvconf) => resolvconf.set_dns(interface, servers)?,
             StaticResolvConf(static_resolv_conf) => {
                 static_resolv_conf.set_dns(servers.to_vec()).await?
@@ -177,7 +177,7 @@ impl DnsMonitorHolder {
     async fn reset(&mut self) -> Result<()> {
         use self::DnsMonitorHolder::*;
         match self {
-            Dnsmasq(dnsmasq) => dnsmasq.reset()?,
+            Dnsmasq(dnsmasq) => dnsmasq.reset().await?,
             Resolvconf(resolvconf) => resolvconf.reset()?,
             StaticResolvConf(static_resolv_conf) => static_resolv_conf.reset().await?,
             SystemdResolved(systemd_resolved) => systemd_resolved.reset().await?,

@@ -4941,6 +4941,7 @@ dependencies = [
  "nym-dbus",
  "nym-routing",
  "resolv-conf",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
