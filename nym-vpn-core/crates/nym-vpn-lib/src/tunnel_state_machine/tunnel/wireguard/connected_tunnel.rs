@@ -107,6 +107,8 @@ impl ConnectedTunnel {
         .await
         .map_err(Error::Wireguard)?;
 
+        let exit_stats_reader = exit_tunnel.stats_reader();
+
         let shutdown_token = CancellationToken::new();
         let child_shutdown_token = shutdown_token.child_token();
 
@@ -123,6 +125,7 @@ impl ConnectedTunnel {
         Ok(TunnelHandle {
             shutdown_token,
             event_handler_task,
+            exit_stats_reader,
         })
     }
 }
@@ -142,12 +145,18 @@ pub struct TunTunTunnelOptions {
 pub struct TunnelHandle {
     shutdown_token: CancellationToken,
     event_handler_task: JoinHandle<Tombstone>,
+    exit_stats_reader: wireguard_go::StatsReader,
 }
 
 impl TunnelHandle {
     /// Close entry and exit WireGuard tunnels and signal mixnet facilities shutdown.
     pub fn cancel(&mut self) {
         self.shutdown_token.cancel();
+    }
+
+    /// Returns true once every exit-tunnel peer has completed a WireGuard handshake.
+    pub async fn exit_handshake_complete(&self) -> bool {
+        self.exit_stats_reader.all_peers_have_handshake().await
     }
 
     /// Wait until the tunnel finished execution.
