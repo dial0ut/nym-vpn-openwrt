@@ -11,6 +11,8 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+## [1.32.0] - 2026-07-19
+
 ### Changed
 
 - Connects are ~4x faster: time-to-Connected drops from ~11.5 s to 2.2-3 s
