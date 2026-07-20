@@ -87,22 +87,19 @@ impl Tunnel {
 
         // When amnezia feature is enabled, wrap UDP factory with AmneziaUdpFactory.
         // When disabled, use the default UDP factory.
+        let socket_factory = gotatun::udp::socket::UdpSocketFactory::default();
+
         #[cfg(feature = "amnezia")]
         let udp_factory = crate::amnezia_udp::AmneziaUdpFactory::new(
-            gotatun::udp::socket::UdpSocketFactory,
+            socket_factory,
             config.interface.azwg_config.as_ref(),
         );
 
-        #[cfg(feature = "amnezia")]
+        #[cfg(not(feature = "amnezia"))]
+        let udp_factory = socket_factory;
+
         let mut builder = device::build()
             .with_udp(udp_factory)
-            .with_ip(tun_device)
-            .with_private_key(private_key)
-            .with_listen_port(config.interface.listen_port.unwrap_or(0));
-
-        #[cfg(not(feature = "amnezia"))]
-        let mut builder = device::build()
-            .with_default_udp()
             .with_ip(tun_device)
             .with_private_key(private_key)
             .with_listen_port(config.interface.listen_port.unwrap_or(0));

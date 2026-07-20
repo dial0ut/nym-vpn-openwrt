@@ -192,11 +192,10 @@ nym-vpn-network-config = { path = "crates/nym-vpn-network-config" }
 nym-vpn-proto = { path = "crates/nym-vpn-proto" }
 nym-vpn-store = { path = "crates/nym-vpn-store" }
 nym-wg-gotatun = { path = "crates/nym-wg-gotatun" }
-# Pinned past a89bba82 ("Fix clearing of expected incoming handshake early"):
-# the prior pin (3969d36) purged in-flight handshake indices every 250ms,
-# silently dropping exit-hop handshake responses and forcing a 5s rekey wait
-# on nearly every two-hop connect.
-gotatun = { git = "https://github.com/mullvad/gotatun", rev = "a89bba825c1f4154eb0b5f0ef2ee4fe7888b4378", features = ["device", "tun"] }
+# Pinned at 0.8.1. default-features = false keeps aws-lc-rs out (default AEAD
+# backend since 0.6.0; aws-lc-sys needs cmake + a C toolchain in the musl cross
+# environment) — we stay on ring.
+gotatun = { git = "https://github.com/mullvad/gotatun", rev = "549bbf4d50c66cae2f26430b3d9f20ed2d431523", default-features = false, features = ["device", "tun", "ring"] }
 nym-wg-metadata-client = { path = "crates/nym-wg-metadata-client" }
 
 # For normal development
