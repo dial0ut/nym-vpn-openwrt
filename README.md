@@ -36,7 +36,8 @@ Or grab the `.ipk` / `.apk` for your architecture from the [Releases](https://gi
 git clone https://github.com/dial0ut/nym-vpn-openwrt.git
 cd nym-vpn-openwrt
 
-# Build for a target architecture (aarch64, armv7, x86_64, i686)
+# Build for a target architecture
+# (aarch64, armv7, armv5te, x86_64, i686, mips, mipsel, riscv64)
 ./scripts/build-musl.sh aarch64
 ```
 
@@ -46,8 +47,11 @@ Cross-compiles `nym-vpnd` and `nym-vpnc` as fully static MUSL binaries inside Do
 
 | Tier | Architectures |
 |------|--------------|
-| **Tier 2** | x86_64, aarch64, armv7, i686 |
-| **Tier 3** | mips, mipsel |
+| **Tier 2** (stable Rust) | x86_64, aarch64, armv7, i686 |
+| **Tier 3** (nightly Rust, custom cross images) | mips, mipsel, riscv64, armv5te |
+
+Packages are built for 21 OpenWrt architecture variants across these targets —
+see [Supported Devices](docs/devices.md) for the full list.
 
 ## License
 
