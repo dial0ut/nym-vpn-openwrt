@@ -11,6 +11,26 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+### Security
+
+- Bumped the bundled WireGuard implementation (mullvad/gotatun) from the
+  March 2026 pin (~0.4.1) to 0.8.1, picking up upstream security fixes:
+  a remotely triggerable crash in the UDP receive path (an oversized
+  datagram could panic the batched `recvmmsg` handler; fixed in 0.7.2),
+  cross-peer allowed-IPs subnet spoofing (a peer could hijack another
+  peer's routed subnets; fixed in 0.7.2), enforcement of the WireGuard
+  nonce limit (Reject-After-Messages), and cookie replies being sent from
+  a mismatched source port (fixed in 0.6.0).
+
+### Changed
+
+- WireGuard anti-replay window grew from 1024 to 8192 packets (fewer
+  spurious drops under heavy packet reordering) and passive-keepalive
+  timers now match wireguard-go semantics — idle tunnels no longer
+  keepalive-ping-pong each other. The 7 MB UDP socket buffers that
+  gotatun 0.7.0 stopped setting are restored explicitly, so throughput
+  on OpenWrt's small default socket buffers is unaffected by the bump.
+
 ## [1.32.0] - 2026-07-19
 
 ### Changed
