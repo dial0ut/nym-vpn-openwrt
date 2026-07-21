@@ -41,7 +41,7 @@ cd nym-vpn-openwrt
 ./scripts/build-musl.sh aarch64
 ```
 
-Cross-compiles `nym-vpnd` and `nym-vpnc` as fully static MUSL binaries inside Docker. Output lands in `nym-vpn-core/target/<triple>/release/`.
+Cross-compiles `nym-vpnd` and `nym-vpnc` for MUSL inside Docker. Output lands in `nym-vpn-core/target/<triple>/release/`.
 
 ## Supported Architectures
 
