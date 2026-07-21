@@ -2,12 +2,31 @@
 
 ## Firewall Stuck After Crash
 
-If nym-vpnd crashes or is killed while connected, its firewall rules
-may remain active, blocking internet access.
+If nym-vpnd crashes or is killed while the kill switch is enabled, its
+fail-closed firewall table remains active, blocking internet access.
 
 **Symptoms:** No internet connectivity after nym-vpnd exits unexpectedly.
+A telltale signature: DNS names still resolve (the blocked policy permits
+the configured public resolvers) but every connection hangs, and the
+router itself cannot reach the WAN (`ping: sendto: Operation not
+permitted`).
 
-**Fix:**
+**Fix (v1.32.0+):**
+```
+/etc/init.d/nym-vpnd stop      # or restart
+```
+The init script tears down the kill-switch table after the daemon is
+gone, even if the daemon is dead or hung and cannot be asked to
+disconnect. Since v1.32.0 procd also respawns the daemon indefinitely,
+so a crash-looping daemon keeps re-owning its firewall instead of
+being abandoned with the kill switch left up.
+
+**Manual fix (any version with fw4, OpenWrt 22.03+):**
+```
+nft delete table inet nym 2>/dev/null
+```
+
+**Fix (older iptables-based versions):**
 ```
 # Flush nym firewall chains
 iptables -F NYM_INPUT 2>/dev/null
@@ -22,12 +41,6 @@ iptables -D forwarding_rule -j NYM_FORWARD 2>/dev/null
 iptables -t nat -D postrouting_rule -j NYM_NAT 2>/dev/null
 
 # Restart firewall to restore defaults
-/etc/init.d/firewall restart
-```
-
-For fw4 (OpenWrt 22.03+), replace the above with:
-```
-nft delete table inet nym 2>/dev/null
 /etc/init.d/firewall restart
 ```
 

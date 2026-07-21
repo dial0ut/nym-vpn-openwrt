@@ -26,6 +26,15 @@ the GitHub release notes.
   our own firewall). After a daemon restart the already-installed list is
   reused without a download or dnsmasq restart; after a reboot the download
   retries in the background and completes once a tunnel is up.
+- A dead or hung nym-vpnd no longer strands the router behind its own
+  kill switch (reproduced on real hardware: WAN egress and LAN forwarding
+  blocked, DNS still resolving, with no process left able to clear the
+  firewall). `/etc/init.d/nym-vpnd stop` now tears down the kill-switch
+  table after the daemon is gone — including when the daemon is
+  unresponsive and cannot be asked to disconnect (the graceful disconnect
+  is bounded at 10s instead of wedging stop forever) — and procd now
+  respawns the daemon indefinitely instead of abandoning it after a crash
+  loop with the fail-closed firewall left up.
 
 ### Security
 
