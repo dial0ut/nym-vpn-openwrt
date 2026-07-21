@@ -9,6 +9,7 @@
 //! restarted to pick up the changes.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::fs;
 use tokio::process::Command;
 
@@ -70,13 +71,59 @@ pub async fn remove_adblock() -> Result<(), AdblockError> {
     Ok(())
 }
 
+/// Bumped on every explicit enable/disable so a pending background restore
+/// can tell it has been superseded by a user action.
+static TOGGLE_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Must be called from the explicit enable/disable path (not from restore):
+/// supersedes any background restore still retrying its download.
+pub fn note_explicit_toggle() {
+    TOGGLE_GENERATION.fetch_add(1, Ordering::Relaxed);
+}
+
 /// Re-apply ad-blocking on startup if it was previously enabled.
+///
+/// The kill-switch keeps its blocked policy loaded while disconnected, so a
+/// blocklist download at daemon startup is *expected* to fail (instant curl
+/// exit 7). Two-tier recovery: after a daemon restart the converted list in
+/// /tmp is still installed and dnsmasq is already serving it, so only the
+/// redirect rules are re-asserted — no download, no dnsmasq restart. After a
+/// reboot (/tmp empty) the download is retried in the background with
+/// backoff; it succeeds once a tunnel is up or the kill-switch is off.
 pub async fn restore_if_enabled(config: &nym_vpn_lib_types::VpnServiceConfig) {
-    if config.enable_ad_blocking {
-        if let Err(e) = apply_adblock().await {
-            tracing::error!("Failed to restore ad-blocking on startup: {e}");
-        }
+    if !config.enable_ad_blocking {
+        return;
     }
+
+    if Path::new(DNSMASQ_CONF_FILE).exists() {
+        tracing::info!("Ad-block list already installed; re-asserting DNS redirect only");
+        if let Err(e) = install_dns_redirect().await {
+            tracing::warn!("Failed to re-assert ad-block DNS redirect: {e}");
+        }
+        return;
+    }
+
+    tokio::spawn(async {
+        let generation = TOGGLE_GENERATION.load(Ordering::Relaxed);
+        let mut delay = std::time::Duration::from_secs(15);
+        let mut first = true;
+        loop {
+            match apply_adblock().await {
+                Ok(()) => return,
+                Err(e) if first => {
+                    first = false;
+                    tracing::warn!("Ad-block restore failed (will keep retrying): {e}");
+                }
+                Err(e) => tracing::debug!("Ad-block restore retry failed: {e}"),
+            }
+            tokio::time::sleep(delay).await;
+            delay = (delay * 2).min(std::time::Duration::from_secs(300));
+            if TOGGLE_GENERATION.load(Ordering::Relaxed) != generation {
+                tracing::debug!("Ad-block restore superseded by explicit toggle");
+                return;
+            }
+        }
+    });
 }
 
 fn hosts_to_dnsmasq(hosts_content: &str) -> String {

@@ -1137,6 +1137,7 @@ impl NymVpnService {
 
     async fn handle_set_enable_ad_blocking(&mut self, enable: bool) {
         self.config_manager.set_enable_ad_blocking(enable).await;
+        crate::adblocker::note_explicit_toggle();
         if enable {
             if let Err(e) = crate::adblocker::apply_adblock().await {
                 tracing::error!("Failed to apply ad-blocking: {e}");
