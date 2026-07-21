@@ -11,6 +11,22 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+### Fixed
+
+- Routers with a committed `noresolv` in the dnsmasq config (AdGuard Home,
+  https-dns-proxy, stubby and similar user-owned DNS setups) could not
+  connect on 1.32.0: the restart-free DNS handover verified a `resolv-file=`
+  repoint that OpenWrt's init script never emits under `noresolv`, so every
+  connect failed with a DNS error after restarting dnsmasq twice. The daemon
+  now detects this and steps aside — dnsmasq is left untouched (zero
+  restarts), the connect succeeds, and the user's chosen upstreams simply
+  ride the tunnel while connected.
+- Ad-blocking no longer silently fails to restore when the daemon starts
+  while the kill-switch is engaged (the blocklist download was rejected by
+  our own firewall). After a daemon restart the already-installed list is
+  reused without a download or dnsmasq restart; after a reboot the download
+  retries in the background and completes once a tunnel is up.
+
 ### Security
 
 - Bumped the bundled WireGuard implementation (mullvad/gotatun) from the
