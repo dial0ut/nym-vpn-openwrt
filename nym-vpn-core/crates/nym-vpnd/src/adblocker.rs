@@ -9,7 +9,7 @@
 //! restarted to pick up the changes.
 
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::fs;
 use tokio::process::Command;
 
@@ -72,8 +72,10 @@ pub async fn remove_adblock() -> Result<(), AdblockError> {
 }
 
 /// Bumped on every explicit enable/disable so a pending background restore
-/// can tell it has been superseded by a user action.
-static TOGGLE_GENERATION: AtomicU64 = AtomicU64::new(0);
+/// can tell it has been superseded by a user action. Usize, not u64: the
+/// 32-bit tier-3 targets (mips, armv5te) have no `AtomicU64` in std, and
+/// only equality is ever compared so width doesn't matter.
+static TOGGLE_GENERATION: AtomicUsize = AtomicUsize::new(0);
 
 /// Must be called from the explicit enable/disable path (not from restore):
 /// supersedes any background restore still retrying its download.
