@@ -22,6 +22,13 @@
 //! `resolvfile` flips the init script's `localuse` logic to write
 //! `/tmp/resolv.conf` as `nameserver 127.0.0.1`, so they ride dnsmasq and
 //! its cache. We deliberately do not touch `/etc/resolv.conf`.
+//!
+//! Escape hatch: a committed `noresolv` (AdGuard Home, https-dns-proxy,
+//! stubby — user-owned upstream DNS) makes the init script omit
+//! `resolv-file=` entirely, so the repoint can never take. Converge detects
+//! this and steps aside (`Scheme::UserManaged`): dnsmasq is left untouched,
+//! `set_dns` degrades to a cache flush, and the user's chosen upstreams
+//! simply ride the tunnel while connected.
 
 use std::{
     fs, io,
@@ -124,6 +131,10 @@ trait Sys: Send + Sync + 'static {
     fn repair_committed_resolvfile(&self) -> Result<()>;
     /// Contents of the committed /etc/config/dhcp ("" if unreadable).
     fn committed_dhcp(&self) -> String;
+    /// Effective truthiness of the section's `noresolv` option via `uci get`.
+    /// Must be read AFTER the targeted reverts so a stale staged delta of our
+    /// own (≤1.31 scheme) can't masquerade as user intent.
+    fn effective_noresolv(&self, section: &str) -> bool;
     /// First uci section of type dnsmasq, e.g. "cfg01411c".
     fn dnsmasq_section(&self) -> Option<String>;
     /// Contents of the generated /var/etc/dnsmasq.conf.<section>.
@@ -149,6 +160,9 @@ impl<T: Sys> Sys for std::sync::Arc<T> {
     }
     fn committed_dhcp(&self) -> String {
         (**self).committed_dhcp()
+    }
+    fn effective_noresolv(&self, section: &str) -> bool {
+        (**self).effective_noresolv(section)
     }
     fn dnsmasq_section(&self) -> Option<String> {
         (**self).dnsmasq_section()
@@ -201,6 +215,22 @@ impl Sys for RealSys {
         fs::read_to_string("/etc/config/dhcp").unwrap_or_default()
     }
 
+    fn effective_noresolv(&self, section: &str) -> bool {
+        let output = Command::new("uci")
+            .args(["get", &format!("dhcp.{}.noresolv", section)])
+            .output();
+        // Unset option → uci exits non-zero → not noresolv.
+        let Ok(output) = output else { return false };
+        if !output.status.success() {
+            return false;
+        }
+        // config_get_bool truthy set.
+        matches!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "1" | "on" | "true" | "yes" | "enabled"
+        )
+    }
+
     fn dnsmasq_section(&self) -> Option<String> {
         // -X: raw section ids (cfg01411c), not extended syntax (@dnsmasq[0]).
         // procd keys its service instances by the raw id.
@@ -245,6 +275,22 @@ enum ConvergeOutcome {
     /// The repoint is staged but dnsmasq is administratively stopped; we leave
     /// it stopped (it will pick up the staged config whenever it starts).
     DnsmasqStopped,
+    /// Committed `noresolv` in the user's dhcp config: the init script never
+    /// emits a `resolv-file=` line, so the repoint scheme cannot work — and
+    /// the user has deliberately taken ownership of upstream DNS (AdGuard
+    /// Home, https-dns-proxy, stubby all commit this). Leave dnsmasq alone;
+    /// their upstreams ride the tunnel while connected.
+    UserManagedDns,
+}
+
+/// Which DNS handover scheme converge settled on, cached for the actor's
+/// lifetime (re-checked on connect via the self-heal paths).
+#[derive(Clone, Copy, PartialEq)]
+enum Scheme {
+    /// dnsmasq reads upstreams from our managed resolv file.
+    ManagedFile,
+    /// User-managed upstreams (committed `noresolv`); we never touch dnsmasq.
+    UserManaged,
 }
 
 /// Idempotently converge system state onto the managed-resolv-file scheme.
@@ -273,6 +319,19 @@ fn converge<S: Sys>(sys: &S, managed_file: &str) -> Result<ConvergeOutcome> {
     }
 
     let section = sys.dnsmasq_section().ok_or(Error::NoDnsmasq)?;
+
+    // Committed noresolv makes the repoint unreachable (the init script only
+    // emits `resolv-file=` when noresolv is unset/false — 24.10 dnsmasq.init
+    // gates it), and it signals the user runs their own upstream (DoH proxy,
+    // AdGuard Home). Respect it: no repoint, no restarts, connect proceeds
+    // with the user's upstreams riding the tunnel.
+    if sys.effective_noresolv(&section) {
+        tracing::info!(
+            "dnsmasq has noresolv set — user manages upstream DNS; \
+             leaving it untouched (upstreams ride the tunnel while connected)"
+        );
+        return Ok(ConvergeOutcome::UserManagedDns);
+    }
 
     for attempt in 0..2u8 {
         sys.uci_set("dhcp.@dnsmasq[0].resolvfile", managed_file)?;
@@ -399,41 +458,75 @@ fn flush_cache<S: Sys>(sys: &S, section: &str) {
     }
 }
 
-fn ensure_converged<S: Sys>(sys: &S, paths: &Paths, converged: &mut bool) -> Result<()> {
-    if !*converged {
-        converge(sys, &paths.managed.display().to_string())?;
-        *converged = true;
+fn ensure_converged<S: Sys>(
+    sys: &S,
+    paths: &Paths,
+    scheme: &mut Option<Scheme>,
+) -> Result<Scheme> {
+    if let Some(s) = *scheme {
+        return Ok(s);
     }
-    Ok(())
+    let s = match converge(sys, &paths.managed.display().to_string())? {
+        ConvergeOutcome::UserManagedDns => Scheme::UserManaged,
+        ConvergeOutcome::Ready | ConvergeOutcome::DnsmasqStopped => Scheme::ManagedFile,
+    };
+    *scheme = Some(s);
+    Ok(s)
 }
 
 fn handle_set_tunnel<S: Sys>(
     sys: &S,
     paths: &Paths,
-    converged: &mut bool,
+    scheme: &mut Option<Scheme>,
     servers: &[IpAddr],
 ) -> Result<()> {
-    ensure_converged(sys, paths, converged)?;
+    let s = ensure_converged(sys, paths, scheme)?;
     let servers = prefer_ipv4_upstreams(servers);
     write_managed(paths, &render_resolv_conf(&servers))?;
 
     if let Some(section) = sys.dnsmasq_section() {
-        // Self-heal: a third-party dnsmasq restart may have regenerated the
-        // config while our staged delta was absent/stale. Cheap re-assert on
-        // every connect; full converge (with restart) only on mismatch.
-        let managed = paths.managed.display().to_string();
-        let pointed = sys
-            .generated_conf(&section)
-            .is_some_and(|conf| generated_conf_points_at(&conf, &managed));
-        if !pointed {
-            tracing::warn!("dnsmasq no longer points at managed resolv file; re-converging");
-            *converged = false;
-            ensure_converged(sys, paths, converged)?;
+        match s {
+            Scheme::ManagedFile => {
+                // Self-heal: a third-party dnsmasq restart may have regenerated
+                // the config while our staged delta was absent/stale. Cheap
+                // re-assert on every connect; full converge (with restart) only
+                // on mismatch.
+                let managed = paths.managed.display().to_string();
+                let pointed = sys
+                    .generated_conf(&section)
+                    .is_some_and(|conf| generated_conf_points_at(&conf, &managed));
+                if !pointed {
+                    tracing::warn!(
+                        "dnsmasq no longer points at managed resolv file; re-converging"
+                    );
+                    *scheme = None;
+                    ensure_converged(sys, paths, scheme)?;
+                }
+            }
+            Scheme::UserManaged => {
+                // Symmetric self-heal: if the user cleared noresolv since we
+                // last looked (e.g. uninstalled their DoH proxy), converge onto
+                // the managed-file scheme.
+                if !sys.effective_noresolv(&section) {
+                    tracing::info!("noresolv cleared since last converge; re-converging");
+                    *scheme = None;
+                    ensure_converged(sys, paths, scheme)?;
+                }
+            }
         }
         flush_cache(sys, &section);
     }
 
-    tracing::info!("Configured dnsmasq with VPN DNS servers: {:?}", servers);
+    match s {
+        Scheme::ManagedFile => {
+            tracing::info!("Configured dnsmasq with VPN DNS servers: {:?}", servers)
+        }
+        Scheme::UserManaged => tracing::info!(
+            "User-managed dnsmasq upstreams (noresolv) left in place; \
+             VPN DNS servers not applied: {:?}",
+            servers
+        ),
+    }
     Ok(())
 }
 
@@ -473,8 +566,8 @@ async fn run_actor<S: Sys>(sys: S, paths: Paths, mut rx: mpsc::Receiver<Cmd>) {
     if let Err(e) = write_managed(&paths, &wan_snapshot(&paths)) {
         tracing::warn!("Failed to seed managed resolv file: {}", e);
     }
-    let mut converged = false;
-    if let Err(e) = ensure_converged(&sys, &paths, &mut converged) {
+    let mut scheme: Option<Scheme> = None;
+    if let Err(e) = ensure_converged(&sys, &paths, &mut scheme) {
         tracing::warn!("dnsmasq converge failed (will retry on first use): {}", e);
     }
 
@@ -488,7 +581,7 @@ async fn run_actor<S: Sys>(sys: S, paths: Paths, mut rx: mpsc::Receiver<Cmd>) {
                 let Some(cmd) = cmd else { break };
                 match cmd {
                     Cmd::SetTunnel(servers, ack) => {
-                        let result = handle_set_tunnel(&sys, &paths, &mut converged, &servers);
+                        let result = handle_set_tunnel(&sys, &paths, &mut scheme, &servers);
                         if result.is_ok() {
                             mode = Mode::Tunnel;
                         }
@@ -640,6 +733,7 @@ mod converge_tests {
         // queue of generated-conf reads, popped front on each generated_conf()
         pub generated: Mutex<Vec<Option<String>>>,
         pub running: bool,
+        pub noresolv: bool,
     }
 
     impl Sys for FakeSys {
@@ -656,6 +750,10 @@ mod converge_tests {
         }
         fn committed_dhcp(&self) -> String {
             self.committed.clone()
+        }
+        fn effective_noresolv(&self, _section: &str) -> bool {
+            self.calls.lock().unwrap().push("get noresolv".into());
+            self.noresolv
         }
         fn dnsmasq_section(&self) -> Option<String> {
             self.section.clone()
@@ -749,6 +847,27 @@ mod converge_tests {
     }
 
     #[test]
+    fn converge_noresolv_skips_repoint_and_never_restarts() {
+        let sys = FakeSys {
+            section: Some("cfg01411c".into()),
+            running: true,
+            noresolv: true,
+            ..Default::default()
+        };
+        let out = converge(&sys, MANAGED_FILE).unwrap();
+        assert!(matches!(out, ConvergeOutcome::UserManagedDns));
+        let calls = sys.calls.lock().unwrap();
+        assert!(
+            !calls.iter().any(|c| c == "restart"),
+            "noresolv boxes must never be restarted: {calls:?}"
+        );
+        assert!(
+            !calls.iter().any(|c| c.starts_with("set dhcp.@dnsmasq[0].resolvfile")),
+            "no repoint may be staged under noresolv: {calls:?}"
+        );
+    }
+
+    #[test]
     fn converge_reverts_only_targeted_options() {
         let sys = FakeSys {
             section: Some("cfg01411c".into()),
@@ -839,6 +958,35 @@ mod actor_tests {
         std::fs::write(&paths.wan, "nameserver 198.51.100.53\n").unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(12_000)).await;
         assert!(std::fs::read_to_string(&paths.managed).unwrap().contains("198.51.100.53"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn set_tunnel_succeeds_under_noresolv_without_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths {
+            managed: dir.path().join("nym-resolv.conf"),
+            tmp: dir.path().join(".nym-resolv.tmp"),
+            wan: dir.path().join("resolv.conf.auto"),
+        };
+        let sys = Arc::new(FakeSys {
+            section: Some("cfg01411c".into()),
+            running: true,
+            noresolv: true,
+            ..Default::default()
+        });
+        let (tx, rx) = tokio::sync::mpsc::channel(8);
+        tokio::spawn(run_actor(sys.clone(), paths, rx));
+        let (ack, arx) = tokio::sync::oneshot::channel();
+        tx.send(Cmd::SetTunnel(vec!["10.64.0.1".parse().unwrap()], ack))
+            .await
+            .unwrap();
+        arx.await.unwrap().unwrap(); // connect must NOT fail
+        let calls = sys.calls.lock().unwrap();
+        assert!(!calls.iter().any(|c| c == "restart"), "no restarts: {calls:?}");
+        assert!(
+            calls.iter().any(|c| c.starts_with("hup ")),
+            "cache still flushed at transition: {calls:?}"
+        );
     }
 
     #[tokio::test(start_paused = true)]
