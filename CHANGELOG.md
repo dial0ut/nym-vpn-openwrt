@@ -11,6 +11,8 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+## [1.32.1] - 2026-07-21
+
 ### Fixed
 
 - Routers with a committed `noresolv` in the dnsmasq config (AdGuard Home,
