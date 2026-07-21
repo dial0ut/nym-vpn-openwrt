@@ -517,7 +517,8 @@ fn handle_set_tunnel<S: Sys>(
         flush_cache(sys, &section);
     }
 
-    match s {
+    // The self-heal above may have switched schemes; log the effective one.
+    match scheme.unwrap_or(s) {
         Scheme::ManagedFile => {
             tracing::info!("Configured dnsmasq with VPN DNS servers: {:?}", servers)
         }
