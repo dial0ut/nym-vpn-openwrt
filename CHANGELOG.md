@@ -11,6 +11,22 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+### Fixed
+
+- A WAN outage no longer switches the connected server. When the tunnel
+  dropped and a reconnect attempt failed (typically because the line had
+  not recovered yet), the daemon blamed the gateway: it was blacklisted
+  and a different server selected. 1.32.0 made this much more likely —
+  connects got ~4x faster, so the retry now lands inside the outage
+  window. Reconnect failures shortly after a drop of a working session
+  now check whether the local network is actually up (a quick probe of
+  the VPN API): if it is down too, the same server is retried instead of
+  blamed, for up to two minutes; if the network is up, the server really
+  is at fault and is blacklisted after one confirming retry — so a
+  genuinely dead server still fails over within seconds, not minutes.
+  Outages that drop the default route (PPPoE/DSL resync) get the same
+  shield when connectivity returns.
+
 ## [1.32.1] - 2026-07-21
 
 ### Fixed

@@ -164,6 +164,19 @@ impl TunnelStateHandler for OfflineState {
                     Self::reset_dns(shared_state).await;
 
                     if self.reconnect {
+                        // Same shield as ConnectedState::handle_tunnel_down: the route
+                        // just came back, but connectivity often lags it (PPPoE session
+                        // up while the upstream still converges), so a failed reconnect
+                        // right now says nothing about the gateway. Anchor the grace at
+                        // resume time — time spent offline is not the gateway's fault.
+                        if let Some(ref gateways) = self.selected_gateways {
+                            shared_state.entry_gateway_grace = Some((
+                                gateways.entry_gateway().identity,
+                                std::time::Instant::now()
+                                    + crate::tunnel_state_machine::GATEWAY_BLAME_GRACE,
+                            ));
+                        }
+
                         NextTunnelState::NewState(ConnectingState::enter(0, self.selected_gateways, shared_state).await)
                     } else {
                         NextTunnelState::NewState(DisconnectedState::enter(None, shared_state).await)

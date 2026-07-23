@@ -180,9 +180,21 @@ impl ConnectedState {
             Some(block_reason) => {
                 NextTunnelState::NewState(ErrorState::enter(block_reason, shared_state).await)
             }
-            None => NextTunnelState::NewState(
-                ConnectingState::enter(0, Some(self.selected_gateways), shared_state).await,
-            ),
+            None => {
+                // This session was viable moments ago, so reconnect failures in
+                // the near future are far more likely a local outage than the
+                // gateway's fault. Grant the entry gateway a grace window during
+                // which failures are retried against it instead of blacklisting
+                // it and switching the user to a different server.
+                shared_state.entry_gateway_grace = Some((
+                    self.selected_gateways.entry_gateway().identity,
+                    std::time::Instant::now() + crate::tunnel_state_machine::GATEWAY_BLAME_GRACE,
+                ));
+
+                NextTunnelState::NewState(
+                    ConnectingState::enter(0, Some(self.selected_gateways), shared_state).await,
+                )
+            }
         }
     }
 }

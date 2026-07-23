@@ -20,6 +20,9 @@ impl DisconnectedState {
     ) -> (Box<dyn TunnelStateHandler>, PrivateTunnelState) {
         shared_state.apply_killswitch_policy();
 
+        // The post-drop gateway grace window is scoped to a connect session.
+        shared_state.entry_gateway_grace = None;
+
         // Drop tombstone to close tunnel devices.
         drop(tombstone);
 

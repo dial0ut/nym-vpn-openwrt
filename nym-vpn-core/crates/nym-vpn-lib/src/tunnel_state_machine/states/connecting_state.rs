@@ -53,6 +53,10 @@ const FAST_RETRY_ATTEMPTS: u32 = 2;
 /// Fast retry delay for network recovery scenarios (first FAST_RETRY_ATTEMPTS).
 const NETWORK_RECOVERY_DELAY: Duration = Duration::from_millis(500);
 
+/// Overall deadline for the VPN API reachability probe that distinguishes a
+/// local outage from a broken gateway inside the post-drop grace window.
+const API_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+
 type ResolveApiAddrsFuture = BoxFuture<'static, Result<ResolvedConfig>>;
 type ReconnectDelayFuture = BoxFuture<'static, ()>;
 
@@ -206,13 +210,29 @@ impl ConnectingState {
         shared_state.route_handler.remove_routes().await
     }
 
+    /// Whether the currently selected entry gateway is inside its post-drop
+    /// grace window and must be retried rather than blamed and re-selected.
+    fn grace_retry_pending(&self, shared_state: &SharedState) -> bool {
+        match (&self.selected_gateways, shared_state.entry_gateway_grace) {
+            (Some(gateways), Some((identity, deadline))) => {
+                gateways.entry_gateway().identity == identity
+                    && std::time::Instant::now() < deadline
+            }
+            _ => false,
+        }
+    }
+
     async fn reconnect(self, shared_state: &mut SharedState) -> NextTunnelState {
         let next_attempt = self.retry_attempt.saturating_add(1);
-        let next_gateways = if next_attempt.is_multiple_of(2) {
-            None
-        } else {
-            self.selected_gateways
-        };
+        // Refresh the selection every other attempt — unless the current
+        // gateway is owed a grace retry, which must run against the same
+        // gateway to mean anything.
+        let next_gateways =
+            if next_attempt.is_multiple_of(2) && !self.grace_retry_pending(shared_state) {
+                None
+            } else {
+                self.selected_gateways
+            };
 
         tracing::info!("Reconnecting, attempt {next_attempt}");
 
@@ -447,6 +467,92 @@ impl ConnectingState {
         set_policy_result
     }
 
+    /// Quick reachability probe against the known VPN API endpoints, used to
+    /// tell a local outage from a broken gateway when a reconnect fails inside
+    /// the post-drop grace window. Reaching any endpoint proves the local
+    /// network is up. Probes run concurrently under a single deadline so the
+    /// event loop is never held up for more than API_PROBE_TIMEOUT. No known
+    /// endpoints counts as unreachable (indeterminate, so the grace stands).
+    async fn any_api_endpoint_reachable(shared_state: &SharedState) -> bool {
+        let probes: Vec<_> = shared_state
+            .api_endpoints
+            .iter()
+            .take(2)
+            .map(|addr| Box::pin(tokio::net::TcpStream::connect(*addr)))
+            .collect();
+        if probes.is_empty() {
+            return false;
+        }
+        matches!(
+            tokio::time::timeout(API_PROBE_TIMEOUT, futures::future::select_ok(probes)).await,
+            Ok(Ok(_))
+        )
+    }
+
+    /// Handle a failed connection/registration attempt against the selected
+    /// gateways. While the entry gateway of a recently dropped (previously
+    /// viable) session is inside its grace window AND the local network is
+    /// down (the VPN API is unreachable too), the failure is forgiven and the
+    /// same selection retried: blaming the gateway for a WAN blip switches
+    /// the user's server for no reason. Once the API answers, the network is
+    /// up and the gateway looks genuinely at fault — but this failed attempt
+    /// may have started while the network was still down (recovery edge), so
+    /// the grace is expired and the same gateway retried one final time; the
+    /// next failure comes from an attempt made with the network provenly up
+    /// and blacklists it (when culpable), forcing re-selection.
+    async fn handle_gateway_failure(
+        &mut self,
+        entry_culpable: bool,
+        failure_kind: &str,
+        shared_state: &mut SharedState,
+    ) {
+        let Some(ref selected_gateways) = self.selected_gateways else {
+            return;
+        };
+        let entry_gateway_identifier = selected_gateways.entry_gateway().identity;
+
+        if self.grace_retry_pending(shared_state) {
+            if !Self::any_api_endpoint_reachable(shared_state).await {
+                tracing::warn!(
+                    "Tunnel {failure_kind} via entry gateway {entry_gateway_identifier} \
+                     shortly after a working session dropped, and the VPN API is \
+                     unreachable too — this is a local network outage; retrying the \
+                     same gateway instead of re-selecting"
+                );
+                return;
+            }
+            shared_state.entry_gateway_grace = None;
+            tracing::warn!(
+                "Tunnel {failure_kind} via entry gateway {entry_gateway_identifier} \
+                 while the VPN API is reachable — the network is up, but this \
+                 attempt may predate its recovery; giving the gateway one final \
+                 retry before blaming it"
+            );
+            return;
+        }
+
+        shared_state.entry_gateway_grace = None;
+        if entry_culpable {
+            if let Err(e) = shared_state
+                .blacklisted_entry_gateways
+                .add(entry_gateway_identifier)
+            {
+                tracing::error!(
+                    "Failed to add gateway {entry_gateway_identifier} to blacklisted entry gateway list: {e}"
+                );
+            } else {
+                tracing::warn!(
+                    "Blacklisted entry gateway {entry_gateway_identifier} due to repeated {failure_kind}"
+                );
+            }
+        } else {
+            tracing::warn!(
+                "Repeated {failure_kind} at the exit gateway; re-selecting without blacklisting the entry gateway"
+            );
+        }
+        self.selected_gateways = None;
+    }
+
     fn make_connecting_tunnel_state(
         &self,
         shared_state: &SharedState,
@@ -565,6 +671,7 @@ impl TunnelStateHandler for ConnectingState {
                     }
                     TunnelMonitorEvent::Up { tunnel_interface, connection_data } => {
                         // We have successfully connected, clear any blacklisted entry gateways
+                        shared_state.entry_gateway_grace = None;
                         match shared_state.blacklisted_entry_gateways.is_empty() {
                             Ok(is_empty) => if !is_empty {
                                 tracing::info!("Clearing blacklisted entry gateways");
@@ -606,39 +713,21 @@ impl TunnelStateHandler for ConnectingState {
                         }
                     }
                     TunnelMonitorEvent::ConnectionFailed => {
-                        // We have failed to connect to the entry gateway; blacklist the
-                        // previously selected entry gateway for a while and force gateway
+                        // Failed to connect via the entry gateway. Inside the post-drop
+                        // grace window with the API also unreachable this is forgiven
+                        // (local outage); otherwise blacklist and force gateway
                         // re-selection.
-                        if let Some(ref selected_gateways) = self.selected_gateways {
-                            let entry_gateway_identifier = selected_gateways.entry_gateway().identity;
-                            if let Err(e) = shared_state.blacklisted_entry_gateways.add(entry_gateway_identifier) {
-                                tracing::error!("Failed to add gateway {} to blacklisted entry gateway list: {e}", entry_gateway_identifier);
-                            } else {
-                                tracing::warn!("Blacklisted entry gateway {} due to repeated connection failure", entry_gateway_identifier);
-                            }
-                            self.selected_gateways = None;
-                        }
+                        self.handle_gateway_failure(true, "connection failure", shared_state).await;
                         NextTunnelState::SameState(self)
                     }
                     TunnelMonitorEvent::RegistrationFailed { entry_culpable } => {
                         // Registration failed. Only blacklist the entry gateway when it is
                         // the culpable party — an exit-gateway registration rejection must
                         // not poison the (innocent) entry gateway. Either way force
-                        // re-selection so a Random exit can land on a different node next
-                        // attempt (a pinned, broken exit will simply keep retrying).
-                        if let Some(ref selected_gateways) = self.selected_gateways {
-                            if entry_culpable {
-                                let entry_gateway_identifier = selected_gateways.entry_gateway().identity;
-                                if let Err(e) = shared_state.blacklisted_entry_gateways.add(entry_gateway_identifier) {
-                                    tracing::error!("Failed to add gateway {} to blacklisted entry gateway list: {e}", entry_gateway_identifier);
-                                } else {
-                                    tracing::warn!("Blacklisted entry gateway {} due to repeated registration failure", entry_gateway_identifier);
-                                }
-                            } else {
-                                tracing::warn!("Registration failed at the exit gateway; not blacklisting the entry gateway");
-                            }
-                            self.selected_gateways = None;
-                        }
+                        // re-selection (once past the post-drop grace window) so a
+                        // Random exit can land on a different node next attempt (a
+                        // pinned, broken exit will simply keep retrying).
+                        self.handle_gateway_failure(entry_culpable, "registration failure", shared_state).await;
                         NextTunnelState::SameState(self)
                     }
                 }

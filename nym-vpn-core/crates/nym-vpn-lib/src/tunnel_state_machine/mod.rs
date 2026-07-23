@@ -38,7 +38,7 @@ use nym_firewall::{
     InitialFirewallState, TransportProtocol,
 };
 use nym_gateway_directory::{
-    BlacklistedGateways, Config as GatewayDirectoryConfig, GatewayCacheHandle,
+    BlacklistedGateways, Config as GatewayDirectoryConfig, GatewayCacheHandle, NodeIdentity,
 };
 use nym_vpn_lib_types::{
     AccountControllerErrorStateReason, ActionAfterDisconnect, ConnectionData, EntryPoint,
@@ -540,6 +540,15 @@ impl From<TunnelInterface> for nym_firewall::TunnelInterface {
     }
 }
 
+/// How long after losing a viable session its entry gateway is shielded from
+/// blame while the local network is down: reconnect failures inside this
+/// window (with the VPN API also unreachable) keep retrying the same gateway
+/// instead of blacklisting it and re-selecting. Sized to outlast routine WAN
+/// blips (DSL/PPPoE resync, cable/LTE hiccups); it only bounds the corner
+/// where gateway and API are unreachable at once, since a reachable API
+/// proves the network is up and ends the shield early.
+const GATEWAY_BLAME_GRACE: std::time::Duration = std::time::Duration::from_secs(120);
+
 pub struct SharedState {
     route_handler: RouteHandler,
     firewall: Firewall,
@@ -558,6 +567,13 @@ pub struct SharedState {
     wg_keys_db: WireguardKeysDb,
     user_agent: UserAgent,
     blacklisted_entry_gateways: BlacklistedGateways,
+    /// Grace window for the entry gateway of a previously viable session, set
+    /// when the tunnel drops. Until the deadline passes, failed reconnects to
+    /// this gateway are forgiven and retried against the same gateway: right
+    /// after a drop the local network is usually the culprit, and blaming the
+    /// gateway (blacklist + re-selection) would switch the user's server on
+    /// every WAN blip.
+    entry_gateway_grace: Option<(NodeIdentity, std::time::Instant)>,
     /// Nym VPN API socket addresses resolved during the most recent Connecting
     /// state. Used by DisconnectedState to build a kill-switch Blocked policy
     /// that still permits traffic to the API so the account controller can
@@ -739,6 +755,7 @@ impl TunnelStateMachine {
             wg_keys_db,
             user_agent,
             blacklisted_entry_gateways: BlacklistedGateways::new(),
+            entry_gateway_grace: None,
             api_endpoints,
         };
 
