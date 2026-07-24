@@ -26,6 +26,13 @@ the GitHub release notes.
   genuinely dead server still fails over within seconds, not minutes.
   Outages that drop the default route (PPPoE/DSL resync) get the same
   shield when connectivity returns.
+- Connecting no longer stalls five seconds when the first WireGuard
+  handshake packet is lost — which it reliably is: the WG devices start
+  a moment before their routes and firewall exceptions exist, so the
+  first initiation dies locally and WireGuard waited the protocol's full
+  5s before retrying. Lost initiations are now retransmitted after ~1s,
+  bringing connects from ~6.5s back to ~2.5s (measured), and making
+  mid-session recovery from packet loss faster as well.
 
 ## [1.32.1] - 2026-07-21
 

@@ -22,6 +22,21 @@ use crate::amnezia::AmneziaConfig;
 /// kernel clamps to `{r,w}mem_max`, as it did before.
 const UDP_SOCKET_BUFFER_SIZE: usize = 7 * 1024 * 1024;
 
+/// Handshake-initiation retransmit range forced on every peer, replacing the
+/// stock `REKEY_TIMEOUT` (5s) + jitter.
+///
+/// The devices start before the state machine installs their routes and
+/// firewall exceptions (see `ConnectedTunnel::run` ordering, inherited from
+/// upstream), so the very first initiation of a session races bring-up and
+/// reliably dies locally — and a gateway slow to install our peer after
+/// registration drops it remotely. With stock timing every such loss is a
+/// flat 5-second stall on the connect path. Retransmitting after ~1s caps
+/// it at ~1s. This also applies to rekey initiations, where retrying loss
+/// sooner only speeds recovery; `REKEY_ATTEMPT_TIME` still bounds the total
+/// retry window, and duplicate initiations are handled by the protocol.
+const REKEY_TIMEOUT_FAST: std::ops::RangeInclusive<Duration> =
+    Duration::from_millis(1000)..=Duration::from_millis(1333);
+
 /// Classic WireGuard interface configuration.
 pub struct InterfaceConfig {
     pub listen_port: Option<u16>,
@@ -232,7 +247,11 @@ fn convert_peer(peer_config: &PeerConfig) -> Peer {
 
     let mut peer = Peer::new(pub_key)
         .with_endpoint(peer_config.endpoint)
-        .with_allowed_ips(peer_config.allowed_ips.iter().copied());
+        .with_allowed_ips(peer_config.allowed_ips.iter().copied())
+        .dangerously_with_timer_params(gotatun::noise::TimerParams {
+            rekey_timeout: REKEY_TIMEOUT_FAST,
+            ..Default::default()
+        });
 
     if let Some(ref psk) = peer_config.preshared_key {
         peer = peer.with_preshared_key(*psk.as_bytes());
