@@ -273,19 +273,28 @@ return view.extend({
                         buildConnectionChain(hops);
                     }
 
-                    // Reset gateway selectors to default state only on state change to connected
-                    if (previousState !== 'connected') {
-                        if (entryCountrySelect) entryCountrySelect.value = 'none';
-                        if (exitCountrySelect) exitCountrySelect.value = 'none';
-                        if (entryGatewayContainer) dom.content(entryGatewayContainer, E('div', { 'class': 'nym-gateway-loading' }, 'Select a country'));
-                        if (exitGatewayContainer) dom.content(exitGatewayContainer, E('div', { 'class': 'nym-gateway-loading' }, 'Select a country'));
-                    }
+                    // The pickers are hidden while connected and their saved
+                    // state now lives on the daemon, so any in-flight prefill
+                    // is stale and the dirty flag has served its purpose.
+                    // Deliberately NOT resetting the picker contents here: they
+                    // sit invisibly under the connection info (grid overlay in
+                    // theme.js) and blanking them would flash mid-dissolve and
+                    // change the panel footprint. The disconnect-time restore
+                    // below re-syncs them from the daemon config regardless.
+                    restoreGeneration++;
+                    pickersDirty = false;
                 } else if (state === 'disconnected' || state === 'connecting') {
                     // Only clear gateway info when fully disconnected or connecting fresh
                     if (entryGatewayDisplay) entryGatewayDisplay.innerHTML = '<div class="nym-gateway-empty">—</div>';
                     if (exitGatewayDisplay) exitGatewayDisplay.innerHTML = '<div class="nym-gateway-empty">—</div>';
                     // Force a fresh render on the next connect.
                     lastConnectedSig = null;
+                    // The tunnel just dropped: refill the pickers from the
+                    // saved daemon config so reconnecting doesn't force a
+                    // re-pick of both sides.
+                    if (state === 'disconnected' && previousState !== 'disconnected') {
+                        restoreGatewaySelection();
+                    }
                 }
                 // Keep gateway info visible during 'disconnecting' state
 
@@ -345,6 +354,10 @@ return view.extend({
 
         // Connection handlers
         var handleConnect = function() {
+            // Whatever the pickers show right now is what connects — abort any
+            // in-flight prefill so it can't mutate them mid-flow.
+            restoreGeneration++;
+
             // Get selected gateway settings
             var entry_country = entryCountrySelect ? entryCountrySelect.value : 'none';
             var exit_country = exitCountrySelect ? exitCountrySelect.value : 'none';
@@ -405,9 +418,14 @@ return view.extend({
                         return;
                     }
 
-                    // Poll until daemon reaches connected state
+                    // Poll until daemon reaches connected state. Fast cadence
+                    // (250ms) for the first 5s so the UI confirms within one
+                    // beat of the daemon (~2.5s connects), then 1s up to the
+                    // same ~60s ceiling. A status call is ~10ms via the Rust
+                    // rpcd bridge, so the fast phase costs nothing.
                     var pollCount = 0;
-                    var maxPolls = 60;
+                    var maxPolls = 75;
+                    var nextDelay = function() { return pollCount < 20 ? 250 : 1000; };
 
                     var pollStatus = function() {
                         pollCount++;
@@ -442,7 +460,7 @@ return view.extend({
                                 updateStatus();
                             } else if (st && (st.state === 'connecting' || st.state === 'disconnecting')) {
                                 if (pollCount < maxPolls) {
-                                    setTimeout(pollStatus, 1000);
+                                    setTimeout(pollStatus, nextDelay());
                                 } else {
                                     actionInProgress = false;
                                     updateStatus();
@@ -453,12 +471,12 @@ return view.extend({
                                 updateStatus();
                             }
                         }).catch(function() {
-                            if (pollCount < maxPolls) setTimeout(pollStatus, 1000);
+                            if (pollCount < maxPolls) setTimeout(pollStatus, nextDelay());
                             else { actionInProgress = false; updateStatus(); }
                         });
                     };
 
-                    setTimeout(pollStatus, 1000);
+                    setTimeout(pollStatus, 250);
                 }).catch(function(err) {
                     actionInProgress = false;
                     showToast('Connection error: ' + err.message, 'error');
@@ -508,9 +526,11 @@ return view.extend({
                     return;
                 }
 
-                // Poll until daemon reaches disconnected state
+                // Poll until daemon reaches disconnected state — same adaptive
+                // cadence as the connect path.
                 var pollCount = 0;
-                var maxPolls = 60;
+                var maxPolls = 75;
+                var nextDelay = function() { return pollCount < 20 ? 250 : 1000; };
 
                 var pollDisconnect = function() {
                     pollCount++;
@@ -520,18 +540,18 @@ return view.extend({
                             previousState = 'disconnected';
                             updateStatus();
                         } else if (pollCount < maxPolls) {
-                            setTimeout(pollDisconnect, 1000);
+                            setTimeout(pollDisconnect, nextDelay());
                         } else {
                             actionInProgress = false;
                             updateStatus();
                         }
                     }).catch(function() {
-                        if (pollCount < maxPolls) setTimeout(pollDisconnect, 1000);
+                        if (pollCount < maxPolls) setTimeout(pollDisconnect, nextDelay());
                         else { actionInProgress = false; updateStatus(); }
                     });
                 };
 
-                setTimeout(pollDisconnect, 500);
+                setTimeout(pollDisconnect, 250);
             }).catch(function(err) {
                 actionInProgress = false;
                 showToast('Disconnect error: ' + err.message, 'error');
@@ -544,21 +564,61 @@ return view.extend({
             card.classList.toggle('expanded');
         };
 
+        // --- Gateway directory (session cache) ---------------------------
+        // One gateway_list_full call per type (served by the Rust rpcd
+        // bridge from the daemon's directory cache) feeds both the country
+        // dropdown and every per-country list for the rest of the session.
+        // The old per-country RPCs stay as a fallback for a backend without
+        // the bridge, so a version-skewed install degrades instead of dying.
+        var gatewayListCache = {};
+
+        var getGatewayList = function(gwType) {
+            if (!gatewayListCache[gwType]) {
+                gatewayListCache[gwType] = rpc.gatewayListFull(gwType).then(function(result) {
+                    if (!result || !Array.isArray(result.gateways))
+                        throw new Error((result && result.error) || 'Invalid gateway list');
+                    if (result.error && result.gateways.length === 0)
+                        throw new Error(result.error);
+                    return result.gateways;
+                }).catch(function(err) {
+                    // Don't cache failure: the next interaction retries.
+                    gatewayListCache[gwType] = null;
+                    throw err;
+                });
+            }
+            return gatewayListCache[gwType];
+        };
+
+        // Warm the picker data shortly after load instead of on first click:
+        // the transfer happens while the user is still looking at the
+        // dashboard, and a daemon whose directory cache is still cold (e.g.
+        // right after a restart) gets its fetch out of the way early. Errors
+        // are swallowed — the pickers retry on interaction.
+        window.setTimeout(function() {
+            getGatewayList('mixnet-entry').catch(function() {});
+            getGatewayList('mixnet-exit').catch(function() {});
+        }, 1500);
+
         // Load gateways for selected country
         var loadGatewaysForCountry = function(country, type, container) {
             if (!country || country === 'none') {
                 dom.content(container, E('div', { 'class': 'nym-gateway-loading' }, 'Select a country above'));
-                return;
+                return Promise.resolve();
             }
 
             if (country === 'random') {
                 dom.content(container, '');
-                return;
+                return Promise.resolve();
             }
 
             dom.content(container, E('div', { 'class': 'nym-gateway-loading' }, 'Loading gateways...'));
 
-            rpc.gatewayListByCountry(type, country).then(function(result) {
+            return getGatewayList(type).then(function(list) {
+                return { gateways: list.filter(function(gw) { return gw.country === country; }) };
+            }).catch(function() {
+                // Older backend without gateway_list_full: per-country RPC.
+                return rpc.gatewayListByCountry(type, country);
+            }).then(function(result) {
                 if (!result || !result.gateways || result.gateways.length === 0) {
                     dom.content(container, E('div', { 'class': 'nym-gateway-loading' }, 'No gateways available'));
                     return;
@@ -686,27 +746,106 @@ return view.extend({
                 'change': onSelect
             }, [E('option', { 'value': 'none' }, '— Select Country —')]);
 
-            // Lazy-load country list on first focus
-            var loaded = false;
-            select.addEventListener('focus', function() {
-                if (loaded) return;
-                loaded = true;
-
-                if (countryCache[gwType]) {
-                    populateCountrySelect(select, countryCache[gwType]);
-                    return;
+            // Populate options on demand: first focus, or a programmatic
+            // prefill via ensureLoaded(). The promise is cached so the options
+            // are only built once; a failed load clears it so the next attempt
+            // retries. Countries are derived from the shared full list; the
+            // per-country-counts RPC is only a fallback for older backends.
+            var loadPromise = null;
+            select.ensureLoaded = function() {
+                if (!loadPromise) {
+                    loadPromise = getGatewayList(gwType).then(function(gateways) {
+                        var counts = {};
+                        gateways.forEach(function(gw) {
+                            if (gw.country) counts[gw.country] = (counts[gw.country] || 0) + 1;
+                        });
+                        return Object.keys(counts).sort().map(function(code) {
+                            return { code: code, count: counts[code] };
+                        });
+                    }).catch(function() {
+                        return countryCache[gwType]
+                            ? Promise.resolve(countryCache[gwType])
+                            : rpc.gatewayListCountries(gwType).then(function(result) {
+                                var list = (result && result.countries) || [];
+                                countryCache[gwType] = list;
+                                return list;
+                            });
+                    }).then(function(list) {
+                        populateCountrySelect(select, list);
+                    }).catch(function() {
+                        loadPromise = null;
+                        select.options[0].textContent = '— Failed to load —';
+                    });
                 }
-
-                rpc.gatewayListCountries(gwType).then(function(result) {
-                    var list = (result && result.countries) || [];
-                    countryCache[gwType] = list;
-                    populateCountrySelect(select, list);
-                }).catch(function() {
-                    select.options[0].textContent = '— Failed to load —';
-                });
-            });
+                return loadPromise;
+            };
+            select.addEventListener('focus', function() { select.ensureLoaded(); });
 
             return select;
+        };
+
+        // --- Remember last gateway selection ---------------------------------
+        // The daemon persists entry/exit points across disconnects, but these
+        // pickers used to come back empty, forcing a full re-pick before every
+        // reconnect. restoreGatewaySelection() prefills them from the saved
+        // daemon config, so the explicit-choice guard in handleConnect passes
+        // with the previous selection visible instead of silently falling back
+        // to invisible state. pickersDirty stops a restore from stomping on
+        // picks the user is making right now; restoreGeneration aborts stale
+        // in-flight restores when the state moves on (connect, reconnect).
+        var pickersDirty = false;
+        var restoreGeneration = 0;
+        var markPickersDirty = function() { pickersDirty = true; };
+
+        var selectHasOption = function(select, value) {
+            for (var i = 0; i < select.options.length; i++)
+                if (select.options[i].value === value) return true;
+            return false;
+        };
+
+        // Prefill one side. saved = {type, country, id} from gateway_get:
+        // type 'random' selects the Random option; 'country' opens the saved
+        // country with the default "Any Gateway" radio; 'gateway' additionally
+        // checks the saved gateway's radio, degrading to country-level when the
+        // gateway is gone from the directory or CT-disabled.
+        var restoreSide = function(select, container, listType, saved, gen) {
+            if (!select || !saved || !saved.type) return Promise.resolve();
+            var stale = function() { return gen !== restoreGeneration || pickersDirty; };
+            return select.ensureLoaded().then(function() {
+                if (stale()) return;
+                if (saved.type === 'random') {
+                    if (selectHasOption(select, 'random')) {
+                        select.value = 'random';
+                        return loadGatewaysForCountry('random', listType, container);
+                    }
+                    return;
+                }
+                if (!saved.country || !selectHasOption(select, saved.country)) return;
+                select.value = saved.country;
+                return loadGatewaysForCountry(saved.country, listType, container).then(function() {
+                    if (stale() || saved.type !== 'gateway' || !saved.id || !container) return;
+                    var radio = container.querySelector('input[value="' + saved.id + '"]');
+                    if (!radio || radio.disabled) return;
+                    radio.checked = true;
+                    container.querySelectorAll('.nym-gateway-option').forEach(function(el) {
+                        el.classList.remove('selected');
+                    });
+                    var opt = radio.closest('.nym-gateway-option');
+                    if (opt) opt.classList.add('selected');
+                });
+            });
+        };
+
+        var restoreGatewaySelection = function() {
+            if (pickersDirty) return;
+            var gen = ++restoreGeneration;
+            rpc.gatewayGet().then(function(cfg) {
+                if (!cfg || gen !== restoreGeneration || pickersDirty) return;
+                restoreSide(entryCountrySelect, entryGatewayContainer, 'mixnet-entry',
+                    { type: cfg.entry_type, country: cfg.entry_country, id: cfg.entry_id }, gen);
+                restoreSide(exitCountrySelect, exitGatewayContainer, 'mixnet-exit',
+                    { type: cfg.exit_type, country: cfg.exit_country, id: cfg.exit_id }, gen);
+            }).catch(function() {});
         };
 
         // Gateway update handler
@@ -1202,10 +1341,14 @@ return view.extend({
                             E('div', { 'class': 'nym-form-group', 'style': 'margin-bottom: 0' }, [
                                 E('label', { 'class': 'nym-form-label' }, 'Country'),
                                 entryCountrySelect = createCountrySelect('mixnet-entry', 'entry_country', function(ev) {
+                                    markPickersDirty();
                                     loadGatewaysForCountry(ev.target.value, 'mixnet-entry', entryGatewayContainer);
                                 })
                             ]),
-                            entryGatewayContainer = E('div', { 'class': 'nym-form-group', 'style': 'margin-bottom: 0' },
+                            // 'change' only fires on user interaction (radio
+                            // clicks bubble; programmatic prefill doesn't), so
+                            // it is exactly the dirty signal we want.
+                            entryGatewayContainer = E('div', { 'class': 'nym-form-group', 'style': 'margin-bottom: 0', 'change': markPickersDirty },
                                 E('div', { 'class': 'nym-gateway-loading' }, 'Select a country'))
                         ]),
                         E('div', { 'class': 'nym-panel-info' }, [
@@ -1242,10 +1385,11 @@ return view.extend({
                             E('div', { 'class': 'nym-form-group', 'style': 'margin-bottom: 0' }, [
                                 E('label', { 'class': 'nym-form-label' }, 'Country'),
                                 exitCountrySelect = createCountrySelect('mixnet-exit', 'exit_country', function(ev) {
+                                    markPickersDirty();
                                     loadGatewaysForCountry(ev.target.value, 'mixnet-exit', exitGatewayContainer);
                                 })
                             ]),
-                            exitGatewayContainer = E('div', { 'class': 'nym-form-group', 'style': 'margin-bottom: 0' },
+                            exitGatewayContainer = E('div', { 'class': 'nym-form-group', 'style': 'margin-bottom: 0', 'change': markPickersDirty },
                                 E('div', { 'class': 'nym-gateway-loading' }, 'Select a country'))
                         ]),
                         E('div', { 'class': 'nym-panel-info' }, [
@@ -2826,6 +2970,13 @@ return view.extend({
         if (status.state === 'connected') {
             var initSecs = parseInt(status.connected_seconds, 10);
             syncUptime(isNaN(initSecs) ? 0 : initSecs);
+        }
+
+        // Prefill the pickers from the saved daemon config on first render.
+        // While connected/connecting they are hidden and reset anyway; the
+        // poll's disconnected transition handles later drops.
+        if (!status.state || status.state === 'disconnected' || status.state === 'unknown') {
+            restoreGatewaySelection();
         }
 
         // Start polling

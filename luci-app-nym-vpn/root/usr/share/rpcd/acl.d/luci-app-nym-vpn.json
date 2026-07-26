@@ -8,7 +8,7 @@
           "status",
           "info",
           "gateway_get",
-          "gateway_list",
+          "gateway_list_full",
           "gateway_list_countries",
           "gateway_list_by_country",
           "tunnel_get",

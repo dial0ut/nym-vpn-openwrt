@@ -45,6 +45,15 @@ return baseclass.extend({
         params: ['entry_country', 'exit_country', 'entry_id', 'exit_id', 'entry_random', 'exit_random', 'residential_exit']
     }),
 
+    // Full typed list for one gateway type, served by the Rust rpcd bridge.
+    // The view derives the country dropdown and per-country lists from one
+    // response instead of a round-trip per country.
+    gatewayListFull: rpc.declare({
+        object: 'nym-vpn',
+        method: 'gateway_list_full',
+        params: ['gateway_type']
+    }),
+
     gatewayListCountries: rpc.declare({
         object: 'nym-vpn',
         method: 'gateway_list_countries',
