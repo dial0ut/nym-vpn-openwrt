@@ -11,7 +11,40 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+### Added
+
+- The gateway pickers come back pre-filled with the previously selected
+  country and server after a disconnect, instead of forcing a full re-pick
+  before every reconnect.
+
+### Changed
+
+- The web UI's backend has been rewritten. The previous rpcd plugin was a
+  ~2000-line shell script that reconstructed every answer by parsing
+  nym-vpnc's human-readable output — hundreds of process spawns per
+  request. It is now a native bridge built into nym-vpnc (`nym-vpnc rpcd`)
+  that speaks the daemon's typed API directly and emits JSON, which also
+  removes a whole class of silent parsing breakage when output formats
+  change.
+- The connection card no longer changes size or shifts when connecting or
+  disconnecting — state changes are a pure cross-fade.
+
 ### Fixed
+
+- Gateway lists in the web UI no longer fail or time out on slower
+  routers. Loading the server list for a country took seconds of pure
+  process-spawning on router CPUs (measured 2.2s on a quad-core ARM
+  router, far worse on single-core MIPS — past the web UI's request
+  timeout); it now completes in ~0.15s. The status poll also no longer
+  fetches the full gateway directory four times per refresh while
+  connected.
+- Opening a gateway picker after the dashboard sat idle no longer stalls
+  on a directory re-fetch: the daemon keeps recently-used gateway lists
+  fresh in the background (measured 1.15s → 0.05s). Lists nobody has
+  asked about in the last half hour are not refreshed, so an idle router
+  does zero background directory fetches. The UI also warms the picker
+  data right after page load, covering the window right after a daemon
+  restart.
 
 - A WAN outage no longer switches the connected server. When the tunnel
   dropped and a reconnect attempt failed (typically because the line had
