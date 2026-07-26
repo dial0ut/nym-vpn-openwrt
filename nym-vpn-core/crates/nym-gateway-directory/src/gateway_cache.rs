@@ -21,6 +21,21 @@ use crate::{
 /// The maximum age of the cache before it is considered stale.
 const MAX_CACHE_AGE: Duration = Duration::from_secs(5 * 60);
 
+/// How often to check for (and re-fetch) stale gateway lists in the
+/// background. Without this, a stale list is only refreshed inline on the
+/// next lookup, which makes the caller (e.g. the LuCI gateway picker) block
+/// on a full directory fetch — over the tunnel when connected. The check is
+/// a no-op while every list is fresh, so the effective refresh rate stays
+/// MAX_CACHE_AGE per list type.
+const REFRESH_CHECK_INTERVAL: Duration = Duration::from_secs(60);
+
+/// Only lists that were looked up within this window are kept warm by the
+/// background check. This makes the standing cost demand-driven: while a UI
+/// is in use (its page-load prefetch and picker clicks are lookups) the
+/// lists never go stale, and a router nobody is looking at does zero
+/// background directory fetches.
+const LOOKUP_INTEREST_WINDOW: Duration = Duration::from_secs(30 * 60);
+
 #[derive(Clone)]
 pub struct GatewayCacheHandle {
     tx: tokio::sync::mpsc::UnboundedSender<Command>,
@@ -208,6 +223,10 @@ pub struct GatewayCache {
     // The cached gateways and their last updated time
     cached_gateways: HashMap<GatewayType, (GatewayList, Instant)>,
 
+    // When each gateway list was last asked for — drives the background
+    // refresh (see LOOKUP_INTEREST_WINDOW)
+    lookup_interest: HashMap<GatewayType, Instant>,
+
     // The cached full node list (with nr_address) for SOCKS5
     cached_nymnodes: Option<(NymNodeList, Instant)>,
 
@@ -234,6 +253,7 @@ impl GatewayCache {
             connectivity_handle,
             command_rx,
             cached_gateways: HashMap::default(),
+            lookup_interest: HashMap::default(),
             cached_nymnodes: None,
             is_performed_initial_refresh: false,
             shutdown_token,
@@ -247,8 +267,18 @@ impl GatewayCache {
             self.perform_initial_fetch_once().await;
         }
 
+        let mut refresh_interval = tokio::time::interval(REFRESH_CHECK_INTERVAL);
+        refresh_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
         loop {
             tokio::select! {
+                _ = refresh_interval.tick() => {
+                    // Proactively re-fetch stale lists that were recently
+                    // looked up, so interactive lookups always hit a warm
+                    // cache. Offline-gated, and a no-op while everything is
+                    // fresh or nobody has asked lately.
+                    self.refresh_recently_used().await;
+                }
                 Some(cmd) = self.command_rx.recv() => {
                     match cmd {
                         Command::RefreshAll => {
@@ -337,6 +367,22 @@ impl GatewayCache {
             .collect()
     }
 
+    async fn refresh_recently_used(&mut self) {
+        let gw_types: Vec<GatewayType> = GatewayType::iter()
+            .filter(|gw_type| !self.is_gateways_current(gw_type))
+            .filter(|gw_type| {
+                self.lookup_interest
+                    .get(gw_type)
+                    .is_some_and(|at| at.elapsed() < LOOKUP_INTEREST_WINDOW)
+            })
+            .collect();
+
+        if !gw_types.is_empty() {
+            tracing::debug!("Background-refreshing recently used gateway lists: {gw_types:?}");
+            self.refresh(gw_types).await;
+        }
+    }
+
     async fn refresh(&mut self, gw_list_types: Vec<GatewayType>) {
         if self.connectivity_handle.connectivity().await.is_offline() {
             tracing::debug!("Not refreshing gateways because we are not connected");
@@ -403,6 +449,7 @@ impl GatewayCache {
     }
 
     async fn lookup_gateways(&mut self, gw_type: GatewayType) -> Result<GatewayList> {
+        self.lookup_interest.insert(gw_type, Instant::now());
         let refresh_result = self.refresh_gateways(gw_type).await;
 
         // Regardless of if we managed to refresh the cache, we return the cached gateways if they
