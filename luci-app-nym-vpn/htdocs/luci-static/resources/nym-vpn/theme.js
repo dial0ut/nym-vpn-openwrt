@@ -53,22 +53,26 @@ return baseclass.extend({
     .nym-status-hero.connecting .nym-status-label, .nym-status-hero.disconnecting .nym-status-label { color: var(--warning); }\
     .nym-uptime { font-family: var(--font-mono); font-size: 28px; font-weight: 300; color: var(--text-primary); margin-bottom: 8px; font-variant-numeric: tabular-nums; }\
     .nym-uptime-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: var(--label-spacing); }\
-    /* Connected-state display: hidden until a tunnel is up so the disconnected\
-       hero shows only the pickers + Connect. The picker row is hidden in turn\
-       once connected (see .nym-hero-gateway-row rules below). */\
-    /* Each side column swaps its picker (disconnected) for the live connection\
-       info (connected). Both collapse via max-height + opacity so the swap\
-       animates smoothly and the hero resizes without snapping. */\
-    .nym-panel-picker { overflow: hidden; max-height: 420px; opacity: 1; transition: max-height 0.45s ease, opacity 0.3s ease; }\
-    .nym-status-hero.connected .nym-panel-picker, .nym-status-hero.disconnecting .nym-panel-picker { max-height: 0; opacity: 0; }\
-    .nym-panel-info { overflow: hidden; max-height: 0; opacity: 0; text-align: center; transition: max-height 0.45s ease, opacity 0.35s ease; }\
-    .nym-status-hero.connected .nym-panel-info, .nym-status-hero.disconnecting .nym-panel-info { max-height: 320px; opacity: 1; }\
+    /* Connected-state display: the hero card is STATIC — nothing in it may\
+       change size on a state swap; the swap is a pure opacity dissolve.\
+       Each side panel is a one-cell grid overlaying its picker (disconnected)\
+       and the live connection info (connected): the hidden layer stays in the\
+       grid at opacity 0, so the panel keeps one footprint through the swap.\
+       Every earlier max-height choreography leaked some card movement.\
+       visibility flips after the fade so the hidden layer is never clickable\
+       and drops out of the tab order. */\
+    .nym-panel-picker { grid-area: 1 / 1; align-self: start; min-width: 0; opacity: 1; visibility: visible; transition: opacity 0.5s ease, visibility 0s linear; }\
+    .nym-status-hero.connected .nym-panel-picker, .nym-status-hero.disconnecting .nym-panel-picker { opacity: 0; visibility: hidden; transition: opacity 0.5s ease, visibility 0s linear 0.5s; }\
+    .nym-panel-info { grid-area: 1 / 1; align-self: center; min-width: 0; opacity: 0; visibility: hidden; text-align: center; transition: opacity 0.5s ease, visibility 0s linear 0.5s; }\
+    .nym-status-hero.connected .nym-panel-info, .nym-status-hero.disconnecting .nym-panel-info { opacity: 1; visibility: visible; transition: opacity 0.5s ease, visibility 0s linear; }\
     .nym-gateway-label { font-size: 10px; text-transform: uppercase; letter-spacing: var(--label-spacing); text-indent: 2px; color: var(--text-muted); margin-bottom: 8px; text-align: center; }\
     /* No transform here: a transformed ancestor disrupts the compositor-driven\
-       flow animation on the chain line pseudo-element. Collapse with\
-       max-height + opacity only. */\
-    .nym-connection-wrapper { display: flex; flex-direction: column; align-items: center; justify-content: center; max-height: 0; padding-top: 0; opacity: 0; overflow: hidden; transition: opacity 0.5s ease, max-height 0.45s ease, padding-top 0.45s ease; pointer-events: none; }\
-    .nym-status-hero.connected .nym-connection-wrapper, .nym-status-hero.disconnecting .nym-connection-wrapper { max-height: 140px; padding-top: 20px; opacity: 1; pointer-events: auto; }\
+       flow animation on the chain line pseudo-element. */\
+    /* The chain keeps its space under the ring in BOTH states (no max-height\
+       collapse), so the ring never shifts — the chain only fades. min-height\
+       covers first render, before buildConnectionChain has added content. */\
+    .nym-connection-wrapper { display: flex; flex-direction: column; align-items: center; justify-content: center; padding-top: 20px; min-height: 44px; opacity: 0; visibility: hidden; transition: opacity 0.5s ease, visibility 0s linear 0.5s; pointer-events: none; }\
+    .nym-status-hero.connected .nym-connection-wrapper, .nym-status-hero.disconnecting .nym-connection-wrapper { opacity: 1; visibility: visible; pointer-events: auto; transition: opacity 0.5s ease, visibility 0s linear; }\
     .nym-mode-label { font-size: 10px; text-transform: uppercase; letter-spacing: var(--label-spacing); color: var(--nym-green); opacity: 0.8; margin-bottom: 8px; }\
     .nym-connection-chain { display: flex; align-items: center; justify-content: center; padding-top: 0; gap: 0; margin: 0; }\
     .nym-chain-node { width: 14px; height: 14px; border-radius: 50%; background: var(--nym-green); opacity: 0.8; flex-shrink: 0; box-shadow: 0 0 6px var(--nym-green-glow); }\
@@ -336,9 +340,12 @@ return baseclass.extend({
        info so the entry/exit hops sit cleanly to either side of the ring. The\
        panel keeps its flex width in both states, so the center ring never\
        shifts; only the inner picker/info content collapses (above). */\
-    .nym-status-hero.connected .nym-hero-gateway-panel, .nym-status-hero.disconnecting .nym-hero-gateway-panel { background: transparent; border-color: transparent; padding: 8px 12px; text-align: center; }\
-    .nym-status-hero.connected .nym-hero-gateway-row, .nym-status-hero.disconnecting .nym-hero-gateway-row { align-items: center; }\
-    .nym-hero-gateway-panel { flex: 1 1 0; max-width: 280px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px; transition: background 0.4s ease, border-color 0.3s ease, padding 0.4s ease; text-align: left; }\
+    /* Only the chrome fades when connected; padding and row alignment stay\
+       constant so the box never moves or resizes (static-hero rule above). */\
+    .nym-status-hero.connected .nym-hero-gateway-panel, .nym-status-hero.disconnecting .nym-hero-gateway-panel { background: transparent; border-color: transparent; text-align: center; }\
+    /* display:grid stacks .nym-panel-picker and .nym-panel-info in the same\
+       cell (grid-area 1/1) for the dissolve swap — see the static-hero rules. */\
+    .nym-hero-gateway-panel { flex: 1 1 0; max-width: 280px; display: grid; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px; transition: background 0.4s ease, border-color 0.3s ease; text-align: left; }\
     .nym-hero-gateway-panel:hover { border-color: var(--border-accent); }\
     .nym-hero-gateway-panel .nym-gateway-box-title { margin-bottom: 14px; font-size: 11px; }\
     .nym-hero-gateway-panel .nym-select { font-size: 13px; padding: 0 16px; height: 44px; line-height: 44px; background-position: right 14px center; text-align: center; text-align-last: center; }\
