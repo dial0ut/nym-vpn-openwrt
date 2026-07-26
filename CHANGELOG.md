@@ -11,6 +11,8 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+## [1.33.0] - 2026-07-26
+
 ### Added
 
 - The gateway pickers come back pre-filled with the previously selected
