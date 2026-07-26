@@ -1,6 +1,9 @@
 // Copyright 2024 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
+// The rpcd bridge's ubus method map is one large json! literal.
+#![recursion_limit = "256"]
+
 mod boolean_option;
 mod commands;
 mod display_helpers;
@@ -18,6 +21,13 @@ use crate::table_style::TableStyle;
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = ProgramArgs::parse();
+
+    // The rpcd bridge connects lazily per-method: it must keep answering
+    // (with JSON error payloads) while the daemon is down, e.g. for the
+    // LuCI daemon-restart flow.
+    if let Command::Rpcd(rpcd_args) = args.command {
+        return rpcd_args.execute().await;
+    }
 
     let rpc_client = RpcClient::new()
         .await
@@ -142,6 +152,10 @@ pub enum Command {
         #[command(subcommand)]
         subcommand: nym_diagnostic::cli::Command,
     },
+
+    /// ubus rpcd bridge used by the OpenWrt LuCI app (not for interactive use)
+    #[clap(hide = true)]
+    Rpcd(commands::rpcd::Args),
 }
 
 impl Command {
@@ -168,6 +182,7 @@ impl Command {
             Command::Diagnostic { subcommand } => {
                 commands::diagnostic::execute(subcommand, rpc_client).await
             }
+            Command::Rpcd(_) => unreachable!("dispatched in main before RPC client creation"),
         }
     }
 
