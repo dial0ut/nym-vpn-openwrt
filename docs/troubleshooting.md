@@ -172,3 +172,53 @@ Failed to enable UDP GRO for IPv4 socket: Protocol not available (os error 99)
 
 This is harmless. UDP Generic Receive Offload requires kernel 5.x+.
 Most OpenWrt devices run older kernels. Performance is fine without it.
+
+## Custom DNS Setting Has No Effect
+
+**Symptoms:** custom DNS is enabled in the web UI (or `nym-vpnc dns get`
+reports it as enabled), but lookups clearly still go somewhere else — a
+DNS leak test names your ISP's resolver, or one you never configured.
+
+Check whether dnsmasq is set to ignore its resolv file:
+```
+uci get dhcp.@dnsmasq[0].noresolv
+```
+
+If that prints `1`, the custom DNS setting is being ignored and the
+daemon has deliberately stepped aside. In LuCI the same setting is
+**Network → DHCP and DNS → Resolv & Hosts Files → "Ignore resolv file"**
+(on some LuCI versions the page is listed as just **DNS**).
+
+The reason: the daemon applies VPN DNS servers by writing them into
+dnsmasq's resolv file, which is the only way to change upstream servers
+without restarting dnsmasq — a restart means several seconds with no DNS
+for the whole network on every connect. With "Ignore resolv file"
+ticked, dnsmasq never reads that file, so nothing the daemon writes can
+take effect. Your own entries under the **Forwards** tab are what
+resolve instead.
+
+That is usually correct and intended: AdGuard Home, https-dns-proxy and
+stubby all tick this box when installed, because you have asked *them*
+to own DNS. Leave it alone in that case — those queries still ride the
+tunnel while connected.
+
+If you did not intend it, untick it (or `uci delete
+dhcp.@dnsmasq[0].noresolv; uci commit dhcp; /etc/init.d/dnsmasq restart`)
+and the VPN's DNS servers will apply on the next connect.
+
+Ad-blocking is unaffected either way — it works through separate
+dnsmasq directives, not upstream servers.
+
+## No Internet After Clearing DNS Forwards
+
+**Symptoms:** you emptied **Network → DHCP and DNS → Forwards** (perhaps
+to force DNS through the VPN) and now nothing resolves at all.
+
+This happens when "Ignore resolv file" is ticked — see the previous
+entry. With it ticked, the Forwards list is dnsmasq's *only* source of
+upstream servers, so emptying it leaves nothing to forward queries to.
+
+Either put a forward back, or untick "Ignore resolv file" so dnsmasq
+falls back to its resolv file. Unticking it is the better fix if your
+goal was VPN DNS in the first place, because it also lets the daemon
+supply the VPN's DNS servers.
