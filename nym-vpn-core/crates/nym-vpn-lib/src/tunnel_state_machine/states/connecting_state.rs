@@ -737,7 +737,7 @@ impl TunnelStateHandler for ConnectingState {
                 match command {
                     TunnelCommand::Connect => {
                         if let Some(tunnel_monitor_handle) = self.tunnel_monitor_handle {
-                            Self::disconnect(PrivateActionAfterDisconnect::Reconnect, tunnel_monitor_handle, shared_state).await
+                            Self::disconnect(PrivateActionAfterDisconnect::Reconnect { gateways: None }, tunnel_monitor_handle, shared_state).await
                         } else {
                             NextTunnelState::NewState(ConnectingState::enter(self.retry_attempt, None, shared_state).await)
                         }
@@ -783,14 +783,18 @@ impl TunnelStateHandler for ConnectingState {
                             return NextTunnelState::SameState(self);
                         }
 
-                        if let Some(tunnel_monitor_handle) = self.tunnel_monitor_handle {
-                           Self::disconnect(PrivateActionAfterDisconnect::Reconnect, tunnel_monitor_handle, shared_state).await
+                        // Same rule as connected_state: a settings-driven
+                        // reconnect keeps the pair it had unless the change is
+                        // an input to gateway selection.
+                        let next_gateways = if diff.affects_gateway_selection() {
+                            None
                         } else {
-                            let next_gateways = if diff.entry_point_changed() || diff.exit_point_changed() || diff.quic_changed() {
-                                None
-                            } else {
-                                self.selected_gateways
-                            };
+                            self.selected_gateways
+                        };
+
+                        if let Some(tunnel_monitor_handle) = self.tunnel_monitor_handle {
+                           Self::disconnect(PrivateActionAfterDisconnect::Reconnect { gateways: next_gateways }, tunnel_monitor_handle, shared_state).await
+                        } else {
                             NextTunnelState::NewState(ConnectingState::enter(self.retry_attempt, next_gateways, shared_state).await)
                         }
                     }

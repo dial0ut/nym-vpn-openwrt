@@ -11,6 +11,17 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+### Fixed
+
+- Changing a setting while connected no longer moves you to a different
+  server. Settings that need a reconnect to take effect (IPv6, DNS, the
+  kill-switch, split tunneling) tore the tunnel down and then re-ran server
+  selection from scratch, so anyone connected via a country or random pick
+  landed on a new entry/exit pair. The reconnect now keeps the pair it was
+  running on, and only re-selects when the change is one selection actually
+  depends on — the entry/exit points themselves, mixnet vs 2-hop, QUIC,
+  residential exit, or the minimum-performance thresholds.
+
 ## [1.33.0] - 2026-07-26
 
 ### Added

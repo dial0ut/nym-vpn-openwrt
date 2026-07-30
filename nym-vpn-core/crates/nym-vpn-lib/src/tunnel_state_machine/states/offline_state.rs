@@ -134,7 +134,7 @@ impl TunnelStateHandler for OfflineState {
                             return NextTunnelState::SameState(self);
                         };
 
-                        if diff.entry_point_changed() || diff.exit_point_changed() || diff.quic_changed() {
+                        if diff.affects_gateway_selection() {
                             self.selected_gateways = None;
                         };
 

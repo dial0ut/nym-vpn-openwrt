@@ -336,6 +336,31 @@ impl TunnelSettingsDiff {
     pub fn only_mixnet_performance_options_changed(&self) -> bool {
         self.only_field_changed(&TunnelSettingsDiffFields::MixnetPerformanceOptions)
     }
+
+    /// True when the change can invalidate an already-resolved gateway pair.
+    ///
+    /// A settings change that forces a reconnect must not silently move the
+    /// user to a different server, so the reconnect reuses the pair it was
+    /// running on — except for the inputs `select_gateways` actually reads:
+    /// the entry/exit points themselves, the tunnel type (mixnet and
+    /// wireguard draw from different gateway sets), QUIC/bridges (entry
+    /// gateways are filtered to those advertising bridge params),
+    /// residential exit (exit filter), and the min-performance thresholds
+    /// (applied to the directory lookup). Anything else — IPv6, DNS,
+    /// kill-switch, split tunnel — leaves the current pair perfectly valid.
+    pub fn affects_gateway_selection(&self) -> bool {
+        self.0.iter().any(|f| {
+            matches!(
+                f,
+                TunnelSettingsDiffFields::EntryPoint
+                    | TunnelSettingsDiffFields::ExitPoint
+                    | TunnelSettingsDiffFields::TunnelType
+                    | TunnelSettingsDiffFields::QUIC
+                    | TunnelSettingsDiffFields::ResidentialExit
+                    | TunnelSettingsDiffFields::GatewayPerformanceOptions
+            )
+        })
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
@@ -457,7 +482,7 @@ impl From<PrivateActionAfterDisconnect> for ActionAfterDisconnect {
     fn from(value: PrivateActionAfterDisconnect) -> Self {
         match value {
             PrivateActionAfterDisconnect::Nothing => Self::Nothing,
-            PrivateActionAfterDisconnect::Reconnect => Self::Reconnect,
+            PrivateActionAfterDisconnect::Reconnect { .. } => Self::Reconnect,
             PrivateActionAfterDisconnect::Offline { .. } => Self::Offline,
             PrivateActionAfterDisconnect::Error(_) => Self::Error,
         }
@@ -471,7 +496,12 @@ enum PrivateActionAfterDisconnect {
     Nothing,
 
     /// Reconnect after disconnect
-    Reconnect,
+    Reconnect {
+        /// Gateways to reuse on reconnect, when the reason for disconnecting
+        /// does not invalidate the current selection. `None` re-runs gateway
+        /// selection from scratch.
+        gateways: Option<SelectedGateways>,
+    },
 
     /// Enter offline state after disconnect
     Offline {
@@ -1042,5 +1072,99 @@ impl From<tunnel::transports::TransportError> for Error {
 impl From<nym_registration_client::RegistrationClientError> for Error {
     fn from(value: nym_registration_client::RegistrationClientError) -> Self {
         Self::Tunnel(Box::new(tunnel::Error::RegistrationClient(Box::new(value))))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn settings() -> TunnelSettings {
+        TunnelSettings {
+            enable_ipv6: false,
+            tunnel_type: TunnelType::Wireguard,
+            allow_lan: true,
+            residential_exit: false,
+            mixnet_tunnel_options: MixnetTunnelOptions::default(),
+            wireguard_tunnel_options: WireguardTunnelOptions::default(),
+            gateway_performance_options: GatewayPerformanceOptions::default(),
+            mixnet_client_config: None,
+            entry_point: Box::new(EntryPoint::Country {
+                two_letter_iso_country_code: "DE".to_owned(),
+            }),
+            exit_point: Box::new(ExitPoint::Country {
+                two_letter_iso_country_code: "FR".to_owned(),
+            }),
+            dns: DnsOptions::Default,
+            killswitch: true,
+            legacy_split_tunnel: false,
+            inbound_exemptions: Vec::new(),
+        }
+    }
+
+    fn diff_of(mutate: impl FnOnce(&mut TunnelSettings)) -> TunnelSettingsDiff {
+        let old = settings();
+        let mut new = old.clone();
+        mutate(&mut new);
+        old.diff(&new).expect("settings must differ")
+    }
+
+    /// The reported bug: toggling IPv6 forces a reconnect, and that reconnect
+    /// used to re-run gateway selection — moving a `Country`/`Random` user to
+    /// a different server pair. IPv6 is not an input to selection, so the
+    /// running pair must survive it.
+    #[test]
+    fn ipv6_toggle_does_not_affect_gateway_selection() {
+        assert!(!diff_of(|s| s.enable_ipv6 = true).affects_gateway_selection());
+    }
+
+    #[test]
+    fn non_selection_settings_reuse_the_current_pair() {
+        assert!(!diff_of(|s| s.killswitch = false).affects_gateway_selection());
+        assert!(!diff_of(|s| s.legacy_split_tunnel = true).affects_gateway_selection());
+        assert!(
+            !diff_of(|s| s.dns = DnsOptions::Custom(vec!["1.1.1.1".parse().unwrap()]))
+                .affects_gateway_selection()
+        );
+        assert!(!diff_of(|s| s.allow_lan = false).affects_gateway_selection());
+    }
+
+    #[test]
+    fn selection_inputs_force_reselection() {
+        assert!(
+            diff_of(|s| s.entry_point = Box::new(EntryPoint::Random)).affects_gateway_selection()
+        );
+        assert!(
+            diff_of(|s| s.exit_point = Box::new(ExitPoint::Random)).affects_gateway_selection()
+        );
+        assert!(diff_of(|s| s.tunnel_type = TunnelType::Mixnet).affects_gateway_selection());
+        assert!(diff_of(|s| s.residential_exit = true).affects_gateway_selection());
+        assert!(
+            diff_of(|s| s.wireguard_tunnel_options.enable_bridges = true)
+                .affects_gateway_selection()
+        );
+        assert!(
+            diff_of(|s| s.gateway_performance_options.mixnet_min_performance = Some(80))
+                .affects_gateway_selection()
+        );
+    }
+
+    /// The two predicates gate different halves of the same decision, so a
+    /// change that can be applied without dropping the tunnel must never be
+    /// one that invalidates the selection.
+    #[test]
+    fn hot_appliable_changes_never_force_reselection() {
+        for diff in [
+            diff_of(|s| s.allow_lan = false),
+            diff_of(|s| {
+                s.inbound_exemptions.push(nym_firewall::InboundExemption::new(
+                    nym_firewall::TransportProtocol::Tcp,
+                    443,
+                ))
+            }),
+        ] {
+            assert!(diff.only_hot_appliable_changed());
+            assert!(!diff.affects_gateway_selection());
+        }
     }
 }

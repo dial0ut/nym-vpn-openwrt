@@ -212,7 +212,7 @@ impl TunnelStateHandler for ConnectedState {
                 tracing::debug!("ConnectedState received command: {command:?}");
                 match command {
                     TunnelCommand::Connect => {
-                        self.disconnect(PrivateActionAfterDisconnect::Reconnect, shared_state).await
+                        self.disconnect(PrivateActionAfterDisconnect::Reconnect { gateways: None }, shared_state).await
                     },
                     TunnelCommand::Disconnect => {
                         self.disconnect(PrivateActionAfterDisconnect::Nothing, shared_state).await
@@ -250,7 +250,13 @@ impl TunnelStateHandler for ConnectedState {
                         if diff.only_hot_appliable_changed() || (diff.only_mixnet_performance_options_changed() && shared_state.tunnel_settings.tunnel_type == TunnelType::Wireguard) {
                             NextTunnelState::SameState(self)
                         } else {
-                            self.disconnect(PrivateActionAfterDisconnect::Reconnect, shared_state).await
+                            // Toggling a setting must not move the user to a
+                            // different server: carry the running pair through
+                            // the reconnect unless the change is one gateway
+                            // selection actually depends on.
+                            let gateways = (!diff.affects_gateway_selection())
+                                .then(|| self.selected_gateways.clone());
+                            self.disconnect(PrivateActionAfterDisconnect::Reconnect { gateways }, shared_state).await
                         }
                     }
                 }

@@ -65,8 +65,8 @@ impl TunnelStateHandler for DisconnectingState {
                     PrivateActionAfterDisconnect::Error(reason) => {
                         NextTunnelState::NewState(ErrorState::enter(reason, shared_state).await)
                     },
-                    PrivateActionAfterDisconnect::Reconnect => {
-                        NextTunnelState::NewState(ConnectingState::enter(0, None, shared_state).await)
+                    PrivateActionAfterDisconnect::Reconnect { gateways } => {
+                        NextTunnelState::NewState(ConnectingState::enter(0, gateways, shared_state).await)
                     },
                     PrivateActionAfterDisconnect::Offline { reconnect, gateways } => {
                         NextTunnelState::NewState(OfflineState::enter(reconnect, gateways, shared_state).await)
@@ -81,7 +81,12 @@ impl TunnelStateHandler for DisconnectingState {
                             PrivateActionAfterDisconnect::Offline { gateways,  .. } => {
                                 PrivateActionAfterDisconnect::Offline { reconnect: true, gateways }
                             }
-                            _ => PrivateActionAfterDisconnect::Reconnect,
+                            // Already reconnecting: keep whatever selection the
+                            // pending reconnect carries rather than re-rolling it.
+                            PrivateActionAfterDisconnect::Reconnect { gateways } => {
+                                PrivateActionAfterDisconnect::Reconnect { gateways }
+                            }
+                            _ => PrivateActionAfterDisconnect::Reconnect { gateways: None },
                         };
                         NextTunnelState::SameState(self)
                     },
