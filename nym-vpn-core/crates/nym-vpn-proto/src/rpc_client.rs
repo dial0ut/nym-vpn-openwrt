@@ -3,7 +3,8 @@
 
 use nym_vpn_lib_types::{
     AccountBalanceResponse, AccountCommandResponse, AccountControllerState, AvailableTickets,
-    DiagnosticReport, EntryPoint, ExitPoint, FeatureFlags, Gateway, GetDeeplinkParams,
+    DiagnosticReport, DnsUpstreamOwner, EntryPoint, ExitPoint, FeatureFlags, Gateway,
+    GetDeeplinkParams,
     HttpRpcSettings, ListGatewaysOptions, LogPath, LookupGatewayFilters, NetworkCompatibility,
     NetworkStatisticsIdentity, NymVpnDevice, NymVpnUsage, ParsedAccountLinks,
     PrivyDerivationMessage, RegistrationReport, Socks5Settings, Socks5Status, StoreAccountRequest,
@@ -322,6 +323,16 @@ impl RpcClient {
             .into_inner();
         let ip_vec = response.try_into().map_err(Error::InvalidResponse)?;
         Ok(ip_vec)
+    }
+
+    pub async fn get_dns_upstream_owner(&mut self) -> Result<DnsUpstreamOwner> {
+        let response = self
+            .0
+            .get_dns_upstream_owner(())
+            .await
+            .map_err(Error::Rpc)?
+            .into_inner();
+        Ok(DnsUpstreamOwner::from(response))
     }
 
     pub async fn connect_tunnel(&mut self) -> Result<bool> {

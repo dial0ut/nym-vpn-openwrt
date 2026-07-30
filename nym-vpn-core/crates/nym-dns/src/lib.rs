@@ -9,7 +9,7 @@ use nym_routing::RouteManagerHandle;
 #[path = "linux/mod.rs"]
 mod imp;
 
-pub use imp::will_use_nm;
+pub use imp::{UpstreamOwner, current_upstream_owner, will_use_nm};
 
 pub use self::imp::Error;
 

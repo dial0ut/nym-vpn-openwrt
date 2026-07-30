@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use anyhow::{Result, anyhow};
+use nym_vpn_lib_types::DnsUpstreamOwner;
 use nym_vpn_proto::rpc_client::RpcClient;
 use std::net::IpAddr;
 
@@ -45,6 +46,22 @@ impl Command {
                         .collect::<Vec<_>>()
                         .join(" ")
                 );
+                // The setting above is what was asked for; say so plainly when it
+                // isn't what the resolver is actually doing. A daemon too old to
+                // answer must not turn `dns get` into an error — stay quiet.
+                let owner = rpc_client
+                    .get_dns_upstream_owner()
+                    .await
+                    .unwrap_or(DnsUpstreamOwner::NotApplicable);
+                if owner == DnsUpstreamOwner::User {
+                    println!(
+                        "\nNOT APPLIED: dnsmasq has 'noresolv' set, so you manage upstream DNS.\n\
+                         The servers above are ignored; dnsmasq's own forwards (Network > DNS >\n\
+                         Forwards in LuCI, 'uci show dhcp' server= entries) are what resolve, and\n\
+                         they ride the tunnel while connected. Clear noresolv to let the VPN\n\
+                         supply DNS instead."
+                    );
+                }
                 Ok(())
             }
             Command::Enable => {

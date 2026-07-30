@@ -45,8 +45,9 @@ use nym_vpn_lib::{
 use nym_vpn_lib_types::{
     AccountBalanceResponse, AccountCommandError, AccountControllerState,
     DecentralisedObtainTicketbooksRequest, DeeplinkClient, DeeplinkKind, DiagnosticRegisterParams,
-    DiagnosticReport, DiagnosticRunParams, EnableSocks5Request, EntryPoint, ExitPoint,
-    FeatureFlags, Gateway, GetDeeplinkParams, ListGatewaysOptions, LogPath, LookupGatewayFilters,
+    DiagnosticReport, DiagnosticRunParams, DnsUpstreamOwner, EnableSocks5Request, EntryPoint,
+    ExitPoint, FeatureFlags, Gateway, GetDeeplinkParams, ListGatewaysOptions, LogPath,
+    LookupGatewayFilters,
     MixnetTrafficConfig, NetworkCompatibility, NetworkStatisticsIdentity, NymNetworkDetails,
     NymVpnDevice, NymVpnNetwork, NymVpnUsage, ParsedAccountLinks, RegistrationReport,
     StoreAccountRequest, SystemMessage, TargetState, TunnelEvent, TunnelState, VpnAccountSummary,
@@ -93,6 +94,7 @@ pub enum VpnServiceCommand {
     GetNetworkCompatibility(oneshot::Sender<Option<NetworkCompatibility>>, ()),
     GetFeatureFlags(oneshot::Sender<Option<FeatureFlags>>, ()),
     GetDefaultDns(oneshot::Sender<Vec<IpAddr>>, ()),
+    GetDnsUpstreamOwner(oneshot::Sender<DnsUpstreamOwner>, ()),
     ListGateways(
         oneshot::Sender<Result<Vec<Gateway>, ListGatewaysError>>,
         ListGatewaysOptions,
@@ -882,6 +884,10 @@ impl NymVpnService {
                 let result = self.handle_get_default_dns().await;
                 let _ = tx.send(result);
             }
+            VpnServiceCommand::GetDnsUpstreamOwner(tx, ()) => {
+                let result = self.handle_get_dns_upstream_owner().await;
+                let _ = tx.send(result);
+            }
             VpnServiceCommand::ListGateways(tx, options) => {
                 self.handle_list_gateways(options, tx).await;
             }
@@ -1222,6 +1228,10 @@ impl NymVpnService {
 
     async fn handle_get_default_dns(&self) -> Vec<IpAddr> {
         DEFAULT_DNS_SERVERS.clone()
+    }
+
+    async fn handle_get_dns_upstream_owner(&self) -> DnsUpstreamOwner {
+        nym_vpn_lib::dns_upstream_owner()
     }
 
     async fn handle_list_gateways(

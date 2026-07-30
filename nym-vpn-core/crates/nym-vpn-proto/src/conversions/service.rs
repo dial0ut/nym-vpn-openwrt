@@ -163,3 +163,66 @@ impl From<nym_vpn_lib_types::MixnetTrafficConfig> for proto::MixnetTrafficConfig
         }
     }
 }
+
+impl From<nym_vpn_lib_types::DnsUpstreamOwner> for proto::DnsUpstreamOwnerResponse {
+    fn from(value: nym_vpn_lib_types::DnsUpstreamOwner) -> Self {
+        use proto::dns_upstream_owner_response::Owner;
+        let owner = match value {
+            nym_vpn_lib_types::DnsUpstreamOwner::Vpn => Owner::Vpn,
+            nym_vpn_lib_types::DnsUpstreamOwner::User => Owner::User,
+            nym_vpn_lib_types::DnsUpstreamOwner::NotApplicable => Owner::NotApplicable,
+        };
+        proto::DnsUpstreamOwnerResponse {
+            owner: owner.into(),
+        }
+    }
+}
+
+impl From<proto::DnsUpstreamOwnerResponse> for nym_vpn_lib_types::DnsUpstreamOwner {
+    fn from(value: proto::DnsUpstreamOwnerResponse) -> Self {
+        use proto::dns_upstream_owner_response::Owner;
+        match Owner::try_from(value.owner) {
+            Ok(Owner::Vpn) => nym_vpn_lib_types::DnsUpstreamOwner::Vpn,
+            Ok(Owner::User) => nym_vpn_lib_types::DnsUpstreamOwner::User,
+            // An unspecified owner means a daemon too old to report this, or a
+            // host where the question is moot. Both are "nothing to warn about".
+            Ok(Owner::NotApplicable) | Ok(Owner::Unspecified) | Err(_) => {
+                nym_vpn_lib_types::DnsUpstreamOwner::NotApplicable
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dns_upstream_owner_round_trips() {
+        for owner in [
+            nym_vpn_lib_types::DnsUpstreamOwner::Vpn,
+            nym_vpn_lib_types::DnsUpstreamOwner::User,
+            nym_vpn_lib_types::DnsUpstreamOwner::NotApplicable,
+        ] {
+            let wire = proto::DnsUpstreamOwnerResponse::from(owner);
+            assert_eq!(nym_vpn_lib_types::DnsUpstreamOwner::from(wire), owner);
+        }
+    }
+
+    /// A daemon predating this field leaves the enum at its zero value. That
+    /// must read as "nothing to report", never as "your DNS is being ignored" —
+    /// a false warning on every older daemon would be worse than silence.
+    #[test]
+    fn unset_owner_reads_as_not_applicable() {
+        let unset = proto::DnsUpstreamOwnerResponse { owner: 0 };
+        assert_eq!(
+            nym_vpn_lib_types::DnsUpstreamOwner::from(unset),
+            nym_vpn_lib_types::DnsUpstreamOwner::NotApplicable
+        );
+        let garbage = proto::DnsUpstreamOwnerResponse { owner: 99 };
+        assert_eq!(
+            nym_vpn_lib_types::DnsUpstreamOwner::from(garbage),
+            nym_vpn_lib_types::DnsUpstreamOwner::NotApplicable
+        );
+    }
+}

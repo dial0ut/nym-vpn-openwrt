@@ -50,6 +50,42 @@ pub struct VpnServiceConfig {
     pub inbound_exemptions: Vec<InboundExemption>,
 }
 
+/// Whether the DNS servers in [`VpnServiceConfig`] actually reach the system
+/// resolver, or whether the daemon has deliberately stepped aside.
+///
+/// This is observed state, not configuration: `enable_custom_dns` says what the
+/// user asked for, this says whether it is in force. The two disagree whenever
+/// the router's dnsmasq has a committed `noresolv` (AdGuard Home,
+/// https-dns-proxy, stubby), because then the daemon leaves dnsmasq's upstreams
+/// alone and the user's own forwards do the resolving.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[cfg_attr(
+    feature = "typescript-bindings",
+    derive(TS),
+    ts(export),
+    ts(export_to = "bindings.ts")
+)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum DnsUpstreamOwner {
+    /// The daemon manages the resolver's upstreams; configured DNS is applied.
+    Vpn,
+    /// The user manages upstreams themselves; configured DNS is **not** applied.
+    /// Their own forwards resolve, riding the tunnel while connected.
+    User,
+    /// No daemon-managed resolver on this host, so the distinction is moot.
+    NotApplicable,
+}
+
+impl fmt::Display for DnsUpstreamOwner {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Vpn => f.write_str("vpn"),
+            Self::User => f.write_str("user"),
+            Self::NotApplicable => f.write_str("n/a"),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum InboundExemptionProtocol {

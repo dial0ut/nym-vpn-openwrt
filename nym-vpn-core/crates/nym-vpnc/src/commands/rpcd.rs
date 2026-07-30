@@ -28,10 +28,10 @@ use anyhow::Result;
 use serde_json::{Value, json};
 
 use nym_vpn_lib_types::{
-    AccountControllerErrorStateReason, AccountControllerState, DiagnosticRunParams, EntryPoint,
-    ErrorStateReason, ExitPoint, Gateway, GatewayType, InboundExemption, InboundExemptionProtocol,
-    ListGatewaysOptions, NodeIdentity, StoreAccountRequest, TunnelConnectionData, TunnelState,
-    VpnServiceConfig,
+    AccountControllerErrorStateReason, AccountControllerState, DiagnosticRunParams,
+    DnsUpstreamOwner, EntryPoint, ErrorStateReason, ExitPoint, Gateway, GatewayType,
+    InboundExemption, InboundExemptionProtocol, ListGatewaysOptions, NodeIdentity,
+    StoreAccountRequest, TunnelConnectionData, TunnelState, VpnServiceConfig,
 };
 use nym_vpn_proto::rpc_client::RpcClient;
 
@@ -1419,13 +1419,26 @@ fn dns_json(config: &VpnServiceConfig) -> Value {
     })
 }
 
+/// `dns_json` plus a `user_managed` flag telling the UI the configured servers
+/// are not in force, so it can stop presenting a setting the resolver ignores.
+/// The flag is omitted rather than set false when the daemon can't answer (one
+/// too old to have the call): no claim beats a wrong one. Nothing is logged on
+/// the error path on purpose — stdout is the ubus reply channel.
+async fn dns_json_with_owner(client: &mut RpcClient, config: &VpnServiceConfig) -> Value {
+    let mut out = dns_json(config);
+    if let (Some(obj), Ok(owner)) = (out.as_object_mut(), client.get_dns_upstream_owner().await) {
+        obj.insert("user_managed".into(), json!(owner == DnsUpstreamOwner::User));
+    }
+    out
+}
+
 async fn dns_get() -> Value {
     let mut client = match RpcClient::new().await {
         Ok(client) => client,
         Err(err) => return json!({ "enabled": false, "servers": "", "error": format!("{err:#}") }),
     };
     match client.get_config().await {
-        Ok(config) => dns_json(&config),
+        Ok(config) => dns_json_with_owner(&mut client, &config).await,
         Err(err) => json!({ "enabled": false, "servers": "", "error": format!("{err:#}") }),
     }
 }
@@ -2270,7 +2283,7 @@ async fn init_batch() -> Value {
                         "ad_block".into(),
                         json!({ "enabled": config.enable_ad_blocking }),
                     );
-                    out.insert("dns".into(), dns_json(&config));
+                    out.insert("dns".into(), dns_json_with_owner(&mut client, &config).await);
                 }
                 Err(err) => insert_degraded_config_members(&mut out, format!("{err:#}")),
             }

@@ -108,6 +108,19 @@ message IpAddrList {
   repeated IpAddr ips = 1;
 }
 
+// Who owns the system resolver's upstreams. Observed state, not configuration:
+// USER means the daemon deliberately left a user-managed resolver alone
+// (dnsmasq `noresolv`), so the configured DNS servers are NOT applied.
+message DnsUpstreamOwnerResponse {
+  enum Owner {
+    OWNER_UNSPECIFIED = 0;
+    OWNER_VPN = 1;
+    OWNER_USER = 2;
+    OWNER_NOT_APPLICABLE = 3;
+  }
+  Owner owner = 1;
+}
+
 message ApiUrl {
   string url = 1;
   repeated string front_hosts = 2;
@@ -1001,6 +1014,10 @@ service NymVpnService {
 
   // Get the default DNS used by the daemon
   rpc GetDefaultDns (google.protobuf.Empty) returns (IpAddrList) {}
+
+  // Get whether the daemon's configured DNS servers actually reach the system
+  // resolver, or whether it has stepped aside for a user-managed resolver.
+  rpc GetDnsUpstreamOwner (google.protobuf.Empty) returns (DnsUpstreamOwnerResponse) {}
 
   // Connect the tunnel
   rpc ConnectTunnel (google.protobuf.Empty) returns (google.protobuf.BoolValue) {}

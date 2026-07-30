@@ -293,6 +293,45 @@ enum Scheme {
     UserManaged,
 }
 
+/// Who owns dnsmasq's upstream resolvers right now — i.e. whether the DNS
+/// servers configured in nym-vpnd actually reach the system resolver.
+///
+/// Reported to callers so the UI can stop claiming a custom-DNS setting is in
+/// effect when [`UpstreamOwner::User`] means we deliberately stepped aside.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpstreamOwner {
+    /// We manage dnsmasq's upstreams via the managed resolv file; the
+    /// configured DNS servers are applied while connected.
+    Vpn,
+    /// The user manages upstreams (committed `noresolv`): the configured DNS
+    /// servers are **not** applied, and dnsmasq's own `server=` forwards are
+    /// what resolve — riding the tunnel while connected.
+    User,
+    /// No dnsmasq under UCI on this host, so the question doesn't apply.
+    NotApplicable,
+}
+
+/// Read-only view of who owns the upstreams. Deliberately not routed through
+/// the actor and deliberately not cached off `Scheme`: this re-reads the
+/// effective `noresolv` so a user who has just edited their dhcp config sees
+/// the truth rather than whatever converge last settled on. Being read-only,
+/// it must never converge, stage uci, or restart anything.
+fn upstream_owner<S: Sys>(sys: &S) -> UpstreamOwner {
+    match sys.dnsmasq_section() {
+        None => UpstreamOwner::NotApplicable,
+        Some(section) if sys.effective_noresolv(&section) => UpstreamOwner::User,
+        Some(_) => UpstreamOwner::Vpn,
+    }
+}
+
+/// Who currently owns dnsmasq's upstream resolvers on this host.
+pub fn current_upstream_owner() -> UpstreamOwner {
+    if !Path::new(OPENWRT_RELEASE).exists() {
+        return UpstreamOwner::NotApplicable;
+    }
+    upstream_owner(&RealSys)
+}
+
 /// Idempotently converge system state onto the managed-resolv-file scheme.
 /// Safe to run on every daemon start: it only restarts dnsmasq when the
 /// running instance's generated config does not already point at the managed
@@ -1018,6 +1057,7 @@ mod actor_tests {
 
 #[cfg(test)]
 mod tests {
+    use super::converge_tests::FakeSys;
     use super::prefer_ipv4_upstreams;
     use std::net::IpAddr;
 
@@ -1085,5 +1125,56 @@ mod tests {
         assert_eq!(super::extract_instance_pid(json, "cfg01411c"), Some(2994));
         assert_eq!(super::extract_instance_pid(json, "cfg99"), None);
         assert_eq!(super::extract_instance_pid("not json", "cfg01411c"), None);
+    }
+
+    #[test]
+    fn reports_user_ownership_under_noresolv() {
+        let sys = FakeSys {
+            section: Some("cfg01411c".into()),
+            noresolv: true,
+            ..Default::default()
+        };
+        assert_eq!(super::upstream_owner(&sys), super::UpstreamOwner::User);
+    }
+
+    #[test]
+    fn reports_vpn_ownership_without_noresolv() {
+        let sys = FakeSys {
+            section: Some("cfg01411c".into()),
+            noresolv: false,
+            ..Default::default()
+        };
+        assert_eq!(super::upstream_owner(&sys), super::UpstreamOwner::Vpn);
+    }
+
+    #[test]
+    fn reports_not_applicable_without_dnsmasq() {
+        let sys = FakeSys {
+            section: None,
+            noresolv: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            super::upstream_owner(&sys),
+            super::UpstreamOwner::NotApplicable
+        );
+    }
+
+    /// The query is a status read on a live system; converging or restarting
+    /// dnsmasq from a `dns get` would be a nasty surprise.
+    #[test]
+    fn ownership_query_never_mutates_system_state() {
+        let sys = FakeSys {
+            section: Some("cfg01411c".into()),
+            noresolv: true,
+            ..Default::default()
+        };
+        super::upstream_owner(&sys);
+        let calls = sys.calls.lock().unwrap().clone();
+        assert_eq!(
+            calls,
+            vec!["get noresolv".to_string()],
+            "status query must only read noresolv: {calls:?}"
+        );
     }
 }

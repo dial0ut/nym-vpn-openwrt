@@ -457,6 +457,16 @@ impl NymVpnService for CommandInterface {
         Ok(tonic::Response::new(ipaddr_list))
     }
 
+    async fn get_dns_upstream_owner(
+        &self,
+        _request: tonic::Request<()>,
+    ) -> Result<tonic::Response<proto::DnsUpstreamOwnerResponse>> {
+        let owner = self
+            .send_and_wait(VpnServiceCommand::GetDnsUpstreamOwner, ())
+            .await?;
+        Ok(tonic::Response::new(owner.into()))
+    }
+
     async fn connect_tunnel(&self, _request: tonic::Request<()>) -> Result<tonic::Response<bool>> {
         let accepted = self
             .send_and_wait(VpnServiceCommand::SetTargetState, TargetState::Secured)

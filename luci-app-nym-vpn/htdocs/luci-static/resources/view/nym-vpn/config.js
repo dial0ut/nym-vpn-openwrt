@@ -2091,6 +2091,25 @@ return view.extend({
         // DNS & Ad Blocking Card
         var adBlockEnabled = ad_block.enabled ? true : false;
         var dnsEnabled = dns_config.enabled ? true : false;
+
+        // The daemon steps aside when dnsmasq has noresolv set (AdGuard Home,
+        // https-dns-proxy, stubby), so the servers below are configured but not
+        // in force. Say so rather than letting the card imply otherwise.
+        var dnsUserManagedNotice = dns_config.user_managed
+            ? E('div', { 'class': 'nym-card-description', 'style': 'color: #e67e22' }, [
+                E('strong', {}, 'Not in effect: '),
+                'dnsmasq has ',
+                E('code', {}, 'noresolv'),
+                ' set, so you manage upstream DNS. The servers below are ignored — ',
+                'your own entries under Network → DNS → Forwards do the resolving, ',
+                'and they ride the VPN tunnel while connected. Clear ',
+                E('code', {}, 'noresolv'),
+                ' if you want the VPN to supply DNS instead.'
+            ])
+            // null (not '') — LuCI's dom.append skips null children outright
+            // rather than inserting an empty text node.
+            : null;
+
         var dnsCard = E('div', { 'class': 'nym-card' }, [
             E('div', { 'class': 'nym-card-header', 'click': function() { toggleCard(dnsCard); } }, [
                 E('div', { 'class': 'nym-card-title' }, [
@@ -2102,6 +2121,7 @@ return view.extend({
             E('div', { 'class': 'nym-card-body' }, [
                 E('div', { 'class': 'nym-card-description' },
                     'Configure custom DNS servers and block ads at the DNS level.'),
+                dnsUserManagedNotice,
 
                 // Custom DNS toggle
                 E('div', { 'class': 'nym-toggle-row' }, [

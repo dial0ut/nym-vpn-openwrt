@@ -15,6 +15,7 @@ use std::{net::IpAddr, sync::LazyLock};
 
 use hickory_resolver::config::NameServerConfigGroup;
 use itertools::Itertools;
+use nym_vpn_lib_types::DnsUpstreamOwner;
 
 // Re-export some our nym dependencies
 pub use nym_config;
@@ -56,6 +57,17 @@ pub static DEFAULT_DNS_SERVERS: LazyLock<Vec<IpAddr>> = LazyLock::new(|| {
         .unique()
         .collect()
 });
+
+/// Who currently owns the system resolver's upstreams, i.e. whether the
+/// configured DNS servers are actually applied or the daemon has stepped aside
+/// for a user-managed resolver. See [`DnsUpstreamOwner`].
+pub fn dns_upstream_owner() -> DnsUpstreamOwner {
+    match nym_dns::current_upstream_owner() {
+        nym_dns::UpstreamOwner::Vpn => DnsUpstreamOwner::Vpn,
+        nym_dns::UpstreamOwner::User => DnsUpstreamOwner::User,
+        nym_dns::UpstreamOwner::NotApplicable => DnsUpstreamOwner::NotApplicable,
+    }
+}
 
 /// Routing table id used for routing all traffic through the tunnel.
 pub const TUNNEL_TABLE_ID: u32 = 0x14d;

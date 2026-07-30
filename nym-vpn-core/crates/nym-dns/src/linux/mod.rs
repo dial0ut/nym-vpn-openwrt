@@ -195,3 +195,5 @@ impl DnsMonitorHolder {
 pub fn will_use_nm() -> bool {
     crate::imp::SystemdResolved::new().is_err() && crate::imp::NetworkManager::new().is_ok()
 }
+
+pub use dnsmasq::{UpstreamOwner, current_upstream_owner};

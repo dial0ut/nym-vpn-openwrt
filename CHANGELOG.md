@@ -11,6 +11,18 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+### Changed
+
+- The DNS settings now tell you when they aren't in effect. If dnsmasq is set to
+  ignore its resolv file — the "Ignore resolv file" box under Network → DHCP and
+  DNS → Resolv & Hosts Files, which AdGuard Home, https-dns-proxy and stubby all
+  tick when installed — the daemon deliberately leaves your upstream DNS alone,
+  so the servers configured here are ignored and your own entries under the
+  Forwards tab are what resolve (riding the tunnel while connected). That was
+  already the behaviour, but nothing said so: `nym-vpnc dns get` and the web UI
+  both reported the setting as active. Both now state plainly that it is not
+  applied, and why.
+
 ### Fixed
 
 - Changing a setting while connected no longer moves you to a different
