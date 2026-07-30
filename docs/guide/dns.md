@@ -25,7 +25,7 @@ Default DNS: 9.9.9.9 149.112.112.112 2620:fe::fe 2620:fe::fe:9
 
 IPv6 servers are dropped when IPv6 is disabled. Set your own with `nym-vpnc dns set <ip>...` or in the web UI.
 
-Whichever servers are used, the queries travel through the tunnel, so the resolver sees the exit gateway rather than your ISP connection — unless you have split tunnelling enabled, which changes this. See [Caveats](#caveats).
+Whichever servers are used, the queries travel through the tunnel, so the resolver sees the exit gateway rather than your ISP connection. That holds in the default split-tunnelling mode too, including for excluded devices — see [Caveats](#caveats). It does **not** hold under legacy (inclusive/PBR) split tunnelling.
 
 ## These queries are not encrypted
 
@@ -68,13 +68,20 @@ This is intended. Your encrypted resolver is a better arrangement than the plain
 (nothing)
 ```
 
-So your encrypted resolver sees the exit gateway, not your ISP connection — the same privacy property as NymVPN's own DNS, with encryption added. Split tunnelling changes this, as above.
+So your encrypted resolver sees the exit gateway, not your ISP connection — the same privacy property as NymVPN's own DNS, with encryption added. This holds in the default split-tunnelling mode; legacy split tunnelling changes it, as below.
 
 Ad-blocking is unaffected either way. It works through separate dnsmasq directives rather than upstream servers.
 
 ## Caveats
 
-**With split tunnelling enabled, DNS is not tunnelled and is not private.** Legacy split tunnelling deliberately withholds the default route into the tunnel, so only traffic your PBR rules select goes in — and DNS is not selected unless you add a rule for it. Measured on a connected router with split tunnelling on:
+**In the default (exclusion) split-tunnelling mode, DNS is tunnelled — including for excluded devices.** An excluded device's lookup goes to the router, and the router's own upstream query follows the default route into the tunnel. Two consequences worth knowing:
+
+- Answers are chosen from the exit gateway's vantage point, while the excluded device then connects from your real address. For services on unicast geo-DNS — Netflix, Akamai, non-anycast Fastly — that can mean a distant or wrong-region CDN even though the device itself bypasses the VPN. Anything behind Cloudflare or Google anycast is unaffected.
+- Excluding a device does not stop its hostnames being resolved through the tunnel. If your reason for excluding it was to keep it away from the VPN entirely, DNS is the part that doesn't follow.
+
+Local `.lan` names and ad-blocking keep working for excluded devices, because dnsmasq answers those itself without an upstream query.
+
+**With legacy (inclusive/PBR) split tunnelling, DNS is not tunnelled and is not private.** That mode deliberately withholds the default route into the tunnel, so only traffic your PBR rules select goes in — and DNS is not selected unless you add a rule for it. Measured on a connected router with legacy split tunnelling on:
 
 ```
 # ip route get 1.1.1.1
@@ -84,9 +91,11 @@ Ad-blocking is unaffected either way. It works through separate dnsmasq directiv
 192.168.1.135.37432 > 1.1.1.1.53: A? example.org.    ← cleartext, real WAN IP
 ```
 
-With split tunnelling off the same lookup goes out the tunnel interface from the tunnel address, and nothing appears on the WAN. If you use split tunnelling and want DNS covered, add a PBR rule for it or run an encrypted resolver so at least the query contents are protected.
+With legacy split tunnelling off the same lookup goes out the tunnel interface from the tunnel address, and nothing appears on the WAN.
 
-**While disconnected with the kill-switch armed**, the kill-switch allows DNS to the daemon's own DNS server addresses — on port 53, and also on 853 (DoT) and 443 (DoH) — so that it can still resolve enough to reconnect. Everything else is dropped.
+Covering DNS in this mode is not simply a matter of adding a PBR rule for port 53: the tunnel routing table has no default route in legacy mode — that is the whole point of it — so a rule pointing at that table resolves to nothing and falls through to the WAN. A routing fix has to add a route to the tunnel device as well. The two approaches that work today are to give the PBR-selected clients their own resolver by DHCP (option 6), so their queries carry their own source address and your existing PBR rules route them in with the rest of their traffic; or to run an encrypted resolver so that at least the query contents are protected even though they leave via the WAN.
+
+**While disconnected with the kill-switch armed**, the kill-switch allows the router's own lookups to the daemon's DNS server addresses — on port 53, and also on 853 (DoT) and 443 (DoH) — so that it can still resolve enough to reconnect. Everything else is dropped, and LAN clients are not forwarded to those addresses.
 
 The practical consequence for a local proxy is that it keeps working while disconnected **if and only if** its upstream is one of those addresses. Pointed at Cloudflare or Quad9 — the defaults, and the most common DoT choices — resolution continues. Pointed anywhere else it stops dead; measured with stubby aimed at `8.8.8.8`, not one SYN reached the wire. Either way the proxy recovers by itself when the tunnel comes back, with no restart needed.
 

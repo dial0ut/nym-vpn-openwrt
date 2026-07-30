@@ -48,6 +48,42 @@ Under the hood this just writes the same `0x14e` mark rules described below into
 drop-in (`/etc/nftables.d/30-nym-split.nft`) plus dnsmasq `nftset` lines, then reloads. The rest
 of this page documents that mechanism for advanced/manual setups and for `pbr` users.
 
+### An excluded device's DNS still goes through the tunnel
+
+Exclusions cover a device's own packets. They do not cover its name lookups, because those
+never become traffic we can mark: the query goes *to* the router, dnsmasq answers or forwards
+it, and dnsmasq's own upstream query is router traffic that follows the default route into the
+tunnel. dnsmasq has no way to pick a different upstream per client, so every client shares one
+DNS path regardless of its exclusion.
+
+What that means in practice:
+
+- **Local `.lan` names and ad-blocking keep working** for excluded devices. dnsmasq answers
+  those itself, with no upstream query involved.
+- **Answers are chosen from the exit gateway's location**, while the device then connects from
+  your real address. For services on unicast geo-DNS — Netflix, Akamai, non-anycast Fastly —
+  an excluded streaming box can still be steered to a distant or wrong-region CDN. Anything
+  behind Cloudflare or Google anycast is unaffected.
+- **Excluding a device does not keep its hostnames off the VPN.** If that was the point of
+  excluding it, DNS is the part that doesn't follow.
+
+This is a deliberate trade: routing an excluded device's DNS out the WAN instead would fix the
+geolocation problem but cost that device local names and ad-blocking. See
+[DNS](dns.md) for the full picture.
+
+### Domain rules apply to every client
+
+A domain exclusion is destination-IP based, not per-device: the router resolves the name and
+puts the answer addresses into an nftables set that carves out traffic to those addresses from
+**all** clients, not just one. For a domain behind a large shared front-end (Cloudflare, Fastly,
+Akamai shared IPs) that can pull far more out of the tunnel than you intended, since those same
+addresses serve many unrelated sites.
+
+Domain rules also depend on dnsmasq being the resolver that actually sees the query. A client
+using its own DoH — a browser with secure DNS enabled — never asks dnsmasq, so the rule silently
+does not apply to it. The same is true if another resolver (AdGuard Home, for instance) sits in
+front of dnsmasq on port 53.
+
 ## How it works
 
 When connected, the daemon installs:
@@ -149,6 +185,13 @@ opkg update && opkg install pbr luci-app-pbr
 ```
 
 ## Legacy split tunneling (inclusive / PBR)
+
+!!! warning "DNS is not tunnelled in this mode"
+    Because the default route into the tunnel is withheld, the router's DNS lookups leave via
+    the WAN in cleartext from your real address — so your ISP sees every hostname your
+    PBR-selected clients visit, even though their traffic is tunnelled. The kill-switch is
+    forced off in this mode, so nothing catches it either. See [DNS](dns.md#caveats) for the
+    measurement and the two ways to address it.
 
 Everything above is **exclusion**-based: all traffic is tunnelled and you carve specific
 flows back out. Some setups want the opposite — **inclusive** routing, where *nothing* is
