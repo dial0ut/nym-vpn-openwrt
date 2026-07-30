@@ -143,9 +143,19 @@ pub fn compile(policy: &FirewallPolicy) -> RuleSet {
             for ep in allowed_endpoints {
                 allow_endpoint(&mut rs, ep);
             }
+            // Router-only: these are the daemon's own resolvers, which are
+            // typically public. A forward accept would let a LAN client with
+            // hardcoded DNS query them out the WAN while everything else is
+            // blocked — it learns addresses it cannot then connect to, so the
+            // leak buys nothing. Reconnecting only needs the router's own
+            // lookups, which are output/input.
             for dns in dns_servers {
-                allow_dns_server(&mut rs, *dns, None);
+                allow_dns_server_router_only(&mut rs, *dns);
             }
+            // Must precede block_dns: an excluded client with hardcoded DNS
+            // (Chromecasts, consoles) forwards port 53, and the reject is
+            // terminal. Carve-outs are meant to survive exactly this state.
+            bypass_mark_forward_accept(&mut rs);
             // DNS hatch must precede block_dns so the NTP-pool lookup the NTP
             // hatch depends on isn't rejected.
             dns_escape_hatch(&mut rs);
@@ -154,9 +164,6 @@ pub fn compile(policy: &FirewallPolicy) -> RuleSet {
             if *allow_lan {
                 allow_lan_traffic(&mut rs);
             }
-            // Keep split-tunnel carve-outs alive while disconnected/reconnecting:
-            // marked traffic egresses the WAN, everything else stays blocked.
-            bypass_mark_forward_accept(&mut rs);
         }
     }
 
@@ -369,9 +376,26 @@ fn allow_endpoint(rs: &mut RuleSet, ep: &AllowedEndpoint) {
     );
 }
 
+/// Allow the **router's own** lookups to a server, with no forward accept, so
+/// LAN clients cannot use it. For the `Blocked` state, where the servers are the
+/// daemon's own (public) resolvers and only the daemon needs to resolve.
+fn allow_dns_server_router_only(rs: &mut RuleSet, dns: IpAddr) {
+    allow_dns_server_inner(rs, dns, None, false);
+}
+
 /// Allow DNS to a specific server. If `iface` is set, restrict to that
-/// interface (used for tunnel-configured resolvers).
+/// interface (used for tunnel-configured resolvers). LAN clients are permitted
+/// to reach it too when not iface-restricted.
 fn allow_dns_server(rs: &mut RuleSet, dns: IpAddr, iface: Option<&str>) {
+    allow_dns_server_inner(rs, dns, iface, true);
+}
+
+fn allow_dns_server_inner(
+    rs: &mut RuleSet,
+    dns: IpAddr,
+    iface: Option<&str>,
+    allow_forward: bool,
+) {
     let family = family_of(&dns);
 
     // Standard DNS (UDP and TCP on 53), DoT (853/tcp), DoH (443/tcp).
@@ -399,7 +423,7 @@ fn allow_dns_server(rs: &mut RuleSet, dns: IpAddr, iface: Option<&str>) {
     }
 
     // Forward DNS for LAN clients (only when not iface-restricted).
-    if iface.is_none() {
+    if allow_forward && iface.is_none() {
         for proto in [Proto::Udp, Proto::Tcp] {
             rs.filter.forward.push(
                 Rule::accept(family)
@@ -852,7 +876,53 @@ mod tests {
                 pos.unwrap() < rs.filter.forward.rules.len() - 1,
                 "{name}: bypass-mark accept must precede the final reject"
             );
+            // Preceding the *final* reject is not enough: block_dns pushes its
+            // own terminal port-53 rejects into FORWARD, and an excluded client
+            // with hardcoded DNS is forwarded traffic. If those land first the
+            // carve-out silently loses DNS in that state — which is exactly what
+            // used to happen in Blocked.
+            if let Some(dns_reject) = rs.filter.forward.rules.iter().position(|r| {
+                r.verdict == Verdict::Reject && r.matches.dport == Some(DNS_PORT)
+            }) {
+                assert!(
+                    pos.unwrap() < dns_reject,
+                    "{name}: bypass-mark accept must precede the port-53 reject, \
+                     else excluded clients with hardcoded DNS lose resolution"
+                );
+            }
         }
+    }
+
+    /// In Blocked the DNS accepts exist so the *daemon* can resolve enough to
+    /// reconnect, and that only needs output/input. A forward accept would let a
+    /// LAN client with hardcoded DNS query those public resolvers out the WAN
+    /// while every other destination is blocked — leaking what it is looking up
+    /// in exchange for addresses it cannot reach.
+    #[test]
+    fn blocked_dns_hatch_is_router_only_not_forwarded() {
+        let policy = FirewallPolicy::Blocked {
+            allow_lan: true,
+            allowed_endpoints: vec![],
+            dns_servers: vec!["1.1.1.1".parse().unwrap()],
+        };
+        let rs = compile(&policy);
+
+        assert!(
+            rs.filter
+                .output
+                .rules
+                .iter()
+                .any(|r| r.verdict == Verdict::Accept && r.matches.dport == Some(DNS_PORT)),
+            "the daemon's own lookups must still be allowed in OUTPUT"
+        );
+        assert!(
+            !rs.filter
+                .forward
+                .rules
+                .iter()
+                .any(|r| r.verdict == Verdict::Accept && r.matches.dport == Some(DNS_PORT)),
+            "LAN clients must not be forwarded to the daemon's resolvers while blocked"
+        );
     }
 
     #[test]
