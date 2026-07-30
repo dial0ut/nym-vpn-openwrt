@@ -25,7 +25,7 @@ Default DNS: 9.9.9.9 149.112.112.112 2620:fe::fe 2620:fe::fe:9
 
 IPv6 servers are dropped when IPv6 is disabled. Set your own with `nym-vpnc dns set <ip>...` or in the web UI.
 
-Whichever servers are used, the queries travel through the tunnel, so the resolver sees the exit gateway rather than your ISP connection.
+Whichever servers are used, the queries travel through the tunnel, so the resolver sees the exit gateway rather than your ISP connection — unless you have split tunnelling enabled, which changes this. See [Caveats](#caveats).
 
 ## These queries are not encrypted
 
@@ -59,15 +59,38 @@ Install and configure these per their own documentation — `https-dns-proxy` in
 
 This is intended. Your encrypted resolver is a better arrangement than the plaintext one NymVPN can offer, so it would be wrong to override it. Nothing needs fixing.
 
-**The encrypted queries still go through the tunnel.** The proxy's outbound DoT or DoH connections follow the same routing as any other traffic from the router, and the kill-switch permits anything leaving via the tunnel interface. So your encrypted resolver sees the exit gateway, not your ISP connection — the same privacy property as NymVPN's own DNS, with encryption added.
+**The encrypted queries still go through the tunnel.** The proxy's outbound DoT or DoH connections follow the same routing as any other traffic from the router, and the kill-switch permits anything leaving via the tunnel interface. Verified with stubby: the DoT connections appear on the tunnel interface sourced from the tunnel address, with nothing on the WAN.
+
+```
+# tcpdump -i nym1 'tcp port 853'
+10.1.184.141.54372 > 1.0.0.1.853: Flags [S] ...    ← tunnel address
+# tcpdump -i eth0 'tcp port 853'
+(nothing)
+```
+
+So your encrypted resolver sees the exit gateway, not your ISP connection — the same privacy property as NymVPN's own DNS, with encryption added. Split tunnelling changes this, as above.
 
 Ad-blocking is unaffected either way. It works through separate dnsmasq directives rather than upstream servers.
 
 ## Caveats
 
-**With split tunnelling enabled**, the default route into the tunnel is deliberately withheld, so DNS follows whatever policy routing you have configured rather than automatically using the tunnel. Check your PBR rules if you expect DNS to be tunnelled.
+**With split tunnelling enabled, DNS is not tunnelled and is not private.** Legacy split tunnelling deliberately withholds the default route into the tunnel, so only traffic your PBR rules select goes in — and DNS is not selected unless you add a rule for it. Measured on a connected router with split tunnelling on:
 
-**While disconnected with the kill-switch armed**, outbound traffic that isn't explicitly allowed is blocked — which includes a local proxy's encrypted upstream connections. That is correct no-leak behaviour, but it means name resolution stops until you connect. Whether a given proxy recovers cleanly on reconnect, and whether a DoH proxy can bootstrap its upstream hostname in that state, depends on the proxy and is not something NymVPN controls.
+```
+# ip route get 1.1.1.1
+1.1.1.1 via 192.168.1.1 dev eth0 src 192.168.1.135   ← the WAN, not the tunnel
+
+# tcpdump -i eth0 'udp port 53'
+192.168.1.135.37432 > 1.1.1.1.53: A? example.org.    ← cleartext, real WAN IP
+```
+
+With split tunnelling off the same lookup goes out the tunnel interface from the tunnel address, and nothing appears on the WAN. If you use split tunnelling and want DNS covered, add a PBR rule for it or run an encrypted resolver so at least the query contents are protected.
+
+**While disconnected with the kill-switch armed**, the kill-switch allows DNS to the daemon's own DNS server addresses — on port 53, and also on 853 (DoT) and 443 (DoH) — so that it can still resolve enough to reconnect. Everything else is dropped.
+
+The practical consequence for a local proxy is that it keeps working while disconnected **if and only if** its upstream is one of those addresses. Pointed at Cloudflare or Quad9 — the defaults, and the most common DoT choices — resolution continues. Pointed anywhere else it stops dead; measured with stubby aimed at `8.8.8.8`, not one SYN reached the wire. Either way the proxy recovers by itself when the tunnel comes back, with no restart needed.
+
+A proxy configured by IP, as DoT usually is, needs no bootstrap resolution. A DoH proxy given a hostname does, and whether it can obtain it in the armed-and-disconnected state depends on that proxy's bootstrap settings — untested here.
 
 **Do not point NymVPN's custom DNS at `127.0.0.1`.** The setting takes bare IP addresses with no port, so it would send dnsmasq's queries to port 53 on the router — itself. dnsmasq's loop detection will refuse. Local proxies listen on other ports and are configured through the forwards list, not here.
 
