@@ -11,6 +11,8 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+## [1.33.1] - 2026-08-01
+
 ### Changed
 
 - The DNS settings now tell you when they aren't in effect. If dnsmasq is set to
