@@ -79,7 +79,8 @@ impl VpnServiceConfigManager {
 
         // If we didn't read the latest version then write the config straight back to file
         if version != Some(VpnServiceConfigVersion::latest()) {
-            config_manager.write_to_file().await;
+            // Failure is already logged; at startup there is no client to report to
+            let _ = config_manager.write_to_file().await;
         }
 
         // If the deprecated TOML file exists then remove it
@@ -104,101 +105,136 @@ impl VpnServiceConfigManager {
     pub async fn set_config(&mut self, config: nym_vpn_lib_types::VpnServiceConfig) {
         if self.config != config {
             self.config = config;
-            self.save_config_and_send_event().await;
+            let _ = self.save_config_and_send_event().await;
         }
     }
 
-    pub async fn set_entry_point(&mut self, entry_point: nym_vpn_lib_types::EntryPoint) {
+    pub async fn set_entry_point(
+        &mut self,
+        entry_point: nym_vpn_lib_types::EntryPoint,
+    ) -> Result<(), String> {
         if self.config.entry_point != entry_point {
             self.config.entry_point = entry_point;
-            self.save_config_and_send_event().await;
+            self.save_config_and_send_event().await
+        } else {
+            Ok(())
         }
     }
 
-    pub async fn set_exit_point(&mut self, exit_point: nym_vpn_lib_types::ExitPoint) {
+    pub async fn set_exit_point(
+        &mut self,
+        exit_point: nym_vpn_lib_types::ExitPoint,
+    ) -> Result<(), String> {
         if self.config.exit_point != exit_point {
             self.config.exit_point = exit_point;
-            self.save_config_and_send_event().await;
+            self.save_config_and_send_event().await
+        } else {
+            Ok(())
         }
     }
 
-    pub async fn set_disable_ipv6(&mut self, disable_ipv6: bool) {
+    pub async fn set_disable_ipv6(&mut self, disable_ipv6: bool) -> Result<(), String> {
         if self.config.disable_ipv6 != disable_ipv6 {
             self.config.disable_ipv6 = disable_ipv6;
-            self.save_config_and_send_event().await;
+            self.save_config_and_send_event().await
+        } else {
+            Ok(())
         }
     }
 
-    pub async fn set_enable_two_hop(&mut self, enable_two_hop: bool) {
+    pub async fn set_enable_two_hop(&mut self, enable_two_hop: bool) -> Result<(), String> {
         if self.config.enable_two_hop != enable_two_hop {
             self.config.enable_two_hop = enable_two_hop;
-            self.save_config_and_send_event().await;
+            self.save_config_and_send_event().await
+        } else {
+            Ok(())
         }
     }
 
-    pub async fn set_enable_lewes_protocol(&mut self, enable_lewes_protocol: bool) {
+    pub async fn set_enable_lewes_protocol(
+        &mut self,
+        enable_lewes_protocol: bool,
+    ) -> Result<(), String> {
         if self.config.enable_lewes_protocol != enable_lewes_protocol {
             self.config.enable_lewes_protocol = enable_lewes_protocol;
-            self.save_config_and_send_event().await;
+            self.save_config_and_send_event().await
+        } else {
+            Ok(())
         }
     }
 
-    pub async fn set_netstack(&mut self, netstack: bool) {
+    pub async fn set_netstack(&mut self, netstack: bool) -> Result<(), String> {
         if self.config.netstack != netstack {
             self.config.netstack = netstack;
-            self.save_config_and_send_event().await;
+            self.save_config_and_send_event().await
+        } else {
+            Ok(())
         }
     }
 
-    pub async fn set_allow_lan(&mut self, allow_lan: bool) {
+    pub async fn set_allow_lan(&mut self, allow_lan: bool) -> Result<(), String> {
         if self.config.allow_lan != allow_lan {
             self.config.allow_lan = allow_lan;
-            self.save_config_and_send_event().await;
+            self.save_config_and_send_event().await
+        } else {
+            Ok(())
         }
     }
 
-    pub async fn set_enable_bridges(&mut self, enable_bridges: bool) {
+    pub async fn set_enable_bridges(&mut self, enable_bridges: bool) -> Result<(), String> {
         if self.config.enable_bridges != enable_bridges {
             self.config.enable_bridges = enable_bridges;
-            self.save_config_and_send_event().await;
+            self.save_config_and_send_event().await
+        } else {
+            Ok(())
         }
     }
 
-    pub async fn set_residential_exit(&mut self, residential_only: bool) {
+    pub async fn set_residential_exit(&mut self, residential_only: bool) -> Result<(), String> {
         if self.config.residential_exit != residential_only {
             self.config.residential_exit = residential_only;
-            self.save_config_and_send_event().await;
+            self.save_config_and_send_event().await
+        } else {
+            Ok(())
         }
     }
 
-    pub async fn set_enable_ad_blocking(&mut self, enable_ad_blocking: bool) {
+    pub async fn set_enable_ad_blocking(&mut self, enable_ad_blocking: bool) -> Result<(), String> {
         if self.config.enable_ad_blocking != enable_ad_blocking {
             self.config.enable_ad_blocking = enable_ad_blocking;
-            self.save_config_and_send_event().await;
+            self.save_config_and_send_event().await
+        } else {
+            Ok(())
         }
     }
 
-    pub async fn set_killswitch(&mut self, killswitch: bool) {
+    pub async fn set_killswitch(&mut self, killswitch: bool) -> Result<(), String> {
         if self.config.killswitch != killswitch {
             self.config.killswitch = killswitch;
-            self.save_config_and_send_event().await;
+            self.save_config_and_send_event().await
+        } else {
+            Ok(())
         }
     }
 
-    pub async fn set_legacy_split_tunnel(&mut self, legacy_split_tunnel: bool) {
+    pub async fn set_legacy_split_tunnel(&mut self, legacy_split_tunnel: bool) -> Result<(), String> {
         if self.config.legacy_split_tunnel != legacy_split_tunnel {
             self.config.legacy_split_tunnel = legacy_split_tunnel;
-            self.save_config_and_send_event().await;
+            self.save_config_and_send_event().await
+        } else {
+            Ok(())
         }
     }
 
     pub async fn set_inbound_exemptions(
         &mut self,
         exemptions: Vec<nym_vpn_lib_types::InboundExemption>,
-    ) {
+    ) -> Result<(), String> {
         if self.config.inbound_exemptions != exemptions {
             self.config.inbound_exemptions = exemptions;
-            self.save_config_and_send_event().await;
+            self.save_config_and_send_event().await
+        } else {
+            Ok(())
         }
     }
 
@@ -208,27 +244,27 @@ impl VpnServiceConfigManager {
 
     /// Enable or disable custom DNS servers
     ///
-    /// Returns true if the setting has changed, otherwise false if it's the same
-    pub async fn set_enable_custom_dns(&mut self, enable_custom_dns: bool) -> bool {
+    /// Returns true if the setting has changed, otherwise false if it's the same.
+    /// An error means the setting changed in memory but could not be persisted.
+    pub async fn set_enable_custom_dns(&mut self, enable_custom_dns: bool) -> Result<bool, String> {
         if self.config.enable_custom_dns == enable_custom_dns {
-            false
+            Ok(false)
         } else {
             self.config.enable_custom_dns = enable_custom_dns;
-            self.save_config_and_send_event().await;
-            true
+            self.save_config_and_send_event().await.map(|()| true)
         }
     }
 
     /// Update custom DNS servers
     ///
-    /// Returns true if custom DNS servers have changed, otherwise false if they're the same
-    pub async fn set_custom_dns(&mut self, custom_dns: Vec<IpAddr>) -> bool {
+    /// Returns true if custom DNS servers have changed, otherwise false if they're the same.
+    /// An error means the setting changed in memory but could not be persisted.
+    pub async fn set_custom_dns(&mut self, custom_dns: Vec<IpAddr>) -> Result<bool, String> {
         if self.config.custom_dns == custom_dns {
-            false
+            Ok(false)
         } else {
             self.config.custom_dns = custom_dns;
-            self.save_config_and_send_event().await;
-            true
+            self.save_config_and_send_event().await.map(|()| true)
         }
     }
 
@@ -239,7 +275,7 @@ impl VpnServiceConfigManager {
         mixnet_traffic.validate()?;
         if self.config.mixnet_traffic != mixnet_traffic {
             self.config.mixnet_traffic = mixnet_traffic;
-            self.save_config_and_send_event().await;
+            self.save_config_and_send_event().await?;
         }
         Ok(())
     }
@@ -252,29 +288,31 @@ impl VpnServiceConfigManager {
         if self.config.min_gateway_vpn_performance != min_gateway_vpn_performance {
             self.config.min_gateway_vpn_performance =
                 min_gateway_vpn_performance.map(|u| u.min(100));
-            self.save_config_and_send_event().await;
+            let _ = self.save_config_and_send_event().await;
         }
     }
 
     pub async fn set_netstats_allow_disconnected(&mut self, allow_disconnected: bool) {
         if self.config.network_stats.allow_disconnected != allow_disconnected {
             self.config.network_stats.allow_disconnected = allow_disconnected;
-            self.save_config_and_send_event().await;
+            let _ = self.save_config_and_send_event().await;
         }
     }
 
     pub async fn set_netstats_enabled(&mut self, enabled: bool) {
         if self.config.network_stats.enabled != enabled {
             self.config.network_stats.enabled = enabled;
-            self.save_config_and_send_event().await;
+            let _ = self.save_config_and_send_event().await;
         }
     }
 
-    async fn save_config_and_send_event(&self) {
+    async fn save_config_and_send_event(&self) -> Result<(), String> {
         // This function already logs
-        let _ = self.write_to_file().await;
+        let write_result = self.write_to_file().await;
 
-        // Notify all clients that the config has changed
+        // Notify all clients that the config has changed. Do this even when
+        // the write failed: the in-memory config did change and is what the
+        // tunnel runs with.
         if let Some(tx) = self.tunnel_event_tx.as_ref() {
             match tx.send(nym_vpn_lib_types::TunnelEvent::ConfigChanged(Box::new(
                 self.config.clone(),
@@ -287,6 +325,19 @@ impl VpnServiceConfigManager {
                 }
             }
         }
+
+        write_result.map_err(|e| {
+            // Flatten the source chain ("config setup error" alone tells the
+            // user nothing; the io error carries the ENOSPC/EROFS detail).
+            let mut msg = format!("setting applied but not saved to disk (lost on reboot): {e}");
+            let mut source = std::error::Error::source(&e);
+            while let Some(s) = source {
+                msg.push_str(": ");
+                msg.push_str(&s.to_string());
+                source = s.source();
+            }
+            msg
+        })
     }
 
     /// Returns the configuration as well as the version read from file.
@@ -333,15 +384,12 @@ impl VpnServiceConfigManager {
     }
 
     // Only public for unit tests
-    pub(crate) async fn write_to_file(&self) -> bool {
-        let ext_config =
-            match VpnServiceConfigExt::try_from(&self.config).map_err(Error::ConfigSetup) {
-                Ok(ext_config) => ext_config,
-                Err(e) => {
-                    tracing::error!("Failed to convert service config to JSON: {e}");
-                    return false;
-                }
-            };
+    pub(crate) async fn write_to_file(&self) -> Result<()> {
+        let ext_config = VpnServiceConfigExt::try_from(&self.config)
+            .map_err(Error::ConfigSetup)
+            .inspect_err(|e| {
+                tracing::error!("Failed to convert service config to JSON: {e}");
+            })?;
         let version = ext_config.version();
 
         match write_json_config_file(&self.json_config_path, &ext_config)
@@ -353,14 +401,14 @@ impl VpnServiceConfigManager {
                     "Writing service config version {version} to {}",
                     self.json_config_path.display()
                 );
-                true
+                Ok(())
             }
             Err(e) => {
                 tracing::error!(
                     "Failed to write service config version {version} to {}: {e}",
                     self.json_config_path.display()
                 );
-                false
+                Err(e)
             }
         }
     }

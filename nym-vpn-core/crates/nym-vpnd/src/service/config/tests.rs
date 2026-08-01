@@ -90,7 +90,7 @@ async fn run_serialize_test(config: nym_vpn_lib_types::VpnServiceConfig) {
         .await
         .unwrap();
     config_manager.set_config(config.clone()).await;
-    assert!(config_manager.write_to_file().await);
+    assert!(config_manager.write_to_file().await.is_ok());
     drop(config_manager);
 
     // Read it back and compare it
@@ -984,8 +984,8 @@ async fn test_legacy_split_tunnel_forces_killswitch_off() {
     let mut config_manager = VpnServiceConfigManager::new(&network_config_path, None)
         .await
         .unwrap();
-    config_manager.set_killswitch(true).await;
-    config_manager.set_legacy_split_tunnel(true).await;
+    config_manager.set_killswitch(true).await.unwrap();
+    config_manager.set_legacy_split_tunnel(true).await.unwrap();
 
     let settings = config_manager.generate_tunnel_settings();
     assert!(settings.legacy_split_tunnel);
@@ -995,7 +995,7 @@ async fn test_legacy_split_tunnel_forces_killswitch_off() {
     );
 
     // Disabling legacy mode restores the stored kill-switch value.
-    config_manager.set_legacy_split_tunnel(false).await;
+    config_manager.set_legacy_split_tunnel(false).await.unwrap();
     let settings = config_manager.generate_tunnel_settings();
     assert!(!settings.legacy_split_tunnel);
     assert!(settings.killswitch);

@@ -66,28 +66,28 @@ type Locale = String;
 pub enum VpnServiceCommand {
     Info(oneshot::Sender<VpnServiceInfo>, ()),
     GetConfig(oneshot::Sender<VpnServiceConfig>, ()),
-    SetEntryPoint(oneshot::Sender<()>, EntryPoint),
-    SetExitPoint(oneshot::Sender<()>, ExitPoint),
-    SetDisableIPv6(oneshot::Sender<()>, bool),
-    SetEnableTwoHop(oneshot::Sender<()>, bool),
-    SetEnableLewesProtocol(oneshot::Sender<()>, bool),
-    SetNetstack(oneshot::Sender<()>, bool),
-    SetAllowLan(oneshot::Sender<()>, bool),
-    SetKillswitch(oneshot::Sender<()>, bool),
-    SetLegacySplitTunnel(oneshot::Sender<()>, bool),
+    SetEntryPoint(oneshot::Sender<Result<(), String>>, EntryPoint),
+    SetExitPoint(oneshot::Sender<Result<(), String>>, ExitPoint),
+    SetDisableIPv6(oneshot::Sender<Result<(), String>>, bool),
+    SetEnableTwoHop(oneshot::Sender<Result<(), String>>, bool),
+    SetEnableLewesProtocol(oneshot::Sender<Result<(), String>>, bool),
+    SetNetstack(oneshot::Sender<Result<(), String>>, bool),
+    SetAllowLan(oneshot::Sender<Result<(), String>>, bool),
+    SetKillswitch(oneshot::Sender<Result<(), String>>, bool),
+    SetLegacySplitTunnel(oneshot::Sender<Result<(), String>>, bool),
     SetInboundExemptions(
-        oneshot::Sender<()>,
+        oneshot::Sender<Result<(), String>>,
         Vec<nym_vpn_lib_types::InboundExemption>,
     ),
     GetInboundExemptions(
         oneshot::Sender<Vec<nym_vpn_lib_types::InboundExemption>>,
         (),
     ),
-    SetEnableBridges(oneshot::Sender<()>, bool),
-    SetResidentialExit(oneshot::Sender<()>, bool),
-    SetEnableCustomDns(oneshot::Sender<()>, bool),
-    SetCustomDns(oneshot::Sender<()>, Vec<IpAddr>),
-    SetEnableAdBlocking(oneshot::Sender<()>, bool),
+    SetEnableBridges(oneshot::Sender<Result<(), String>>, bool),
+    SetResidentialExit(oneshot::Sender<Result<(), String>>, bool),
+    SetEnableCustomDns(oneshot::Sender<Result<(), String>>, bool),
+    SetCustomDns(oneshot::Sender<Result<(), String>>, Vec<IpAddr>),
+    SetEnableAdBlocking(oneshot::Sender<Result<(), String>>, bool),
     SetMixnetTrafficConfig(oneshot::Sender<Result<(), String>>, MixnetTrafficConfig),
     SetNetwork(oneshot::Sender<Result<(), SetNetworkError>>, String),
     GetSystemMessages(oneshot::Sender<Vec<SystemMessage>>, ()),
@@ -795,68 +795,69 @@ impl NymVpnService {
                 let _ = tx.send(result);
             }
             VpnServiceCommand::SetEntryPoint(tx, entry_point) => {
-                self.handle_set_entry_point(entry_point).await;
-                let _ = tx.send(());
+                let result = self.handle_set_entry_point(entry_point).await;
+                let _ = tx.send(result);
             }
             VpnServiceCommand::SetExitPoint(tx, exit_point) => {
-                self.handle_set_exit_point(exit_point).await;
-                let _ = tx.send(());
+                let result = self.handle_set_exit_point(exit_point).await;
+                let _ = tx.send(result);
             }
             VpnServiceCommand::SetDisableIPv6(tx, disable_ipv6) => {
-                self.handle_set_disable_ipv6(disable_ipv6).await;
-                let _ = tx.send(());
+                let result = self.handle_set_disable_ipv6(disable_ipv6).await;
+                let _ = tx.send(result);
             }
             VpnServiceCommand::SetEnableTwoHop(tx, enable_two_hop) => {
-                self.handle_set_enable_two_hop(enable_two_hop).await;
-                let _ = tx.send(());
+                let result = self.handle_set_enable_two_hop(enable_two_hop).await;
+                let _ = tx.send(result);
             }
             VpnServiceCommand::SetEnableLewesProtocol(tx, enable_lewes_protocol) => {
-                self.handle_set_enable_lewes_protocol(enable_lewes_protocol)
+                let result = self
+                    .handle_set_enable_lewes_protocol(enable_lewes_protocol)
                     .await;
-                let _ = tx.send(());
+                let _ = tx.send(result);
             }
             VpnServiceCommand::SetNetstack(tx, netstack) => {
-                self.handle_set_netstack(netstack).await;
-                let _ = tx.send(());
+                let result = self.handle_set_netstack(netstack).await;
+                let _ = tx.send(result);
             }
             VpnServiceCommand::SetAllowLan(tx, allow_lan) => {
-                self.handle_set_allow_lan(allow_lan).await;
-                let _ = tx.send(());
+                let result = self.handle_set_allow_lan(allow_lan).await;
+                let _ = tx.send(result);
             }
             VpnServiceCommand::SetKillswitch(tx, killswitch) => {
-                self.handle_set_killswitch(killswitch).await;
-                let _ = tx.send(());
+                let result = self.handle_set_killswitch(killswitch).await;
+                let _ = tx.send(result);
             }
             VpnServiceCommand::SetLegacySplitTunnel(tx, legacy_split_tunnel) => {
-                self.handle_set_legacy_split_tunnel(legacy_split_tunnel).await;
-                let _ = tx.send(());
+                let result = self.handle_set_legacy_split_tunnel(legacy_split_tunnel).await;
+                let _ = tx.send(result);
             }
             VpnServiceCommand::SetInboundExemptions(tx, exemptions) => {
-                self.handle_set_inbound_exemptions(exemptions).await;
-                let _ = tx.send(());
+                let result = self.handle_set_inbound_exemptions(exemptions).await;
+                let _ = tx.send(result);
             }
             VpnServiceCommand::GetInboundExemptions(tx, ()) => {
                 let _ = tx.send(self.config_manager.inbound_exemptions().to_vec());
             }
             VpnServiceCommand::SetEnableBridges(tx, enable_bridges) => {
-                self.handle_set_enable_bridges(enable_bridges).await;
-                let _ = tx.send(());
+                let result = self.handle_set_enable_bridges(enable_bridges).await;
+                let _ = tx.send(result);
             }
             VpnServiceCommand::SetResidentialExit(tx, residential_exit) => {
-                self.handle_set_residential_exit(residential_exit).await;
-                let _ = tx.send(());
+                let result = self.handle_set_residential_exit(residential_exit).await;
+                let _ = tx.send(result);
             }
             VpnServiceCommand::SetEnableCustomDns(tx, enable_custom_dns) => {
-                self.handle_set_enable_custom_dns(enable_custom_dns).await;
-                let _ = tx.send(());
+                let result = self.handle_set_enable_custom_dns(enable_custom_dns).await;
+                let _ = tx.send(result);
             }
             VpnServiceCommand::SetCustomDns(tx, custom_dns) => {
-                self.handle_set_custom_dns(custom_dns).await;
-                let _ = tx.send(());
+                let result = self.handle_set_custom_dns(custom_dns).await;
+                let _ = tx.send(result);
             }
             VpnServiceCommand::SetEnableAdBlocking(tx, enable) => {
-                self.handle_set_enable_ad_blocking(enable).await;
-                let _ = tx.send(());
+                let result = self.handle_set_enable_ad_blocking(enable).await;
+                let _ = tx.send(result);
             }
             VpnServiceCommand::SetMixnetTrafficConfig(tx, mixnet_traffic_config) => {
                 let res = self
@@ -1039,92 +1040,120 @@ impl NymVpnService {
         self.config_manager.config().clone()
     }
 
-    async fn handle_set_entry_point(&mut self, entry_point: EntryPoint) {
-        self.config_manager.set_entry_point(entry_point).await;
+    // The handle_set_* functions apply the setting to the live tunnel even
+    // when persisting it fails (the in-memory config did change); the
+    // returned error tells the client the setting won't survive a restart.
+
+    async fn handle_set_entry_point(&mut self, entry_point: EntryPoint) -> Result<(), String> {
+        let result = self.config_manager.set_entry_point(entry_point).await;
         self.update_tunnel_settings_with_throttle();
+        result
     }
 
-    async fn handle_set_exit_point(&mut self, exit_point: ExitPoint) {
-        self.config_manager.set_exit_point(exit_point).await;
+    async fn handle_set_exit_point(&mut self, exit_point: ExitPoint) -> Result<(), String> {
+        let result = self.config_manager.set_exit_point(exit_point).await;
         self.update_tunnel_settings_with_throttle();
+        result
     }
 
-    async fn handle_set_disable_ipv6(&mut self, disable_ipv6: bool) {
-        self.config_manager.set_disable_ipv6(disable_ipv6).await;
+    async fn handle_set_disable_ipv6(&mut self, disable_ipv6: bool) -> Result<(), String> {
+        let result = self.config_manager.set_disable_ipv6(disable_ipv6).await;
         self.update_tunnel_settings_with_throttle();
+        result
     }
 
-    async fn handle_set_enable_two_hop(&mut self, enable_two_hop: bool) {
-        self.config_manager.set_enable_two_hop(enable_two_hop).await;
+    async fn handle_set_enable_two_hop(&mut self, enable_two_hop: bool) -> Result<(), String> {
+        let result = self.config_manager.set_enable_two_hop(enable_two_hop).await;
         self.update_tunnel_settings_with_throttle();
+        result
     }
 
-    async fn handle_set_enable_lewes_protocol(&mut self, enable_lewes_protocol: bool) {
-        self.config_manager
+    async fn handle_set_enable_lewes_protocol(
+        &mut self,
+        enable_lewes_protocol: bool,
+    ) -> Result<(), String> {
+        let result = self
+            .config_manager
             .set_enable_lewes_protocol(enable_lewes_protocol)
             .await;
         self.update_tunnel_settings_with_throttle();
+        result
     }
 
-    async fn handle_set_netstack(&mut self, netstack: bool) {
-        self.config_manager.set_netstack(netstack).await;
+    async fn handle_set_netstack(&mut self, netstack: bool) -> Result<(), String> {
+        let result = self.config_manager.set_netstack(netstack).await;
         self.update_tunnel_settings_with_throttle();
+        result
     }
 
-    async fn handle_set_allow_lan(&mut self, allow_lan: bool) {
-        self.config_manager.set_allow_lan(allow_lan).await;
+    async fn handle_set_allow_lan(&mut self, allow_lan: bool) -> Result<(), String> {
+        let result = self.config_manager.set_allow_lan(allow_lan).await;
         self.update_tunnel_settings_with_throttle();
+        result
     }
 
-    async fn handle_set_killswitch(&mut self, killswitch: bool) {
-        self.config_manager.set_killswitch(killswitch).await;
+    async fn handle_set_killswitch(&mut self, killswitch: bool) -> Result<(), String> {
+        let result = self.config_manager.set_killswitch(killswitch).await;
         self.update_tunnel_settings_with_throttle();
+        result
     }
 
-    async fn handle_set_legacy_split_tunnel(&mut self, legacy_split_tunnel: bool) {
-        self.config_manager
+    async fn handle_set_legacy_split_tunnel(
+        &mut self,
+        legacy_split_tunnel: bool,
+    ) -> Result<(), String> {
+        let result = self
+            .config_manager
             .set_legacy_split_tunnel(legacy_split_tunnel)
             .await;
         self.update_tunnel_settings_with_throttle();
+        result
     }
 
     async fn handle_set_inbound_exemptions(
         &mut self,
         exemptions: Vec<nym_vpn_lib_types::InboundExemption>,
-    ) {
-        self.config_manager
-            .set_inbound_exemptions(exemptions)
-            .await;
+    ) -> Result<(), String> {
+        let result = self.config_manager.set_inbound_exemptions(exemptions).await;
         self.update_tunnel_settings_with_throttle();
+        result
     }
 
-    async fn handle_set_enable_bridges(&mut self, enable_bridges: bool) {
-        self.config_manager.set_enable_bridges(enable_bridges).await;
+    async fn handle_set_enable_bridges(&mut self, enable_bridges: bool) -> Result<(), String> {
+        let result = self.config_manager.set_enable_bridges(enable_bridges).await;
         self.update_tunnel_settings_with_throttle();
+        result
     }
 
-    async fn handle_set_residential_exit(&mut self, residential_exit: bool) {
-        self.config_manager
+    async fn handle_set_residential_exit(&mut self, residential_exit: bool) -> Result<(), String> {
+        let result = self
+            .config_manager
             .set_residential_exit(residential_exit)
             .await;
         self.update_tunnel_settings_with_throttle();
+        result
     }
 
-    async fn handle_set_enable_custom_dns(&mut self, enable_custom_dns: bool) {
-        if self
+    async fn handle_set_enable_custom_dns(
+        &mut self,
+        enable_custom_dns: bool,
+    ) -> Result<(), String> {
+        let result = self
             .config_manager
             .set_enable_custom_dns(enable_custom_dns)
-            .await
-        {
+            .await;
+        // A save error still means the value changed in memory: apply it.
+        if !matches!(result, Ok(false)) {
             let config = self.config_manager.config();
             // Ignore reconnect if custom DNS is enabled but custom DNS addresses aren't set
             if !enable_custom_dns || !config.custom_dns.is_empty() {
                 self.update_tunnel_settings_with_throttle();
             }
         }
+        result.map(|_| ())
     }
 
-    async fn handle_set_custom_dns(&mut self, mut custom_dns: Vec<IpAddr>) {
+    async fn handle_set_custom_dns(&mut self, mut custom_dns: Vec<IpAddr>) -> Result<(), String> {
         const MAX_CUSTOM_DNS_SERVERS: usize = 5;
 
         if custom_dns.len() > MAX_CUSTOM_DNS_SERVERS {
@@ -1132,17 +1161,20 @@ impl NymVpnService {
             custom_dns.truncate(MAX_CUSTOM_DNS_SERVERS);
         }
 
-        if self.config_manager.set_custom_dns(custom_dns).await {
+        let result = self.config_manager.set_custom_dns(custom_dns).await;
+        // A save error still means the value changed in memory: apply it.
+        if !matches!(result, Ok(false)) {
             let config = self.config_manager.config();
             // Only issue reconnect if custom DNS is enabled
             if config.enable_custom_dns {
                 self.update_tunnel_settings_with_throttle();
             }
         }
+        result.map(|_| ())
     }
 
-    async fn handle_set_enable_ad_blocking(&mut self, enable: bool) {
-        self.config_manager.set_enable_ad_blocking(enable).await;
+    async fn handle_set_enable_ad_blocking(&mut self, enable: bool) -> Result<(), String> {
+        let result = self.config_manager.set_enable_ad_blocking(enable).await;
         crate::adblocker::note_explicit_toggle();
         if enable {
             if let Err(e) = crate::adblocker::apply_adblock().await {
@@ -1153,6 +1185,7 @@ impl NymVpnService {
                 tracing::error!("Failed to remove ad-blocking: {e}");
             }
         }
+        result
     }
 
     async fn handle_set_mixnet_traffic_config(

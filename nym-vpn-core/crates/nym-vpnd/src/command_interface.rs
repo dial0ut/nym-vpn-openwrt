@@ -95,10 +95,11 @@ impl NymVpnService for CommandInterface {
         let entry_point = EntryPoint::try_from(request.into_inner())
             .map_err(|e| tonic::Status::invalid_argument(format!("Invalid entry point: {e}")))?;
 
-        let _ = self
+        self
             .send_and_wait(VpnServiceCommand::SetEntryPoint, entry_point)
             .await
-            .map_err(|e| tonic::Status::internal(format!("Failed to set VPN entry point: {e}")))?;
+            .map_err(|e| tonic::Status::internal(format!("Failed to set VPN entry point: {e}")))?
+            .map_err(tonic::Status::internal)?;
 
         Ok(tonic::Response::new(()))
     }
@@ -110,10 +111,11 @@ impl NymVpnService for CommandInterface {
         let exit_point = ExitPoint::try_from(request.into_inner())
             .map_err(|e| tonic::Status::invalid_argument(format!("Invalid exit point: {e}")))?;
 
-        let _ = self
+        self
             .send_and_wait(VpnServiceCommand::SetExitPoint, exit_point)
             .await
-            .map_err(|e| tonic::Status::internal(format!("Failed to set VPN exit point: {e}")))?;
+            .map_err(|e| tonic::Status::internal(format!("Failed to set VPN exit point: {e}")))?
+            .map_err(tonic::Status::internal)?;
 
         Ok(tonic::Response::new(()))
     }
@@ -121,10 +123,11 @@ impl NymVpnService for CommandInterface {
     async fn set_disable_ipv6(&self, request: tonic::Request<bool>) -> Result<tonic::Response<()>> {
         let disable_ipv6 = request.into_inner();
 
-        let _ = self
+        self
             .send_and_wait(VpnServiceCommand::SetDisableIPv6, disable_ipv6)
             .await
-            .map_err(|e| tonic::Status::internal(format!("Failed to set IPv6 config: {e}")))?;
+            .map_err(|e| tonic::Status::internal(format!("Failed to set IPv6 config: {e}")))?
+            .map_err(tonic::Status::internal)?;
 
         Ok(tonic::Response::new(()))
     }
@@ -135,10 +138,11 @@ impl NymVpnService for CommandInterface {
     ) -> Result<tonic::Response<()>> {
         let enable_two_hop = request.into_inner();
 
-        let _ = self
+        self
             .send_and_wait(VpnServiceCommand::SetEnableTwoHop, enable_two_hop)
             .await
-            .map_err(|e| tonic::Status::internal(format!("Failed to set two-hop config: {e}")))?;
+            .map_err(|e| tonic::Status::internal(format!("Failed to set two-hop config: {e}")))?
+            .map_err(tonic::Status::internal)?;
 
         Ok(tonic::Response::new(()))
     }
@@ -149,10 +153,11 @@ impl NymVpnService for CommandInterface {
     ) -> Result<tonic::Response<()>> {
         let enable_bridges = request.into_inner();
 
-        let _ = self
+        self
             .send_and_wait(VpnServiceCommand::SetEnableBridges, enable_bridges)
             .await
-            .map_err(|e| tonic::Status::internal(format!("Failed to set enable bridges: {e}")))?;
+            .map_err(|e| tonic::Status::internal(format!("Failed to set enable bridges: {e}")))?
+            .map_err(tonic::Status::internal)?;
 
         Ok(tonic::Response::new(()))
     }
@@ -163,7 +168,7 @@ impl NymVpnService for CommandInterface {
     ) -> Result<tonic::Response<()>> {
         let enable_lewes_protocol = request.into_inner();
 
-        let _ = self
+        self
             .send_and_wait(
                 VpnServiceCommand::SetEnableLewesProtocol,
                 enable_lewes_protocol,
@@ -171,7 +176,8 @@ impl NymVpnService for CommandInterface {
             .await
             .map_err(|e| {
                 tonic::Status::internal(format!("Failed to set lewes-protocol config: {e}"))
-            })?;
+            })?
+            .map_err(tonic::Status::internal)?;
 
         Ok(tonic::Response::new(()))
     }
@@ -179,10 +185,11 @@ impl NymVpnService for CommandInterface {
     async fn set_netstack(&self, request: tonic::Request<bool>) -> Result<tonic::Response<()>> {
         let netstack = request.into_inner();
 
-        let _ = self
+        self
             .send_and_wait(VpnServiceCommand::SetNetstack, netstack)
             .await
-            .map_err(|e| tonic::Status::internal(format!("Failed to set netstack config: {e}")))?;
+            .map_err(|e| tonic::Status::internal(format!("Failed to set netstack config: {e}")))?
+            .map_err(tonic::Status::internal)?;
 
         Ok(tonic::Response::new(()))
     }
@@ -190,10 +197,11 @@ impl NymVpnService for CommandInterface {
     async fn set_allow_lan(&self, request: tonic::Request<bool>) -> Result<tonic::Response<()>> {
         let allow_lan = request.into_inner();
 
-        let _ = self
+        self
             .send_and_wait(VpnServiceCommand::SetAllowLan, allow_lan)
             .await
-            .map_err(|e| tonic::Status::internal(format!("Failed to set allow lan: {e}")))?;
+            .map_err(|e| tonic::Status::internal(format!("Failed to set allow lan: {e}")))?
+            .map_err(tonic::Status::internal)?;
 
         Ok(tonic::Response::new(()))
     }
@@ -201,12 +209,13 @@ impl NymVpnService for CommandInterface {
     async fn set_killswitch(&self, request: tonic::Request<bool>) -> Result<tonic::Response<()>> {
         let killswitch = request.into_inner();
 
-        let _ = self
+        self
             .send_and_wait(VpnServiceCommand::SetKillswitch, killswitch)
             .await
             .map_err(|e| {
                 tonic::Status::internal(format!("Failed to set killswitch: {e}"))
-            })?;
+            })?
+            .map_err(tonic::Status::internal)?;
 
         Ok(tonic::Response::new(()))
     }
@@ -217,7 +226,7 @@ impl NymVpnService for CommandInterface {
     ) -> Result<tonic::Response<()>> {
         let legacy_split_tunnel = request.into_inner();
 
-        let _ = self
+        self
             .send_and_wait(
                 VpnServiceCommand::SetLegacySplitTunnel,
                 legacy_split_tunnel,
@@ -225,7 +234,8 @@ impl NymVpnService for CommandInterface {
             .await
             .map_err(|e| {
                 tonic::Status::internal(format!("Failed to set legacy split tunnel: {e}"))
-            })?;
+            })?
+            .map_err(tonic::Status::internal)?;
 
         Ok(tonic::Response::new(()))
     }
@@ -256,12 +266,13 @@ impl NymVpnService for CommandInterface {
             })
             .collect();
 
-        let _ = self
+        self
             .send_and_wait(VpnServiceCommand::SetInboundExemptions, exemptions)
             .await
             .map_err(|e| {
                 tonic::Status::internal(format!("Failed to set inbound exemptions: {e}"))
-            })?;
+            })?
+            .map_err(tonic::Status::internal)?;
 
         Ok(tonic::Response::new(()))
     }
@@ -304,12 +315,13 @@ impl NymVpnService for CommandInterface {
     ) -> Result<tonic::Response<()>> {
         let residential_exit = request.into_inner();
 
-        let _ = self
+        self
             .send_and_wait(VpnServiceCommand::SetResidentialExit, residential_exit)
             .await
             .map_err(|e| {
                 tonic::Status::internal(format!("Failed to set residential exit only: {e}"))
-            })?;
+            })?
+            .map_err(tonic::Status::internal)?;
 
         Ok(tonic::Response::new(()))
     }
@@ -320,12 +332,13 @@ impl NymVpnService for CommandInterface {
     ) -> Result<tonic::Response<()>> {
         let enable_custom_dns = request.into_inner();
 
-        let _ = self
+        self
             .send_and_wait(VpnServiceCommand::SetEnableCustomDns, enable_custom_dns)
             .await
             .map_err(|e| {
                 tonic::Status::internal(format!("Failed to set enable custom DNS: {e}"))
-            })?;
+            })?
+            .map_err(tonic::Status::internal)?;
 
         Ok(tonic::Response::new(()))
     }
@@ -339,10 +352,11 @@ impl NymVpnService for CommandInterface {
             .try_into()
             .map_err(|e| tonic::Status::invalid_argument(format!("Invalid Custom DNS: {e}")))?;
 
-        let _ = self
+        self
             .send_and_wait(VpnServiceCommand::SetCustomDns, custom_dns)
             .await
-            .map_err(|e| tonic::Status::internal(format!("Failed to set custom DNS: {e}")))?;
+            .map_err(|e| tonic::Status::internal(format!("Failed to set custom DNS: {e}")))?
+            .map_err(tonic::Status::internal)?;
 
         Ok(tonic::Response::new(()))
     }
@@ -353,12 +367,13 @@ impl NymVpnService for CommandInterface {
     ) -> Result<tonic::Response<()>> {
         let enable = request.into_inner();
 
-        let _ = self
+        self
             .send_and_wait(VpnServiceCommand::SetEnableAdBlocking, enable)
             .await
             .map_err(|e| {
                 tonic::Status::internal(format!("Failed to set enable ad-blocking: {e}"))
-            })?;
+            })?
+            .map_err(tonic::Status::internal)?;
 
         Ok(tonic::Response::new(()))
     }
