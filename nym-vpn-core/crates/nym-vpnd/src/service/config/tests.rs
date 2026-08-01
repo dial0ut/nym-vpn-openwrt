@@ -122,6 +122,24 @@ async fn run_fallback_test(broken_json_content: &str) {
         config_manager.config(),
         &nym_vpn_lib_types::VpnServiceConfig::default()
     );
+
+    // The broken file must be preserved as .bak (settings recoverable,
+    // corruption evidence intact), not silently overwritten with defaults.
+    let bak_path = json_path.with_extension("json.bak");
+    let bak_content = fs::read_to_string(&bak_path).await.unwrap();
+    assert_eq!(bak_content, broken_json_content);
+
+    // And the default config written in its place must parse on the next start.
+    let config_manager = VpnServiceConfigManager::new(&network_config_path, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        config_manager.config(),
+        &nym_vpn_lib_types::VpnServiceConfig::default()
+    );
+    // Second start read a valid file, so the .bak must not have been replaced.
+    let bak_content = fs::read_to_string(&bak_path).await.unwrap();
+    assert_eq!(bak_content, broken_json_content);
 }
 
 #[tokio::test]

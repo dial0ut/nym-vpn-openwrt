@@ -50,6 +50,23 @@ impl VpnServiceConfigManager {
                         "Failed to read service config file {}; using default",
                         json_config_path.display()
                     );
+                    // Stash the unreadable file instead of overwriting it
+                    // below: the user's settings stay recoverable and the
+                    // corrupt content survives as evidence of what happened.
+                    if json_config_path.exists() {
+                        let backup_path = json_config_path.with_extension("json.bak");
+                        match fs::rename(&json_config_path, &backup_path).await {
+                            Ok(()) => tracing::error!(
+                                "Preserved unreadable service config as {}",
+                                backup_path.display()
+                            ),
+                            Err(e) => trace_err_chain!(
+                                e,
+                                "Failed to preserve unreadable service config {}",
+                                json_config_path.display()
+                            ),
+                        }
+                    }
                     (nym_vpn_lib_types::VpnServiceConfig::default(), None)
                 }
             };
