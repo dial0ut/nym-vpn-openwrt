@@ -1,17 +1,12 @@
 # Quick Start
 
-Get connected in under 5 minutes after installation.
+## 1. Import your account
 
-## 1. Import Your Account
-
-Get your account mnemonic from the [Nym wallet](https://nymtech.net/) or existing setup, then import it:
+Your account is a 24-word recovery phrase from the [Nym wallet](https://nymtech.net/).
 
 === "LuCI"
 
-    1. Open your router's web interface
-    2. Navigate to **NymVPN**
-    3. Expand the **Account** card
-    4. Paste your mnemonic and click **Save**
+    Open **NymVPN**, expand the **Account** card, paste the phrase, **Login**.
 
 === "CLI"
 
@@ -23,47 +18,44 @@ Get your account mnemonic from the [Nym wallet](https://nymtech.net/) or existin
 
 === "LuCI"
 
-    Click the **Connect** button on the NymVPN status page. The status ring will animate while connecting and turn green once the tunnel is established.
+    Hit **Connect**. The status ring pulses while connecting and turns green once the tunnel is up.
 
 === "CLI"
 
     ```bash
     nym-vpnc connect-v2
-    ```
-
-    Check status:
-
-    ```bash
     nym-vpnc status
     ```
 
+First connect takes a few seconds longer than later ones — the daemon has to fetch the gateway
+directory before it can pick a pair.
+
 ## 3. Verify
 
-From any device on your LAN, check your public IP has changed:
+From any LAN device:
 
 ```bash
 curl ifconfig.me
 ```
 
-The returned IP should belong to the exit gateway, not your ISP.
+The address you get back should be the exit gateway's, not your ISP's.
 
-## Optional: Choose a Gateway
+## Pick a gateway
 
-By default, NymVPN auto-selects gateways. To pick a specific exit country:
+Gateways are auto-selected by default. To pin an exit country:
 
 === "LuCI"
 
-    Use the **Gateway** card to select entry and exit countries from the dropdown.
+    Choose entry and exit countries in the **Gateway** card.
 
 === "CLI"
 
     ```bash
-    # Set exit country
     nym-vpnc gateway set --exit-country CH
     ```
 
-## Next Steps
+## Next
 
-- [CLI Reference](../guide/cli.md) — full command reference
-- [Split Tunneling](../guide/split-tunneling.md) — selective routing with PBR
-- [Troubleshooting](../troubleshooting.md) — common issues and fixes
+- [CLI Reference](../guide/cli.md) — every `nym-vpnc` subcommand
+- [Split Tunneling](../guide/split-tunneling.md) — send specific devices around the VPN
+- [Troubleshooting](../troubleshooting.md) — when the above doesn't happen

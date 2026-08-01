@@ -1,81 +1,79 @@
 # LuCI Web Interface
 
-The NymVPN LuCI app provides a browser-based interface for managing your VPN connection.
+Your router's IP (usually `http://192.168.1.1`), then **NymVPN** in the navigation menu.
 
-## Accessing the Interface
+The main view shows a connection status ring (green connected, pulsing connecting, grey
+disconnected), uptime since the tunnel came up, and the hop chain through entry and exit gateways.
 
-Navigate to your router's IP (typically `http://192.168.1.1`) and click **NymVPN** in the navigation menu.
+## Tunnel Settings
 
-## Status Overview
+**IPv6** — off by default. Most exit gateways have no IPv6 egress, and IPv6 that gets tunnelled
+and then dropped makes dual-stack clients stall on every new connection. Turn it on only if your
+exit demonstrably carries IPv6.
 
-The main view shows:
+**Two-Hop Mode** — 2-hop (faster) versus 5-hop mixnet routing.
 
-- **Connection status ring** — animated indicator (green = connected, pulsing = connecting, gray = disconnected)
-- **Connection uptime** — time since the tunnel was established
-- **Mixnet hop chain** — visual representation of your traffic path through entry and exit gateways
+**Kill-Switch** — blocks all non-tunnel WAN egress. It is *only* a firewall block: traffic is
+routed into the tunnel whenever connected regardless of this setting. Turn it off to allow WAN
+fallback. You do **not** need to turn it off for
+[split-tunnel carve-outs](split-tunneling.md) — those work with it on. Takes effect on reconnect.
 
-## Cards
+## Mixnet Tuning
 
-### Tunnel Settings
+Sphinx knobs, 5-hop mode only. These trade anonymity for latency — the defaults are the private
+end. Turning off delays or cover traffic makes traffic analysis easier.
 
-Configure tunnel behavior:
+- **Disable Poisson Delays** — send real traffic immediately instead of on a randomised schedule
+- **Disable Background Cover Traffic** — stop sending decoys
+- **Cover traffic delay** — 0–200 ms; blank leaves it as is
+- **Mixing delay per hop** — 0–200 ms; blank leaves it as is
+- **Sending delay** — 5–50 ms; blank leaves it as is
 
-- **IPv6** — Enable IPv6 connectivity through the tunnel. Off by default:
-  most exit gateways have no IPv6 egress, and tunneled-then-dropped IPv6
-  makes dual-stack clients stall on every new connection. Turn on only if
-  your chosen exit demonstrably carries IPv6.
-- **Two-Hop Mode** — toggle between 2-hop (faster) and 5-hop mixnet routing (on/off)
-- **Kill-Switch** — block all non-tunnel WAN egress (on/off). This is *only* a firewall block; traffic is routed through the tunnel whenever connected regardless of this setting. Turn it off to allow WAN fallback or [split-tunnel carve-outs](split-tunneling.md). Shows a warning when disabled. Requires reconnect to take effect.
+## Inbound Services
 
-### Mixnet Tuning
+Ports whose reply traffic bypasses the tunnel, so a service on the router (LuCI, SSH) or on the
+LAN (Jellyfin, a NAS) stays reachable from the WAN with the kill-switch on.
 
-Sphinx traffic knobs for mixnet (5-hop) mode only. These trade anonymity for performance — defaults give the strongest privacy; disabling delays or cover traffic makes traffic analysis easier.
+Pick `TCP` or `UDP`, type the port, optionally a label, **Save** (or `Enter`). `×` removes a row.
 
-- **Disable Poisson Delays** — send real traffic immediately instead of on a randomized schedule (on/off)
-- **Disable Background Cover Traffic** — stop sending decoy traffic (on/off)
-- **Cover traffic delay** — 0-200 ms; blank keeps the current value
-- **Mixing delay per hop** — 0-200 ms; blank keeps the current value
-- **Sending delay** — 5-50 ms; blank keeps the current value
+Rows read `● Active` when the kill-switch is on and `● Inert` when it is off — an exemption is
+only meaningful while there is a block to be exempt from.
 
-### Inbound Services
+For a LAN-hosted service, create the port forward in **Network → Firewall → Port Forwards** first,
+then add the exemption here using the **WAN-side** port.
+[Inbound Services](inbound-services.md) has the recipes.
 
-Declare port-forwarded services that bypass the tunnel for reply traffic, so a router-hosted (LuCI, SSH) or LAN-hosted (Jellyfin, NAS) service stays reachable from the WAN while the kill-switch is on.
+## Split Tunneling
 
-- Pick `TCP` or `UDP`, type the port, optionally a label, **Save** (or `Enter`).
-- Rows show `● Active` when the kill-switch is on, `● Inert` when off (exemptions only matter while the kill-switch is enforcing — with it off there is no block to exempt).
-- `×` removes an entry.
+Carve specific devices or domains out to the WAN. Devices are stored by MAC, so they survive an
+IP change; domains need `dnsmasq-full`. See [Split Tunneling](split-tunneling.md) for the
+caveats — particularly that an excluded device's DNS still goes through the tunnel.
 
-For LAN-hosted services, set up the OpenWrt port forward in **Network → Firewall → Port Forwards** first, then add the exemption here using the **WAN-side** port. See [Inbound Services](inbound-services.md) for the full mechanism and recipes.
+## Local Network
 
-### Local Network
+**Allow LAN** lets LAN devices reach each other and local services while connected. **Block LAN**
+isolates them.
 
-Control LAN device access while connected to the VPN:
+## DNS & Ad Blocking
 
-- **Allow LAN** — LAN devices can access each other and local services
-- **Block LAN** — LAN device access is blocked for maximum isolation
+**Custom DNS** — enable, then set servers as space-separated IPs. **Ad Blocking** — on or off.
 
-### DNS & Ad Blocking
+If the custom DNS setting appears to do nothing, dnsmasq is probably set to ignore its resolv
+file; see [Custom DNS setting has no
+effect](../troubleshooting.md#custom-dns-setting-has-no-effect).
 
-- **Custom DNS** — enable and set custom DNS servers (space-separated IPs)
-- **Ad Blocking** — enable or disable DNS-based ad blocking
+## Account
 
-### Account
+Logged in: identity and account state, with **Rotate Keys** and **Logout**. Logged out: recovery
+phrase field and **Login**.
 
-Manage your Nym account:
+## Service Management
 
-- **Logged in** — shows identity and account state, with **Rotate Keys** and **Logout** buttons
-- **Logged out** — recovery phrase input field with **Login** button
+Whether `nym-vpnd` is running, and a **Restart Daemon** button.
 
-### Service Management
-
-- **Daemon Status** — shows whether `nym-vpnd` is running or stopped
-- **Restart Daemon** — restart the service
-
-### Footer
-
-Displays the daemon version and current network name (mainnet/canary).
+The footer shows the daemon version and current network (mainnet or canary).
 
 ## Notifications
 
-- **Toast messages** — brief status updates that auto-dismiss
-- **Modals** — confirmations for destructive actions (disconnect, forget account)
+Toasts for status updates, modals to confirm anything destructive — disconnecting, forgetting an
+account.

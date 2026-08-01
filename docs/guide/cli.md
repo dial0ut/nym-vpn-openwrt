@@ -1,172 +1,124 @@
 # CLI Usage
 
-`nym-vpnc` is the command-line client that communicates with the `nym-vpnd` daemon via gRPC.
+`nym-vpnc` is the command-line client. It talks to the `nym-vpnd` daemon over gRPC — everything
+LuCI can do goes through the same commands.
 
 ## Connection
 
 ```bash
-# Connect with default settings
 nym-vpnc connect-v2
-
-# Disconnect
 nym-vpnc disconnect
-
-# Check connection status
 nym-vpnc status
 ```
 
-## Gateway Management
+## Gateways
 
 ```bash
-# View current gateway selection
 nym-vpnc gateway get
-
-# List gateways by type (mixnet-entry, mixnet-exit, wg)
-nym-vpnc gateway list mixnet-exit
-
-# Set entry/exit gateways by country
+nym-vpnc gateway list mixnet-exit          # or mixnet-entry, wg
 nym-vpnc gateway set --entry-country DE --exit-country CH
-
-# Set a specific gateway by ID
 nym-vpnc gateway set --exit-id <base58-gateway-id>
-
-# Auto-select with random gateways
 nym-vpnc gateway set --entry-random --exit-random
 ```
 
 ## Account
 
 ```bash
-# Import account recovery phrase
 nym-vpnc account set "your twenty four word mnemonic phrase here"
-
-# View account info
 nym-vpnc account get
-
-# Remove stored credentials
 nym-vpnc account forget
-
-# Rotate WireGuard keys
 nym-vpnc account rotate-keys
 ```
 
-## Inbound Services
-
-Expose port-forwarded services to the WAN while the kill-switch is on. See the [Inbound Services guide](inbound-services.md) for the full mechanism and recipes.
+## Tunnel settings
 
 ```bash
-# List, add, delete
+nym-vpnc tunnel get
+nym-vpnc tunnel set --ipv6 on --two-hop on
+nym-vpnc tunnel set --killswitch off       # allows WAN fallback and carve-outs
+nym-vpnc tunnel set --killswitch on
+```
+
+## Inbound services
+
+Keeps port-forwarded services reachable from the WAN while the kill-switch is on. The port is the
+**WAN-side** one; LAN-hosted services also need a port forward in `Network → Firewall → Port
+Forwards`. Full mechanism in [Inbound Services](inbound-services.md).
+
+```bash
 nym-vpnc inbound list
 nym-vpnc inbound add tcp:443 --label "HTTPS"
 nym-vpnc inbound add udp:51820
 nym-vpnc inbound del tcp:443
 ```
 
-The exemption uses the **WAN-side port**. For LAN-hosted services you also need a port forward in `Network → Firewall → Port Forwards`.
-
-## Tunnel Settings
-
-```bash
-# View tunnel configuration
-nym-vpnc tunnel get
-
-# Configure tunnel options
-nym-vpnc tunnel set --ipv6 on --two-hop on
-
-# Disable kill-switch (allow WAN fallback / split-tunnel carve-outs)
-nym-vpnc tunnel set --killswitch off
-
-# Re-enable kill-switch
-nym-vpnc tunnel set --killswitch on
-```
-
-## Network Settings
-
-```bash
-# View current network (mainnet, canary)
-nym-vpnc network get
-
-# Set network
-nym-vpnc network set mainnet
-```
-
-## LAN Policy
-
-```bash
-# View current LAN policy
-nym-vpnc lan get
-
-# Allow LAN device access while connected
-nym-vpnc lan set allow
-
-# Block LAN device access while connected
-nym-vpnc lan set block
-```
-
 ## DNS
 
 ```bash
-# View DNS configuration
 nym-vpnc dns get
-
-# Set custom DNS servers
 nym-vpnc dns set 1.1.1.1 9.9.9.9
-
-# Enable/disable custom DNS
 nym-vpnc dns enable
 nym-vpnc dns disable
-
-# Clear custom DNS servers
 nym-vpnc dns clear
 ```
 
-## Ad Blocking
+## Ad blocking
 
 ```bash
-# View ad-blocking status
 nym-vpnc ad-block get
-
-# Enable/disable ad-blocking
 nym-vpnc ad-block set enabled
 nym-vpnc ad-block set disabled
 ```
 
-## Daemon Control
+## LAN policy
+
+Whether LAN devices can reach each other and local services while the VPN is up.
 
 ```bash
-# Check daemon status
+nym-vpnc lan get
+nym-vpnc lan set allow
+nym-vpnc lan set block
+```
+
+## Network
+
+```bash
+nym-vpnc network get
+nym-vpnc network set mainnet                # or canary
+```
+
+## Daemon
+
+```bash
 nym-vpnc info
 
-# Via init script
 /etc/init.d/nym-vpnd start
 /etc/init.d/nym-vpnd stop
 /etc/init.d/nym-vpnd restart
 /etc/init.d/nym-vpnd status
-```
 
-The service is managed by procd with automatic respawn (up to 5 times within a 3600s window). On stop, the init script calls `nym-vpnc disconnect` to clean up firewall rules and tunnels.
-
-```bash
-# Enable/disable auto-start on boot
-/etc/init.d/nym-vpnd enable
+/etc/init.d/nym-vpnd enable                 # start on boot
 /etc/init.d/nym-vpnd disable
 ```
 
+procd respawns the daemon automatically if it dies. On `stop`, the init script disconnects and
+tears down the firewall table — including when the daemon is hung and cannot be asked nicely.
+
 ## Configuration
 
-Settings are stored in `/etc/config/nym-vpn` (UCI format, preserved across firmware upgrades). Settings are managed through `nym-vpnc` or the LuCI interface — direct UCI editing is not recommended.
+Settings live in `/etc/config/nym-vpn` (UCI, preserved across firmware upgrades). Read it if you
+like:
 
 ```bash
-# View current config
 uci show nym-vpn
 ```
+
+Write it through `nym-vpnc` or LuCI, not by hand — the daemon holds its own copy of most settings
+and editing UCI directly will not reach it.
 
 ## Logs
 
 ```bash
-# View daemon logs
 logread -e nym-vpnd
-
-# Follow logs in real time
 logread -e nym-vpnd -f
 ```

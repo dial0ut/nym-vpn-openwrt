@@ -1,18 +1,17 @@
 # Installation
 
-## Method 1: One-Line Installer
-
-The fastest way to install on a running OpenWrt device:
+## One-line installer
 
 ```bash
 curl -fsSL https://packages.dial0ut.org/install.sh | sh
 ```
 
-The installer detects your package manager (`opkg` or `apk`), queries it for your CPU architecture, downloads the matching package from the latest GitHub release, and installs it.
+It detects your package manager (`opkg` or `apk`), asks it for the CPU architecture, pulls the
+matching package from the latest GitHub release, and installs it.
 
-## Method 2: Manual Package Install
+## Manual install
 
-### Find Your Architecture
+### Find your architecture
 
 === "opkg (OpenWrt ≤24.10)"
 
@@ -20,7 +19,7 @@ The installer detects your package manager (`opkg` or `apk`), queries it for you
     opkg print-architecture
     ```
 
-    The highest-priority line (largest number in the third column) is your architecture. For example:
+    Take the line with the highest priority — the largest number in the third column:
 
     ```
     arch all 1
@@ -28,7 +27,7 @@ The installer detects your package manager (`opkg` or `apk`), queries it for you
     arch aarch64_cortex-a53 10
     ```
 
-    Here the architecture is `aarch64_cortex-a53`.
+    Here it is `aarch64_cortex-a53`.
 
 === "apk (OpenWrt 25.x+)"
 
@@ -36,62 +35,55 @@ The installer detects your package manager (`opkg` or `apk`), queries it for you
     apk --print-arch
     ```
 
-    This prints your architecture directly, e.g. `aarch64`.
+    Prints the architecture directly, e.g. `aarch64`.
 
-### Download and Install
+### Download and install
 
-Download the `.ipk` or `.apk` for your architecture from [GitHub Releases](https://github.com/dial0ut/nym-vpn-openwrt/releases), then install:
+Grab the matching package from [GitHub Releases](https://github.com/dial0ut/nym-vpn-openwrt/releases):
 
 === "opkg (OpenWrt ≤24.10)"
 
     ```bash
-    # Transfer to router
     scp nym-vpn_*.ipk root@192.168.1.1:/tmp/
-
-    # Install on router
     opkg install /tmp/nym-vpn_*.ipk
     ```
 
 === "apk (OpenWrt 25.x+)"
 
     ```bash
-    # Transfer to router
     scp nym-vpn_*.apk root@192.168.1.1:/tmp/
-
-    # Install on router
     apk add --allow-untrusted /tmp/nym-vpn_*.apk
     ```
 
-## Post-Install
+## After installing
 
-### Verify Installation
+Check the daemon came up and the CLI can reach it:
 
 ```bash
-# Check daemon is running
 /etc/init.d/nym-vpnd status
-
-# Check CLI is available
 nym-vpnc status
 ```
 
-### Access LuCI Interface
+**NymVPN** appears in the LuCI navigation menu at your router's web interface (usually
+`http://192.168.1.1`). If the page loads but every action fails with *"No related RPC reply"*,
+see [Troubleshooting](../troubleshooting.md#no-related-rpc-reply-on-glinet-devices) — GL.iNet
+routers need port 8080.
 
-Navigate to your router's web interface (typically `http://192.168.1.1`) and look for **NymVPN** in the navigation menu.
-
-### Set Up Your Account
-
-You need a Nym account credential to connect. See [Quick Start](quickstart.md) for account setup.
+You need a Nym account before you can connect. [Quick Start](quickstart.md) covers that.
 
 ## Dependencies
 
-The package declares these dependencies (installed automatically):
+Pulled in automatically:
 
-| Package | Purpose |
-|---------|---------|
-| `libc` | Standard C library |
-| `kmod-tun` | TUN device kernel module |
+| Package | Why |
+|---------|-----|
+| `libc` | musl libc |
+| `kmod-tun` | TUN device — userspace WireGuard needs it |
+| `libmnl` | netlink |
+| `libnftnl` | nftables netlink |
+| `kmod-ipt-conntrack-extra` | conntrack marking for inbound exemptions on fw3 |
 | `luci-base` | LuCI web framework |
-| `rpcd` | RPC daemon for LuCI backend |
+| `rpcd` | RPC backend the LuCI app talks to |
 
 ## Uninstall
 
@@ -107,7 +99,7 @@ The package declares these dependencies (installed automatically):
     apk del nym-vpn
     ```
 
-Or manually:
+If the package database is broken and you have to do it by hand:
 
 ```bash
 /etc/init.d/nym-vpnd stop
@@ -121,3 +113,6 @@ rm -f /usr/share/luci/menu.d/luci-app-nym-vpn.json
 rm -f /usr/share/rpcd/acl.d/luci-app-nym-vpn.json
 /etc/init.d/rpcd restart
 ```
+
+Stop the daemon first. The init script tears down the kill-switch firewall table on stop; delete
+the binary out from under a running daemon and you can be left with no internet.

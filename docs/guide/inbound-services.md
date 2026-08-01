@@ -1,68 +1,80 @@
 # Inbound Services
 
-Expose port-forwarded services (LuCI on the router, SSH, a self-hosted website, a docker on the LAN) to the WAN while the NymVPN kill-switch is on.
+Keep port-forwarded services — LuCI on the router, SSH, a self-hosted site, something on a NAS —
+reachable from the WAN while the kill-switch is on.
 
-## Why this exists
+## The problem
 
-When the kill-switch is on, every outbound packet that isn't explicitly allowed is sent through the VPN tunnel. That includes the **reply** to any inbound connection — so a port-forwarded service on the router or behind it will:
+With the kill-switch on, every outbound packet that is not explicitly allowed goes through the
+tunnel. That includes the **reply** to an inbound connection. So a port-forwarded service:
 
-1. Accept the inbound SYN on the WAN
-2. Try to reply
-3. Send the reply through the VPN tunnel
-4. Hit the wrong source IP at the egress, and the client connection dies
+1. Accepts the inbound SYN on the WAN
+2. Replies
+3. Sends the reply through the tunnel
+4. Egresses with the wrong source IP, and the client's connection dies
 
-Inbound exemptions short-circuit that. For ports you declare here, replies are routed via the **real WAN** instead of the tunnel.
+An inbound exemption routes replies for the ports you declare via the **real WAN** instead.
 
 ## How it works
 
-For each `{proto, port}` you declare:
+Per `{proto, port}`:
 
-- A `mangle` rule marks the inbound connection's `conntrack` mark on the WAN interface, **before DNAT runs**, so the original public port is what matches.
-- The mark is restored onto the reply packet's mark via `meta mark set ct mark`.
-- A routing rule at priority 90 — `ip rule fwmark 0x14e lookup main` — sends marked replies via the main routing table (real WAN) instead of the tunnel routing table.
-- The kill-switch's filter chains get a `meta mark 0x14e accept` so the reject-all rule doesn't fire on the marked reply.
+- A `mangle` rule sets the inbound connection's conntrack mark on the WAN interface, **before
+  DNAT runs**, so the match is against the original public port.
+- `meta mark set ct mark` restores that mark onto the reply packet.
+- `ip rule fwmark 0x14e lookup main` at priority 90 sends marked replies via the main routing
+  table (real WAN) rather than the tunnel table.
+- The kill-switch's filter chains get `meta mark 0x14e accept`, so the reject-all rule does not
+  fire on the marked reply.
 
-The exemption only adds a reply path. It does not weaken outbound enforcement: the daemon's own outbound traffic is unaffected, and a compromised exempt service cannot exfiltrate through the exempt port because the mark is only set on `iif=wan ct state new` — not on connections the router itself initiates.
+**This only adds a reply path.** Outbound enforcement is unchanged — the daemon's own traffic is
+unaffected, and a compromised exempt service cannot exfiltrate through its own port, because the
+mark is only ever set on `iif=wan ct state new`, never on connections the router initiates.
 
-## When you need a port forward
+## Do you need a port forward too?
 
-NymVPN's inbound exemption only handles the **reply routing**. It does **not** set up the DNAT that delivers an inbound connection to a host on your LAN. Use OpenWrt's native firewall UI for that.
+The exemption handles **reply routing** only. It does **not** set up the DNAT that delivers an
+inbound connection to a LAN host — that stays in OpenWrt's own firewall.
 
-| Service location | Port forward needed? | Where to set it up |
-|------------------|----------------------|--------------------|
-| On the router itself (LuCI, SSH, WireGuard listener on the router) | No | — |
-| On a LAN host (Jellyfin on a NAS, docker on a server, etc.) | Yes | `Network → Firewall → Port Forwards` in LuCI |
+| Service lives | Port forward? | Where |
+|---------------|---------------|-------|
+| On the router (LuCI, SSH, a WireGuard listener) | No | — |
+| On a LAN host (Jellyfin on a NAS, docker on a server) | Yes | `Network → Firewall → Port Forwards` |
 
-**For LAN-hosted services, set up the port forward first.** Then add the exemption with the WAN-side port. The exemption matches by `(proto, WAN-port)` before DNAT rewrites the destination — so the LAN target IP doesn't need to be declared on the NymVPN side.
+For LAN-hosted services, create the port forward first, then add the exemption for the **WAN-side**
+port. The exemption matches `(proto, WAN-port)` before DNAT rewrites the destination, so the LAN
+target IP never needs declaring on the NymVPN side.
 
 ## CLI
 
 ```bash
-# List configured exemptions
 nym-vpnc inbound list
 
-# Add an exemption with optional label
 nym-vpnc inbound add tcp:443 --label "HTTPS reverse proxy"
 nym-vpnc inbound add tcp:22222
 nym-vpnc inbound add udp:51820 --label "WireGuard"
 
-# Remove an exemption
 nym-vpnc inbound del tcp:443
-
-# Tunnel summary now shows the exemption list too
-nym-vpnc tunnel get
-# … Inbound exemptions: tcp/443, tcp/22222, udp/51820 …
 ```
 
-Add and delete persist to `/etc/nym/nym-vpnd.json` and survive daemon restart. Changes apply on the next state transition; while the VPN is connected, the daemon debounces tunnel-settings updates by ~1s and then triggers a reconnect to re-apply the firewall and routing rules.
+`nym-vpnc tunnel get` lists them too:
+
+```
+… Inbound exemptions: tcp/443, tcp/22222, udp/51820 …
+```
+
+Entries persist to `/etc/nym/nym-vpnd.json` and survive a daemon restart. Changes apply on the
+next state transition; while connected, the daemon debounces tunnel-settings updates by ~1s and
+then reconnects to re-apply firewall and routing rules.
 
 ## LuCI
 
 The **Inbound Services** card sits between `Tunnel Settings` and `DNS & Ad Blocking`.
 
-- Pick `TCP` or `UDP`, type the port, optionally a label, press **Save** (or `Enter`).
-- Rows show proto / port / label / status (`● Active` when kill-switch is on, `● Inert` when off) with a `×` to delete.
-- If the kill-switch is off, a warning banner explains that exemptions are inert — exemptions only matter when the tunnel default route is enforcing.
+Pick `TCP` or `UDP`, type the port, optionally a label, **Save** (or `Enter`). Rows show
+proto / port / label / status — `● Active` with the kill-switch on, `● Inert` with it off — and a
+`×` to delete. With the kill-switch off a banner explains why the entries are inert: exemptions
+only matter while something is enforcing.
 
 ## Recipes
 
@@ -71,7 +83,7 @@ The **Inbound Services** card sits between `Tunnel Settings` and `DNS & Ad Block
 The router's web UI listens on `:443`.
 
 ```bash
-# 1. Allow WAN input to TCP/443 in OpenWrt firewall
+# 1. allow WAN input to TCP/443
 uci set firewall.luci_wan=rule
 uci set firewall.luci_wan.name='Allow-LuCI-WAN'
 uci set firewall.luci_wan.src='wan'
@@ -81,20 +93,19 @@ uci set firewall.luci_wan.target='ACCEPT'
 uci commit firewall
 fw4 reload
 
-# 2. Allow LuCI to accept RFC1918-source requests (only needed if the
-#    test client is on a private network)
+# 2. only if your test client is on a private network
 uci set uhttpd.main.rfc1918_filter='0'
 uci commit uhttpd
 /etc/init.d/uhttpd restart
 
-# 3. Add the NymVPN exemption
+# 3. the exemption
 nym-vpnc inbound add tcp:443 --label "LuCI"
 ```
 
-### Expose a LAN service (e.g. Jellyfin at 192.168.1.50:8096)
+### Expose a LAN service — Jellyfin at 192.168.1.50:8096
 
 ```bash
-# 1. Create the port forward in OpenWrt — public:8096 → 192.168.1.50:8096
+# 1. port forward, public:8096 -> 192.168.1.50:8096
 uci add firewall redirect
 uci set firewall.@redirect[-1].name='Jellyfin'
 uci set firewall.@redirect[-1].src='wan'
@@ -107,13 +118,11 @@ uci set firewall.@redirect[-1].target='DNAT'
 uci commit firewall
 fw4 reload
 
-# 2. Add the exemption for the WAN-side port (same number here)
+# 2. exemption for the WAN-side port
 nym-vpnc inbound add tcp:8096 --label "Jellyfin"
 ```
 
-The exemption uses the **public** port (`src_dport`), not the internal one — even if the port forward remaps them.
-
-### Remap example (`WAN:8443 → LAN:443`)
+### Remapped ports — WAN:8443 → LAN:443
 
 ```bash
 uci add firewall redirect
@@ -128,28 +137,29 @@ uci set firewall.@redirect[-1].target='DNAT'
 uci commit firewall
 fw4 reload
 
-# Use the WAN port (8443), not the LAN port (443)
 nym-vpnc inbound add tcp:8443 --label "Home Assistant"
 ```
+
+The exemption always takes the **public** port (`src_dport`), never the internal one.
 
 ## Verification
 
 ```bash
-# Mark-set rule in mangle PREROUTING (only present in Connecting/Connected)
+# mark-set rule in mangle PREROUTING — only present in Connecting/Connected
 nft list table inet nym | grep -A4 'chain mangle_prerouting'
 
-# Mark restore in mangle output
+# mark restore in mangle output
 nft list table inet nym | grep -A2 'chain mangle_output'
 
-# Filter accepts for the exempt mark
+# filter accepts for the exempt mark
 nft list table inet nym | grep 'meta mark 0x'
 
-# The fwmark routing rule at priority 90
+# the routing rule
 ip rule | grep 0x14e
 # 90: from all fwmark 0x14e lookup main
 ```
 
-On `fw3`/iptables routers the equivalent is:
+On fw3/iptables routers:
 
 ```bash
 iptables -t mangle -L NYM_MANGLE_PREROUTING -v -n
@@ -159,14 +169,23 @@ iptables -L NYM_OUTPUT -v -n | grep '0x14e'
 
 ## Caveats
 
-- **Single WAN only in v1.** If `mwan3` reports more than one enabled WAN, the daemon logs a warning and the exemption may apply to the wrong egress.
-- **PPPoE / tunnelled WANs are handled.** The exemption anchors its `iif` match to the WAN's real L3 device (e.g. `pppoe-wan`), resolved from `ubus call network.interface.wan status`, not the underlying ethernet. Confirm with the `mangle_prerouting` command under [Verification](#verification) that the `iifname` matches `ip route get 1.1.1.1`'s device.
-- **Kernel module `kmod-ipt-conntrack-extra`.** The IPK declares this as a hard dependency on `fw3` builds; if you've manually stripped it, exemption rule application will fail at `iptables-restore` time with a clear error.
-- **Hot-apply takes ~1s.** When you `add` or `del` while connected, the daemon debounces the tunnel-settings update by ~1s and then reconnects to re-apply the firewall/routing — connections may briefly drop. Existing in-flight flows keep their original routing (no retroactive marking).
-- **Exemption is not a port forward.** If you `add tcp:8096` without an OpenWrt port forward for `8096`, nothing forwards traffic to your LAN host — the exemption only fixes the reply path.
+- **Single WAN only in v1.** If `mwan3` reports more than one enabled WAN, the daemon warns and
+  the exemption may apply to the wrong egress.
+- **PPPoE and tunnelled WANs work.** The `iif` match is anchored to the WAN's real L3 device (e.g.
+  `pppoe-wan`), resolved from `ubus call network.interface.wan status`, not the underlying
+  ethernet. Confirm with the `mangle_prerouting` command under [Verification](#verification) that
+  `iifname` matches the device from `ip route get 1.1.1.1`.
+- **`kmod-ipt-conntrack-extra`** is a hard dependency on fw3 builds. If you have stripped it
+  manually, rule application fails at `iptables-restore` time with a clear error.
+- **Hot-apply takes ~1s and drops connections.** `add` or `del` while connected debounces ~1s then
+  reconnects to re-apply firewall and routing. In-flight flows keep their original routing —
+  marking is not retroactive.
+- **An exemption is not a port forward.** `add tcp:8096` with no OpenWrt port forward for 8096
+  forwards nothing to your LAN host. It only fixes the reply path.
 
 ## See also
 
-- [Split Tunneling with PBR](split-tunneling.md) — for *outbound* exclusions (route specific clients/destinations around the VPN). Inbound exemption and PBR can coexist; both use the daemon's published fwmark/table layout.
-- [LuCI Web Interface](luci.md) — Inbound Services card reference.
-- [CLI Usage](cli.md) — full `nym-vpnc` reference.
+- [Split Tunneling](split-tunneling.md) — *outbound* exclusions. The two coexist; both use the
+  daemon's published fwmark and routing-table layout.
+- [LuCI Web Interface](luci.md) — the Inbound Services card
+- [CLI Usage](cli.md) — the rest of `nym-vpnc`

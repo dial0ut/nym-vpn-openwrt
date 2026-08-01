@@ -1,47 +1,58 @@
-# WireGuard Backend Selection
+# WireGuard Backend
 
-## The Problem: WireGuard on Embedded Linux
+## The constraints
 
-NymVPN needs two simultaneous WireGuard tunnels on devices ranging from x86_64 boxes to 32 MB MIPS routers. The backend must cross-compile for six architectures, link statically against musl, and support AmneziaWG obfuscation to defeat deep packet inspection. These constraints ruled out the approaches used by the upstream project.
+NymVPN needs two simultaneous WireGuard tunnels on hardware ranging from x86_64 boxes down to
+MIPS routers with 32 MB of flash. The backend has to cross-compile for eight architectures against
+musl, and leave room to add AmneziaWG obfuscation on top.
 
-## Why Not wireguard-go
+Between them, those three rule out both the kernel module and wireguard-go.
 
-The upstream `nym-vpn-client` used wireguard-go, which wraps the Go WireGuard implementation through C FFI. This has a fundamental problem on musl-based systems: Go's `c-archive` buildmode segfaults on musl libc. This is a known, long-standing Go issue tracked in [golang/go#13492](https://github.com/golang/go/issues/13492).
+## Not wireguard-go
 
-Beyond the segfault, cross-compiling Go for MIPS and other embedded targets requires a separate Go toolchain alongside Rust, plus a CGo bridge between them. Each new target architecture multiplies the build complexity. On Tier 3 targets that already require nightly Rust and `-Z build-std`, adding Go cross-compilation made the build system fragile and difficult to maintain.
+Upstream wraps the Go WireGuard implementation through C FFI. Go's `c-archive` buildmode segfaults
+on musl libc — a known issue open since 2015, [golang/go#13492](https://github.com/golang/go/issues/13492).
 
-## Choosing Gotatun: Pure Rust Userspace WireGuard
+Even without that, it means a Go toolchain alongside Rust and a CGo bridge between them, with the
+complexity multiplying per target. Tier 3 targets already need nightly Rust and `-Z build-std`;
+adding Go cross-compilation on top made the build fragile enough that adding an architecture
+stopped being routine.
 
-The project uses [mullvad/gotatun](https://github.com/mullvad/gotatun), a pure Rust userspace WireGuard implementation. This resolved both the musl compatibility problem and the cross-compilation complexity in one move.
+## gotatun
 
-Gotatun only requires `kmod-tun` on the target device, which every OpenWrt build includes. No WireGuard kernel module is needed. The entire VPN stack builds with a single Rust toolchain, from x86_64 down to MIPS.
+[mullvad/gotatun](https://github.com/mullvad/gotatun) is pure-Rust userspace WireGuard. It solves
+the musl problem and the toolchain problem at once — one Rust toolchain builds the whole stack,
+x86_64 down to MIPS, and the only thing the target needs is `kmod-tun`, which every OpenWrt build
+ships.
 
-The `nym-wg-gotatun` crate wraps gotatun and exposes the same API surface that the old wireguard-go crate provided, minimizing integration churn in the rest of the codebase.
+The `nym-wg-gotatun` crate wraps it behind the same API the old wireguard-go crate exposed, so the
+rest of the codebase did not have to change.
 
-## Enabling AmneziaWG Obfuscation
+## AmneziaWG obfuscation
 
-### Why Obfuscation Matters
+Standard WireGuard is easy to fingerprint. Handshake messages carry fixed type values and the
+packet structure is public, so DPI in censorship-heavy networks can identify and block it on
+signature alone. AmneziaWG remaps those message type headers to random values and injects junk
+packets during the handshake, so the traffic stops matching the known pattern.
 
-Standard WireGuard has a distinctive packet fingerprint. The handshake messages use fixed type values, and the packet structure is well-documented. Deep packet inspection systems in censorship-heavy environments can identify and block WireGuard traffic based on these signatures.
+**Userspace is what makes this possible at all.** Obfuscation has to sit between the WireGuard
+state machine and the UDP socket — rewriting headers and prepending junk on the way out,
+reversing it on the way in. With kernel WireGuard the whole wire protocol lives in kernel space
+and there is no seam to insert that. gotatun exposes one.
 
-AmneziaWG defeats this fingerprinting by remapping message type headers to random values and injecting junk packets during the handshake. To an observer, the traffic no longer matches WireGuard's known patterns.
+The implementation wraps gotatun's UDP socket factory rather than forking gotatun.
+`AmneziaUdpFactory` produces obfuscated send and receive halves; the send side remaps and injects,
+the receive side strips and reverses. gotatun's internals stay untouched, which keeps upstream
+updates cheap, and with the feature flag off or the config set to passthrough the wrapper costs
+nothing.
 
-### Why Userspace Makes It Possible
+## What userspace costs
 
-AmneziaWG obfuscation requires intercepting packets between the WireGuard state machine and the UDP socket. The obfuscation layer must rewrite outgoing packet headers and prepend junk data before the packet hits the network, then reverse the process on incoming packets before the WireGuard state machine sees them.
+Packet processing moves out of the kernel, adding context switches per packet. `sendmmsg` and
+`recvmmsg` batch multiple packets per syscall to amortise that, which recovers most of it.
 
-With a kernel WireGuard implementation, the wire protocol is handled entirely in kernel space. There is no extension point between the WireGuard module and the UDP socket where userspace code could inject obfuscation. A userspace implementation like gotatun exposes this layer, making AmneziaWG integration straightforward.
+On a router the trade is worth it: one toolchain, every device supported, obfuscation possible.
 
-### Transport Layer Wrapping
-
-Rather than forking gotatun and modifying its internals, the obfuscation is implemented as a wrapper around gotatun's UDP socket factory. The `AmneziaUdpFactory` wraps the standard socket factory to produce obfuscated send and receive halves. The send side remaps headers and injects junk packets. The receive side strips junk and reverses the header remapping.
-
-This design keeps the obfuscation isolated behind a feature flag. When the flag is disabled or the config is set to passthrough, the wrapper adds zero overhead. Gotatun's internals remain unmodified, which simplifies tracking upstream updates.
-
-## Performance Tradeoffs
-
-Userspace WireGuard moves packet processing from kernel space to user space, adding context switches on every packet. Linux provides `sendmmsg` and `recvmmsg` system calls that batch multiple packets per syscall to amortize this cost.
-
-On resource-constrained routers, the userspace approach is an acceptable tradeoff. The benefits of a single toolchain, universal device support, and obfuscation capability outweigh the overhead of context switches.
-
-On 32-bit targets like MIPS, gotatun's `AtomicU64` usage and BLS12-381 field arithmetic require build-time patches: `portable-atomic` for the former, a u32-based multiplication fork for the latter. These are handled by the Tier 3 cross-compilation infrastructure in `docker/tier3-musl/`.
+32-bit targets need two build-time patches — `portable-atomic` for gotatun's `AtomicU64` usage,
+and a u32-based multiplication fork for BLS12-381 field arithmetic. Both are handled by the Tier 3
+infrastructure in `docker/tier3-musl/`.
