@@ -83,6 +83,12 @@ return view.extend({
         var serviceInfoFrame;
         var daemonStartBtn;
         var daemonStopBtn;
+        // Whether nym-vpnd has its boot symlink. Defaults to true so an older
+        // bridge that omits the field never shows a spurious warning.
+        var lastDaemonEnabled = daemon_status.enabled !== false;
+        // Last account availability seen from status polling, so the Account
+        // card is rebuilt when the daemon comes back or goes away.
+        var prevAccountUnavailable = (status && status.available === false) || false;
         // Inbound-exemptions section, mounted inside the Tunnel Settings card
         // under the Kill-Switch toggle and shown only while kill-switch is on.
         var inboundMount;
@@ -304,6 +310,16 @@ return view.extend({
                 var curErrorReason = result.error_reason || '';
                 if (curErrorReason !== prevErrorReason) {
                     prevErrorReason = curErrorReason;
+                    if (typeof refreshAccountCard === 'function') refreshAccountCard();
+                }
+
+                // The daemon appearing or disappearing produces no
+                // error_reason of its own, so track it separately: without
+                // this the Account card keeps showing the stale panel until
+                // the page is reloaded.
+                var curUnavailable = result.available === false;
+                if (curUnavailable !== prevAccountUnavailable) {
+                    prevAccountUnavailable = curUnavailable;
                     if (typeof refreshAccountCard === 'function') refreshAccountCard();
                 }
 
@@ -957,7 +973,10 @@ return view.extend({
         var handleAccountLogin = function(ev) {
             ev.preventDefault();
             var fd = new FormData(ev.target);
-            var mnemonic = fd.get('mnemonic');
+            // Collapse whitespace: the field is a textarea, so a pasted phrase
+            // can carry newlines and double spaces, and the daemon-side
+            // validator only accepts lowercase letters and single spaces.
+            var mnemonic = (fd.get('mnemonic') || '').replace(/\s+/g, ' ').trim();
             var mode = fd.get('mode') || 'api';
 
             if (!mnemonic) {
@@ -1304,12 +1323,22 @@ return view.extend({
             var rawState = acct.state || '';
             var state = rawState.replace(/([a-z])([A-Z])/g, '$1 $2');
             var invalidIdentities = ['', 'Not set', 'LoggedOut', 'unset', 'none'];
+            // The daemon never answered — either it said so (`available:false`)
+            // or, on an older bridge, both fields came back empty, which no
+            // real reply produces. This outranks every other flag: showing the
+            // login form for a question we never got to ask is what made the
+            // 1.33.1 upgrade look like it had wiped the stored account.
+            var isUnavailable = acct.available === false || (!identity && !rawState);
             var hasError = state.indexOf('Error') >= 0 || identity.indexOf('Error') >= 0;
             var isLoggedOut = (rawState || '').trim() === 'LoggedOut';
-            var isLoggedIn = !!identity && invalidIdentities.indexOf(identity) === -1 && !hasError && !isLoggedOut;
+            var isLoggedIn = !isUnavailable && !!identity && invalidIdentities.indexOf(identity) === -1 && !hasError && !isLoggedOut;
             return {
                 identity: identity, rawState: rawState, state: state,
-                hasError: hasError, isLoggedIn: isLoggedIn, isLoggedOut: isLoggedOut
+                hasError: hasError, isLoggedIn: isLoggedIn, isLoggedOut: isLoggedOut,
+                isUnavailable: isUnavailable,
+                // Only meaningful while unavailable; absent on a real reply.
+                daemonRunning: acct.daemon_running !== false,
+                daemonEnabled: acct.daemon_enabled !== false
             };
         };
 
@@ -2203,6 +2232,28 @@ return view.extend({
             var state = flags.state;
             var accountStatusLabel = (state || '').trim() || 'Active';
 
+            // Checked before anything else: with no answer from the daemon we
+            // know nothing about the account, so say that instead of guessing.
+            if (flags.isUnavailable) {
+                var unavailableBody = [
+                    E('div', { 'class': 'nym-account-state', 'style': 'background: var(--danger-dim); color: var(--danger)' },
+                        flags.daemonRunning ? 'Service not responding' : 'Service not running'),
+                    E('div', { 'class': 'nym-card-description', 'style': 'margin: 16px 0' },
+                        'The account state is unknown because the VPN service could not be reached. Your recovery phrase is still stored on this device — nothing has been removed.')
+                ];
+                if (!flags.daemonEnabled) {
+                    unavailableBody.push(E('div', { 'class': 'nym-card-description', 'style': 'margin-bottom: 16px; opacity: 0.8' },
+                        'nym-vpnd is also not enabled at boot, so it will stay down after a reboot. Enable it from the Service Management card or with: /etc/init.d/nym-vpnd enable'));
+                }
+                unavailableBody.push(E('button', {
+                    'class': 'nym-btn nym-btn-primary',
+                    'type': 'button',
+                    'style': 'width: 100%',
+                    'click': function() { runDaemonAction(flags.daemonRunning ? 'restart' : 'start'); }
+                }, flags.daemonRunning ? 'Restart service' : 'Start service'));
+                return E('div', { 'class': 'nym-account-logged-in' }, unavailableBody);
+            }
+
             if (flags.isLoggedIn) {
                 var copyBtn = E('button', {
                     'class': 'nym-identity-copy',
@@ -2266,14 +2317,21 @@ return view.extend({
                     'Enter your Nym account recovery phrase to connect.'),
                 E('div', { 'class': 'nym-form-group' }, [
                     E('label', { 'class': 'nym-form-label' }, 'Recovery Phrase'),
-                    E('input', {
+                    // A textarea, not a text input: browsers ignore
+                    // autocomplete="off" on inputs and helpfully autofill the
+                    // saved LuCI login here (users see the word "root" appear
+                    // in the field). Password managers do not autofill
+                    // textareas, and a 24-word phrase wraps instead of
+                    // scrolling. FormData.get('mnemonic') is unchanged.
+                    E('textarea', {
                         'class': 'nym-input',
-                        'type': 'text',
                         'name': 'mnemonic',
+                        'rows': '3',
                         'autocomplete': 'off',
                         'autocapitalize': 'off',
                         'autocorrect': 'off',
                         'spellcheck': 'false',
+                        'style': 'resize: vertical',
                         'placeholder': 'Enter your recovery phrase...'
                     })
                 ]),
@@ -2320,12 +2378,18 @@ return view.extend({
         container.appendChild(accountCard);
 
         // Daemon action helpers
-        var refreshDaemonUi = function(running) {
+        // `enabled` is optional: pass undefined to leave the boot-time part of
+        // the badge as it was. Running-but-not-enabled is a state users end up
+        // in after a bad upgrade and everything looks fine until they reboot,
+        // so it gets said out loud rather than inferred.
+        var refreshDaemonUi = function(running, enabled) {
+            if (enabled !== undefined) lastDaemonEnabled = !!enabled;
             if (daemonStatusBadge) {
                 daemonStatusBadge.className = 'nym-card-status' + (running ? '' : ' stopped');
             }
             if (daemonStatusBadgeText) {
-                daemonStatusBadgeText.textContent = running ? 'Running' : 'Stopped';
+                daemonStatusBadgeText.textContent = (running ? 'Running' : 'Stopped') +
+                    (lastDaemonEnabled ? '' : ' · not enabled at boot');
             }
             if (serviceInfoFrame) {
                 serviceInfoFrame.className = 'nym-info-frame' + (running ? '' : ' stopped');
@@ -2348,7 +2412,10 @@ return view.extend({
                 showModal(info.verb + ' Daemon', 'Please wait...');
                 info.rpcCall().then(function(result) {
                     var running = result && result.status === 'running';
-                    refreshDaemonUi(running);
+                    refreshDaemonUi(running, result ? result.enabled : undefined);
+                    // The Account card may be sitting on the "service not
+                    // reachable" panel; re-ask now that the daemon moved.
+                    if (typeof refreshAccountCard === 'function') refreshAccountCard();
                     if (result && result.success) {
                         setModalSuccess('Done', 'Daemon ' + info.pastTense, '✓');
                         setTimeout(fadeOutModal, 1500);
@@ -2393,7 +2460,7 @@ return view.extend({
         var updateDaemonStatus = function() {
             return rpc.daemonStatus().then(function(result) {
                 if (!result) return;
-                refreshDaemonUi(!!result.running);
+                refreshDaemonUi(!!result.running, result.enabled);
             }).catch(function(err) {
                 console.error('Daemon status update failed:', err);
             });
@@ -2425,7 +2492,9 @@ return view.extend({
         daemonStopBtn.innerHTML = assets.iconStop + '<span>Stop</span>';
         daemonStopBtn.disabled = !initialDaemonRunning;
 
-        daemonStatusBadgeText = E('span', { 'class': 'nym-card-status-text' }, initialDaemonRunning ? 'Running' : 'Stopped');
+        daemonStatusBadgeText = E('span', { 'class': 'nym-card-status-text' },
+            (initialDaemonRunning ? 'Running' : 'Stopped') +
+            (lastDaemonEnabled ? '' : ' · not enabled at boot'));
         daemonStatusBadge = E('div', {
             'class': 'nym-card-status' + (initialDaemonRunning ? '' : ' stopped')
         }, [

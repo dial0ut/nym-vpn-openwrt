@@ -488,8 +488,24 @@ async fn gateway_name_map(client: &mut RpcClient, gw_type: GatewayType) -> Optio
 // status
 //-------------------------------------------------------------------------------
 
+/// Marks a reply as "the daemon never answered", plus enough detail for the
+/// UI to say what to do about it. Every degraded shape must carry this: a
+/// frontend that cannot tell "unreachable" from a real answer ends up
+/// rendering "no account configured" for a question it never got to ask,
+/// which reads to the user as their credentials having been wiped.
+fn insert_unavailable(out: &mut serde_json::Map<String, Value>) {
+    out.insert("available".into(), json!(false));
+    out.insert("daemon_running".into(), json!(initd_running("nym-vpnd")));
+    out.insert("daemon_enabled".into(), json!(initd_enabled("nym-vpnd")));
+}
+
 fn unknown_status(raw: String) -> Value {
-    json!({ "state": "unknown", "connected": false, "raw_state": raw })
+    let mut out = serde_json::Map::new();
+    out.insert("state".into(), json!("unknown"));
+    out.insert("connected".into(), json!(false));
+    out.insert("raw_state".into(), json!(raw));
+    insert_unavailable(&mut out);
+    Value::Object(out)
 }
 
 /// The ident the frontend matches on (e.g. PerformantEntryGatewayUnavailable).
@@ -1135,7 +1151,12 @@ async fn tunnel_set(args: &Value) -> Value {
 
 async fn account_get() -> Value {
     let degraded = |err: String| {
-        json!({ "identity": "", "state": "", "raw_info": err })
+        let mut out = serde_json::Map::new();
+        out.insert("identity".into(), json!(""));
+        out.insert("state".into(), json!(""));
+        out.insert("raw_info".into(), json!(err));
+        insert_unavailable(&mut out);
+        Value::Object(out)
     };
     let mut client = match RpcClient::new().await {
         Ok(client) => client,
@@ -1152,6 +1173,9 @@ async fn account_get() -> Value {
     json!({
         "identity": identity,
         "state": state,
+        // Positive signal that this is the daemon's own answer, so an empty
+        // state here means "no account", not "could not ask".
+        "available": true,
         "raw_info": format!("Account identity: {identity}\nAccount state: {state}"),
     })
 }
@@ -1560,11 +1584,28 @@ fn initd_running(service: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Whether the service has its /etc/rc.d start symlink, i.e. whether it comes
+/// back on the next boot. `enabled` answers through the exit status and prints
+/// nothing, so cmd_stdout can't be reused here.
+fn initd_enabled(service: &str) -> bool {
+    std::process::Command::new(format!("/etc/init.d/{service}"))
+        .arg("enabled")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
 fn daemon_status() -> Value {
     let running = initd_running("nym-vpnd");
     json!({
         "status": if running { "running" } else { "stopped" },
         "running": running,
+        // Running but not enabled is a real state users land in (an upgrade
+        // that stops+disables and never re-enables), and it is invisible
+        // unless we report it: everything works until the next reboot.
+        "enabled": initd_enabled("nym-vpnd"),
     })
 }
 
@@ -2099,10 +2140,11 @@ fn sleep_secs(secs: u64) {
 }
 
 fn daemon_state_json(running_msg: &str, stopped_err: &str) -> Value {
+    let enabled = initd_enabled("nym-vpnd");
     if initd_running("nym-vpnd") {
-        json!({ "success": true, "message": running_msg, "status": "running" })
+        json!({ "success": true, "message": running_msg, "status": "running", "enabled": enabled })
     } else {
-        json!({ "success": false, "error": stopped_err, "status": "stopped" })
+        json!({ "success": false, "error": stopped_err, "status": "stopped", "enabled": enabled })
     }
 }
 
@@ -2115,10 +2157,11 @@ fn daemon_start() -> Value {
 fn daemon_stop() -> Value {
     initd_run("nym-vpnd", "stop");
     sleep_secs(1);
+    let enabled = initd_enabled("nym-vpnd");
     if initd_running("nym-vpnd") {
-        json!({ "success": false, "error": "Daemon failed to stop", "status": "running" })
+        json!({ "success": false, "error": "Daemon failed to stop", "status": "running", "enabled": enabled })
     } else {
-        json!({ "success": true, "message": "Daemon stopped", "status": "stopped" })
+        json!({ "success": true, "message": "Daemon stopped", "status": "stopped", "enabled": enabled })
     }
 }
 
@@ -2288,26 +2331,45 @@ async fn init_batch() -> Value {
                 Err(err) => insert_degraded_config_members(&mut out, format!("{err:#}")),
             }
 
-            let identity = client
-                .get_account_identity()
-                .await
-                .ok()
-                .flatten()
-                .unwrap_or_else(|| "unset".to_owned());
-            let account_state = client
-                .get_account_state()
-                .await
-                .map(|s| format!("{s:?}"))
-                .unwrap_or_default();
-            out.insert(
-                "account".into(),
-                json!({ "identity": identity, "state": account_state }),
+            // Mirror account_get(): a failed query must not fall through as an
+            // empty state, which the frontend would read as "no account".
+            let identity_res = client.get_account_identity().await;
+            let state_res = client.get_account_state().await;
+            let mut account = serde_json::Map::new();
+            account.insert(
+                "identity".into(),
+                json!(
+                    identity_res
+                        .as_ref()
+                        .ok()
+                        .and_then(|id| id.clone())
+                        .unwrap_or_else(|| "unset".to_owned())
+                ),
             );
+            account.insert(
+                "state".into(),
+                json!(
+                    state_res
+                        .as_ref()
+                        .map(|state| format!("{state:?}"))
+                        .unwrap_or_default()
+                ),
+            );
+            if identity_res.is_err() || state_res.is_err() {
+                insert_unavailable(&mut account);
+            } else {
+                account.insert("available".into(), json!(true));
+            }
+            out.insert("account".into(), Value::Object(account));
         }
         Err(err) => {
             out.insert("info".into(), json!({}));
             out.insert("network".into(), json!({ "network": "" }));
-            out.insert("account".into(), json!({ "identity": "", "state": "" }));
+            let mut account = serde_json::Map::new();
+            account.insert("identity".into(), json!(""));
+            account.insert("state".into(), json!(""));
+            insert_unavailable(&mut account);
+            out.insert("account".into(), Value::Object(account));
             insert_degraded_config_members(&mut out, format!("{err:#}"));
         }
     }
