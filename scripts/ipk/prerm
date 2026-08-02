@@ -1,11 +1,20 @@
 #!/bin/sh
 # Pre-removal script for nym-vpn IPK package
 
-# Stop and disable services before removal
+# Stop the services: the binaries are about to be replaced either way.
 /etc/init.d/nym-vpn-watchdog stop 2>/dev/null
-/etc/init.d/nym-vpn-watchdog disable 2>/dev/null
 /etc/init.d/nym-vpnd stop 2>/dev/null
-/etc/init.d/nym-vpnd disable 2>/dev/null
+
+# Disabling is for real removal only. On an upgrade the boot symlinks must
+# survive: postinst re-creates them, but if postinst never runs (a failed or
+# interrupted transaction, or a package manager that skips post-upgrade) the
+# router is left with the service permanently disabled — it does not come back
+# after a reboot either, and the UI then shows an empty account, which reads as
+# lost credentials. Leaving /etc/rc.d alone makes that failure self-healing.
+if [ "$PKG_UPGRADE" != "1" ]; then
+    /etc/init.d/nym-vpn-watchdog disable 2>/dev/null
+    /etc/init.d/nym-vpnd disable 2>/dev/null
+fi
 
 # Clean up firewall rules
 if [ -x /sbin/fw4 ]; then
