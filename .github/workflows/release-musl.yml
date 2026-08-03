@@ -515,6 +515,51 @@ jobs:
           cp artifacts/*.apk feed/apk/ 2>/dev/null || true
           bash scripts/feed/generate-feed.sh apk feed/apk /tmp/dial0ut-apk.pem
 
+      - name: Smoke-test the apk feed with a real apk client
+        run: |
+          # Nothing else in this pipeline ever consumes the feed it publishes,
+          # which is how a filename mismatch went unnoticed for four releases:
+          # apk stores no filename in packages.adb and rebuilds the URL as
+          # <name>-<version>.apk, so a feed holding only nym-vpn_<ver>_<arch>.apk
+          # 404s on every `apk add/upgrade` while looking perfectly healthy.
+          # Serve the generated feed locally and make apk actually fetch from it.
+          set -euo pipefail
+          ( cd feed/apk && python3 -m http.server 8899 --bind 127.0.0.1 & )
+          # `cmd && break` would abort the whole step under set -e on the
+          # first miss, which is exactly when we still need to wait.
+          for _ in $(seq 20); do
+            if curl -fsS -o /dev/null "http://127.0.0.1:8899/"; then break; fi
+            sleep 1
+          done
+
+          failed=0
+          for arch_dir in feed/apk/*/; do
+            arch="$(basename "$arch_dir")"
+            [ -f "$arch_dir/packages.adb" ] || continue
+            echo "::group::apk fetch nym-vpn ($arch)"
+            # --arch so one runner can exercise every published architecture.
+            # The index is signed; trust it via the public key we ship on-device,
+            # so this also catches a signing-key regression.
+            if docker run --rm --network host \
+                 -v "$PWD/scripts/feed/dial0ut-apk.pem:/etc/apk/keys/dial0ut-apk.pem:ro" \
+                 alpine:edge sh -c "
+                   set -e
+                   echo 'http://127.0.0.1:8899/$arch/packages.adb' > /etc/apk/repositories
+                   apk update
+                   apk fetch --arch '$arch' -o /tmp nym-vpn
+                   ls -la /tmp/nym-vpn-*.apk
+                 "; then
+              echo "  OK: $arch"
+            else
+              echo "::error::apk cannot fetch nym-vpn from the $arch feed"
+              failed=1
+            fi
+            echo "::endgroup::"
+          done
+
+          pkill -f "http.server 8899" || true
+          [ "$failed" -eq 0 ]
+
       - name: Clean up signing keys
         if: always()
         run: rm -f /tmp/opkg.sec /tmp/dial0ut-apk.pem

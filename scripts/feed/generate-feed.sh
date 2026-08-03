@@ -147,7 +147,21 @@ generate_opkg_feed() {
 generate_apk_feed() {
     local ext="apk"
 
-    # Organize files by architecture
+    # Organize files by architecture.
+    #
+    # Each package is published under TWO names in its arch dir:
+    #
+    #   nym-vpn-<ver>-r0.apk       what apk itself fetches. mkndx stores no
+    #                              filename in packages.adb, so the client
+    #                              derives the URL as <repo-dir>/<name>-<ver>.apk
+    #                              (the same convention as OpenWrt's own feeds).
+    #                              Without this, `apk add/upgrade nym-vpn` 404s
+    #                              and dies with "wget: exited with error 8".
+    #   nym-vpn_<ver>_<arch>.apk   what install.sh and the release notes link
+    #                              to directly. Kept so those keep working.
+    #
+    # Only the canonical name is handed to mkndx below, otherwise the index
+    # carries two identical entries for the same package.
     for pkg in "$PACKAGES_DIR"/*.$ext; do
         [ -f "$pkg" ] || continue
         local filename=$(basename "$pkg")
@@ -156,9 +170,19 @@ generate_apk_feed() {
             echo "Warning: Could not extract architecture from $filename, skipping"
             continue
         fi
+        local ver=$(echo "$filename" | sed "s/^nym-vpn_\\([^_]*\\)_.*\\.${ext}\$/\\1/")
+        if [ -z "$ver" ] || [ "$ver" = "$filename" ]; then
+            echo "Warning: Could not extract version from $filename, skipping"
+            continue
+        fi
+        # Must match the version given to `apk mkpkg -I version:` in
+        # scripts/apk/build-apk.sh — apk rebuilds the filename from the index
+        # version verbatim, release suffix included.
+        local canonical="nym-vpn-${ver}-r0.${ext}"
         mkdir -p "$PACKAGES_DIR/$arch"
-        cp "$pkg" "$PACKAGES_DIR/$arch/"
-        echo "  $arch/$filename"
+        cp "$pkg" "$PACKAGES_DIR/$arch/$canonical"
+        cp "$pkg" "$PACKAGES_DIR/$arch/$filename"
+        echo "  $arch/$canonical (+ $filename)"
     done
 
     # Generate packages.adb per architecture using apk mkndx
@@ -169,9 +193,12 @@ generate_apk_feed() {
         abs_arch_dir="$(cd "$arch_dir" && pwd)"
         echo "Generating apk index for $arch..."
 
-        # Collect .apk files for this architecture
+        # Collect .apk files for this architecture. Canonical names only —
+        # the underscore duplicates are byte-identical and would be indexed
+        # as a second entry for the same package. The globs cannot collide:
+        # the underscore form is nym-vpn_<ver>_..., never nym-vpn-<ver>-.
         local apk_files=()
-        for pkg in "$abs_arch_dir"/*.$ext; do
+        for pkg in "$abs_arch_dir"/nym-vpn-*-r0.$ext; do
             [ -f "$pkg" ] || continue
             apk_files+=("$pkg")
         done
