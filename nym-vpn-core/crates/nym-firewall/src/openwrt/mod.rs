@@ -318,12 +318,19 @@ mod e2e_tests {
         assert!(v4.contains(
             "-p udp --dport 53 -m owner --uid-owner 0 -m limit --limit 30/minute --limit-burst 20 -j ACCEPT"
         ));
-        // No unscoped rate-limited 53 accept anywhere: an unscoped nft rule
-        // starts the line with the proto (no `meta skuid` prefix), and an
-        // unscoped iptables rule goes straight from the port to the limit
-        // (the owner match would sit between them).
-        assert!(!nft.contains("\n        udp dport 53 limit rate"));
-        assert!(!v4.contains("--dport 53 -m limit"));
+        // No unscoped port-53 accept anywhere. Scan lines rather than
+        // matching on indentation or adjacency, which would go vacuous on a
+        // reformat of the rendered output.
+        for line in nft.lines() {
+            if line.contains("dport 53") && line.ends_with("accept") {
+                assert!(line.contains("skuid"), "unscoped 53 accept in nft: {line}");
+            }
+        }
+        for line in v4.lines() {
+            if line.contains("--dport 53") && line.contains("-j ACCEPT") {
+                assert!(line.contains("--uid-owner"), "unscoped 53 accept in v4: {line}");
+            }
+        }
     }
 
     #[test]
