@@ -80,6 +80,13 @@ pub(crate) async fn ensure_sane_clock() {
 /// The newest time we know is in the past: this binary existed before now.
 /// Using the installed binary's mtime instead of a compiled-in constant keeps
 /// the floor fresh with every package upgrade and costs one stat.
+///
+/// Known blind spot: if the package was installed while the clock was
+/// already bogus, the mtime inherits that bogus time and detection never
+/// fires — same behavior as before this module existed, so it degrades to
+/// the status quo, not below it. The stat is load-bearing; don't replace it
+/// with a build-time constant, which goes stale the moment a user runs an
+/// old binary.
 fn sanity_floor() -> Option<SystemTime> {
     std::fs::metadata("/proc/self/exe")
         .and_then(|m| m.modified())
