@@ -11,6 +11,8 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+## [1.34.0] - 2026-08-21
+
 ### Fixed
 
 - Closed a DNS leak in the kill switch's disconnected state (reported with
