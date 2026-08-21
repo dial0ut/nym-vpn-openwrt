@@ -33,6 +33,12 @@ the GitHub release notes.
   installing the package needs network, which the locked state blocks:
   disable the kill switch first, install, then re-enable.
 
+- Fixed the kill switch on fw3/iptables routers (OpenWrt 21.02 and older),
+  broken in every release since v1.27.0: the generated ICMPv6 rules lacked a
+  `-p icmpv6` protocol flag, which legacy `ip6tables-restore` rejects, so
+  every policy application failed with a SetFirewallPolicy error. nftables
+  routers were unaffected. Found by on-device testing on 21.02.7.
+
 ### Changed
 
 - The daemon now fixes a cold-boot clock itself instead of relying on the

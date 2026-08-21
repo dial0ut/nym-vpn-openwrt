@@ -97,6 +97,15 @@ fn render_rule(rule: &Rule, family: AddrFamily) -> String {
     }
     if let Some(proto) = m.proto {
         parts.push(format!("-p {}", proto_str(proto)));
+    } else if m.icmpv4_type.is_some() {
+        // Legacy (ip)?(6)?tables-restore only recognizes --icmp-type /
+        // --icmpv6-type once the protocol providing the option is on the
+        // line; without `-p` the whole restore fails with "unknown option".
+        // nft has no such coupling, which is how an ICMP rule without an
+        // explicit proto shipped broken for fw3 while fw4 worked.
+        parts.push("-p icmp".into());
+    } else if m.icmpv6_type.is_some() {
+        parts.push("-p icmpv6".into());
     }
     if let Some(t) = m.icmpv4_type {
         parts.push(format!("--icmp-type {}", icmpv4_name(t)));
@@ -207,6 +216,25 @@ mod tests {
         assert_eq!(
             render_rule(&rule, AddrFamily::V4),
             "-m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT"
+        );
+    }
+
+    #[test]
+    fn icmp_type_without_proto_still_emits_protocol_flag() {
+        // Regression: base_rules pushes ICMPv6 accepts without an explicit
+        // proto. ip6tables-restore 1.8.7 rejects a bare --icmpv6-type
+        // ("unknown option"), which failed the entire v6 restore and broke
+        // the fw3 kill switch in every release since v1.27.0. nft never
+        // needed the proto, so fw4 masked it.
+        let rule = Rule::accept(Family::V6).icmpv6_type(IcmpV6Type::RouterSolicit);
+        assert_eq!(
+            render_rule(&rule, AddrFamily::V6),
+            "-p icmpv6 --icmpv6-type router-solicitation -j ACCEPT"
+        );
+        let rule = Rule::accept(Family::V4).icmpv4_type(IcmpV4Type::EchoRequest);
+        assert_eq!(
+            render_rule(&rule, AddrFamily::V4),
+            "-p icmp --icmp-type echo-request -j ACCEPT"
         );
     }
 
