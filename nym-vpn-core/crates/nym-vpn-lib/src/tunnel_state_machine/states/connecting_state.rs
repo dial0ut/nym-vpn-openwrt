@@ -267,6 +267,14 @@ impl ConnectingState {
         let gateway_config = shared_state.nym_config.gateway_config.clone();
 
         self.resolve_api_addrs_fut = async move {
+            // With the kill switch up nothing else on the router can fix a
+            // cold clock (sysntpd's pool lookup dies with the rest of
+            // dnsmasq's upstream traffic), and a clock that predates this
+            // binary fails every TLS handshake the resolve below depends
+            // on. Daemon-owned bootstrap; no-op when the clock is sane.
+            #[cfg(target_os = "linux")]
+            crate::clock_bootstrap::ensure_sane_clock().await;
+
             nym_gateway_directory::resolve_config(&gateway_config)
                 .await
                 .map_err(|err| Error::ResolveApiHostnames(Box::new(err)))

@@ -110,6 +110,11 @@ pub struct Match {
     pub rate_limit: Option<RateLimit>,
     /// Match on packet (meta) mark. nft: `meta mark <N>`; iptables: `-m mark --mark <N>`.
     pub mark: Option<u32>,
+    /// Match on the owning socket's uid. nft: `meta skuid <N>`; iptables:
+    /// `-m owner --uid-owner <N>`. OUTPUT-chain only: input/forward packets
+    /// have no local socket, so the match never fires there (nft) or is
+    /// rejected outright by the kernel (iptables).
+    pub skuid: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -180,6 +185,12 @@ impl Rule {
     }
     pub fn mark_eq(mut self, mark: u32) -> Self {
         self.matches.mark = Some(mark);
+        self
+    }
+    /// Match on the owning socket's uid. Only valid on OUTPUT-chain rules —
+    /// see [`Match::skuid`].
+    pub fn skuid(mut self, uid: u32) -> Self {
+        self.matches.skuid = Some(uid);
         self
     }
     /// Build a non-terminal `ct mark set <N>` rule (mangle prerouting).
@@ -257,6 +268,40 @@ pub struct RuleSet {
 }
 
 impl RuleSet {
+    /// True if any rule carries a socket-uid match.
+    pub fn has_skuid(&self) -> bool {
+        self.all_chains().any(|c| c.rules.iter().any(|r| r.matches.skuid.is_some()))
+    }
+
+    /// A copy with socket-uid-scoped exception rules removed. This is the
+    /// secure fw3 fallback when `-m owner` is unavailable: daemon reconnect
+    /// DNS may fail, but an unscoped DNS accept is never installed.
+    pub fn without_skuid_rules(&self) -> RuleSet {
+        let mut rs = self.clone();
+        let chains = [
+            &mut rs.filter.input,
+            &mut rs.filter.output,
+            &mut rs.filter.forward,
+            &mut rs.mangle.prerouting,
+            &mut rs.mangle.output,
+        ];
+        for chain in chains {
+            chain.rules.retain(|rule| rule.matches.skuid.is_none());
+        }
+        rs
+    }
+
+    fn all_chains(&self) -> impl Iterator<Item = &Chain> {
+        [
+            &self.filter.input,
+            &self.filter.output,
+            &self.filter.forward,
+            &self.mangle.prerouting,
+            &self.mangle.output,
+        ]
+        .into_iter()
+    }
+
     /// True if every rule that lacks a verdict-bearing match (the catch-all
     /// final rules in OUTPUT and FORWARD) is `Reject` or `Drop`. Used by
     /// tests to verify the kill-switch invariant.
@@ -274,5 +319,26 @@ impl RuleSet {
             self.filter.forward.rules.last().map(|r| r.verdict),
             Some(Verdict::Reject) | Some(Verdict::Drop)
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn without_skuid_rules_removes_scoped_exceptions() {
+        let mut rs = RuleSet::default();
+        rs.filter.output.push(Rule::accept(Family::Inet).proto(Proto::Udp).dport(53).skuid(0));
+        rs.filter.output.push(Rule::reject(Family::Inet));
+        rs.filter.input.push(Rule::accept(Family::Inet).iif("lo"));
+        assert!(rs.has_skuid());
+
+        let stripped = rs.without_skuid_rules();
+        assert!(!stripped.has_skuid());
+        // The scoped exception is removed, while unrelated rules are untouched.
+        assert_eq!(stripped.filter.output.rules.len(), 1);
+        assert_eq!(stripped.filter.output.rules[0].verdict, Verdict::Reject);
+        assert_eq!(stripped.filter.input, rs.filter.input);
     }
 }

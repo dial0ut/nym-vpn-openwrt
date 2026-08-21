@@ -58,10 +58,42 @@ tunnel, which is the leak it exists to stop.
 
 **Rule 12 must come before rule 13, and rule 14 depends on it.** The NTP hatch exists because a
 router with no battery-backed clock boots with the wrong time and cannot validate TLS to the API
-or gateway, deadlocking in `DeviceTimeDesynced`. But it can only reach an NTP server after
+or gateway, deadlocking in `DeviceTimeDesynced`. But an NTP server can only be reached after
 resolving `*.pool.ntp.org`, and rule 13 would reject that lookup. Both hatches are rate-limited —
 sized for a cold-boot resolution round — so neither degrades into a general leak or an exfil
 channel.
+
+**Rules 8 and 12 are uid-scoped to root in every state where the tunnel is not up** — Blocked
+*and* Connecting (`meta skuid 0` on fw4, `-m owner --uid-owner 0` on fw3). "Router-originated"
+is not the same as "daemon-originated": dnsmasq answers LAN clients and re-originates their
+queries upstream as its own OUTPUT packets, so an unscoped accept forwards every LAN lookup to
+the WAN in plaintext while the kill switch is nominally blocking DNS — confirmed by simultaneous
+LAN/WAN packet captures. The daemon resolves in-process (hickory, DoT/DoH to its bootstrap
+resolvers) as uid 0, so root-scoping keeps reconnects working while dnsmasq's relayed queries
+fall through to rule 13 and fail closed.
+
+The cold-boot pool lookup used to be the exception: it ran `sysntpd → dnsmasq → upstream` under
+dnsmasq's uid, which forced the Connecting hatch to stay unscoped — reopening the LAN relay leak
+for the duration of every connect attempt. That dependency is gone: the daemon now owns its own
+clock bootstrap (`clock_bootstrap` in nym-vpn-lib). When the clock predates the daemon binary's
+own mtime, the daemon resolves the pool hostnames itself over plain UDP/53 to the static
+resolver set (through the root-scoped rule 12 — deliberately not DoH/DoT, which need the working
+clock we don't have yet), makes one SNTP exchange through rule 14, and steps the clock with a
+forward-only `clock_settime(2)` floored at the binary mtime. A spoofed SNTP reply can therefore
+only push the clock forward, making TLS fail closed. sysntpd keeps running and takes over fine
+discipline once the tunnel is up; its own cold-boot lookup now fails closed, which is correct —
+it was never entitled to punch through the kill switch.
+
+Known residual limits of the uid scoping, accepted deliberately: a dnsmasq configured to run as
+root (non-default) defeats it; any root-owned process on the router can still query the bootstrap
+resolvers; and while disconnected, LAN DNS plus the router's own getaddrinfo consumers (opkg/apk,
+wget) fail closed instead of resolving — that last one is the fix working as intended. On fw3 the
+`owner` match needs `kmod-ipt-extra` plus the `iptables-mod-extra` userspace extension. The
+backend probes the extension before applying a uid-scoped policy and, if it is unavailable,
+omits the daemon-only exceptions while retaining the kill switch; it never silently falls back
+to an unscoped DNS exception. Since Connecting is scoped too, an fw3 router without the
+extension cannot resolve anything with the kill switch on — connecting fails closed until the
+extension is installed or the kill switch is disabled, and the daemon logs exactly that.
 
 **`ct established` is INPUT-only, deliberately.** That is return traffic *to* the router, so it is
 not an egress bypass. Output and forward established accepts are scoped to the tunnel interface

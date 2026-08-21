@@ -53,6 +53,14 @@ pub fn render(rs: &RuleSet, family: AddrFamily) -> String {
 }
 
 fn render_chain(out: &mut String, chain: &str, c: &Chain, family: AddrFamily) {
+    // The kernel hard-rejects `-m owner` outside OUTPUT/POSTROUTING, so an
+    // skuid match on any other chain would fail the whole restore COMMIT.
+    debug_assert!(
+        chain == CHAIN_OUTPUT
+            || chain == CHAIN_MANGLE_OUTPUT
+            || c.rules.iter().all(|r| r.matches.skuid.is_none()),
+        "skuid match emitted on non-output chain {chain}"
+    );
     for rule in &c.rules {
         if !family_matches(rule.family, family) {
             continue;
@@ -112,6 +120,9 @@ fn render_rule(rule: &Rule, family: AddrFamily) -> String {
     }
     if let Some(mark) = m.mark {
         parts.push(format!("-m mark --mark {mark:#x}"));
+    }
+    if let Some(uid) = m.skuid {
+        parts.push(format!("-m owner --uid-owner {uid}"));
     }
     if let Some(rl) = m.rate_limit {
         parts.push(format!(
@@ -283,6 +294,32 @@ mod tests {
         assert_eq!(
             render_rule(&rule, AddrFamily::V4),
             "-m mark --mark 0x14e -j ACCEPT"
+        );
+    }
+
+    #[test]
+    fn renders_skuid_scoped_resolver_accept() {
+        let rule = Rule::accept(Family::V4)
+            .proto(Proto::Udp)
+            .daddr(IpAddr::V4(Ipv4Addr::new(9, 9, 9, 9)))
+            .dport(53)
+            .skuid(0);
+        assert_eq!(
+            render_rule(&rule, AddrFamily::V4),
+            "-d 9.9.9.9 -p udp --dport 53 -m owner --uid-owner 0 -j ACCEPT"
+        );
+    }
+
+    #[test]
+    fn renders_skuid_before_rate_limit() {
+        let rule = Rule::accept(Family::Inet)
+            .proto(Proto::Udp)
+            .dport(53)
+            .rate_limit(30, 20)
+            .skuid(0);
+        assert_eq!(
+            render_rule(&rule, AddrFamily::V4),
+            "-p udp --dport 53 -m owner --uid-owner 0 -m limit --limit 30/minute --limit-burst 20 -j ACCEPT"
         );
     }
 

@@ -5,6 +5,8 @@ pub mod storage;
 
 mod bandwidth_controller;
 pub mod cache_refresh;
+#[cfg(target_os = "linux")]
+pub(crate) mod clock_bootstrap;
 mod error;
 pub mod login;
 mod mixnet;

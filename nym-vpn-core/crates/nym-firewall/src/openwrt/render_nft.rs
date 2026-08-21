@@ -40,6 +40,10 @@ pub fn render(rs: &RuleSet) -> String {
 }
 
 fn render_chain(out: &mut String, chain_name: &str, hook: &str, chain: &Chain) {
+    debug_assert!(
+        hook == "output" || chain.rules.iter().all(|r| r.matches.skuid.is_none()),
+        "skuid match emitted on non-output hook {hook}"
+    );
     writeln!(out, "    chain {chain_name} {{").unwrap();
     writeln!(
         out,
@@ -55,6 +59,10 @@ fn render_chain(out: &mut String, chain_name: &str, hook: &str, chain: &Chain) {
 }
 
 fn render_mangle_chain(out: &mut String, chain_name: &str, hook: &str, chain: &Chain) {
+    debug_assert!(
+        hook == "output" || chain.rules.iter().all(|r| r.matches.skuid.is_none()),
+        "skuid match emitted on non-output hook {hook}"
+    );
     writeln!(out, "    chain {chain_name} {{").unwrap();
     writeln!(
         out,
@@ -90,6 +98,9 @@ fn render_rule(rule: &Rule) -> String {
     }
     if let Some(mark) = m.mark {
         parts.push(format!("meta mark {mark:#x}"));
+    }
+    if let Some(uid) = m.skuid {
+        parts.push(format!("meta skuid {uid}"));
     }
     if let Some(saddr) = &m.saddr {
         parts.push(format!("{} saddr {}", addr_family(rule.family), render_addr(saddr)));
@@ -278,6 +289,32 @@ mod tests {
     fn renders_meta_mark_match_accept() {
         let rule = Rule::accept(Family::Inet).mark_eq(0x14e);
         assert_eq!(render_rule(&rule), "meta mark 0x14e accept");
+    }
+
+    #[test]
+    fn renders_skuid_scoped_dns_hatch() {
+        let rule = Rule::accept(Family::Inet)
+            .proto(Proto::Udp)
+            .dport(53)
+            .rate_limit(30, 20)
+            .skuid(0);
+        assert_eq!(
+            render_rule(&rule),
+            "meta skuid 0 udp dport 53 limit rate 30/minute burst 20 packets accept"
+        );
+    }
+
+    #[test]
+    fn renders_skuid_scoped_resolver_accept() {
+        let rule = Rule::accept(Family::V4)
+            .proto(Proto::Udp)
+            .daddr(IpAddr::V4(Ipv4Addr::new(9, 9, 9, 9)))
+            .dport(53)
+            .skuid(0);
+        assert_eq!(
+            render_rule(&rule),
+            "meta skuid 0 ip daddr 9.9.9.9 udp dport 53 accept"
+        );
     }
 
     #[test]

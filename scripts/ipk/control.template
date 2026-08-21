@@ -5,6 +5,6 @@ Maintainer: dial0ut
 Installed-Size: {{SIZE}}
 Section: net
 Priority: optional
-Depends: libc, kmod-tun, libmnl, libnftnl, kmod-ipt-conntrack-extra, luci-base, rpcd
+Depends: libc, kmod-tun, libmnl, libnftnl, kmod-ipt-conntrack-extra, kmod-ipt-extra, luci-base, rpcd
 Description: NymVPN for OpenWrt
  Privacy-focused VPN using the Nym mixnet. Includes daemon, CLI, and LuCI web interface.

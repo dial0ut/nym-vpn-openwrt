@@ -92,9 +92,38 @@ pub fn reset() -> Result<()> {
     Ok(())
 }
 
+/// Apply a ruleset only when the iptables `owner` match is available.
+///
+/// If it is unavailable, remove the daemon-only exceptions entirely. This
+/// preserves the kill switch without silently turning them into unscoped
+/// accepts; reconnect DNS may fail until the extension is installed.
 fn apply_filter(rs: &RuleSet, family: AddrFamily) -> Result<()> {
+    let stripped;
+    let rs = if rs.has_skuid() && !owner_match_available(family) {
+        let ipt = ipt_cmd(family);
+        tracing::error!(
+            "{ipt} owner match unavailable; omitting daemon-only DNS exceptions. \
+             The kill switch remains active but the daemon cannot resolve DNS, \
+             so connecting will fail until the extension is installed. Install \
+             iptables-mod-extra and kmod-ipt-extra, or disable the kill switch."
+        );
+        stripped = rs.without_skuid_rules();
+        &stripped
+    } else {
+        rs
+    };
+
     let script = render_iptables::render(rs, family);
     run_restore(&script, family)
+}
+
+fn owner_match_available(family: AddrFamily) -> bool {
+    let ipt = ipt_cmd(family);
+    Command::new(ipt)
+        .args(["-m", "owner", "--help"])
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
 }
 
 fn run_restore(script: &str, family: AddrFamily) -> Result<()> {

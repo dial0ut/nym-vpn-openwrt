@@ -36,13 +36,26 @@ const NTP_RATE_PER_MIN: u32 = 12;
 const NTP_BURST: u32 = 8;
 
 /// Rate limit for the DNS escape hatch in `Blocked`/`Connecting`. The NTP
-/// escape hatch is useless on its own because the router has to resolve the
+/// escape hatch is useless on its own because the daemon has to resolve the
 /// NTP pool hostnames (`*.pool.ntp.org`) before it can reach a server, and
-/// `block_dns` would otherwise reject that lookup. Sized for a cold-boot
+/// `block_dns` would otherwise reject that lookup. The daemon owns that
+/// cold-boot resolution (plain UDP/53 as root — see `clock_bootstrap` in
+/// nym-vpn-lib), so the hatch is always root-scoped. Sized for a cold-boot
 /// resolution round (a handful of pool hostnames, A+AAAA, with retries) and
 /// rate-capped so it can't degrade into a general DNS leak or exfil channel.
 const DNS_RATE_PER_MIN: u32 = 30;
 const DNS_BURST: u32 = 20;
+
+/// Explicitly describes which principals may use a DNS exception. Keeping this
+/// at the policy boundary prevents a destination-only accept from accidentally
+/// becoming a LAN relay bypass.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DnsAccess {
+    /// The daemon/bootstrap process only.
+    Daemon,
+    /// Router and forwarded LAN clients.
+    RouterAndLan,
+}
 
 /// Compile a [`FirewallPolicy`] into a backend-neutral [`RuleSet`].
 pub fn compile(policy: &FirewallPolicy) -> RuleSet {
@@ -66,8 +79,11 @@ pub fn compile(policy: &FirewallPolicy) -> RuleSet {
             for ep in allowed_endpoints {
                 allow_endpoint(&mut rs, ep);
             }
+            // Daemon-only, like Blocked: the daemon resolves in-process as
+            // root, and mid-connect is precisely when dnsmasq must not relay
+            // LAN queries out the WAN.
             for dns in dns_config.non_tunnel_config() {
-                allow_dns_server(&mut rs, *dns, None);
+                allow_dns_server_daemon_only(&mut rs, *dns);
             }
             // Tunnel interface rules must come before the DNS block so that
             // DNS routed through the tunnel isn't caught by the kill-switch.
@@ -80,14 +96,18 @@ pub fn compile(policy: &FirewallPolicy) -> RuleSet {
             exemption_filter_accepts(&mut rs, inbound_exemptions);
             bypass_mark_forward_accept(&mut rs);
             // DNS hatch must precede block_dns so the NTP-pool lookup the NTP
-            // hatch depends on isn't rejected.
+            // hatch depends on isn't rejected. Root-scoped: the cold-boot
+            // pool lookup is daemon-owned (plain UDP/53 as root, see
+            // `clock_bootstrap` in nym-vpn-lib) — it no longer rides
+            // sysntpd -> dnsmasq, so nothing outside the daemon is entitled
+            // to DNS while the kill switch is enforcing.
             dns_escape_hatch(&mut rs);
             block_dns(&mut rs);
             // A clockless router that boots straight into a connect attempt
             // needs NTP to reach a server before TLS to the API/gateway can
             // validate, otherwise it deadlocks in DeviceTimeDesynced. The
-            // tunnel isn't up yet, so allow the same rate-limited escape hatch
-            // as the Blocked state.
+            // daemon's SNTP bootstrap goes out through this hatch; it's the
+            // same rate-limited hatch as the Blocked state.
             ntp_escape_hatch(&mut rs);
             if *allow_lan {
                 allow_lan_traffic(&mut rs);
@@ -143,21 +163,26 @@ pub fn compile(policy: &FirewallPolicy) -> RuleSet {
             for ep in allowed_endpoints {
                 allow_endpoint(&mut rs, ep);
             }
-            // Router-only: these are the daemon's own resolvers, which are
-            // typically public. A forward accept would let a LAN client with
-            // hardcoded DNS query them out the WAN while everything else is
-            // blocked — it learns addresses it cannot then connect to, so the
-            // leak buys nothing. Reconnecting only needs the router's own
-            // lookups, which are output/input.
+            // Daemon-only (root-scoped): these are the daemon's own resolvers,
+            // which it queries in-process (hickory, DoT/DoH) as uid 0. No
+            // forward accept, and the output accepts are uid-scoped, because
+            // "router-originated" is not the same as "daemon-originated":
+            // dnsmasq relays LAN clients' queries as its own OUTPUT packets,
+            // which leaked every LAN lookup to these public resolvers while
+            // the kill switch claimed to block DNS (packet-capture confirmed).
+            // dnsmasq runs as user `dnsmasq`, so uid-0 scoping fails it closed
+            // while the daemon's reconnect bootstrap still passes.
             for dns in dns_servers {
-                allow_dns_server_router_only(&mut rs, *dns);
+                allow_dns_server_daemon_only(&mut rs, *dns);
             }
             // Must precede block_dns: an excluded client with hardcoded DNS
             // (Chromecasts, consoles) forwards port 53, and the reject is
             // terminal. Carve-outs are meant to survive exactly this state.
             bypass_mark_forward_accept(&mut rs);
             // DNS hatch must precede block_dns so the NTP-pool lookup the NTP
-            // hatch depends on isn't rejected.
+            // hatch depends on isn't rejected. Root-scoped like everywhere
+            // else: dnsmasq (uid `dnsmasq`) gets no escape hatch — an
+            // unscoped one re-opens the LAN relay leak.
             dns_escape_hatch(&mut rs);
             block_dns(&mut rs);
             ntp_escape_hatch(&mut rs);
@@ -376,27 +401,36 @@ fn allow_endpoint(rs: &mut RuleSet, ep: &AllowedEndpoint) {
     );
 }
 
-/// Allow the **router's own** lookups to a server, with no forward accept, so
-/// LAN clients cannot use it. For the `Blocked` state, where the servers are the
-/// daemon's own (public) resolvers and only the daemon needs to resolve.
-fn allow_dns_server_router_only(rs: &mut RuleSet, dns: IpAddr) {
-    allow_dns_server_inner(rs, dns, None, false);
+/// Allow the **daemon's own** lookups to a server. For the `Blocked` and
+/// `Connecting` states, where the servers are the daemon's in-process
+/// (hickory DoT/DoH) resolvers and only the daemon — uid 0 — needs to
+/// resolve. A plain "router-only" (unscoped output) accept is NOT enough:
+/// dnsmasq re-originates LAN clients' queries as router OUTPUT packets,
+/// which turned these accepts into a LAN-wide plaintext DNS leak while
+/// disconnected.
+fn allow_dns_server_daemon_only(rs: &mut RuleSet, dns: IpAddr) {
+    allow_dns_server_inner(rs, dns, None, DnsAccess::Daemon);
 }
 
 /// Allow DNS to a specific server. If `iface` is set, restrict to that
 /// interface (used for tunnel-configured resolvers). LAN clients are permitted
 /// to reach it too when not iface-restricted.
 fn allow_dns_server(rs: &mut RuleSet, dns: IpAddr, iface: Option<&str>) {
-    allow_dns_server_inner(rs, dns, iface, true);
+    allow_dns_server_inner(rs, dns, iface, DnsAccess::RouterAndLan);
 }
 
 fn allow_dns_server_inner(
     rs: &mut RuleSet,
     dns: IpAddr,
     iface: Option<&str>,
-    allow_forward: bool,
+    clients: DnsAccess,
 ) {
     let family = family_of(&dns);
+    let output_skuid = match clients {
+        DnsAccess::Daemon => Some(crate::ROOT_UID),
+        DnsAccess::RouterAndLan => None,
+    };
+    let allow_forward = matches!(clients, DnsAccess::RouterAndLan);
 
     // Standard DNS (UDP and TCP on 53), DoT (853/tcp), DoH (443/tcp).
     let pairs = [
@@ -410,6 +444,8 @@ fn allow_dns_server_inner(
             .proto(proto)
             .daddr(dns)
             .dport(port);
+        // Input stays unscoped: inbound packets have no local socket owner,
+        // and without the scoped output rule no reply traffic exists anyway.
         let mut inp = Rule::accept(family)
             .proto(proto)
             .saddr(dns)
@@ -417,6 +453,9 @@ fn allow_dns_server_inner(
         if let Some(iface) = iface {
             out = out.oif(iface);
             inp = inp.iif(iface);
+        }
+        if let Some(uid) = output_skuid {
+            out = out.skuid(uid);
         }
         rs.filter.output.push(out);
         rs.filter.input.push(inp);
@@ -480,20 +519,26 @@ fn ntp_escape_hatch(rs: &mut RuleSet) {
     );
 }
 
-/// Rate-limited DNS escape hatch: the NTP hatch needs the router's own resolver
-/// to look up the NTP pool hostnames (and the API/gateway) before the tunnel is
-/// up. Without this, `block_dns` rejects that lookup and the NTP hatch never
-/// resolves a server — the cold-boot `DeviceTimeDesynced` deadlock the kill
-/// switch is otherwise blamed for. OUTPUT-only (router-originated; LAN clients
-/// stay fenced off via the forward-chain `block_dns` reject) and rate-capped so
-/// it can't become a general DNS leak or exfil channel while disconnected.
+/// Rate-limited DNS escape hatch: the daemon needs to resolve the NTP pool
+/// hostnames (and the API/gateway) before the tunnel is up. Without this,
+/// `block_dns` rejects that lookup and the NTP hatch never resolves a server
+/// — the cold-boot `DeviceTimeDesynced` deadlock the kill switch is
+/// otherwise blamed for.
+///
+/// Always root-scoped. OUTPUT-only is NOT a LAN fence on its own: dnsmasq
+/// re-originates LAN clients' queries as router OUTPUT packets, so an
+/// unscoped hatch trickles LAN hostnames out the WAN. The cold-boot pool
+/// lookup no longer needs an unscoped hole either — the daemon resolves the
+/// pool itself over plain UDP/53 as root (`clock_bootstrap` in nym-vpn-lib)
+/// instead of riding sysntpd -> dnsmasq -> upstream.
 fn dns_escape_hatch(rs: &mut RuleSet) {
     for proto in [Proto::Udp, Proto::Tcp] {
         rs.filter.output.push(
             Rule::accept(Family::Inet)
                 .proto(proto)
                 .dport(DNS_PORT)
-                .rate_limit(DNS_RATE_PER_MIN, DNS_BURST),
+                .rate_limit(DNS_RATE_PER_MIN, DNS_BURST)
+                .skuid(crate::ROOT_UID),
         );
     }
 }
@@ -899,7 +944,7 @@ mod tests {
     /// while every other destination is blocked — leaking what it is looking up
     /// in exchange for addresses it cannot reach.
     #[test]
-    fn blocked_dns_hatch_is_router_only_not_forwarded() {
+    fn blocked_dns_accepts_are_not_forwarded() {
         let policy = FirewallPolicy::Blocked {
             allow_lan: true,
             allowed_endpoints: vec![],
@@ -970,6 +1015,166 @@ mod tests {
                     "Blocked policy must not have an saddr-LAN accept in forward chain: {:?}",
                     net
                 );
+            }
+        }
+    }
+
+    /// The dnsmasq-relay leak: dnsmasq re-originates LAN clients' queries as
+    /// router OUTPUT packets, so "router-only" DNS accepts are LAN-reachable
+    /// unless uid-scoped. Every Blocked OUTPUT accept that dnsmasq could use —
+    /// any-destination port 53 (the escape hatch) or any port to a resolver
+    /// address (53/853/443) — must be scoped to root, the daemon. Accepts to
+    /// non-resolver allowed endpoints are out of scope even on port 443:
+    /// dnsmasq speaks neither DoT nor DoH, and the endpoint list is
+    /// daemon-controlled, not client-influenced. Input accepts must stay
+    /// unscoped (inbound packets have no socket owner).
+    #[test]
+    fn blocked_dns_exceptions_are_root_scoped() {
+        let resolvers: Vec<IpAddr> =
+            vec!["9.9.9.9".parse().unwrap(), "2620:fe::fe".parse().unwrap()];
+        let policy = FirewallPolicy::Blocked {
+            allow_lan: true,
+            // An API endpoint on 443 must NOT trip the resolver-scoping sweep.
+            allowed_endpoints: vec![ep([1, 2, 3, 4], 443)],
+            dns_servers: resolvers.clone(),
+        };
+        let rs = compile(&policy);
+
+        let is_resolver_daddr = |r: &Rule| {
+            matches!(&r.matches.daddr, Some(AddrMatch::Ip(ip)) if resolvers.contains(ip))
+        };
+        let scoped: Vec<_> = rs
+            .filter
+            .output
+            .rules
+            .iter()
+            .filter(|r| {
+                r.verdict == Verdict::Accept
+                    && (is_resolver_daddr(r)
+                        || (r.matches.dport == Some(DNS_PORT) && r.matches.daddr.is_none()))
+            })
+            .collect();
+        // 2 resolvers x 4 proto/port pairs + 2 escape-hatch rules.
+        assert_eq!(scoped.len(), 10, "unexpected resolver-accept count: {scoped:#?}");
+        for r in &scoped {
+            assert_eq!(
+                r.matches.skuid,
+                Some(crate::ROOT_UID),
+                "unscoped DNS-capable OUTPUT accept in Blocked (dnsmasq relay leak): {r:?}"
+            );
+        }
+
+        // The 443 endpoint accept exists and is not swept up in the scoping.
+        assert!(
+            rs.filter.output.rules.iter().any(|r| {
+                r.verdict == Verdict::Accept
+                    && r.matches.dport == Some(443)
+                    && matches!(&r.matches.daddr, Some(AddrMatch::Ip(IpAddr::V4(ip))) if ip.octets() == [1, 2, 3, 4])
+            }),
+            "allowed endpoint on 443 missing from Blocked OUTPUT"
+        );
+
+        for r in &rs.filter.input.rules {
+            assert_eq!(r.matches.skuid, None, "input rules must not carry skuid: {r:?}");
+        }
+    }
+
+    /// The Connecting DNS hatch is root-scoped like Blocked's. The cold-boot
+    /// NTP-pool lookup that used to justify an unscoped hatch is daemon-owned
+    /// now (plain UDP/53 as root, `clock_bootstrap` in nym-vpn-lib), so a
+    /// reappearing unscoped hatch would be a plain LAN relay leak on every
+    /// reconnect — the exact hole this scoping closed.
+    #[test]
+    fn connecting_dns_hatch_is_root_scoped() {
+        let policy = FirewallPolicy::Connecting {
+            peer_endpoints: vec![],
+            tunnel: None,
+            allow_lan: false,
+            dns_config: dns_config(&[], &[]),
+            allowed_endpoints: vec![],
+            allowed_entry_tunnel_traffic: AllowedTunnelTraffic::All,
+            allowed_exit_tunnel_traffic: AllowedTunnelTraffic::All,
+            inbound_exemptions: vec![],
+        };
+        let rs = compile(&policy);
+        let hatch: Vec<_> = rs
+            .filter
+            .output
+            .rules
+            .iter()
+            .filter(|r| {
+                r.verdict == Verdict::Accept
+                    && r.matches.dport == Some(DNS_PORT)
+                    && r.matches.rate_limit.is_some()
+            })
+            .collect();
+        assert!(!hatch.is_empty(), "Connecting is missing the DNS escape hatch");
+        for r in hatch {
+            assert_eq!(
+                r.matches.skuid,
+                Some(crate::ROOT_UID),
+                "Connecting DNS hatch must be root-scoped: {r:?}"
+            );
+        }
+    }
+
+    /// The kill-switch DNS invariant: while the tunnel is not up (Blocked,
+    /// Connecting), every DNS-capable OUTPUT accept — any accept on port 53
+    /// or 853 — is scoped to the daemon (root), and FORWARD carries no
+    /// port-53 accepts at all. The split-tunnel carve-out matches on the
+    /// bypass mark, not on a port, so it doesn't appear here. Connected is
+    /// exempt: with the tunnel up, LAN DNS follows the tunnel policy.
+    #[test]
+    fn no_unscoped_dns_output_while_tunnel_down() {
+        for (name, policy) in killswitch_states_without_exemptions() {
+            if name == "connected" {
+                continue;
+            }
+            let rs = compile(&policy);
+            for r in &rs.filter.output.rules {
+                if r.verdict == Verdict::Accept
+                    && matches!(r.matches.dport, Some(DNS_PORT) | Some(DOT_PORT))
+                {
+                    assert_eq!(
+                        r.matches.skuid,
+                        Some(crate::ROOT_UID),
+                        "{name}: unscoped DNS-capable OUTPUT accept: {r:?}"
+                    );
+                }
+            }
+            for r in &rs.filter.forward.rules {
+                assert!(
+                    !(r.verdict == Verdict::Accept && r.matches.dport == Some(DNS_PORT)),
+                    "{name}: FORWARD accept on port 53: {r:?}"
+                );
+            }
+        }
+    }
+
+    /// skuid is only meaningful on OUTPUT (and would fail the iptables restore
+    /// on any other chain). Sweep every state: no input/forward/mangle rule
+    /// may carry it, and Connected must not carry it anywhere.
+    #[test]
+    fn skuid_only_ever_in_output_chain() {
+        for (name, policy) in killswitch_states_without_exemptions() {
+            let rs = compile(&policy);
+            for (chain_name, chain) in [
+                ("input", &rs.filter.input),
+                ("forward", &rs.filter.forward),
+                ("mangle_prerouting", &rs.mangle.prerouting),
+                ("mangle_output", &rs.mangle.output),
+            ] {
+                for r in &chain.rules {
+                    assert_eq!(
+                        r.matches.skuid, None,
+                        "{name}: skuid match in {chain_name} chain: {r:?}"
+                    );
+                }
+            }
+            if name == "connected" {
+                for r in &rs.filter.output.rules {
+                    assert_eq!(r.matches.skuid, None, "Connected must have no skuid rules: {r:?}");
+                }
             }
         }
     }

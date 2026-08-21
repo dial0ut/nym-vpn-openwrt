@@ -207,18 +207,28 @@ mod e2e_tests {
         // Allowed endpoint shows up in OUTPUT.
         assert!(script.contains("ip daddr 1.2.3.4 udp dport 443 accept"));
 
-        // DNS to 8.8.8.8 allowed; DNS to anywhere else blocked.
-        assert!(script.contains("ip daddr 8.8.8.8 udp dport 53 accept"));
+        // DNS to 8.8.8.8 allowed for the daemon (root) only — dnsmasq relays
+        // LAN queries as router OUTPUT, so an unscoped accept is a LAN leak.
+        // DNS to anywhere else blocked.
+        assert!(script.contains("meta skuid 0 ip daddr 8.8.8.8 udp dport 53 accept"));
+        // Every resolver accept must carry the uid scope — scan lines rather
+        // than matching on indentation, which would go vacuous on a reformat.
+        for line in script
+            .lines()
+            .filter(|l| l.contains("daddr 8.8.8.8") && l.contains("dport 53") && l.contains("accept"))
+        {
+            assert!(line.contains("meta skuid 0"), "unscoped resolver accept: {line}");
+        }
         assert!(script.contains("udp dport 53 reject"));
         assert!(script.contains("tcp dport 53 reject"));
 
-        // NTP escape hatch present.
+        // NTP escape hatch present (never uid-scoped; sysntpd may not be root).
         assert!(script.contains("udp dport 123 limit rate 12/minute burst 8 packets accept"));
 
-        // DNS escape hatch present (so NTP-pool hostnames can resolve) and
-        // rate-capped on both UDP and TCP.
-        assert!(script.contains("udp dport 53 limit rate 30/minute burst 20 packets accept"));
-        assert!(script.contains("tcp dport 53 limit rate 30/minute burst 20 packets accept"));
+        // DNS escape hatch present, rate-capped on both UDP and TCP, and
+        // root-scoped in Blocked (the unscoped variant belongs to Connecting).
+        assert!(script.contains("meta skuid 0 udp dport 53 limit rate 30/minute burst 20 packets accept"));
+        assert!(script.contains("meta skuid 0 tcp dport 53 limit rate 30/minute burst 20 packets accept"));
 
         // LAN allows.
         assert!(script.contains("ip saddr 10.0.0.0/8 accept"));
@@ -244,6 +254,13 @@ mod e2e_tests {
         // UDP DNS uses icmp port unreachable; TCP DNS uses tcp-reset.
         assert!(v4.contains("-p udp --dport 53 -j REJECT --reject-with icmp-port-unreachable"));
         assert!(v4.contains("-p tcp --dport 53 -j REJECT --reject-with tcp-reset"));
+
+        // The daemon's resolver accepts and the DNS escape hatch are
+        // root-scoped in Blocked (dnsmasq relay leak).
+        assert!(v4.contains("-d 8.8.8.8 -p udp --dport 53 -m owner --uid-owner 0 -j ACCEPT"));
+        assert!(v4.contains(
+            "-p udp --dport 53 -m owner --uid-owner 0 -m limit --limit 30/minute --limit-burst 20 -j ACCEPT"
+        ));
 
         // v6 uses icmp6 variants.
         assert!(v6.contains("-j REJECT --reject-with icmp6-port-unreachable"));
@@ -273,6 +290,40 @@ mod e2e_tests {
         // Non-tunnel DNS — no iface restriction.
         assert!(nft.contains("ip daddr 1.1.1.1 udp dport 53 accept"));
         assert!(!nft.contains("oifname \"wg0\" ip daddr 1.1.1.1"));
+    }
+
+    #[test]
+    fn connecting_render_scopes_dns_hatch_to_root() {
+        // The Connecting hatch renders root-scoped like Blocked's: cold-boot
+        // NTP-pool resolution is daemon-owned (plain UDP/53 as root, see
+        // `clock_bootstrap` in nym-vpn-lib), so dnsmasq no longer gets an
+        // unscoped hole to relay LAN queries through mid-connect.
+        let policy = FirewallPolicy::Connecting {
+            peer_endpoints: vec![ep([1, 2, 3, 4], 443)],
+            tunnel: None,
+            allow_lan: true,
+            dns_config: dns(&[], &[]),
+            allowed_endpoints: vec![],
+            allowed_entry_tunnel_traffic: crate::net::AllowedTunnelTraffic::All,
+            allowed_exit_tunnel_traffic: crate::net::AllowedTunnelTraffic::All,
+            inbound_exemptions: vec![],
+        };
+        let rs = policy::compile(&policy);
+        let nft = render_nft::render(&rs);
+        let v4 = render_iptables::render(&rs, AddrFamily::V4);
+
+        assert!(
+            nft.contains("meta skuid 0 udp dport 53 limit rate 30/minute burst 20 packets accept")
+        );
+        assert!(v4.contains(
+            "-p udp --dport 53 -m owner --uid-owner 0 -m limit --limit 30/minute --limit-burst 20 -j ACCEPT"
+        ));
+        // No unscoped rate-limited 53 accept anywhere: an unscoped nft rule
+        // starts the line with the proto (no `meta skuid` prefix), and an
+        // unscoped iptables rule goes straight from the port to the limit
+        // (the owner match would sit between them).
+        assert!(!nft.contains("\n        udp dport 53 limit rate"));
+        assert!(!v4.contains("--dport 53 -m limit"));
     }
 
     #[test]

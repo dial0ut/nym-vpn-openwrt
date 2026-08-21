@@ -97,6 +97,7 @@ nix = { workspace = true, features = [
     "fs",
     "signal",
     "ioctl",
+    "time",
 ] }
 hickory-server = { workspace = true, features = ["resolver"] }
 nym-routing.workspace = true

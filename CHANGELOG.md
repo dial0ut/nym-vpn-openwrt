@@ -11,6 +11,41 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+### Fixed
+
+- Closed a DNS leak in the kill switch's disconnected state (reported with
+  packet captures by a forum user — thank you). While disconnected with the
+  kill switch on, a LAN client's DNS query answered by the router's dnsmasq was
+  re-sent upstream as the router's own traffic, which slipped through the
+  firewall exceptions that exist for the daemon's reconnect lookups and left in
+  plaintext over the WAN. Those exceptions are now scoped to the daemon's own
+  processes (root-owned sockets): the daemon can still resolve enough to
+  reconnect, while relayed LAN queries fail closed. This covers the connecting
+  state too, not just disconnected — previously every reconnect attempt
+  briefly reopened unscoped DNS for a cold-boot corner case (see below).
+  Consequence you will notice: with the kill switch on and the VPN not yet
+  connected, LAN devices and the router itself (opkg/apk, wget) cannot resolve
+  DNS at all — before, they silently leaked instead. On fw3/iptables routers
+  the scoping additionally needs the `iptables-mod-extra` package; without it
+  the daemon omits the daemon-only DNS exceptions and keeps the kill switch
+  active — meaning connecting itself fails closed until the package is
+  installed or the kill switch is disabled (the log says which). Note that
+  installing the package needs network, which the locked state blocks:
+  disable the kill switch first, install, then re-enable.
+
+### Changed
+
+- The daemon now fixes a cold-boot clock itself instead of relying on the
+  router's NTP client. A router without a real-time clock can boot with a time
+  so wrong that no TLS certificate validates, and with the kill switch up the
+  stock `sysntpd → dnsmasq` path is blocked along with all other non-daemon
+  DNS (that path was why the connecting state kept an unscoped DNS hole). On
+  connect, if the clock predates the daemon binary itself, the daemon resolves
+  the NTP pool over plain DNS to its built-in resolvers, makes one SNTP
+  exchange, and steps the clock forward — never backward — before the first
+  TLS handshake. With a sane clock this does nothing. sysntpd still handles
+  ongoing timekeeping once the tunnel is up.
+
 ## [1.33.1] - 2026-08-01
 
 ### Changed

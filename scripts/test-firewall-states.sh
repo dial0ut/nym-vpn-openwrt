@@ -2,9 +2,12 @@
 # Verify the nym-vpn kill-switch firewall policy across tunnel states on a live
 # router. Drives a real connect with `nym-vpnc connect-v2`, samples the tunnel
 # state and the installed firewall rules once per second, and checks the
-# state->rule correlation. The headline check is the NTP escape hatch in the
-# *Connecting* state (the C1 change): a clockless router must be able to reach
-# NTP while connecting, or it deadlocks in DeviceTimeDesynced.
+# state->rule correlation. Headline checks: the NTP escape hatch in the
+# *Connecting* state (the C1 change — a clockless router must be able to reach
+# NTP while connecting, or it deadlocks in DeviceTimeDesynced), and the DNS
+# invariant that every DNS accept is uid-scoped to root in every state where
+# the tunnel is not up (Blocked AND Connecting) — the daemon owns cold-boot
+# NTP-pool resolution now, so no unscoped DNS accept may exist anywhere.
 #
 # Run as root ON THE ROUTER after installing the new nym-vpnd + nym-vpnc.
 #   scp scripts/test-firewall-states.sh root@router:/tmp/ && ssh root@router sh /tmp/test-firewall-states.sh
@@ -52,6 +55,24 @@ has_tunnel_allow() {            # Connected => egress allowed out the tunnel ifa
         fw_dump | grep -- '-A NYM_OUTPUT' | grep -qE -- '-o (nym|wg|tun)'
     fi
 }
+has_root_scoped_dns() {         # DNS accepts uid-scoped to the daemon
+    # (dnsmasq relays LAN queries as router OUTPUT; without the uid scope
+    # they leak to the WAN — the moejoe pcap repro). Must be PRESENT while
+    # Disconnected AND while Connecting: cold-boot NTP-pool resolution is
+    # daemon-owned (plain UDP/53 as root), not sysntpd -> dnsmasq.
+    if [ "$BACKEND" = nft ]; then
+        fw_dump | grep -qE 'meta skuid 0 .*dport 53 .*accept'
+    else
+        fw_dump | grep -- '-A NYM_OUTPUT' | grep -- '--dport 53' | grep -q -- '--uid-owner 0'
+    fi
+}
+has_unscoped_dns_accept() {     # any port-53 OUTPUT accept NOT uid-scoped = leak
+    if [ "$BACKEND" = nft ]; then
+        fw_dump | grep -E 'dport 53 .*accept' | grep -qv 'skuid'
+    else
+        fw_dump | grep -- '-A NYM_OUTPUT' | grep -- '--dport 53' | grep -- '-j ACCEPT' | grep -qv -- '--uid-owner'
+    fi
+}
 tstate() { "$VPNC" status 2>/dev/null | sed -n 's/^State: //p' | head -1; }
 yn() { if "$@"; then echo yes; else echo no; fi; }
 
@@ -65,8 +86,11 @@ echo "== Phase 0: Disconnected (expect kill-switch 'Blocked' policy) =="
 "$VPNC" disconnect >/dev/null 2>&1
 i=0; while [ "$i" -lt 30 ]; do [ "$(tstate)" = "Disconnected" ] && break; sleep 1; i=$((i+1)); done
 fw_dump > "$OUT/blocked.txt"
-printf '  state=%s table=%s ntp=%s reject=%s\n' \
-    "$(tstate)" "$(yn fw_table_present)" "$(yn has_ntp_hatch)" "$(yn has_final_reject)"
+table_in_blocked=$(yn fw_table_present); rootdns_in_blocked=$(yn has_root_scoped_dns)
+unscopeddns_in_blocked=$(yn has_unscoped_dns_accept)
+printf '  state=%s table=%s ntp=%s reject=%s rootdns=%s\n' \
+    "$(tstate)" "$table_in_blocked" "$(yn has_ntp_hatch)" "$(yn has_final_reject)" \
+    "$rootdns_in_blocked"
 echo "  (no table => firewall open, daemon has no cached API endpoints yet)"
 echo
 
@@ -75,18 +99,22 @@ echo "== Phase 1-3: connect-v2, sampling tunnel state vs firewall =="
 : > "$OUT/connecting.txt"; rm -f "$OUT/connecting.txt" "$OUT/connected.txt" "$OUT/error.txt"
 "$VPNC" connect-v2 > "$OUT/connect.out" 2>&1 &
 
-seen_connecting=no; ntp_in_connecting=no
+seen_connecting=no; ntp_in_connecting=no; rootdns_in_connecting=no
+unscopeddns_in_connecting=no
 seen_connected=no;  ntp_in_connected=no
 seen_error=no
 start=$(date +%s)
-printf '  %-8s %-14s %-7s %-8s %-8s\n' TIME STATE NTP REJECT TUNNEL
+printf '  %-8s %-14s %-7s %-8s %-8s %-8s\n' TIME STATE NTP REJECT TUNNEL ROOTDNS
 while :; do
     st=$(tstate); [ -z "$st" ] && st="(none)"
     ntp=$(yn has_ntp_hatch); rej=$(yn has_final_reject); tun=$(yn has_tunnel_allow)
-    printf '  %-8s %-14s %-7s %-8s %-8s\n' "$(date +%H:%M:%S)" "$st" "$ntp" "$rej" "$tun"
+    rdns=$(yn has_root_scoped_dns)
+    printf '  %-8s %-14s %-7s %-8s %-8s %-8s\n' "$(date +%H:%M:%S)" "$st" "$ntp" "$rej" "$tun" "$rdns"
     case "$st" in
         Connecting*)
             seen_connecting=yes; [ "$ntp" = yes ] && ntp_in_connecting=yes
+            [ "$rdns" = yes ] && rootdns_in_connecting=yes
+            has_unscoped_dns_accept && unscopeddns_in_connecting=yes
             [ -f "$OUT/connecting.txt" ] || fw_dump > "$OUT/connecting.txt" ;;
         Connected*)
             seen_connected=yes; [ "$ntp" = yes ] && ntp_in_connected=yes
@@ -110,10 +138,23 @@ note() { echo "  [note] $1"; }
 ok()   { echo "  [PASS] $1"; }
 bad()  { echo "  [FAIL] $1"; fail=1; }
 
+if [ "$table_in_blocked" = yes ]; then
+    if [ "$rootdns_in_blocked" = yes ]; then ok "Blocked DNS accepts uid-scoped to root (dnsmasq relay leak closed)"
+    else bad "Blocked DNS accepts NOT uid-scoped -- dnsmasq-relayed LAN DNS leaks to the WAN"; fi
+    if [ "$unscopeddns_in_blocked" = no ]; then ok "no unscoped port-53 accept while Blocked"
+    else bad "unscoped port-53 OUTPUT accept found while Blocked -- LAN relay leak"; fi
+else
+    note "no kill-switch table while Disconnected -- root-scoping check skipped"
+fi
+
 if [ "$seen_connecting" = yes ]; then
     ok "observed Connecting state"
     if [ "$ntp_in_connecting" = yes ]; then ok "NTP escape hatch present while Connecting (C1)"
     else bad "NTP escape hatch MISSING while Connecting (C1 regression)"; fi
+    if [ "$rootdns_in_connecting" = yes ]; then ok "DNS accepts uid-scoped to root while Connecting (daemon-owned bootstrap)"
+    else bad "root-scoped DNS accepts MISSING while Connecting -- daemon cannot resolve mid-connect"; fi
+    if [ "$unscopeddns_in_connecting" = no ]; then ok "no unscoped port-53 accept while Connecting (per-reconnect leak window closed)"
+    else bad "unscoped port-53 OUTPUT accept found while Connecting -- LAN relay leak on every reconnect"; fi
 else
     note "never caught a Connecting sample (window shorter than 1s, or instant failure) -- inspect $OUT/connect.out"
 fi
