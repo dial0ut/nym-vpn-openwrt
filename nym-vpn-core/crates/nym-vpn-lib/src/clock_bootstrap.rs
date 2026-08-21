@@ -210,7 +210,10 @@ fn set_clock(t: SystemTime) -> std::io::Result<()> {
     let d = t
         .duration_since(UNIX_EPOCH)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    let ts = nix::sys::time::TimeSpec::new(d.as_secs() as i64, d.subsec_nanos() as i64);
+    // from_duration, not TimeSpec::new: the field widths are platform types
+    // (i32 on the 32-bit musl targets), and hand-casting broke every 32-bit
+    // release build. Those targets keep a 2038 horizon either way.
+    let ts = nix::sys::time::TimeSpec::from_duration(d);
     nix::time::clock_settime(nix::time::ClockId::CLOCK_REALTIME, ts)?;
     Ok(())
 }
