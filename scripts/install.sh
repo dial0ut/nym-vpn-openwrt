@@ -149,7 +149,15 @@ main() {
     step "Installing..."
     case "$pkg_mgr" in
         opkg) opkg install "/tmp/${filename}" ;;
-        apk)  apk add --allow-untrusted "/tmp/${filename}" ;;
+        apk)
+            apk add --allow-untrusted "/tmp/${filename}"
+            # Sideloading a local .apk pins the world entry to that file's
+            # hash (nym-vpn><...), which blocks `apk upgrade nym-vpn` from
+            # the feed and leaves apk unable to resolve world if a later
+            # upgrade is interrupted. The package's postinst registers the
+            # feed and ships its signing key, so a bare name is safe.
+            sed -i 's/^nym-vpn[<>=~].*$/nym-vpn/' /etc/apk/world
+            ;;
     esac
 
     rm -f "/tmp/${filename}"

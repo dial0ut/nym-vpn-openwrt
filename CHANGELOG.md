@@ -33,6 +33,16 @@ the GitHub release notes.
   installing the package needs network, which the locked state blocks:
   disable the kill switch first, install, then re-enable.
 
+- The installer no longer leaves apk (OpenWrt 24.10+/25.x) pinned to the
+  exact package file it sideloaded. That pin silently blocked the advertised
+  `apk upgrade nym-vpn` path, and an interrupted upgrade (reported: ENOSPC
+  mid-upgrade) left the pin pointing at a package that was never installed,
+  after which apk refused every transaction on the system with
+  `breaks: world[nym-vpn><…]`. The installer now normalizes the world entry
+  to a bare `nym-vpn` after installing; re-running the installer also
+  recovers an already-wedged system. Verified on a 25.12 device, including
+  the wedge and recovery paths.
+
 - Fixed the kill switch on fw3/iptables routers (OpenWrt 21.02 and older),
   broken in every release since v1.27.0: the generated ICMPv6 rules lacked a
   `-p icmpv6` protocol flag, which legacy `ip6tables-restore` rejects, so
