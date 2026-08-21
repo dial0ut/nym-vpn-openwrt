@@ -1,0 +1,1521 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Privacy-first VPN for OpenWrt routers, powered by the Nym mixnet">
+      
+      
+      
+        <link rel="canonical" href="https://docs.dial0ut.org/superpowers/plans/2026-07-19-handshake-armed-probing/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../../assets/favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Handshake-Armed Connection Probing Implementation Plan - NymVPN for OpenWrt</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#handshake-armed-connection-probing-implementation-plan" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="NymVPN for OpenWrt" class="md-header__button md-logo" aria-label="NymVPN for OpenWrt" data-md-component="logo">
+      
+  <img src="../../../assets/logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            NymVPN for OpenWrt
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Handshake-Armed Connection Probing Implementation Plan
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/dial0ut/nym-vpn-openwrt" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    dial0ut/nym-vpn-openwrt
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="NymVPN for OpenWrt" class="md-nav__button md-logo" aria-label="NymVPN for OpenWrt" data-md-component="logo">
+      
+  <img src="../../../assets/logo.svg" alt="logo">
+
+    </a>
+    NymVPN for OpenWrt
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/dial0ut/nym-vpn-openwrt" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    dial0ut/nym-vpn-openwrt
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../getting-started/quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guide/luci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LuCI Web Interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guide/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guide/inbound-services/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inbound Services
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guide/split-tunneling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Split Tunneling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guide/dns/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    DNS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../architecture/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../architecture/wireguard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    WireGuard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../architecture/firewall/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Firewall Backends
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../development/building/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building from Source
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../development/packaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Packaging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../development/ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CI/CD
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Supported Devices
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#global-constraints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Global Constraints
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Global Constraints">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#task-0-branch-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 0: Branch setup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-1-phase-0-diagnosis-before-numbers-with-probe-level-tracing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 1: Phase 0 diagnosis — before-numbers with probe-level tracing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-2-nym-wg-gotatun-handshake-predicate-and-statsreader" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 2: nym-wg-gotatun — handshake predicate and StatsReader
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-3-plumb-the-reader-through-tunnelhandle-and-anytunnelhandle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 3: Plumb the reader through TunnelHandle and AnyTunnelHandle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-4-tunnel_monitorrs-the-handshake-wait" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 4: tunnel_monitor.rs — the handshake wait
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-5-build-deploy-to-openwrt25-after-benchmark" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 5: Build, deploy to openwrt25, after-benchmark
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-6-changelog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 6: Changelog
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#self-review-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Self-review notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/dial0ut/nym-vpn-openwrt/edit/openwrt/docs/superpowers/plans/2026-07-19-handshake-armed-probing.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="handshake-armed-connection-probing-implementation-plan">Handshake-Armed Connection Probing Implementation Plan<a class="headerlink" href="#handshake-armed-connection-probing-implementation-plan" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Start the ICMP viability probe when the exit WireGuard handshake completes (instead of on a blind 3-second grid), cutting router time-to-Connected from ~11 s toward registration + handshake + one RTT.</p>
+<p><strong>Architecture:</strong> Three-layer plumbing of a handshake signal that gotatun already tracks: (1) <code>nym-wg-gotatun</code> exposes a <code>StatsReader</code> over the reference-counted gotatun <code>Device</code>; (2) the WireGuard <code>TunnelHandle</code> in <code>nym-vpn-lib</code> carries an exit-tunnel reader; (3) <code>tunnel_monitor.rs</code> polls it after <code>InterfaceUp</code> (500 ms / 10 s cap / never fatal) before spawning the connection monitor. Port of upstream nym-vpn-client #5571 (<code>68b638072</code>), adapted from wireguard-go UAPI polling to gotatun's native API.</p>
+<p><strong>Tech Stack:</strong> Rust (tokio), gotatun (<code>Device::read</code>, <code>PeerStats.stats.last_handshake</code>), OpenWrt test router <code>openwrt25</code> (x86_64), musl cross-build via <code>scripts/build-musl.sh</code>.</p>
+<p>Spec: <code>docs/superpowers/specs/2026-07-19-handshake-armed-probing-design.md</code></p>
+<h2 id="global-constraints">Global Constraints<a class="headerlink" href="#global-constraints" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Probe timings in <code>nym-connection-monitor</code> (<code>TimingConfig::two_hop()</code>) must NOT change.</li>
+<li>The handshake wait is advisory: on timeout or shutdown it logs and falls through to probing; it must never fail the connect.</li>
+<li>Stats-read ambiguity (no peers listed) is treated as "not yet handshaken".</li>
+<li>No Claude/AI attribution in commits (repo rule).</li>
+<li>Work on branch <code>feat/handshake-armed-probe</code> off <code>develop</code>.</li>
+<li>All <code>cargo</code> commands run from <code>nym-vpn-core/</code>.</li>
+<li><code>openwrt25</code> is a live router: benchmark cycles briefly interrupt VPN for LAN clients; always restore the <code>nym-vpnd</code> procd service (and a connected state) when a benchmark task ends.</li>
+</ul>
+<hr />
+<h3 id="task-0-branch-setup">Task 0: Branch setup<a class="headerlink" href="#task-0-branch-setup" title="Permanent link">&para;</a></h3>
+<p><strong>Files:</strong> none (git only)</p>
+<ul>
+<li>[ ] <strong>Step 1: Create the branch</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nb">cd</span><span class="w"> </span>~/dev/nym-vpn-openwrt<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>git<span class="w"> </span>checkout<span class="w"> </span>develop<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>git<span class="w"> </span>checkout<span class="w"> </span>-b<span class="w"> </span>feat/handshake-armed-probe
+</code></pre></div>
+<p>Expected: <code>Switched to a new branch 'feat/handshake-armed-probe'</code></p>
+<hr />
+<h3 id="task-1-phase-0-diagnosis-before-numbers-with-probe-level-tracing">Task 1: Phase 0 diagnosis — before-numbers with probe-level tracing<a class="headerlink" href="#task-1-phase-0-diagnosis-before-numbers-with-probe-level-tracing" title="Permanent link">&para;</a></h3>
+<p><strong>Files:</strong>
+- Create: <code>notes/2026-07-19-connect-diag-before.log</code> (benchmark artifact, NOT committed)</p>
+<p><strong>Interfaces:</strong>
+- Produces: baseline per-probe and per-handshake timestamps that Task 5 compares against.</p>
+<p>Background for the executor: <code>nym-vpnd</code> honors <code>RUST_LOG</code> (EnvFilter <code>from_env_lossy()</code> in <code>nym-vpn-core/crates/nym-vpnd/src/logging.rs:282</code>). Neither <code>nym_connection_monitor</code> nor <code>gotatun</code> is on the forced <code>INFO_TARGETS</code>/<code>WARN_TARGETS</code> lists, so trace/debug directives for them take effect. The stock init script (<code>/etc/init.d/nym-vpnd</code> on the router) sets no env, hence the manual foreground run below.</p>
+<ul>
+<li>[ ] <strong>Step 1: Stop the service and start an instrumented daemon</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>ssh<span class="w"> </span>openwrt25<span class="w"> </span><span class="s1">'/etc/init.d/nym-vpnd stop; sleep 2; RUST_LOG="info,nym_connection_monitor=trace,gotatun=debug" nohup /usr/sbin/nym-vpnd &gt;/tmp/nym-diag-before.log 2&gt;&amp;1 &amp; sleep 4; nym-vpnc status'</span>
+</code></pre></div>
+<p>Expected: a <code>State: ...</code> line (daemon up and serving RPC).</p>
+<ul>
+<li>[ ] <strong>Step 2: Run 3 timed connect cycles</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">for</span><span class="w"> </span>i<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="m">3</span><span class="p">;</span><span class="w"> </span><span class="k">do</span><span class="w"> </span>ssh<span class="w"> </span>openwrt25<span class="w"> </span><span class="s2">"nym-vpnc disconnect &gt;/dev/null 2&gt;&amp;1; sleep 3; echo \"=== CYCLE </span><span class="nv">$i</span><span class="s2"> ===\"; time nym-vpnc connect -w 2&gt;&amp;1 | tail -1"</span><span class="p">;</span><span class="w"> </span><span class="k">done</span>
+</code></pre></div>
+<p>Expected: three <code>real 0m XX.XXs</code> lines, ~10–11 s each (baseline).</p>
+<ul>
+<li>[ ] <strong>Step 3: Collect the log and restore the service</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>scp<span class="w"> </span>openwrt25:/tmp/nym-diag-before.log<span class="w"> </span>~/dev/nym-vpn-openwrt/notes/2026-07-19-connect-diag-before.log
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>ssh<span class="w"> </span>openwrt25<span class="w"> </span><span class="s1">'pkill -f /usr/sbin/nym-vpnd; sleep 2; /etc/init.d/nym-vpnd start; sleep 3; nym-vpnc connect -w &gt;/dev/null 2&gt;&amp;1; nym-vpnc status'</span>
+</code></pre></div>
+<p>Expected: <code>State: Connected ...</code> at the end (router restored).</p>
+<ul>
+<li>[ ] <strong>Step 4: Extract the probe/handshake timeline</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>grep<span class="w"> </span>-E<span class="w"> </span><span class="s2">"Sending (initial|next) probe|Probe succeeded|Next probe|handshake|HANDSHAKE|New tunnel state"</span><span class="w"> </span>~/dev/nym-vpn-openwrt/notes/2026-07-19-connect-diag-before.log<span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-80
+</code></pre></div>
+<p>Record (as a comment block appended to the log file): for each cycle, (a) timestamps of each probe send, (b) timestamp of first probe success, (c) gotatun entry/exit handshake completion timestamps, (d) whether the exit handshake landed well before the successful probe (cadence-bound — the expected finding) or at ~5 s (<code>REKEY_TIMEOUT</code>-bound). Do not commit the log; <code>notes/</code> is untracked scratch.</p>
+<hr />
+<h3 id="task-2-nym-wg-gotatun-handshake-predicate-and-statsreader">Task 2: <code>nym-wg-gotatun</code> — handshake predicate and <code>StatsReader</code><a class="headerlink" href="#task-2-nym-wg-gotatun-handshake-predicate-and-statsreader" title="Permanent link">&para;</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>nym-vpn-core/crates/nym-wg-gotatun/src/wireguard_go.rs</code> (tests go in a <code>#[cfg(test)]</code> module in the same file — the crate has no separate tests dir)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>gotatun::device::Device::read</code>, <code>DeviceRead::peers() -&gt; Vec&lt;gotatun::device::configure::PeerStats&gt;</code> (fields <code>peer: Peer</code>, <code>stats: Stats</code>; <code>stats.last_handshake: Option&lt;Duration&gt;</code>). <code>PeerStats</code> is <code>#[non_exhaustive]</code> — it cannot be constructed in tests, which is why the predicate is a free function over <code>Option&lt;Duration&gt;</code>.
+- Produces: <code>pub struct StatsReader</code> (Clone) with <code>pub async fn all_peers_have_handshake(&amp;self) -&gt; bool</code>; <code>Tunnel::stats_reader(&amp;self) -&gt; StatsReader</code>. Task 3 relies on these exact names.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing tests</strong></li>
+</ul>
+<p>Append to <code>nym-vpn-core/crates/nym-wg-gotatun/src/wireguard_go.rs</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="cp">#[cfg(test)]</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="k">mod</span><span class="w"> </span><span class="nn">tests</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="k">use</span><span class="w"> </span><span class="n">std</span><span class="p">::</span><span class="n">time</span><span class="p">::</span><span class="n">Duration</span><span class="p">;</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">    </span><span class="k">use</span><span class="w"> </span><span class="k">super</span><span class="p">::</span><span class="n">all_peers_handshaken</span><span class="p">;</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">    </span><span class="cp">#[test]</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">    </span><span class="k">fn</span><span class="w"> </span><span class="nf">no_peers_is_not_handshaken</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="w">        </span><span class="fm">assert!</span><span class="p">(</span><span class="o">!</span><span class="n">all_peers_handshaken</span><span class="p">(</span><span class="nb">Vec</span><span class="p">::</span><span class="o">&lt;</span><span class="nb">Option</span><span class="o">&lt;</span><span class="n">Duration</span><span class="o">&gt;&gt;</span><span class="p">::</span><span class="n">new</span><span class="p">()));</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="w">    </span><span class="cp">#[test]</span>
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="w">    </span><span class="k">fn</span><span class="w"> </span><span class="nf">peer_without_handshake_is_not_handshaken</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="w">        </span><span class="fm">assert!</span><span class="p">(</span><span class="o">!</span><span class="n">all_peers_handshaken</span><span class="p">([</span><span class="nb">None</span><span class="p">::</span><span class="o">&lt;</span><span class="n">Duration</span><span class="o">&gt;</span><span class="p">]));</span>
+<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a>
+<a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a><span class="w">    </span><span class="cp">#[test]</span>
+<a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a><span class="w">    </span><span class="k">fn</span><span class="w"> </span><span class="nf">all_peers_with_handshake_is_handshaken</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a><span class="w">        </span><span class="fm">assert!</span><span class="p">(</span><span class="n">all_peers_handshaken</span><span class="p">([</span>
+<a id="__codelineno-5-20" name="__codelineno-5-20" href="#__codelineno-5-20"></a><span class="w">            </span><span class="nb">Some</span><span class="p">(</span><span class="n">Duration</span><span class="p">::</span><span class="n">from_secs</span><span class="p">(</span><span class="mi">1</span><span class="p">)),</span>
+<a id="__codelineno-5-21" name="__codelineno-5-21" href="#__codelineno-5-21"></a><span class="w">            </span><span class="nb">Some</span><span class="p">(</span><span class="n">Duration</span><span class="p">::</span><span class="n">from_secs</span><span class="p">(</span><span class="mi">2</span><span class="p">)),</span>
+<a id="__codelineno-5-22" name="__codelineno-5-22" href="#__codelineno-5-22"></a><span class="w">        </span><span class="p">]));</span>
+<a id="__codelineno-5-23" name="__codelineno-5-23" href="#__codelineno-5-23"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-5-24" name="__codelineno-5-24" href="#__codelineno-5-24"></a>
+<a id="__codelineno-5-25" name="__codelineno-5-25" href="#__codelineno-5-25"></a><span class="w">    </span><span class="cp">#[test]</span>
+<a id="__codelineno-5-26" name="__codelineno-5-26" href="#__codelineno-5-26"></a><span class="w">    </span><span class="k">fn</span><span class="w"> </span><span class="nf">mixed_peers_are_not_handshaken</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-5-27" name="__codelineno-5-27" href="#__codelineno-5-27"></a><span class="w">        </span><span class="fm">assert!</span><span class="p">(</span><span class="o">!</span><span class="n">all_peers_handshaken</span><span class="p">([</span><span class="nb">Some</span><span class="p">(</span><span class="n">Duration</span><span class="p">::</span><span class="n">from_secs</span><span class="p">(</span><span class="mi">1</span><span class="p">)),</span><span class="w"> </span><span class="nb">None</span><span class="p">]));</span>
+<a id="__codelineno-5-28" name="__codelineno-5-28" href="#__codelineno-5-28"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-5-29" name="__codelineno-5-29" href="#__codelineno-5-29"></a><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li>[ ] <strong>Step 2: Run tests to verify they fail</strong></li>
+</ul>
+<p>Run: <code>cd ~/dev/nym-vpn-openwrt/nym-vpn-core &amp;&amp; cargo test -p nym-wg-gotatun</code>
+Expected: compile error — <code>all_peers_handshaken</code> not found.</p>
+<ul>
+<li>[ ] <strong>Step 3: Implement predicate, <code>StatsReader</code>, and <code>Tunnel::stats_reader()</code></strong></li>
+</ul>
+<p>In <code>nym-vpn-core/crates/nym-wg-gotatun/src/wireguard_go.rs</code>:</p>
+<p>Change the first import block (line 9) from <code>use std::fmt;</code> to:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">use</span><span class="w"> </span><span class="n">std</span><span class="p">::{</span><span class="n">fmt</span><span class="p">,</span><span class="w"> </span><span class="n">time</span><span class="p">::</span><span class="n">Duration</span><span class="p">};</span>
+</code></pre></div>
+<p>Add after the <code>impl Tunnel { ... }</code> block (after line 150):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="sd">/// Read-only handle for querying live peer stats off a running tunnel.</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="sd">///</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="sd">/// Holds a reference-counted clone of the gotatun device, so it stays usable</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="sd">/// after the `Tunnel` itself has moved into the tunnel event-handler task.</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="cp">#[derive(Clone)]</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="k">pub</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">StatsReader</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">    </span><span class="n">device</span><span class="p">:</span><span class="w"> </span><span class="nc">device</span><span class="p">::</span><span class="n">Device</span><span class="o">&lt;</span><span class="n">DeviceTransports</span><span class="o">&gt;</span><span class="p">,</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="p">}</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="k">impl</span><span class="w"> </span><span class="n">StatsReader</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="w">    </span><span class="sd">/// Returns true once every peer on the device has completed a handshake.</span>
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="w">    </span><span class="sd">///</span>
+<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="w">    </span><span class="sd">/// An empty peer list (e.g. transiently during reconfiguration) counts as</span>
+<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a><span class="w">    </span><span class="sd">/// not handshaken — callers treat "unknown" as "not yet".</span>
+<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="k">async</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="nf">all_peers_have_handshake</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="kt">bool</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a><span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">last_handshakes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="bp">self</span>
+<a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a><span class="w">            </span><span class="p">.</span><span class="n">device</span>
+<a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a><span class="w">            </span><span class="p">.</span><span class="n">read</span><span class="p">(</span><span class="k">async</span><span class="w"> </span><span class="o">|</span><span class="n">device</span><span class="o">|</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a><span class="w">                </span><span class="n">device</span>
+<a id="__codelineno-7-20" name="__codelineno-7-20" href="#__codelineno-7-20"></a><span class="w">                    </span><span class="p">.</span><span class="n">peers</span><span class="p">()</span>
+<a id="__codelineno-7-21" name="__codelineno-7-21" href="#__codelineno-7-21"></a><span class="w">                    </span><span class="p">.</span><span class="k">await</span>
+<a id="__codelineno-7-22" name="__codelineno-7-22" href="#__codelineno-7-22"></a><span class="w">                    </span><span class="p">.</span><span class="n">into_iter</span><span class="p">()</span>
+<a id="__codelineno-7-23" name="__codelineno-7-23" href="#__codelineno-7-23"></a><span class="w">                    </span><span class="p">.</span><span class="n">map</span><span class="p">(</span><span class="o">|</span><span class="n">peer_stats</span><span class="o">|</span><span class="w"> </span><span class="n">peer_stats</span><span class="p">.</span><span class="n">stats</span><span class="p">.</span><span class="n">last_handshake</span><span class="p">)</span>
+<a id="__codelineno-7-24" name="__codelineno-7-24" href="#__codelineno-7-24"></a><span class="w">                    </span><span class="p">.</span><span class="n">collect</span><span class="p">::</span><span class="o">&lt;</span><span class="nb">Vec</span><span class="o">&lt;</span><span class="n">_</span><span class="o">&gt;&gt;</span><span class="p">()</span>
+<a id="__codelineno-7-25" name="__codelineno-7-25" href="#__codelineno-7-25"></a><span class="w">            </span><span class="p">})</span>
+<a id="__codelineno-7-26" name="__codelineno-7-26" href="#__codelineno-7-26"></a><span class="w">            </span><span class="p">.</span><span class="k">await</span><span class="p">;</span>
+<a id="__codelineno-7-27" name="__codelineno-7-27" href="#__codelineno-7-27"></a><span class="w">        </span><span class="n">all_peers_handshaken</span><span class="p">(</span><span class="n">last_handshakes</span><span class="p">)</span>
+<a id="__codelineno-7-28" name="__codelineno-7-28" href="#__codelineno-7-28"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-7-29" name="__codelineno-7-29" href="#__codelineno-7-29"></a><span class="p">}</span>
+<a id="__codelineno-7-30" name="__codelineno-7-30" href="#__codelineno-7-30"></a>
+<a id="__codelineno-7-31" name="__codelineno-7-31" href="#__codelineno-7-31"></a><span class="sd">/// True iff the list is non-empty and every entry has a handshake timestamp.</span>
+<a id="__codelineno-7-32" name="__codelineno-7-32" href="#__codelineno-7-32"></a><span class="k">fn</span><span class="w"> </span><span class="nf">all_peers_handshaken</span><span class="p">(</span><span class="n">last_handshakes</span><span class="p">:</span><span class="w"> </span><span class="nc">impl</span><span class="w"> </span><span class="nb">IntoIterator</span><span class="o">&lt;</span><span class="n">Item</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">Option</span><span class="o">&lt;</span><span class="n">Duration</span><span class="o">&gt;&gt;</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="kt">bool</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-7-33" name="__codelineno-7-33" href="#__codelineno-7-33"></a><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">any</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">false</span><span class="p">;</span>
+<a id="__codelineno-7-34" name="__codelineno-7-34" href="#__codelineno-7-34"></a><span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="n">last_handshake</span><span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="n">last_handshakes</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-7-35" name="__codelineno-7-35" href="#__codelineno-7-35"></a><span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="n">last_handshake</span><span class="p">.</span><span class="n">is_none</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-7-36" name="__codelineno-7-36" href="#__codelineno-7-36"></a><span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="kc">false</span><span class="p">;</span>
+<a id="__codelineno-7-37" name="__codelineno-7-37" href="#__codelineno-7-37"></a><span class="w">        </span><span class="p">}</span>
+<a id="__codelineno-7-38" name="__codelineno-7-38" href="#__codelineno-7-38"></a><span class="w">        </span><span class="n">any</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span><span class="p">;</span>
+<a id="__codelineno-7-39" name="__codelineno-7-39" href="#__codelineno-7-39"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-7-40" name="__codelineno-7-40" href="#__codelineno-7-40"></a><span class="w">    </span><span class="n">any</span>
+<a id="__codelineno-7-41" name="__codelineno-7-41" href="#__codelineno-7-41"></a><span class="p">}</span>
+</code></pre></div>
+<p>Add inside <code>impl Tunnel</code> (after <code>update_peers</code>, before the closing brace at line 150):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="w">    </span><span class="sd">/// Create a read-only stats handle sharing this tunnel's device.</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="nf">stats_reader</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nc">StatsReader</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">        </span><span class="n">StatsReader</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">            </span><span class="n">device</span><span class="p">:</span><span class="w"> </span><span class="nc">self</span><span class="p">.</span><span class="n">device</span><span class="p">.</span><span class="n">clone</span><span class="p">(),</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">        </span><span class="p">}</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">    </span><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li>[ ] <strong>Step 4: Run tests to verify they pass</strong></li>
+</ul>
+<p>Run: <code>cd ~/dev/nym-vpn-openwrt/nym-vpn-core &amp;&amp; cargo test -p nym-wg-gotatun</code>
+Expected: 4 tests pass (<code>no_peers_is_not_handshaken</code>, <code>peer_without_handshake_is_not_handshaken</code>, <code>all_peers_with_handshake_is_handshaken</code>, <code>mixed_peers_are_not_handshaken</code>).</p>
+<ul>
+<li>[ ] <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nb">cd</span><span class="w"> </span>~/dev/nym-vpn-openwrt<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>git<span class="w"> </span>add<span class="w"> </span>nym-vpn-core/crates/nym-wg-gotatun/src/wireguard_go.rs<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">"feat(wg): expose peer handshake stats from gotatun wrapper"</span>
+</code></pre></div>
+<hr />
+<h3 id="task-3-plumb-the-reader-through-tunnelhandle-and-anytunnelhandle">Task 3: Plumb the reader through <code>TunnelHandle</code> and <code>AnyTunnelHandle</code><a class="headerlink" href="#task-3-plumb-the-reader-through-tunnelhandle-and-anytunnelhandle" title="Permanent link">&para;</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>nym-vpn-core/crates/nym-vpn-lib/src/tunnel_state_machine/tunnel/wireguard/connected_tunnel.rs:110-145</code>
+- Modify: <code>nym-vpn-core/crates/nym-vpn-lib/src/tunnel_state_machine/tunnel/any_tunnel_handle.rs:28</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>wireguard_go::StatsReader</code>, <code>Tunnel::stats_reader()</code> from Task 2 (module already imported in <code>connected_tunnel.rs:8</code> as <code>use nym_wg_gotatun::{amnezia::AmneziaConfig, wireguard_go};</code>).
+- Produces: <code>WireguardTunnelHandle::exit_handshake_complete(&amp;self) -&gt; bool</code> (async); <code>AnyTunnelHandle::as_wireguard(&amp;self) -&gt; Option&lt;&amp;WireguardTunnelHandle&gt;</code>. Task 4 relies on these exact names.</p>
+<p>No new unit test: both methods are one-line delegation over a live gotatun device, which cannot be constructed without a TUN interface; behavior is covered by the Task 5 hardware validation. Verification for this task is <code>cargo check</code> + clippy.</p>
+<ul>
+<li>[ ] <strong>Step 1: Capture the stats reader in <code>ConnectedTunnel::run</code></strong></li>
+</ul>
+<p>In <code>connected_tunnel.rs</code>, after the <code>exit_tunnel</code> is started (after line 108, before <code>let shutdown_token = CancellationToken::new();</code>):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">exit_stats_reader</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">exit_tunnel</span><span class="p">.</span><span class="n">stats_reader</span><span class="p">();</span>
+</code></pre></div>
+<ul>
+<li>[ ] <strong>Step 2: Store it in <code>TunnelHandle</code></strong></li>
+</ul>
+<p>Change the <code>TunnelHandle</code> construction (lines 123-126) to:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="w">        </span><span class="nb">Ok</span><span class="p">(</span><span class="n">TunnelHandle</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="w">            </span><span class="n">shutdown_token</span><span class="p">,</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">            </span><span class="n">event_handler_task</span><span class="p">,</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="w">            </span><span class="n">exit_stats_reader</span><span class="p">,</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="w">        </span><span class="p">})</span>
+</code></pre></div>
+<p>Change the struct definition (lines 142-145) to:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="k">pub</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">TunnelHandle</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">    </span><span class="n">shutdown_token</span><span class="p">:</span><span class="w"> </span><span class="nc">CancellationToken</span><span class="p">,</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">    </span><span class="n">event_handler_task</span><span class="p">:</span><span class="w"> </span><span class="nc">JoinHandle</span><span class="o">&lt;</span><span class="n">Tombstone</span><span class="o">&gt;</span><span class="p">,</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="w">    </span><span class="n">exit_stats_reader</span><span class="p">:</span><span class="w"> </span><span class="nc">wireguard_go</span><span class="p">::</span><span class="n">StatsReader</span><span class="p">,</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="p">}</span>
+</code></pre></div>
+<p>Add inside <code>impl TunnelHandle</code> (after <code>cancel()</code>):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="w">    </span><span class="sd">/// Returns true once every exit-tunnel peer has completed a WireGuard handshake.</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="k">async</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="nf">exit_handshake_complete</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="kt">bool</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">        </span><span class="bp">self</span><span class="p">.</span><span class="n">exit_stats_reader</span><span class="p">.</span><span class="n">all_peers_have_handshake</span><span class="p">().</span><span class="k">await</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="w">    </span><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li>[ ] <strong>Step 3: Add <code>as_wireguard()</code> to <code>AnyTunnelHandle</code></strong></li>
+</ul>
+<p>In <code>any_tunnel_handle.rs</code>, inside <code>impl AnyTunnelHandle</code> (before <code>cancel()</code> at line 29):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="w">    </span><span class="sd">/// Returns the wireguard tunnel handle when this is a wireguard tunnel.</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="nf">as_wireguard</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">Option</span><span class="o">&lt;&amp;</span><span class="n">WireguardTunnelHandle</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="w">        </span><span class="k">match</span><span class="w"> </span><span class="bp">self</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="w">            </span><span class="bp">Self</span><span class="p">::</span><span class="n">Wireguard</span><span class="p">(</span><span class="n">handle</span><span class="p">)</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="nb">Some</span><span class="p">(</span><span class="n">handle</span><span class="p">),</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="w">            </span><span class="bp">Self</span><span class="p">::</span><span class="n">Mixnet</span><span class="p">(</span><span class="n">_</span><span class="p">)</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="nb">None</span><span class="p">,</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="w">        </span><span class="p">}</span>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="w">    </span><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li>[ ] <strong>Step 4: Check it compiles clean</strong></li>
+</ul>
+<p>Run: <code>cd ~/dev/nym-vpn-openwrt/nym-vpn-core &amp;&amp; cargo check -p nym-vpn-lib &amp;&amp; cargo clippy -p nym-vpn-lib -- -D warnings</code>
+Expected: no errors, no warnings. (If clippy flags <code>as_wireguard</code> as dead code at this point, that is expected until Task 4 — suppress nothing; proceed to Task 4 in the same session and re-run clippy there. If clippy fails ONLY on pre-existing issues untouched by this diff, note them and move on.)</p>
+<ul>
+<li>[ ] <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="nb">cd</span><span class="w"> </span>~/dev/nym-vpn-openwrt<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>git<span class="w"> </span>add<span class="w"> </span>nym-vpn-core/crates/nym-vpn-lib/src/tunnel_state_machine/tunnel/wireguard/connected_tunnel.rs<span class="w"> </span>nym-vpn-core/crates/nym-vpn-lib/src/tunnel_state_machine/tunnel/any_tunnel_handle.rs<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">"feat(wg): surface exit handshake state on tunnel handles"</span>
+</code></pre></div>
+<hr />
+<h3 id="task-4-tunnel_monitorrs-the-handshake-wait">Task 4: <code>tunnel_monitor.rs</code> — the handshake wait<a class="headerlink" href="#task-4-tunnel_monitorrs-the-handshake-wait" title="Permanent link">&para;</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>nym-vpn-core/crates/nym-vpn-lib/src/tunnel_state_machine/tunnel_monitor.rs</code> (new fn near the top-level consts at line ~74-80; call site after the <code>InterfaceUp</code> reply block ending at line 710)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>AnyTunnelHandle::as_wireguard()</code> and <code>exit_handshake_complete()</code> from Task 3; <code>tunnel_handle</code> local (destructured from <code>StartTunnelResult</code> at line ~633); <code>self.shutdown_token: CancellationToken</code> (field at line 191). <code>Duration</code> and <code>CancellationToken</code> are already imported in this file; the wireguard handle path resolves via the existing <code>tunnel::</code> import (<code>use super::{... tunnel::{self, ...}}</code>).
+- Produces: nothing consumed later; behavior change only.</p>
+<ul>
+<li>[ ] <strong>Step 1: Add <code>wait_for_exit_handshake</code></strong></li>
+</ul>
+<p>Insert after the <code>REGISTRATION_CLIENT_STARTUP_TIMEOUT</code> const (line 80):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="sd">/// Poll the exit WireGuard tunnel's peer stats until the handshake completes.</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="sd">///</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="sd">/// Advisory only: on timeout or shutdown this logs and returns, and the</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="sd">/// caller proceeds to connectivity probing exactly as before. Ported from</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="sd">/// upstream #5571, adapted to gotatun's native stats API.</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="k">async</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="nf">wait_for_exit_handshake</span><span class="p">(</span>
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="w">    </span><span class="n">tunnel_handle</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="nc">tunnel</span><span class="p">::</span><span class="n">wireguard</span><span class="p">::</span><span class="n">connected_tunnel</span><span class="p">::</span><span class="n">TunnelHandle</span><span class="p">,</span>
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="w">    </span><span class="n">shutdown_token</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="nc">CancellationToken</span><span class="p">,</span>
+<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a><span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="n">HANDSHAKE_TIMEOUT</span><span class="p">:</span><span class="w"> </span><span class="nc">Duration</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Duration</span><span class="p">::</span><span class="n">from_secs</span><span class="p">(</span><span class="mi">10</span><span class="p">);</span>
+<a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a><span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="n">POLL_INTERVAL</span><span class="p">:</span><span class="w"> </span><span class="nc">Duration</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Duration</span><span class="p">::</span><span class="n">from_millis</span><span class="p">(</span><span class="mi">500</span><span class="p">);</span>
+<a id="__codelineno-16-12" name="__codelineno-16-12" href="#__codelineno-16-12"></a>
+<a id="__codelineno-16-13" name="__codelineno-16-13" href="#__codelineno-16-13"></a><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">started</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="p">::</span><span class="n">time</span><span class="p">::</span><span class="n">Instant</span><span class="p">::</span><span class="n">now</span><span class="p">();</span>
+<a id="__codelineno-16-14" name="__codelineno-16-14" href="#__codelineno-16-14"></a><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">wait</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">async</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-16-15" name="__codelineno-16-15" href="#__codelineno-16-15"></a><span class="w">        </span><span class="k">loop</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-16-16" name="__codelineno-16-16" href="#__codelineno-16-16"></a><span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="n">tunnel_handle</span><span class="p">.</span><span class="n">exit_handshake_complete</span><span class="p">().</span><span class="k">await</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-16-17" name="__codelineno-16-17" href="#__codelineno-16-17"></a><span class="w">                </span><span class="k">return</span><span class="p">;</span>
+<a id="__codelineno-16-18" name="__codelineno-16-18" href="#__codelineno-16-18"></a><span class="w">            </span><span class="p">}</span>
+<a id="__codelineno-16-19" name="__codelineno-16-19" href="#__codelineno-16-19"></a><span class="w">            </span><span class="n">tokio</span><span class="p">::</span><span class="n">time</span><span class="p">::</span><span class="n">sleep</span><span class="p">(</span><span class="n">POLL_INTERVAL</span><span class="p">).</span><span class="k">await</span><span class="p">;</span>
+<a id="__codelineno-16-20" name="__codelineno-16-20" href="#__codelineno-16-20"></a><span class="w">        </span><span class="p">}</span>
+<a id="__codelineno-16-21" name="__codelineno-16-21" href="#__codelineno-16-21"></a><span class="w">    </span><span class="p">};</span>
+<a id="__codelineno-16-22" name="__codelineno-16-22" href="#__codelineno-16-22"></a>
+<a id="__codelineno-16-23" name="__codelineno-16-23" href="#__codelineno-16-23"></a><span class="w">    </span><span class="n">tokio</span><span class="p">::</span><span class="n">select</span><span class="o">!</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-16-24" name="__codelineno-16-24" href="#__codelineno-16-24"></a><span class="w">        </span><span class="n">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">tokio</span><span class="p">::</span><span class="n">time</span><span class="p">::</span><span class="n">timeout</span><span class="p">(</span><span class="n">HANDSHAKE_TIMEOUT</span><span class="p">,</span><span class="w"> </span><span class="n">wait</span><span class="p">)</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="k">match</span><span class="w"> </span><span class="n">result</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-16-25" name="__codelineno-16-25" href="#__codelineno-16-25"></a><span class="w">            </span><span class="nb">Ok</span><span class="p">(())</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="n">tracing</span><span class="p">::</span><span class="n">info</span><span class="o">!</span><span class="p">(</span>
+<a id="__codelineno-16-26" name="__codelineno-16-26" href="#__codelineno-16-26"></a><span class="w">                </span><span class="s">"Exit WireGuard handshake completed after {} ms"</span><span class="p">,</span>
+<a id="__codelineno-16-27" name="__codelineno-16-27" href="#__codelineno-16-27"></a><span class="w">                </span><span class="n">started</span><span class="p">.</span><span class="n">elapsed</span><span class="p">().</span><span class="n">as_millis</span><span class="p">()</span>
+<a id="__codelineno-16-28" name="__codelineno-16-28" href="#__codelineno-16-28"></a><span class="w">            </span><span class="p">),</span>
+<a id="__codelineno-16-29" name="__codelineno-16-29" href="#__codelineno-16-29"></a><span class="w">            </span><span class="nb">Err</span><span class="p">(</span><span class="n">_</span><span class="p">)</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="n">tracing</span><span class="p">::</span><span class="n">warn</span><span class="o">!</span><span class="p">(</span>
+<a id="__codelineno-16-30" name="__codelineno-16-30" href="#__codelineno-16-30"></a><span class="w">                </span><span class="s">"Exit WireGuard handshake not observed within {HANDSHAKE_TIMEOUT:?}; proceeding to connectivity probing"</span>
+<a id="__codelineno-16-31" name="__codelineno-16-31" href="#__codelineno-16-31"></a><span class="w">            </span><span class="p">),</span>
+<a id="__codelineno-16-32" name="__codelineno-16-32" href="#__codelineno-16-32"></a><span class="w">        </span><span class="p">},</span>
+<a id="__codelineno-16-33" name="__codelineno-16-33" href="#__codelineno-16-33"></a><span class="w">        </span><span class="n">_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">shutdown_token</span><span class="p">.</span><span class="n">cancelled</span><span class="p">()</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-16-34" name="__codelineno-16-34" href="#__codelineno-16-34"></a><span class="w">            </span><span class="n">tracing</span><span class="p">::</span><span class="n">debug</span><span class="o">!</span><span class="p">(</span><span class="s">"Shutdown requested while waiting for exit handshake"</span><span class="p">);</span>
+<a id="__codelineno-16-35" name="__codelineno-16-35" href="#__codelineno-16-35"></a><span class="w">        </span><span class="p">}</span>
+<a id="__codelineno-16-36" name="__codelineno-16-36" href="#__codelineno-16-36"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-16-37" name="__codelineno-16-37" href="#__codelineno-16-37"></a><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li>[ ] <strong>Step 2: Call it after the <code>InterfaceUp</code> reply</strong></li>
+</ul>
+<p>Immediately after the block ending at line 710 (<code>tracing::warn!("Interface up reply timeout"); }</code>), before the <code>// Send metadata endpoint data to the bandwidth controller</code> comment:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="w">        </span><span class="c1">// Routes and firewall are up. Wait for the exit WG handshake so the</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="w">        </span><span class="c1">// first connectivity probe isn't lost to the handshake window (which</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="w">        </span><span class="c1">// otherwise quantizes time-to-Connected to the 3s probe cadence).</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="kd">let</span><span class="w"> </span><span class="nb">Some</span><span class="p">(</span><span class="n">wg_handle</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">tunnel_handle</span><span class="p">.</span><span class="n">as_wireguard</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="w">            </span><span class="n">wait_for_exit_handshake</span><span class="p">(</span><span class="n">wg_handle</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="bp">self</span><span class="p">.</span><span class="n">shutdown_token</span><span class="p">).</span><span class="k">await</span><span class="p">;</span>
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="w">        </span><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li>[ ] <strong>Step 3: Check it compiles clean</strong></li>
+</ul>
+<p>Run: <code>cd ~/dev/nym-vpn-openwrt/nym-vpn-core &amp;&amp; cargo check -p nym-vpn-lib &amp;&amp; cargo clippy -p nym-vpn-lib -- -D warnings &amp;&amp; cargo test -p nym-wg-gotatun</code>
+Expected: no errors/warnings from this diff; the 4 Task-2 tests still pass.</p>
+<ul>
+<li>[ ] <strong>Step 4: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="nb">cd</span><span class="w"> </span>~/dev/nym-vpn-openwrt<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>git<span class="w"> </span>add<span class="w"> </span>nym-vpn-core/crates/nym-vpn-lib/src/tunnel_state_machine/tunnel_monitor.rs<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">"sync: gate connectivity probing on exit wg handshake (#5571)"</span>
+</code></pre></div>
+<hr />
+<h3 id="task-5-build-deploy-to-openwrt25-after-benchmark">Task 5: Build, deploy to <code>openwrt25</code>, after-benchmark<a class="headerlink" href="#task-5-build-deploy-to-openwrt25-after-benchmark" title="Permanent link">&para;</a></h3>
+<p><strong>Files:</strong>
+- Create: <code>notes/2026-07-19-connect-diag-after.log</code> (benchmark artifact, NOT committed)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: baseline timeline from Task 1.</p>
+<ul>
+<li>[ ] <strong>Step 1: Cross-build for the router (x86_64 musl)</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="nb">cd</span><span class="w"> </span>~/dev/nym-vpn-openwrt<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>./scripts/build-musl.sh<span class="w"> </span>x86_64
+</code></pre></div>
+<p>Expected: build succeeds; binary at <code>nym-vpn-core/target/x86_64-unknown-linux-musl/release/nym-vpnd</code> (the script prints the artifact path — use the printed path if it differs).</p>
+<ul>
+<li>[ ] <strong>Step 2: Deploy and restart</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>scp<span class="w"> </span>nym-vpn-core/target/x86_64-unknown-linux-musl/release/nym-vpnd<span class="w"> </span>openwrt25:/tmp/nym-vpnd.new
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>ssh<span class="w"> </span>openwrt25<span class="w"> </span><span class="s1">'/etc/init.d/nym-vpnd stop; cp /usr/sbin/nym-vpnd /tmp/nym-vpnd.bak; mv /tmp/nym-vpnd.new /usr/sbin/nym-vpnd; chmod 755 /usr/sbin/nym-vpnd'</span>
+</code></pre></div>
+<p>Expected: no errors. (Rollback if needed later: <code>mv /tmp/nym-vpnd.bak /usr/sbin/nym-vpnd</code>.)</p>
+<ul>
+<li>[ ] <strong>Step 3: Instrumented after-benchmark (same protocol as Task 1)</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>ssh<span class="w"> </span>openwrt25<span class="w"> </span><span class="s1">'RUST_LOG="info,nym_connection_monitor=trace,gotatun=debug" nohup /usr/sbin/nym-vpnd &gt;/tmp/nym-diag-after.log 2&gt;&amp;1 &amp; sleep 4; nym-vpnc status'</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="k">for</span><span class="w"> </span>i<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="m">3</span><span class="p">;</span><span class="w"> </span><span class="k">do</span><span class="w"> </span>ssh<span class="w"> </span>openwrt25<span class="w"> </span><span class="s2">"nym-vpnc disconnect &gt;/dev/null 2&gt;&amp;1; sleep 3; echo \"=== CYCLE </span><span class="nv">$i</span><span class="s2"> ===\"; time nym-vpnc connect -w 2&gt;&amp;1 | tail -1"</span><span class="p">;</span><span class="w"> </span><span class="k">done</span>
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>scp<span class="w"> </span>openwrt25:/tmp/nym-diag-after.log<span class="w"> </span>~/dev/nym-vpn-openwrt/notes/2026-07-19-connect-diag-after.log
+<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a>ssh<span class="w"> </span>openwrt25<span class="w"> </span><span class="s1">'pkill -f /usr/sbin/nym-vpnd; sleep 2; /etc/init.d/nym-vpnd start; sleep 3; nym-vpnc connect -w &gt;/dev/null 2&gt;&amp;1; nym-vpnc status'</span>
+</code></pre></div>
+<p>Expected: three <code>real</code> lines; router restored to <code>State: Connected</code> at the end.</p>
+<ul>
+<li>[ ] <strong>Step 4: Compare against the baseline and judge success</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>grep<span class="w"> </span>-E<span class="w"> </span><span class="s2">"Exit WireGuard handshake|Sending (initial|next) probe|Probe succeeded|New tunnel state"</span><span class="w"> </span>~/dev/nym-vpn-openwrt/notes/2026-07-19-connect-diag-after.log<span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-60
+</code></pre></div>
+<p>Success criterion (from the spec): the "tunnel up → viable" phase (second <code>Connecting wg to ...</code> state → <code>Connected</code>) tracks handshake-complete + one probe RTT instead of ~8.7 s constant; the new <code>Exit WireGuard handshake completed after N ms</code> line appears each cycle. Record per-cycle phase timings alongside the Task 1 numbers in a comment block appended to the after-log.</p>
+<p>If totals do NOT improve: check whether the handshake itself only lands at ~5 s (gotatun <code>REKEY_TIMEOUT</code> retry). That outcome is the spec's designated follow-up (gotatun first-handshake retry tuning), NOT a bug in this change — report it, don't chase it in this plan.</p>
+<hr />
+<h3 id="task-6-changelog">Task 6: Changelog<a class="headerlink" href="#task-6-changelog" title="Permanent link">&para;</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>CHANGELOG.md</code> (add entry under the unreleased/1.31.0 section, matching the existing entry style — inspect the top of the file and mimic it)</p>
+<ul>
+<li>[ ] <strong>Step 1: Add the entry</strong></li>
+</ul>
+<p>Add one bullet in the current unreleased section (wording exactly):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="k">-</span><span class="w"> </span>Faster connects: connectivity probing now starts as soon as the exit WireGuard handshake completes, instead of on a fixed 3-second probe grid (port of upstream <span class="ni">#5571</span> adapted to gotatun). Cuts typical time-to-Connected on the router from ~11 s to ~3–5 s.
+</code></pre></div>
+<p>Adjust the measured numbers to match the Task 5 results before committing.</p>
+<ul>
+<li>[ ] <strong>Step 2: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="nb">cd</span><span class="w"> </span>~/dev/nym-vpn-openwrt<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>git<span class="w"> </span>add<span class="w"> </span>CHANGELOG.md<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">"docs: changelog for handshake-armed connection probing"</span>
+</code></pre></div>
+<hr />
+<h2 id="self-review-notes">Self-review notes<a class="headerlink" href="#self-review-notes" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Spec coverage: Phase 0 → Task 1; Component 1 → Task 2; Component 2 → Task 3 (plus the <code>as_wireguard</code> accessor the spec's Component 3 call-site implies); Component 3 → Task 4; Testing/hardware validation → Tasks 2 &amp; 5; error-handling rules → Global Constraints + Task 4 code. Spec's "amnezia symmetry" question resolved during planning: the amnezia variant is a UDP-factory wrapper inside the same <code>Tunnel</code> type, so Task 2 covers it with no extra work.</li>
+<li>The spec's "unit test against gotatun device test scaffolding" was refined: <code>PeerStats</code> is <code>#[non_exhaustive]</code> (not constructible outside gotatun), so the tested unit is the <code>all_peers_handshaken</code> predicate; the device-touching layer is one-line delegation validated on hardware in Task 5.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,1636 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Privacy-first VPN for OpenWrt routers, powered by the Nym mixnet">
+      
+      
+      
+        <link rel="canonical" href="https://docs.dial0ut.org/superpowers/plans/2026-07-19-restart-free-dns/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../../assets/favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Restart-Free dnsmasq DNS Switching + 50ms Handshake Poll — Implementation Plan - NymVPN for OpenWrt</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#restart-free-dnsmasq-dns-switching-50ms-handshake-poll-implementation-plan" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="NymVPN for OpenWrt" class="md-header__button md-logo" aria-label="NymVPN for OpenWrt" data-md-component="logo">
+      
+  <img src="../../../assets/logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            NymVPN for OpenWrt
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Restart-Free dnsmasq DNS Switching + 50ms Handshake Poll — Implementation Plan
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/dial0ut/nym-vpn-openwrt" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    dial0ut/nym-vpn-openwrt
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="NymVPN for OpenWrt" class="md-nav__button md-logo" aria-label="NymVPN for OpenWrt" data-md-component="logo">
+      
+  <img src="../../../assets/logo.svg" alt="logo">
+
+    </a>
+    NymVPN for OpenWrt
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/dial0ut/nym-vpn-openwrt" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    dial0ut/nym-vpn-openwrt
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../getting-started/quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guide/luci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LuCI Web Interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guide/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guide/inbound-services/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inbound Services
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guide/split-tunneling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Split Tunneling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guide/dns/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    DNS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../architecture/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../architecture/wireguard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    WireGuard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../architecture/firewall/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Firewall Backends
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../development/building/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building from Source
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../development/packaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Packaging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../development/ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CI/CD
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Supported Devices
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#global-constraints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Global Constraints
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#file-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File Structure
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="File Structure">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#task-1-pure-helpers-in-dnsmasqrs-tdd" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 1: Pure helpers in dnsmasq.rs (TDD)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-2-sys-trait-converge-logic-tdd" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 2: Sys trait + converge logic (TDD)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-3-single-writer-actor-thin-client-modrs-wiring-tdd" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 3: Single-writer actor + thin client + mod.rs wiring (TDD)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-4-50ms-handshake-poll" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 4: 50ms handshake poll
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-5-prerm-committed-aware-dns-cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 5: prerm committed-aware DNS cleanup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-6-changelog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 6: Changelog
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-7-build-deploy-hardware-validation-on-openwrt25" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 7: Build, deploy, hardware validation on openwrt25
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#self-review" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Self-Review
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/dial0ut/nym-vpn-openwrt/edit/openwrt/docs/superpowers/plans/2026-07-19-restart-free-dns.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="restart-free-dnsmasq-dns-switching-50ms-handshake-poll-implementation-plan">Restart-Free dnsmasq DNS Switching + 50ms Handshake Poll — Implementation Plan<a class="headerlink" href="#restart-free-dnsmasq-dns-switching-50ms-handshake-poll-implementation-plan" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Remove the ~3.3s <code>/etc/init.d/dnsmasq restart</code> from the VPN connect path (and the matching outage at disconnect) by switching dnsmasq upstreams through an inotify-watched managed resolv-file, and drop the exit-handshake poll from 500ms to 50ms — cutting router time-to-Connected from ~6.4s to ~2.5–3s.</p>
+<p><strong>Architecture:</strong> A daemon-lifetime <strong>single-writer actor</strong> owns the managed file <code>/tmp/resolv.conf.d/nym-resolv.conf</code> (always a regular file; all updates are write-temp + <code>rename(2)</code> in the same tmpfs dir). At startup it converges system state idempotently: targeted staged-uci repoint of <code>dhcp.@dnsmasq[0].resolvfile</code> (never committed), committed-store accident repair, seed from <code>resolv.conf.auto</code>, and a <em>conditional</em> dnsmasq restart only when the running instance's generated config doesn't already point at the managed file. Connect/disconnect become file renames + a cache-flush SIGHUP delivered to the ubus-discovered ujail wrapper PID. While disconnected, a 5s tick inside the same actor mirrors netifd's <code>resolv.conf.auto</code> into the managed file (serialized with connect writes by construction — no TOCTOU). The per-connect <code>Dnsmasq</code> structs in <code>nym-dns</code> become thin clients of the actor.</p>
+<p><strong>Tech Stack:</strong> Rust (tokio mpsc/oneshot actor), BusyBox/uci/ubus shell-outs, OpenWrt procd/ujail, dnsmasq 2.93 (inotify build).</p>
+<h2 id="global-constraints">Global Constraints<a class="headerlink" href="#global-constraints" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Commits in repo style (<code>feat(dns): …</code>, <code>perf(wg): …</code>, <code>fix(ipk): …</code>); <strong>NEVER any Claude/AI attribution or Co-Authored-By trailers</strong> (hard project rule).</li>
+<li><strong>Never <code>uci commit</code></strong> our own staging; the only permitted commit is the one-time <em>repair</em> that deletes an accidentally-committed <code>resolvfile</code> pointing at our managed file.</li>
+<li><strong>Never <code>uci revert dhcp</code> wholesale</strong> — targeted per-option reverts only (<code>noresolv</code>, <code>server</code>, <code>resolvfile</code>), so user-staged dhcp edits survive.</li>
+<li>Managed file must live <strong>inside <code>/tmp/resolv.conf.d/</code></strong> (ujail bind-mounts that directory; anywhere else is invisible to jailed dnsmasq).</li>
+<li>Managed file is <strong>always a regular file, never a symlink</strong> (dnsmasq inotify resolves the watch name once at startup; symlink swaps are verified invisible — tests T8b/T8d, 2026-07-19).</li>
+<li>SIGHUP is <strong>cache-flush only</strong> (verified: with polling on, SIGHUP does NOT re-read resolv files); reload is carried entirely by dnsmasq's inotify. Never signal via the dnsmasq pidfile — it contains the in-jail PID (<code>1</code>). Discover the PID via <code>ubus call service list '{"name":"dnsmasq"}'</code> (returns the ujail wrapper PID; HUP forwarding verified).</li>
+<li>The exit-handshake wait stays advisory/never-fatal, WG-only, cancel-safe, 10s cap.</li>
+<li>Keep <code>prefer_ipv4_upstreams</code> (v4-only-when-available) and its unit tests verbatim.</li>
+<li>Do not touch: probe timings in <code>nym-connection-monitor</code>, kill-switch/firewall code, registration path.</li>
+<li>An administratively-stopped dnsmasq stays stopped: converge logs loudly and skips the restart.</li>
+<li>Keep an info-level <code>Configured dnsmasq</code> log line in the connect path (hardware benchmarks time <code>Setting DNS servers</code> → <code>Configured dnsmasq</code>).</li>
+</ul>
+<h2 id="file-structure">File Structure<a class="headerlink" href="#file-structure" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>nym-vpn-core/crates/nym-dns/src/linux/dnsmasq.rs</code> — full rewrite: pure helpers, <code>Sys</code> trait (<code>RealSys</code> shell-outs / <code>FakeSys</code> for tests), converge logic, actor, thin <code>Dnsmasq</code> client. Stays one file (crate convention: one file per backend).</li>
+<li><code>nym-vpn-core/crates/nym-dns/src/linux/mod.rs</code> — <code>set_dns</code>/<code>reset</code> call sites become <code>.await</code>ed.</li>
+<li><code>nym-vpn-core/crates/nym-vpn-lib/src/tunnel_state_machine/tunnel_monitor.rs</code> — <code>POLL_INTERVAL</code> 500ms → 50ms.</li>
+<li><code>scripts/ipk/prerm</code> — committed-aware DNS cleanup on removal.</li>
+<li><code>CHANGELOG.md</code> — perf entry + behavior-change note.</li>
+</ul>
+<hr />
+<h3 id="task-1-pure-helpers-in-dnsmasqrs-tdd">Task 1: Pure helpers in dnsmasq.rs (TDD)<a class="headerlink" href="#task-1-pure-helpers-in-dnsmasqrs-tdd" title="Permanent link">&para;</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>nym-vpn-core/crates/nym-dns/src/linux/dnsmasq.rs</code></p>
+<p><strong>Interfaces (Produces):</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">fn</span><span class="w"> </span><span class="nf">render_resolv_conf</span><span class="p">(</span><span class="n">servers</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="p">[</span><span class="n">IpAddr</span><span class="p">])</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">String</span><span class="p">;</span><span class="w">               </span><span class="c1">// "# Generated by nym-vpnd\nnameserver X\n..."</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="k">fn</span><span class="w"> </span><span class="nf">generated_conf_points_at</span><span class="p">(</span><span class="n">conf</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="kt">str</span><span class="p">,</span><span class="w"> </span><span class="n">managed_path</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="kt">str</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="kt">bool</span><span class="p">;</span><span class="w"> </span><span class="c1">// exact `resolv-file=&lt;managed&gt;` line match</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="k">fn</span><span class="w"> </span><span class="nf">committed_has_managed_path</span><span class="p">(</span><span class="n">committed_dhcp</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="kt">str</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="kt">bool</span><span class="p">;</span><span class="w">        </span><span class="c1">// does /etc/config/dhcp mention nym-resolv.conf</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="k">fn</span><span class="w"> </span><span class="nf">extract_instance_pid</span><span class="p">(</span><span class="n">service_json</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="kt">str</span><span class="p">,</span><span class="w"> </span><span class="n">section</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="kt">str</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">Option</span><span class="o">&lt;</span><span class="kt">u32</span><span class="o">&gt;</span><span class="p">;</span><span class="w"> </span><span class="c1">// ujail wrapper pid from ubus JSON</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="k">const</span><span class="w"> </span><span class="n">MANAGED_FILE</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="kt">str</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"/tmp/resolv.conf.d/nym-resolv.conf"</span><span class="p">;</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="k">const</span><span class="w"> </span><span class="n">MANAGED_TMP</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="kt">str</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="s">"/tmp/resolv.conf.d/.nym-resolv.tmp"</span><span class="p">;</span><span class="w">   </span><span class="c1">// basename must NOT match watch name</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="k">const</span><span class="w"> </span><span class="n">WAN_RESOLV</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="kt">str</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="s">"/tmp/resolv.conf.d/resolv.conf.auto"</span><span class="p">;</span>
+</code></pre></div></p>
+<ul>
+<li>[ ] <strong>Step 1: Write failing tests</strong> (append to the existing <code>#[cfg(test)] mod tests</code>, keeping the two <code>prefer_ipv4_upstreams</code> tests):</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="cp">#[test]</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">fn</span><span class="w"> </span><span class="nf">renders_resolv_conf</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">servers</span><span class="p">:</span><span class="w"> </span><span class="nb">Vec</span><span class="o">&lt;</span><span class="n">IpAddr</span><span class="o">&gt;</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="fm">vec!</span><span class="p">[</span><span class="s">"10.0.0.1"</span><span class="p">.</span><span class="n">parse</span><span class="p">().</span><span class="n">unwrap</span><span class="p">(),</span><span class="w"> </span><span class="s">"10.0.0.2"</span><span class="p">.</span><span class="n">parse</span><span class="p">().</span><span class="n">unwrap</span><span class="p">()];</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">    </span><span class="fm">assert_eq!</span><span class="p">(</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">        </span><span class="k">super</span><span class="p">::</span><span class="n">render_resolv_conf</span><span class="p">(</span><span class="o">&amp;</span><span class="n">servers</span><span class="p">),</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">        </span><span class="s">"# Generated by nym-vpnd</span><span class="se">\n</span><span class="s">nameserver 10.0.0.1</span><span class="se">\n</span><span class="s">nameserver 10.0.0.2</span><span class="se">\n</span><span class="s">"</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">    </span><span class="p">);</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="p">}</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="cp">#[test]</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="k">fn</span><span class="w"> </span><span class="nf">detects_managed_resolv_file_in_generated_conf</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">conf</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"server=1.1.1.1</span><span class="se">\n</span><span class="s">resolv-file=/tmp/resolv.conf.d/nym-resolv.conf</span><span class="se">\n</span><span class="s">cache-size=1000</span><span class="se">\n</span><span class="s">"</span><span class="p">;</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="w">    </span><span class="fm">assert!</span><span class="p">(</span><span class="k">super</span><span class="p">::</span><span class="n">generated_conf_points_at</span><span class="p">(</span><span class="n">conf</span><span class="p">,</span><span class="w"> </span><span class="k">super</span><span class="p">::</span><span class="n">MANAGED_FILE</span><span class="p">));</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">stock</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"resolv-file=/tmp/resolv.conf.d/resolv.conf.auto</span><span class="se">\n</span><span class="s">"</span><span class="p">;</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="w">    </span><span class="fm">assert!</span><span class="p">(</span><span class="o">!</span><span class="k">super</span><span class="p">::</span><span class="n">generated_conf_points_at</span><span class="p">(</span><span class="n">stock</span><span class="p">,</span><span class="w"> </span><span class="k">super</span><span class="p">::</span><span class="n">MANAGED_FILE</span><span class="p">));</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="w">    </span><span class="c1">// substring must not fool it</span>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">tricky</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"# resolv-file=/tmp/resolv.conf.d/nym-resolv.conf.bak</span><span class="se">\n</span><span class="s">"</span><span class="p">;</span>
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="w">    </span><span class="fm">assert!</span><span class="p">(</span><span class="o">!</span><span class="k">super</span><span class="p">::</span><span class="n">generated_conf_points_at</span><span class="p">(</span><span class="n">tricky</span><span class="p">,</span><span class="w"> </span><span class="k">super</span><span class="p">::</span><span class="n">MANAGED_FILE</span><span class="p">));</span>
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="p">}</span>
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a><span class="cp">#[test]</span>
+<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a><span class="k">fn</span><span class="w"> </span><span class="nf">detects_accidentally_committed_repoint</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">dirty</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"config dnsmasq</span><span class="se">\n\t</span><span class="s">option resolvfile '/tmp/resolv.conf.d/nym-resolv.conf'</span><span class="se">\n</span><span class="s">"</span><span class="p">;</span>
+<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a><span class="w">    </span><span class="fm">assert!</span><span class="p">(</span><span class="k">super</span><span class="p">::</span><span class="n">committed_has_managed_path</span><span class="p">(</span><span class="n">dirty</span><span class="p">));</span>
+<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">clean</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"config dnsmasq</span><span class="se">\n\t</span><span class="s">option resolvfile '/tmp/resolv.conf.d/resolv.conf.auto'</span><span class="se">\n</span><span class="s">"</span><span class="p">;</span>
+<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a><span class="w">    </span><span class="fm">assert!</span><span class="p">(</span><span class="o">!</span><span class="k">super</span><span class="p">::</span><span class="n">committed_has_managed_path</span><span class="p">(</span><span class="n">clean</span><span class="p">));</span>
+<a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a><span class="p">}</span>
+<a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a>
+<a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a><span class="cp">#[test]</span>
+<a id="__codelineno-1-30" name="__codelineno-1-30" href="#__codelineno-1-30"></a><span class="k">fn</span><span class="w"> </span><span class="nf">extracts_ujail_wrapper_pid_from_ubus_json</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-1-31" name="__codelineno-1-31" href="#__codelineno-1-31"></a><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">json</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">r#"{ "dnsmasq": { "instances": { "cfg01411c": { "running": true, "pid": 2994, "command": ["x"] } } } }"#</span><span class="p">;</span>
+<a id="__codelineno-1-32" name="__codelineno-1-32" href="#__codelineno-1-32"></a><span class="w">    </span><span class="fm">assert_eq!</span><span class="p">(</span><span class="k">super</span><span class="p">::</span><span class="n">extract_instance_pid</span><span class="p">(</span><span class="n">json</span><span class="p">,</span><span class="w"> </span><span class="s">"cfg01411c"</span><span class="p">),</span><span class="w"> </span><span class="nb">Some</span><span class="p">(</span><span class="mi">2994</span><span class="p">));</span>
+<a id="__codelineno-1-33" name="__codelineno-1-33" href="#__codelineno-1-33"></a><span class="w">    </span><span class="fm">assert_eq!</span><span class="p">(</span><span class="k">super</span><span class="p">::</span><span class="n">extract_instance_pid</span><span class="p">(</span><span class="n">json</span><span class="p">,</span><span class="w"> </span><span class="s">"cfg99"</span><span class="p">),</span><span class="w"> </span><span class="nb">None</span><span class="p">);</span>
+<a id="__codelineno-1-34" name="__codelineno-1-34" href="#__codelineno-1-34"></a><span class="w">    </span><span class="fm">assert_eq!</span><span class="p">(</span><span class="k">super</span><span class="p">::</span><span class="n">extract_instance_pid</span><span class="p">(</span><span class="s">"not json"</span><span class="p">,</span><span class="w"> </span><span class="s">"cfg01411c"</span><span class="p">),</span><span class="w"> </span><span class="nb">None</span><span class="p">);</span>
+<a id="__codelineno-1-35" name="__codelineno-1-35" href="#__codelineno-1-35"></a><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li>[ ] <strong>Step 2: Run to verify failure</strong>: <code>cd nym-vpn-core &amp;&amp; cargo test -p nym-dns</code> → FAIL (functions not defined).</li>
+<li>[ ] <strong>Step 3: Implement</strong> (no serde dependency — targeted string scan is deliberate; document with a comment):</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">const</span><span class="w"> </span><span class="n">MANAGED_FILE</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="kt">str</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"/tmp/resolv.conf.d/nym-resolv.conf"</span><span class="p">;</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">const</span><span class="w"> </span><span class="n">MANAGED_TMP</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="kt">str</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"/tmp/resolv.conf.d/.nym-resolv.tmp"</span><span class="p">;</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="k">const</span><span class="w"> </span><span class="n">WAN_RESOLV</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="kt">str</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"/tmp/resolv.conf.d/resolv.conf.auto"</span><span class="p">;</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="k">fn</span><span class="w"> </span><span class="nf">render_resolv_conf</span><span class="p">(</span><span class="n">servers</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="p">[</span><span class="n">IpAddr</span><span class="p">])</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">String</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">out</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">String</span><span class="p">::</span><span class="n">from</span><span class="p">(</span><span class="s">"# Generated by nym-vpnd</span><span class="se">\n</span><span class="s">"</span><span class="p">);</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="n">s</span><span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="n">servers</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">        </span><span class="n">out</span><span class="p">.</span><span class="n">push_str</span><span class="p">(</span><span class="o">&amp;</span><span class="fm">format!</span><span class="p">(</span><span class="s">"nameserver {}</span><span class="se">\n</span><span class="s">"</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="p">));</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">    </span><span class="n">out</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="p">}</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="k">fn</span><span class="w"> </span><span class="nf">generated_conf_points_at</span><span class="p">(</span><span class="n">conf</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="kt">str</span><span class="p">,</span><span class="w"> </span><span class="n">managed_path</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="kt">str</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="kt">bool</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="w">    </span><span class="n">conf</span><span class="p">.</span><span class="n">lines</span><span class="p">()</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="w">        </span><span class="p">.</span><span class="n">any</span><span class="p">(</span><span class="o">|</span><span class="n">line</span><span class="o">|</span><span class="w"> </span><span class="n">line</span><span class="p">.</span><span class="n">trim</span><span class="p">()</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="fm">format!</span><span class="p">(</span><span class="s">"resolv-file={}"</span><span class="p">,</span><span class="w"> </span><span class="n">managed_path</span><span class="p">))</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="p">}</span>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="k">fn</span><span class="w"> </span><span class="nf">committed_has_managed_path</span><span class="p">(</span><span class="n">committed_dhcp</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="kt">str</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="kt">bool</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="w">    </span><span class="n">committed_dhcp</span><span class="p">.</span><span class="n">contains</span><span class="p">(</span><span class="s">"nym-resolv.conf"</span><span class="p">)</span>
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a><span class="p">}</span>
+<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>
+<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a><span class="sd">/// Minimal extraction of the instance pid from `ubus call service list` output.</span>
+<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a><span class="sd">/// Deliberately not a JSON parser: the shape is stable procd output and we</span>
+<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a><span class="sd">/// only need one integer; a serde dependency isn't warranted.</span>
+<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a><span class="k">fn</span><span class="w"> </span><span class="nf">extract_instance_pid</span><span class="p">(</span><span class="n">service_json</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="kt">str</span><span class="p">,</span><span class="w"> </span><span class="n">section</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="kt">str</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">Option</span><span class="o">&lt;</span><span class="kt">u32</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">inst</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">service_json</span><span class="p">.</span><span class="n">find</span><span class="p">(</span><span class="o">&amp;</span><span class="fm">format!</span><span class="p">(</span><span class="s">"</span><span class="se">\"</span><span class="s">{}</span><span class="se">\"</span><span class="s">"</span><span class="p">,</span><span class="w"> </span><span class="n">section</span><span class="p">))</span><span class="o">?</span><span class="p">;</span>
+<a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">rest</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">service_json</span><span class="p">[</span><span class="n">inst</span><span class="o">..</span><span class="p">];</span>
+<a id="__codelineno-2-28" name="__codelineno-2-28" href="#__codelineno-2-28"></a><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">pid_key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">rest</span><span class="p">.</span><span class="n">find</span><span class="p">(</span><span class="s">"</span><span class="se">\"</span><span class="s">pid</span><span class="se">\"</span><span class="s">"</span><span class="p">)</span><span class="o">?</span><span class="p">;</span>
+<a id="__codelineno-2-29" name="__codelineno-2-29" href="#__codelineno-2-29"></a><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">after</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">rest</span><span class="p">[</span><span class="n">pid_key</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">5</span><span class="o">..</span><span class="p">];</span>
+<a id="__codelineno-2-30" name="__codelineno-2-30" href="#__codelineno-2-30"></a><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">digits</span><span class="p">:</span><span class="w"> </span><span class="nb">String</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">after</span>
+<a id="__codelineno-2-31" name="__codelineno-2-31" href="#__codelineno-2-31"></a><span class="w">        </span><span class="p">.</span><span class="n">chars</span><span class="p">()</span>
+<a id="__codelineno-2-32" name="__codelineno-2-32" href="#__codelineno-2-32"></a><span class="w">        </span><span class="p">.</span><span class="n">skip_while</span><span class="p">(</span><span class="o">|</span><span class="n">c</span><span class="o">|</span><span class="w"> </span><span class="o">!</span><span class="n">c</span><span class="p">.</span><span class="n">is_ascii_digit</span><span class="p">())</span>
+<a id="__codelineno-2-33" name="__codelineno-2-33" href="#__codelineno-2-33"></a><span class="w">        </span><span class="p">.</span><span class="n">take_while</span><span class="p">(</span><span class="o">|</span><span class="n">c</span><span class="o">|</span><span class="w"> </span><span class="n">c</span><span class="p">.</span><span class="n">is_ascii_digit</span><span class="p">())</span>
+<a id="__codelineno-2-34" name="__codelineno-2-34" href="#__codelineno-2-34"></a><span class="w">        </span><span class="p">.</span><span class="n">collect</span><span class="p">();</span>
+<a id="__codelineno-2-35" name="__codelineno-2-35" href="#__codelineno-2-35"></a><span class="w">    </span><span class="n">digits</span><span class="p">.</span><span class="n">parse</span><span class="p">().</span><span class="n">ok</span><span class="p">()</span>
+<a id="__codelineno-2-36" name="__codelineno-2-36" href="#__codelineno-2-36"></a><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li>[ ] <strong>Step 4: Run to verify pass</strong>: <code>cargo test -p nym-dns</code> → all PASS (including the two pre-existing <code>prefer_ipv4_upstreams</code> tests).</li>
+<li>[ ] <strong>Step 5: Commit</strong>: <code>git add -A nym-vpn-core/crates/nym-dns &amp;&amp; git commit -m "feat(dns): pure helpers for restart-free dnsmasq backend"</code></li>
+</ul>
+<hr />
+<h3 id="task-2-sys-trait-converge-logic-tdd">Task 2: <code>Sys</code> trait + converge logic (TDD)<a class="headerlink" href="#task-2-sys-trait-converge-logic-tdd" title="Permanent link">&para;</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>nym-vpn-core/crates/nym-dns/src/linux/dnsmasq.rs</code></p>
+<p><strong>Interfaces (Produces):</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">trait</span><span class="w"> </span><span class="n">Sys</span><span class="p">:</span><span class="w"> </span><span class="nb">Send</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="o">'</span><span class="nb">static</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">    </span><span class="k">fn</span><span class="w"> </span><span class="nf">uci_revert_option</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">key</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="kt">str</span><span class="p">);</span><span class="w">                    </span><span class="c1">// best-effort, logs on failure</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="k">fn</span><span class="w"> </span><span class="nf">uci_set</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">key</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="kt">str</span><span class="p">,</span><span class="w"> </span><span class="n">value</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="kt">str</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">Result</span><span class="o">&lt;</span><span class="p">()</span><span class="o">&gt;</span><span class="p">;</span><span class="w">   </span><span class="c1">// staged only</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">    </span><span class="k">fn</span><span class="w"> </span><span class="nf">repair_committed_resolvfile</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">Result</span><span class="o">&lt;</span><span class="p">()</span><span class="o">&gt;</span><span class="p">;</span><span class="w">       </span><span class="c1">// uci delete + uci commit dhcp (the ONE allowed commit)</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">    </span><span class="k">fn</span><span class="w"> </span><span class="nf">committed_dhcp</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">String</span><span class="p">;</span><span class="w">                        </span><span class="c1">// contents of /etc/config/dhcp ("" if unreadable)</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">    </span><span class="k">fn</span><span class="w"> </span><span class="nf">dnsmasq_section</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">Option</span><span class="o">&lt;</span><span class="nb">String</span><span class="o">&gt;</span><span class="p">;</span><span class="w">               </span><span class="c1">// e.g. "cfg01411c" from `uci show dhcp`</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">    </span><span class="k">fn</span><span class="w"> </span><span class="nf">generated_conf</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">section</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="kt">str</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">Option</span><span class="o">&lt;</span><span class="nb">String</span><span class="o">&gt;</span><span class="p">;</span><span class="w"> </span><span class="c1">// /var/etc/dnsmasq.conf.&lt;section&gt;</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">    </span><span class="k">fn</span><span class="w"> </span><span class="nf">restart_dnsmasq</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">Result</span><span class="o">&lt;</span><span class="p">()</span><span class="o">&gt;</span><span class="p">;</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">    </span><span class="k">fn</span><span class="w"> </span><span class="nf">service_json</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">String</span><span class="p">;</span><span class="w">                          </span><span class="c1">// `ubus call service list '{"name":"dnsmasq"}'`</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="w">    </span><span class="k">fn</span><span class="w"> </span><span class="nf">send_hup</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">pid</span><span class="p">:</span><span class="w"> </span><span class="kt">u32</span><span class="p">);</span><span class="w">                              </span><span class="c1">// libc::kill(pid, SIGHUP), log on error</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="p">}</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="k">struct</span><span class="w"> </span><span class="nc">RealSys</span><span class="p">;</span>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="k">fn</span><span class="w"> </span><span class="nf">converge</span><span class="o">&lt;</span><span class="n">S</span><span class="p">:</span><span class="w"> </span><span class="nc">Sys</span><span class="o">&gt;</span><span class="p">(</span><span class="n">sys</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="nc">S</span><span class="p">,</span><span class="w"> </span><span class="n">managed_file</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="kt">str</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">Result</span><span class="o">&lt;</span><span class="n">ConvergeOutcome</span><span class="o">&gt;</span><span class="p">;</span>
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="k">enum</span><span class="w"> </span><span class="nc">ConvergeOutcome</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">Ready</span><span class="p">,</span><span class="w"> </span><span class="n">DnsmasqStopped</span><span class="w"> </span><span class="p">}</span><span class="w">  </span><span class="c1">// Stopped = configured but service intentionally down</span>
+</code></pre></div></p>
+<p><strong>Converge algorithm (implement exactly this order):</strong>
+1. Targeted reverts: <code>uci_revert_option</code> for <code>dhcp.@dnsmasq[0].noresolv</code>, <code>.server</code>, <code>.resolvfile</code> (clears legacy ≤1.31 scheme and our own stale delta; user's other staged dhcp edits untouched).
+2. Committed repair: if <code>committed_has_managed_path(sys.committed_dhcp())</code> → <code>sys.repair_committed_resolvfile()</code> + <code>tracing::warn!</code> (LuCI Save&amp;Apply persisted our staged delta; deleting the option restores stock-default behavior).
+3. <code>sys.uci_set("dhcp.@dnsmasq[0].resolvfile", managed_file)?</code> (staged, never committed → reboot auto-reverts).
+4. Section discovery: <code>sys.dnsmasq_section()</code>; <code>None</code> → error (<code>NoDnsmasq</code>).
+5. If <code>sys.extract… / service_json</code> shows no running instance for the section → log <code>warn!("dnsmasq is not running; leaving it stopped")</code>, return <code>DnsmasqStopped</code> (do NOT start it).
+6. If <code>generated_conf(section)</code> already <code>generated_conf_points_at(managed)</code> → return <code>Ready</code> <strong>without restart</strong> (kills the watchdog-crashloop restart storm).
+7. Else <code>sys.restart_dnsmasq()?</code>, then re-read <code>generated_conf</code> and assert it points at managed; on mismatch retry steps 3–7 once (third-party restart raced us), then error loudly (this is the DNS-leak race guard).</p>
+<ul>
+<li>[ ] <strong>Step 1: Write failing tests</strong> with a <code>FakeSys</code> (interior-mutability call recorder):</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="cp">#[cfg(test)]</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="k">mod</span><span class="w"> </span><span class="nn">converge_tests</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">    </span><span class="k">use</span><span class="w"> </span><span class="k">super</span><span class="p">::</span><span class="o">*</span><span class="p">;</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">    </span><span class="k">use</span><span class="w"> </span><span class="n">std</span><span class="p">::</span><span class="n">sync</span><span class="p">::</span><span class="n">Mutex</span><span class="p">;</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">    </span><span class="cp">#[derive(Default)]</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">FakeSys</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">        </span><span class="n">calls</span><span class="p">:</span><span class="w"> </span><span class="nc">Mutex</span><span class="o">&lt;</span><span class="nb">Vec</span><span class="o">&lt;</span><span class="nb">String</span><span class="o">&gt;&gt;</span><span class="p">,</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="w">        </span><span class="n">committed</span><span class="p">:</span><span class="w"> </span><span class="nb">String</span><span class="p">,</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="w">        </span><span class="n">section</span><span class="p">:</span><span class="w"> </span><span class="nb">Option</span><span class="o">&lt;</span><span class="nb">String</span><span class="o">&gt;</span><span class="p">,</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="w">        </span><span class="c1">// queue of generated-conf reads, popped front on each generated_conf()</span>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="w">        </span><span class="n">generated</span><span class="p">:</span><span class="w"> </span><span class="nc">Mutex</span><span class="o">&lt;</span><span class="nb">Vec</span><span class="o">&lt;</span><span class="nb">Option</span><span class="o">&lt;</span><span class="nb">String</span><span class="o">&gt;&gt;&gt;</span><span class="p">,</span>
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="w">        </span><span class="n">running</span><span class="p">:</span><span class="w"> </span><span class="kt">bool</span><span class="p">,</span>
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a><span class="w">    </span><span class="k">impl</span><span class="w"> </span><span class="n">Sys</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">FakeSys</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a><span class="w">        </span><span class="k">fn</span><span class="w"> </span><span class="nf">uci_revert_option</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">key</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="kt">str</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">calls</span><span class="p">.</span><span class="n">lock</span><span class="p">().</span><span class="n">unwrap</span><span class="p">().</span><span class="n">push</span><span class="p">(</span><span class="fm">format!</span><span class="p">(</span><span class="s">"revert {key}"</span><span class="p">));</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a><span class="w">        </span><span class="k">fn</span><span class="w"> </span><span class="nf">uci_set</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">key</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="kt">str</span><span class="p">,</span><span class="w"> </span><span class="n">value</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="kt">str</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">Result</span><span class="o">&lt;</span><span class="p">()</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a><span class="w">            </span><span class="bp">self</span><span class="p">.</span><span class="n">calls</span><span class="p">.</span><span class="n">lock</span><span class="p">().</span><span class="n">unwrap</span><span class="p">().</span><span class="n">push</span><span class="p">(</span><span class="fm">format!</span><span class="p">(</span><span class="s">"set {key}={value}"</span><span class="p">));</span><span class="w"> </span><span class="nb">Ok</span><span class="p">(())</span>
+<a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a><span class="w">        </span><span class="p">}</span>
+<a id="__codelineno-4-20" name="__codelineno-4-20" href="#__codelineno-4-20"></a><span class="w">        </span><span class="k">fn</span><span class="w"> </span><span class="nf">repair_committed_resolvfile</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">Result</span><span class="o">&lt;</span><span class="p">()</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-4-21" name="__codelineno-4-21" href="#__codelineno-4-21"></a><span class="w">            </span><span class="bp">self</span><span class="p">.</span><span class="n">calls</span><span class="p">.</span><span class="n">lock</span><span class="p">().</span><span class="n">unwrap</span><span class="p">().</span><span class="n">push</span><span class="p">(</span><span class="s">"repair-commit"</span><span class="p">.</span><span class="n">into</span><span class="p">());</span><span class="w"> </span><span class="nb">Ok</span><span class="p">(())</span>
+<a id="__codelineno-4-22" name="__codelineno-4-22" href="#__codelineno-4-22"></a><span class="w">        </span><span class="p">}</span>
+<a id="__codelineno-4-23" name="__codelineno-4-23" href="#__codelineno-4-23"></a><span class="w">        </span><span class="k">fn</span><span class="w"> </span><span class="nf">committed_dhcp</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">String</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">committed</span><span class="p">.</span><span class="n">clone</span><span class="p">()</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-4-24" name="__codelineno-4-24" href="#__codelineno-4-24"></a><span class="w">        </span><span class="k">fn</span><span class="w"> </span><span class="nf">dnsmasq_section</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">Option</span><span class="o">&lt;</span><span class="nb">String</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">section</span><span class="p">.</span><span class="n">clone</span><span class="p">()</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-4-25" name="__codelineno-4-25" href="#__codelineno-4-25"></a><span class="w">        </span><span class="k">fn</span><span class="w"> </span><span class="nf">generated_conf</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">_s</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="kt">str</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">Option</span><span class="o">&lt;</span><span class="nb">String</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-4-26" name="__codelineno-4-26" href="#__codelineno-4-26"></a><span class="w">            </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">q</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">generated</span><span class="p">.</span><span class="n">lock</span><span class="p">().</span><span class="n">unwrap</span><span class="p">();</span>
+<a id="__codelineno-4-27" name="__codelineno-4-27" href="#__codelineno-4-27"></a><span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="n">q</span><span class="p">.</span><span class="n">is_empty</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nb">None</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">q</span><span class="p">.</span><span class="n">remove</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-4-28" name="__codelineno-4-28" href="#__codelineno-4-28"></a><span class="w">        </span><span class="p">}</span>
+<a id="__codelineno-4-29" name="__codelineno-4-29" href="#__codelineno-4-29"></a><span class="w">        </span><span class="k">fn</span><span class="w"> </span><span class="nf">restart_dnsmasq</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">Result</span><span class="o">&lt;</span><span class="p">()</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">calls</span><span class="p">.</span><span class="n">lock</span><span class="p">().</span><span class="n">unwrap</span><span class="p">().</span><span class="n">push</span><span class="p">(</span><span class="s">"restart"</span><span class="p">.</span><span class="n">into</span><span class="p">());</span><span class="w"> </span><span class="nb">Ok</span><span class="p">(())</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-4-30" name="__codelineno-4-30" href="#__codelineno-4-30"></a><span class="w">        </span><span class="k">fn</span><span class="w"> </span><span class="nf">service_json</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">String</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-4-31" name="__codelineno-4-31" href="#__codelineno-4-31"></a><span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">running</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-4-32" name="__codelineno-4-32" href="#__codelineno-4-32"></a><span class="w">                </span><span class="s">r#"{"dnsmasq":{"instances":{"cfg01411c":{"running":true,"pid":42}}}}"#</span><span class="p">.</span><span class="n">into</span><span class="p">()</span>
+<a id="__codelineno-4-33" name="__codelineno-4-33" href="#__codelineno-4-33"></a><span class="w">            </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="s">r#"{"dnsmasq":{"instances":{}}}"#</span><span class="p">.</span><span class="n">into</span><span class="p">()</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-4-34" name="__codelineno-4-34" href="#__codelineno-4-34"></a><span class="w">        </span><span class="p">}</span>
+<a id="__codelineno-4-35" name="__codelineno-4-35" href="#__codelineno-4-35"></a><span class="w">        </span><span class="k">fn</span><span class="w"> </span><span class="nf">send_hup</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">pid</span><span class="p">:</span><span class="w"> </span><span class="kt">u32</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">calls</span><span class="p">.</span><span class="n">lock</span><span class="p">().</span><span class="n">unwrap</span><span class="p">().</span><span class="n">push</span><span class="p">(</span><span class="fm">format!</span><span class="p">(</span><span class="s">"hup {pid}"</span><span class="p">));</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-4-36" name="__codelineno-4-36" href="#__codelineno-4-36"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-4-37" name="__codelineno-4-37" href="#__codelineno-4-37"></a>
+<a id="__codelineno-4-38" name="__codelineno-4-38" href="#__codelineno-4-38"></a><span class="w">    </span><span class="k">fn</span><span class="w"> </span><span class="nf">managed_line</span><span class="p">()</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">String</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="fm">format!</span><span class="p">(</span><span class="s">"resolv-file={}</span><span class="se">\n</span><span class="s">"</span><span class="p">,</span><span class="w"> </span><span class="n">MANAGED_FILE</span><span class="p">)</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-4-39" name="__codelineno-4-39" href="#__codelineno-4-39"></a>
+<a id="__codelineno-4-40" name="__codelineno-4-40" href="#__codelineno-4-40"></a><span class="w">    </span><span class="cp">#[test]</span>
+<a id="__codelineno-4-41" name="__codelineno-4-41" href="#__codelineno-4-41"></a><span class="w">    </span><span class="k">fn</span><span class="w"> </span><span class="nf">converge_skips_restart_when_already_pointed</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-4-42" name="__codelineno-4-42" href="#__codelineno-4-42"></a><span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">sys</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">FakeSys</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-4-43" name="__codelineno-4-43" href="#__codelineno-4-43"></a><span class="w">            </span><span class="n">section</span><span class="p">:</span><span class="w"> </span><span class="nb">Some</span><span class="p">(</span><span class="s">"cfg01411c"</span><span class="p">.</span><span class="n">into</span><span class="p">()),</span>
+<a id="__codelineno-4-44" name="__codelineno-4-44" href="#__codelineno-4-44"></a><span class="w">            </span><span class="n">generated</span><span class="p">:</span><span class="w"> </span><span class="nc">Mutex</span><span class="p">::</span><span class="n">new</span><span class="p">(</span><span class="fm">vec!</span><span class="p">[</span><span class="nb">Some</span><span class="p">(</span><span class="n">managed_line</span><span class="p">())]),</span>
+<a id="__codelineno-4-45" name="__codelineno-4-45" href="#__codelineno-4-45"></a><span class="w">            </span><span class="n">running</span><span class="p">:</span><span class="w"> </span><span class="nc">true</span><span class="p">,</span>
+<a id="__codelineno-4-46" name="__codelineno-4-46" href="#__codelineno-4-46"></a><span class="w">            </span><span class="o">..</span><span class="nb">Default</span><span class="p">::</span><span class="n">default</span><span class="p">()</span>
+<a id="__codelineno-4-47" name="__codelineno-4-47" href="#__codelineno-4-47"></a><span class="w">        </span><span class="p">};</span>
+<a id="__codelineno-4-48" name="__codelineno-4-48" href="#__codelineno-4-48"></a><span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">out</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">converge</span><span class="p">(</span><span class="o">&amp;</span><span class="n">sys</span><span class="p">,</span><span class="w"> </span><span class="n">MANAGED_FILE</span><span class="p">).</span><span class="n">unwrap</span><span class="p">();</span>
+<a id="__codelineno-4-49" name="__codelineno-4-49" href="#__codelineno-4-49"></a><span class="w">        </span><span class="fm">assert!</span><span class="p">(</span><span class="fm">matches!</span><span class="p">(</span><span class="n">out</span><span class="p">,</span><span class="w"> </span><span class="n">ConvergeOutcome</span><span class="p">::</span><span class="n">Ready</span><span class="p">));</span>
+<a id="__codelineno-4-50" name="__codelineno-4-50" href="#__codelineno-4-50"></a><span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">calls</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">sys</span><span class="p">.</span><span class="n">calls</span><span class="p">.</span><span class="n">lock</span><span class="p">().</span><span class="n">unwrap</span><span class="p">();</span>
+<a id="__codelineno-4-51" name="__codelineno-4-51" href="#__codelineno-4-51"></a><span class="w">        </span><span class="fm">assert!</span><span class="p">(</span><span class="o">!</span><span class="n">calls</span><span class="p">.</span><span class="n">iter</span><span class="p">().</span><span class="n">any</span><span class="p">(</span><span class="o">|</span><span class="n">c</span><span class="o">|</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s">"restart"</span><span class="p">),</span><span class="w"> </span><span class="s">"must not restart when converged: {calls:?}"</span><span class="p">);</span>
+<a id="__codelineno-4-52" name="__codelineno-4-52" href="#__codelineno-4-52"></a><span class="w">        </span><span class="fm">assert!</span><span class="p">(</span><span class="n">calls</span><span class="p">.</span><span class="n">iter</span><span class="p">().</span><span class="n">any</span><span class="p">(</span><span class="o">|</span><span class="n">c</span><span class="o">|</span><span class="w"> </span><span class="n">c</span><span class="p">.</span><span class="n">starts_with</span><span class="p">(</span><span class="s">"revert dhcp.@dnsmasq[0].noresolv"</span><span class="p">)));</span>
+<a id="__codelineno-4-53" name="__codelineno-4-53" href="#__codelineno-4-53"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-4-54" name="__codelineno-4-54" href="#__codelineno-4-54"></a>
+<a id="__codelineno-4-55" name="__codelineno-4-55" href="#__codelineno-4-55"></a><span class="w">    </span><span class="cp">#[test]</span>
+<a id="__codelineno-4-56" name="__codelineno-4-56" href="#__codelineno-4-56"></a><span class="w">    </span><span class="k">fn</span><span class="w"> </span><span class="nf">converge_restarts_once_and_asserts</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-4-57" name="__codelineno-4-57" href="#__codelineno-4-57"></a><span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">sys</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">FakeSys</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-4-58" name="__codelineno-4-58" href="#__codelineno-4-58"></a><span class="w">            </span><span class="n">section</span><span class="p">:</span><span class="w"> </span><span class="nb">Some</span><span class="p">(</span><span class="s">"cfg01411c"</span><span class="p">.</span><span class="n">into</span><span class="p">()),</span>
+<a id="__codelineno-4-59" name="__codelineno-4-59" href="#__codelineno-4-59"></a><span class="w">            </span><span class="n">generated</span><span class="p">:</span><span class="w"> </span><span class="nc">Mutex</span><span class="p">::</span><span class="n">new</span><span class="p">(</span><span class="fm">vec!</span><span class="p">[</span>
+<a id="__codelineno-4-60" name="__codelineno-4-60" href="#__codelineno-4-60"></a><span class="w">                </span><span class="nb">Some</span><span class="p">(</span><span class="s">"resolv-file=/tmp/resolv.conf.d/resolv.conf.auto</span><span class="se">\n</span><span class="s">"</span><span class="p">.</span><span class="n">into</span><span class="p">()),</span><span class="w"> </span><span class="c1">// pre-restart read</span>
+<a id="__codelineno-4-61" name="__codelineno-4-61" href="#__codelineno-4-61"></a><span class="w">                </span><span class="nb">Some</span><span class="p">(</span><span class="n">managed_line</span><span class="p">()),</span><span class="w">                                             </span><span class="c1">// post-restart assert</span>
+<a id="__codelineno-4-62" name="__codelineno-4-62" href="#__codelineno-4-62"></a><span class="w">            </span><span class="p">]),</span>
+<a id="__codelineno-4-63" name="__codelineno-4-63" href="#__codelineno-4-63"></a><span class="w">            </span><span class="n">running</span><span class="p">:</span><span class="w"> </span><span class="nc">true</span><span class="p">,</span>
+<a id="__codelineno-4-64" name="__codelineno-4-64" href="#__codelineno-4-64"></a><span class="w">            </span><span class="o">..</span><span class="nb">Default</span><span class="p">::</span><span class="n">default</span><span class="p">()</span>
+<a id="__codelineno-4-65" name="__codelineno-4-65" href="#__codelineno-4-65"></a><span class="w">        </span><span class="p">};</span>
+<a id="__codelineno-4-66" name="__codelineno-4-66" href="#__codelineno-4-66"></a><span class="w">        </span><span class="fm">assert!</span><span class="p">(</span><span class="fm">matches!</span><span class="p">(</span><span class="n">converge</span><span class="p">(</span><span class="o">&amp;</span><span class="n">sys</span><span class="p">,</span><span class="w"> </span><span class="n">MANAGED_FILE</span><span class="p">).</span><span class="n">unwrap</span><span class="p">(),</span><span class="w"> </span><span class="n">ConvergeOutcome</span><span class="p">::</span><span class="n">Ready</span><span class="p">));</span>
+<a id="__codelineno-4-67" name="__codelineno-4-67" href="#__codelineno-4-67"></a><span class="w">        </span><span class="fm">assert_eq!</span><span class="p">(</span><span class="n">sys</span><span class="p">.</span><span class="n">calls</span><span class="p">.</span><span class="n">lock</span><span class="p">().</span><span class="n">unwrap</span><span class="p">().</span><span class="n">iter</span><span class="p">().</span><span class="n">filter</span><span class="p">(</span><span class="o">|</span><span class="n">c</span><span class="o">|</span><span class="w"> </span><span class="o">*</span><span class="n">c</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s">"restart"</span><span class="p">).</span><span class="n">count</span><span class="p">(),</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+<a id="__codelineno-4-68" name="__codelineno-4-68" href="#__codelineno-4-68"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-4-69" name="__codelineno-4-69" href="#__codelineno-4-69"></a>
+<a id="__codelineno-4-70" name="__codelineno-4-70" href="#__codelineno-4-70"></a><span class="w">    </span><span class="cp">#[test]</span>
+<a id="__codelineno-4-71" name="__codelineno-4-71" href="#__codelineno-4-71"></a><span class="w">    </span><span class="k">fn</span><span class="w"> </span><span class="nf">converge_leaves_stopped_dnsmasq_stopped</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-4-72" name="__codelineno-4-72" href="#__codelineno-4-72"></a><span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">sys</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">FakeSys</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-4-73" name="__codelineno-4-73" href="#__codelineno-4-73"></a><span class="w">            </span><span class="n">section</span><span class="p">:</span><span class="w"> </span><span class="nb">Some</span><span class="p">(</span><span class="s">"cfg01411c"</span><span class="p">.</span><span class="n">into</span><span class="p">()),</span>
+<a id="__codelineno-4-74" name="__codelineno-4-74" href="#__codelineno-4-74"></a><span class="w">            </span><span class="n">generated</span><span class="p">:</span><span class="w"> </span><span class="nc">Mutex</span><span class="p">::</span><span class="n">new</span><span class="p">(</span><span class="fm">vec!</span><span class="p">[</span><span class="nb">None</span><span class="p">]),</span>
+<a id="__codelineno-4-75" name="__codelineno-4-75" href="#__codelineno-4-75"></a><span class="w">            </span><span class="n">running</span><span class="p">:</span><span class="w"> </span><span class="nc">false</span><span class="p">,</span>
+<a id="__codelineno-4-76" name="__codelineno-4-76" href="#__codelineno-4-76"></a><span class="w">            </span><span class="o">..</span><span class="nb">Default</span><span class="p">::</span><span class="n">default</span><span class="p">()</span>
+<a id="__codelineno-4-77" name="__codelineno-4-77" href="#__codelineno-4-77"></a><span class="w">        </span><span class="p">};</span>
+<a id="__codelineno-4-78" name="__codelineno-4-78" href="#__codelineno-4-78"></a><span class="w">        </span><span class="fm">assert!</span><span class="p">(</span><span class="fm">matches!</span><span class="p">(</span><span class="n">converge</span><span class="p">(</span><span class="o">&amp;</span><span class="n">sys</span><span class="p">,</span><span class="w"> </span><span class="n">MANAGED_FILE</span><span class="p">).</span><span class="n">unwrap</span><span class="p">(),</span><span class="w"> </span><span class="n">ConvergeOutcome</span><span class="p">::</span><span class="n">DnsmasqStopped</span><span class="p">));</span>
+<a id="__codelineno-4-79" name="__codelineno-4-79" href="#__codelineno-4-79"></a><span class="w">        </span><span class="fm">assert!</span><span class="p">(</span><span class="o">!</span><span class="n">sys</span><span class="p">.</span><span class="n">calls</span><span class="p">.</span><span class="n">lock</span><span class="p">().</span><span class="n">unwrap</span><span class="p">().</span><span class="n">iter</span><span class="p">().</span><span class="n">any</span><span class="p">(</span><span class="o">|</span><span class="n">c</span><span class="o">|</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s">"restart"</span><span class="p">));</span>
+<a id="__codelineno-4-80" name="__codelineno-4-80" href="#__codelineno-4-80"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-4-81" name="__codelineno-4-81" href="#__codelineno-4-81"></a>
+<a id="__codelineno-4-82" name="__codelineno-4-82" href="#__codelineno-4-82"></a><span class="w">    </span><span class="cp">#[test]</span>
+<a id="__codelineno-4-83" name="__codelineno-4-83" href="#__codelineno-4-83"></a><span class="w">    </span><span class="k">fn</span><span class="w"> </span><span class="nf">converge_repairs_committed_accident</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-4-84" name="__codelineno-4-84" href="#__codelineno-4-84"></a><span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">sys</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">FakeSys</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-4-85" name="__codelineno-4-85" href="#__codelineno-4-85"></a><span class="w">            </span><span class="n">committed</span><span class="p">:</span><span class="w"> </span><span class="s">"option resolvfile '/tmp/resolv.conf.d/nym-resolv.conf'"</span><span class="p">.</span><span class="n">into</span><span class="p">(),</span>
+<a id="__codelineno-4-86" name="__codelineno-4-86" href="#__codelineno-4-86"></a><span class="w">            </span><span class="n">section</span><span class="p">:</span><span class="w"> </span><span class="nb">Some</span><span class="p">(</span><span class="s">"cfg01411c"</span><span class="p">.</span><span class="n">into</span><span class="p">()),</span>
+<a id="__codelineno-4-87" name="__codelineno-4-87" href="#__codelineno-4-87"></a><span class="w">            </span><span class="n">generated</span><span class="p">:</span><span class="w"> </span><span class="nc">Mutex</span><span class="p">::</span><span class="n">new</span><span class="p">(</span><span class="fm">vec!</span><span class="p">[</span><span class="nb">Some</span><span class="p">(</span><span class="n">managed_line</span><span class="p">())]),</span>
+<a id="__codelineno-4-88" name="__codelineno-4-88" href="#__codelineno-4-88"></a><span class="w">            </span><span class="n">running</span><span class="p">:</span><span class="w"> </span><span class="nc">true</span><span class="p">,</span>
+<a id="__codelineno-4-89" name="__codelineno-4-89" href="#__codelineno-4-89"></a><span class="w">            </span><span class="o">..</span><span class="nb">Default</span><span class="p">::</span><span class="n">default</span><span class="p">()</span>
+<a id="__codelineno-4-90" name="__codelineno-4-90" href="#__codelineno-4-90"></a><span class="w">        </span><span class="p">};</span>
+<a id="__codelineno-4-91" name="__codelineno-4-91" href="#__codelineno-4-91"></a><span class="w">        </span><span class="n">converge</span><span class="p">(</span><span class="o">&amp;</span><span class="n">sys</span><span class="p">,</span><span class="w"> </span><span class="n">MANAGED_FILE</span><span class="p">).</span><span class="n">unwrap</span><span class="p">();</span>
+<a id="__codelineno-4-92" name="__codelineno-4-92" href="#__codelineno-4-92"></a><span class="w">        </span><span class="fm">assert!</span><span class="p">(</span><span class="n">sys</span><span class="p">.</span><span class="n">calls</span><span class="p">.</span><span class="n">lock</span><span class="p">().</span><span class="n">unwrap</span><span class="p">().</span><span class="n">iter</span><span class="p">().</span><span class="n">any</span><span class="p">(</span><span class="o">|</span><span class="n">c</span><span class="o">|</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s">"repair-commit"</span><span class="p">));</span>
+<a id="__codelineno-4-93" name="__codelineno-4-93" href="#__codelineno-4-93"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-4-94" name="__codelineno-4-94" href="#__codelineno-4-94"></a>
+<a id="__codelineno-4-95" name="__codelineno-4-95" href="#__codelineno-4-95"></a><span class="w">    </span><span class="cp">#[test]</span>
+<a id="__codelineno-4-96" name="__codelineno-4-96" href="#__codelineno-4-96"></a><span class="w">    </span><span class="k">fn</span><span class="w"> </span><span class="nf">converge_reverts_only_targeted_options</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-4-97" name="__codelineno-4-97" href="#__codelineno-4-97"></a><span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">sys</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">FakeSys</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-4-98" name="__codelineno-4-98" href="#__codelineno-4-98"></a><span class="w">            </span><span class="n">section</span><span class="p">:</span><span class="w"> </span><span class="nb">Some</span><span class="p">(</span><span class="s">"cfg01411c"</span><span class="p">.</span><span class="n">into</span><span class="p">()),</span>
+<a id="__codelineno-4-99" name="__codelineno-4-99" href="#__codelineno-4-99"></a><span class="w">            </span><span class="n">generated</span><span class="p">:</span><span class="w"> </span><span class="nc">Mutex</span><span class="p">::</span><span class="n">new</span><span class="p">(</span><span class="fm">vec!</span><span class="p">[</span><span class="nb">Some</span><span class="p">(</span><span class="n">managed_line</span><span class="p">())]),</span>
+<a id="__codelineno-4-100" name="__codelineno-4-100" href="#__codelineno-4-100"></a><span class="w">            </span><span class="n">running</span><span class="p">:</span><span class="w"> </span><span class="nc">true</span><span class="p">,</span>
+<a id="__codelineno-4-101" name="__codelineno-4-101" href="#__codelineno-4-101"></a><span class="w">            </span><span class="o">..</span><span class="nb">Default</span><span class="p">::</span><span class="n">default</span><span class="p">()</span>
+<a id="__codelineno-4-102" name="__codelineno-4-102" href="#__codelineno-4-102"></a><span class="w">        </span><span class="p">};</span>
+<a id="__codelineno-4-103" name="__codelineno-4-103" href="#__codelineno-4-103"></a><span class="w">        </span><span class="n">converge</span><span class="p">(</span><span class="o">&amp;</span><span class="n">sys</span><span class="p">,</span><span class="w"> </span><span class="n">MANAGED_FILE</span><span class="p">).</span><span class="n">unwrap</span><span class="p">();</span>
+<a id="__codelineno-4-104" name="__codelineno-4-104" href="#__codelineno-4-104"></a><span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">calls</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">sys</span><span class="p">.</span><span class="n">calls</span><span class="p">.</span><span class="n">lock</span><span class="p">().</span><span class="n">unwrap</span><span class="p">();</span>
+<a id="__codelineno-4-105" name="__codelineno-4-105" href="#__codelineno-4-105"></a><span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">reverts</span><span class="p">:</span><span class="w"> </span><span class="nb">Vec</span><span class="o">&lt;</span><span class="n">_</span><span class="o">&gt;</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">calls</span><span class="p">.</span><span class="n">iter</span><span class="p">().</span><span class="n">filter</span><span class="p">(</span><span class="o">|</span><span class="n">c</span><span class="o">|</span><span class="w"> </span><span class="n">c</span><span class="p">.</span><span class="n">starts_with</span><span class="p">(</span><span class="s">"revert"</span><span class="p">)).</span><span class="n">collect</span><span class="p">();</span>
+<a id="__codelineno-4-106" name="__codelineno-4-106" href="#__codelineno-4-106"></a><span class="w">        </span><span class="fm">assert_eq!</span><span class="p">(</span><span class="n">reverts</span><span class="p">.</span><span class="n">len</span><span class="p">(),</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="s">"exactly noresolv/server/resolvfile: {reverts:?}"</span><span class="p">);</span>
+<a id="__codelineno-4-107" name="__codelineno-4-107" href="#__codelineno-4-107"></a><span class="w">        </span><span class="fm">assert!</span><span class="p">(</span><span class="o">!</span><span class="n">calls</span><span class="p">.</span><span class="n">iter</span><span class="p">().</span><span class="n">any</span><span class="p">(</span><span class="o">|</span><span class="n">c</span><span class="o">|</span><span class="w"> </span><span class="o">*</span><span class="n">c</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s">"revert dhcp"</span><span class="p">),</span><span class="w"> </span><span class="s">"wholesale revert forbidden"</span><span class="p">);</span>
+<a id="__codelineno-4-108" name="__codelineno-4-108" href="#__codelineno-4-108"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-4-109" name="__codelineno-4-109" href="#__codelineno-4-109"></a><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li>[ ] <strong>Step 2: Run to verify failure</strong>: <code>cargo test -p nym-dns</code> → FAIL (trait/fn not defined).</li>
+<li>[ ] <strong>Step 3: Implement</strong> <code>Sys</code>, <code>RealSys</code> (shell-outs mirroring the existing <code>uci_set</code>-style helpers: <code>Command::new("uci").args(["revert", key])</code>, <code>["set", &amp;format!("{key}={value}")]</code>, repair = <code>uci delete dhcp.@dnsmasq[0].resolvfile</code> + <code>uci commit dhcp</code>; <code>dnsmasq_section()</code> parses first <code>dhcp.&lt;id&gt;=dnsmasq</code> line of <code>uci show dhcp</code>; <code>generated_conf</code> reads <code>/var/etc/dnsmasq.conf.&lt;section&gt;</code>; <code>service_json</code> = <code>Command::new("ubus").args(["call","service","list","{\"name\":\"dnsmasq\"}"])</code>; <code>send_hup</code> = <code>Command::new("kill").args(["-HUP", &amp;pid.to_string()])</code> — BusyBox kill, avoids a libc dependency), and <code>converge</code> per the algorithm above.</li>
+<li>[ ] <strong>Step 4: Run to verify pass</strong>: <code>cargo test -p nym-dns</code> → all PASS.</li>
+<li>[ ] <strong>Step 5: Commit</strong>: <code>git commit -am "feat(dns): idempotent dnsmasq converge with conditional restart"</code></li>
+</ul>
+<hr />
+<h3 id="task-3-single-writer-actor-thin-client-modrs-wiring-tdd">Task 3: Single-writer actor + thin client + mod.rs wiring (TDD)<a class="headerlink" href="#task-3-single-writer-actor-thin-client-modrs-wiring-tdd" title="Permanent link">&para;</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>nym-vpn-core/crates/nym-dns/src/linux/dnsmasq.rs</code>
+- Modify: <code>nym-vpn-core/crates/nym-dns/src/linux/mod.rs:162,180</code>
+- Verify: <code>nym-vpn-core/crates/nym-dns/Cargo.toml</code> tokio features include <code>sync</code>, <code>time</code>, <code>macros</code>, <code>rt</code> (add missing; <code>rt-multi-thread</code> + <code>macros</code> under <code>[dev-dependencies]</code> if needed for <code>#[tokio::test]</code>).</p>
+<p><strong>Interfaces:</strong>
+- Consumes: Task 1 helpers, Task 2 <code>Sys</code>/<code>converge</code>.
+- Produces:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">pub</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">Dnsmasq</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">tx</span><span class="p">:</span><span class="w"> </span><span class="nc">tokio</span><span class="p">::</span><span class="n">sync</span><span class="p">::</span><span class="n">mpsc</span><span class="p">::</span><span class="n">Sender</span><span class="o">&lt;</span><span class="n">Cmd</span><span class="o">&gt;</span><span class="w"> </span><span class="p">}</span><span class="w">   </span><span class="c1">// thin client, one per connect (cheap)</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="k">impl</span><span class="w"> </span><span class="n">Dnsmasq</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="nf">new</span><span class="p">()</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">Result</span><span class="o">&lt;</span><span class="bp">Self</span><span class="o">&gt;</span><span class="p">;</span><span class="w">                       </span><span class="c1">// OpenWrt+uci detection, get-or-spawn global actor</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="k">async</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="nf">set_dns</span><span class="p">(</span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">servers</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="p">[</span><span class="n">IpAddr</span><span class="p">])</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">Result</span><span class="o">&lt;</span><span class="p">()</span><span class="o">&gt;</span><span class="p">;</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="k">async</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="nf">reset</span><span class="p">(</span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="bp">self</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">Result</span><span class="o">&lt;</span><span class="p">()</span><span class="o">&gt;</span><span class="p">;</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="p">}</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="k">enum</span><span class="w"> </span><span class="nc">Cmd</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">    </span><span class="n">SetTunnel</span><span class="p">(</span><span class="nb">Vec</span><span class="o">&lt;</span><span class="n">IpAddr</span><span class="o">&gt;</span><span class="p">,</span><span class="w"> </span><span class="n">tokio</span><span class="p">::</span><span class="n">sync</span><span class="p">::</span><span class="n">oneshot</span><span class="p">::</span><span class="n">Sender</span><span class="o">&lt;</span><span class="nb">Result</span><span class="o">&lt;</span><span class="p">()</span><span class="o">&gt;&gt;</span><span class="p">),</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="w">    </span><span class="n">SetWanMirror</span><span class="p">(</span><span class="n">tokio</span><span class="p">::</span><span class="n">sync</span><span class="p">::</span><span class="n">oneshot</span><span class="p">::</span><span class="n">Sender</span><span class="o">&lt;</span><span class="nb">Result</span><span class="o">&lt;</span><span class="p">()</span><span class="o">&gt;&gt;</span><span class="p">),</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="p">}</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="k">enum</span><span class="w"> </span><span class="nc">Mode</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">Tunnel</span><span class="p">,</span><span class="w"> </span><span class="n">WanMirror</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="k">async</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="nf">run_actor</span><span class="o">&lt;</span><span class="n">S</span><span class="p">:</span><span class="w"> </span><span class="nc">Sys</span><span class="o">&gt;</span><span class="p">(</span><span class="n">sys</span><span class="p">:</span><span class="w"> </span><span class="nc">S</span><span class="p">,</span><span class="w"> </span><span class="n">paths</span><span class="p">:</span><span class="w"> </span><span class="nc">Paths</span><span class="p">,</span><span class="w"> </span><span class="n">rx</span><span class="p">:</span><span class="w"> </span><span class="nc">mpsc</span><span class="p">::</span><span class="n">Receiver</span><span class="o">&lt;</span><span class="n">Cmd</span><span class="o">&gt;</span><span class="p">);</span><span class="w">  </span><span class="c1">// paths injectable for tests</span>
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="k">struct</span><span class="w"> </span><span class="nc">Paths</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">managed</span><span class="p">:</span><span class="w"> </span><span class="nc">PathBuf</span><span class="p">,</span><span class="w"> </span><span class="n">tmp</span><span class="p">:</span><span class="w"> </span><span class="nc">PathBuf</span><span class="p">,</span><span class="w"> </span><span class="n">wan</span><span class="p">:</span><span class="w"> </span><span class="nc">PathBuf</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div></p>
+<p><strong>Actor semantics (the review's condition 1 — single writer by construction):</strong>
+- On spawn: run <code>converge</code> (retry lazily on first command if it failed); seed managed file from <code>wan</code> (missing → header-only file); <code>Mode::WanMirror</code>.
+- <code>SetTunnel</code>: <code>write_managed(render_resolv_conf(&amp;prefer_ipv4_upstreams(servers)))</code> via temp+rename → re-assert <code>generated_conf_points_at</code> (cheap self-heal; on mismatch re-run converge — catches third-party restarts that raced a stale config in) → HUP (cache flush, best-effort, failure = warn not error) → <code>Mode::Tunnel</code> → ack. Log <code>info!("Configured dnsmasq with VPN DNS servers: {:?}")</code> (benchmark marker).
+- <code>SetWanMirror</code>: copy <code>wan</code> contents (missing → header-only) via temp+rename → HUP → <code>Mode::WanMirror</code> → ack.
+- 5s <code>tokio::time::interval</code> tick: only in <code>Mode::WanMirror</code>, read <code>wan</code>, compare with current managed content, rename-write <strong>only if different</strong>, NO HUP (cache flush on background mirror would churn LAN caches). A tick arriving in <code>Mode::Tunnel</code> does nothing — the TOCTOU leak path is structurally impossible because ticks and commands are serialized in one <code>select!</code> loop.
+- Actor is global: <code>static ACTOR: OnceLock&lt;mpsc::Sender&lt;Cmd&gt;&gt;</code>; <code>Dnsmasq::new()</code> keeps the existing <code>/etc/openwrt_release</code> + <code>uci get dhcp.@dnsmasq[0]</code> detection, then <code>get_or_init</code> spawns <code>run_actor(RealSys, real_paths(), rx)</code> via <code>tokio::spawn</code> (callers are inside the daemon runtime).
+- <strong>Delete</strong> from the old implementation: <code>BACKUP_MARKER</code>, <code>RESOLV_CONF</code>/<code>RESOLV_CONF_BACKUP</code> + <code>write_resolv_conf</code>/<code>save_backup</code>/<code>do_reset</code> (conditions 3 &amp; 6: converge IS recovery; the init script's <code>localuse=0</code> branch points <code>/tmp/resolv.conf</code> at <code>127.0.0.1</code> so local programs ride dnsmasq — do not fight it), <code>uci_revert("dhcp")</code> wholesale, unconditional <code>restart_dnsmasq</code> on set/reset, <code>uci_add_list</code>/<code>uci_delete</code> server-list plumbing.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write failing actor tests</strong> (tempdir-based <code>Paths</code>, <code>FakeSys</code> from Task 2; add <code>tempfile</code> as dev-dependency if not already in workspace — check <code>grep -rn tempfile nym-vpn-core/Cargo.toml</code>):</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="cp">#[cfg(test)]</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="k">mod</span><span class="w"> </span><span class="nn">actor_tests</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">    </span><span class="k">use</span><span class="w"> </span><span class="k">super</span><span class="p">::</span><span class="o">*</span><span class="p">;</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">    </span><span class="c1">// helper: spawn actor with FakeSys(running, converged) + tempdir paths; returns (tx, paths)</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">    </span><span class="k">async</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="nf">spawn_test_actor</span><span class="p">()</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="p">(</span><span class="n">tokio</span><span class="p">::</span><span class="n">sync</span><span class="p">::</span><span class="n">mpsc</span><span class="p">::</span><span class="n">Sender</span><span class="o">&lt;</span><span class="n">Cmd</span><span class="o">&gt;</span><span class="p">,</span><span class="w"> </span><span class="n">Paths</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="p">::</span><span class="n">sync</span><span class="p">::</span><span class="n">Arc</span><span class="o">&lt;</span><span class="n">FakeSys</span><span class="o">&gt;</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="cm">/* build as in converge tests, generated queue always Some(managed_line) */</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="w">    </span><span class="cp">#[tokio::test]</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="w">    </span><span class="k">async</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="nf">set_tunnel_writes_v4_only_and_flushes_cache</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="p">(</span><span class="n">tx</span><span class="p">,</span><span class="w"> </span><span class="n">paths</span><span class="p">,</span><span class="w"> </span><span class="n">sys</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">spawn_test_actor</span><span class="p">().</span><span class="k">await</span><span class="p">;</span>
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="p">(</span><span class="n">ack</span><span class="p">,</span><span class="w"> </span><span class="n">rx</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">tokio</span><span class="p">::</span><span class="n">sync</span><span class="p">::</span><span class="n">oneshot</span><span class="p">::</span><span class="n">channel</span><span class="p">();</span>
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a><span class="w">        </span><span class="n">tx</span><span class="p">.</span><span class="n">send</span><span class="p">(</span><span class="n">Cmd</span><span class="p">::</span><span class="n">SetTunnel</span><span class="p">(</span><span class="fm">vec!</span><span class="p">[</span><span class="s">"2620:fe::fe"</span><span class="p">.</span><span class="n">parse</span><span class="p">().</span><span class="n">unwrap</span><span class="p">(),</span><span class="w"> </span><span class="s">"10.64.0.1"</span><span class="p">.</span><span class="n">parse</span><span class="p">().</span><span class="n">unwrap</span><span class="p">()],</span><span class="w"> </span><span class="n">ack</span><span class="p">)).</span><span class="k">await</span><span class="p">.</span><span class="n">unwrap</span><span class="p">();</span>
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="w">        </span><span class="n">rx</span><span class="p">.</span><span class="k">await</span><span class="p">.</span><span class="n">unwrap</span><span class="p">().</span><span class="n">unwrap</span><span class="p">();</span>
+<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a><span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">content</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="p">::</span><span class="n">fs</span><span class="p">::</span><span class="n">read_to_string</span><span class="p">(</span><span class="o">&amp;</span><span class="n">paths</span><span class="p">.</span><span class="n">managed</span><span class="p">).</span><span class="n">unwrap</span><span class="p">();</span>
+<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a><span class="w">        </span><span class="fm">assert!</span><span class="p">(</span><span class="n">content</span><span class="p">.</span><span class="n">contains</span><span class="p">(</span><span class="s">"nameserver 10.64.0.1"</span><span class="p">));</span>
+<a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a><span class="w">        </span><span class="fm">assert!</span><span class="p">(</span><span class="o">!</span><span class="n">content</span><span class="p">.</span><span class="n">contains</span><span class="p">(</span><span class="s">"2620:fe::fe"</span><span class="p">));</span>
+<a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a><span class="w">        </span><span class="fm">assert!</span><span class="p">(</span><span class="n">sys</span><span class="p">.</span><span class="n">calls</span><span class="p">.</span><span class="n">lock</span><span class="p">().</span><span class="n">unwrap</span><span class="p">().</span><span class="n">iter</span><span class="p">().</span><span class="n">any</span><span class="p">(</span><span class="o">|</span><span class="n">c</span><span class="o">|</span><span class="w"> </span><span class="n">c</span><span class="p">.</span><span class="n">starts_with</span><span class="p">(</span><span class="s">"hup "</span><span class="p">)));</span>
+<a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a>
+<a id="__codelineno-6-19" name="__codelineno-6-19" href="#__codelineno-6-19"></a><span class="w">    </span><span class="cp">#[tokio::test]</span>
+<a id="__codelineno-6-20" name="__codelineno-6-20" href="#__codelineno-6-20"></a><span class="w">    </span><span class="k">async</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="nf">wan_mirror_tracks_while_disconnected_but_never_while_tunnel</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-6-21" name="__codelineno-6-21" href="#__codelineno-6-21"></a><span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="p">(</span><span class="n">tx</span><span class="p">,</span><span class="w"> </span><span class="n">paths</span><span class="p">,</span><span class="w"> </span><span class="n">_sys</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">spawn_test_actor</span><span class="p">().</span><span class="k">await</span><span class="p">;</span>
+<a id="__codelineno-6-22" name="__codelineno-6-22" href="#__codelineno-6-22"></a><span class="w">        </span><span class="c1">// connect</span>
+<a id="__codelineno-6-23" name="__codelineno-6-23" href="#__codelineno-6-23"></a><span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="p">(</span><span class="n">ack</span><span class="p">,</span><span class="w"> </span><span class="n">rx</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">tokio</span><span class="p">::</span><span class="n">sync</span><span class="p">::</span><span class="n">oneshot</span><span class="p">::</span><span class="n">channel</span><span class="p">();</span>
+<a id="__codelineno-6-24" name="__codelineno-6-24" href="#__codelineno-6-24"></a><span class="w">        </span><span class="n">tx</span><span class="p">.</span><span class="n">send</span><span class="p">(</span><span class="n">Cmd</span><span class="p">::</span><span class="n">SetTunnel</span><span class="p">(</span><span class="fm">vec!</span><span class="p">[</span><span class="s">"10.64.0.1"</span><span class="p">.</span><span class="n">parse</span><span class="p">().</span><span class="n">unwrap</span><span class="p">()],</span><span class="w"> </span><span class="n">ack</span><span class="p">)).</span><span class="k">await</span><span class="p">.</span><span class="n">unwrap</span><span class="p">();</span>
+<a id="__codelineno-6-25" name="__codelineno-6-25" href="#__codelineno-6-25"></a><span class="w">        </span><span class="n">rx</span><span class="p">.</span><span class="k">await</span><span class="p">.</span><span class="n">unwrap</span><span class="p">().</span><span class="n">unwrap</span><span class="p">();</span>
+<a id="__codelineno-6-26" name="__codelineno-6-26" href="#__codelineno-6-26"></a><span class="w">        </span><span class="c1">// WAN file changes while connected — mirror must NOT clobber tunnel resolvers</span>
+<a id="__codelineno-6-27" name="__codelineno-6-27" href="#__codelineno-6-27"></a><span class="w">        </span><span class="n">std</span><span class="p">::</span><span class="n">fs</span><span class="p">::</span><span class="n">write</span><span class="p">(</span><span class="o">&amp;</span><span class="n">paths</span><span class="p">.</span><span class="n">wan</span><span class="p">,</span><span class="w"> </span><span class="s">"nameserver 192.0.2.53</span><span class="se">\n</span><span class="s">"</span><span class="p">).</span><span class="n">unwrap</span><span class="p">();</span>
+<a id="__codelineno-6-28" name="__codelineno-6-28" href="#__codelineno-6-28"></a><span class="w">        </span><span class="n">tokio</span><span class="p">::</span><span class="n">time</span><span class="p">::</span><span class="n">sleep</span><span class="p">(</span><span class="n">std</span><span class="p">::</span><span class="n">time</span><span class="p">::</span><span class="n">Duration</span><span class="p">::</span><span class="n">from_millis</span><span class="p">(</span><span class="mi">12_000</span><span class="p">)).</span><span class="k">await</span><span class="p">;</span><span class="w"> </span><span class="c1">// &gt; 2 ticks (use start_paused=true + advance)</span>
+<a id="__codelineno-6-29" name="__codelineno-6-29" href="#__codelineno-6-29"></a><span class="w">        </span><span class="fm">assert!</span><span class="p">(</span><span class="n">std</span><span class="p">::</span><span class="n">fs</span><span class="p">::</span><span class="n">read_to_string</span><span class="p">(</span><span class="o">&amp;</span><span class="n">paths</span><span class="p">.</span><span class="n">managed</span><span class="p">).</span><span class="n">unwrap</span><span class="p">().</span><span class="n">contains</span><span class="p">(</span><span class="s">"10.64.0.1"</span><span class="p">));</span>
+<a id="__codelineno-6-30" name="__codelineno-6-30" href="#__codelineno-6-30"></a><span class="w">        </span><span class="c1">// disconnect → mirror mode: WAN content must flow in</span>
+<a id="__codelineno-6-31" name="__codelineno-6-31" href="#__codelineno-6-31"></a><span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="p">(</span><span class="n">ack</span><span class="p">,</span><span class="w"> </span><span class="n">rx</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">tokio</span><span class="p">::</span><span class="n">sync</span><span class="p">::</span><span class="n">oneshot</span><span class="p">::</span><span class="n">channel</span><span class="p">();</span>
+<a id="__codelineno-6-32" name="__codelineno-6-32" href="#__codelineno-6-32"></a><span class="w">        </span><span class="n">tx</span><span class="p">.</span><span class="n">send</span><span class="p">(</span><span class="n">Cmd</span><span class="p">::</span><span class="n">SetWanMirror</span><span class="p">(</span><span class="n">ack</span><span class="p">)).</span><span class="k">await</span><span class="p">.</span><span class="n">unwrap</span><span class="p">();</span>
+<a id="__codelineno-6-33" name="__codelineno-6-33" href="#__codelineno-6-33"></a><span class="w">        </span><span class="n">rx</span><span class="p">.</span><span class="k">await</span><span class="p">.</span><span class="n">unwrap</span><span class="p">().</span><span class="n">unwrap</span><span class="p">();</span>
+<a id="__codelineno-6-34" name="__codelineno-6-34" href="#__codelineno-6-34"></a><span class="w">        </span><span class="fm">assert!</span><span class="p">(</span><span class="n">std</span><span class="p">::</span><span class="n">fs</span><span class="p">::</span><span class="n">read_to_string</span><span class="p">(</span><span class="o">&amp;</span><span class="n">paths</span><span class="p">.</span><span class="n">managed</span><span class="p">).</span><span class="n">unwrap</span><span class="p">().</span><span class="n">contains</span><span class="p">(</span><span class="s">"192.0.2.53"</span><span class="p">));</span>
+<a id="__codelineno-6-35" name="__codelineno-6-35" href="#__codelineno-6-35"></a><span class="w">        </span><span class="c1">// subsequent WAN change tracked by tick</span>
+<a id="__codelineno-6-36" name="__codelineno-6-36" href="#__codelineno-6-36"></a><span class="w">        </span><span class="n">std</span><span class="p">::</span><span class="n">fs</span><span class="p">::</span><span class="n">write</span><span class="p">(</span><span class="o">&amp;</span><span class="n">paths</span><span class="p">.</span><span class="n">wan</span><span class="p">,</span><span class="w"> </span><span class="s">"nameserver 198.51.100.53</span><span class="se">\n</span><span class="s">"</span><span class="p">).</span><span class="n">unwrap</span><span class="p">();</span>
+<a id="__codelineno-6-37" name="__codelineno-6-37" href="#__codelineno-6-37"></a><span class="w">        </span><span class="n">tokio</span><span class="p">::</span><span class="n">time</span><span class="p">::</span><span class="n">sleep</span><span class="p">(</span><span class="n">std</span><span class="p">::</span><span class="n">time</span><span class="p">::</span><span class="n">Duration</span><span class="p">::</span><span class="n">from_millis</span><span class="p">(</span><span class="mi">12_000</span><span class="p">)).</span><span class="k">await</span><span class="p">;</span>
+<a id="__codelineno-6-38" name="__codelineno-6-38" href="#__codelineno-6-38"></a><span class="w">        </span><span class="fm">assert!</span><span class="p">(</span><span class="n">std</span><span class="p">::</span><span class="n">fs</span><span class="p">::</span><span class="n">read_to_string</span><span class="p">(</span><span class="o">&amp;</span><span class="n">paths</span><span class="p">.</span><span class="n">managed</span><span class="p">).</span><span class="n">unwrap</span><span class="p">().</span><span class="n">contains</span><span class="p">(</span><span class="s">"198.51.100.53"</span><span class="p">));</span>
+<a id="__codelineno-6-39" name="__codelineno-6-39" href="#__codelineno-6-39"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-6-40" name="__codelineno-6-40" href="#__codelineno-6-40"></a><span class="w">    </span><span class="c1">// Use #[tokio::test(start_paused = true)] and tokio::time::advance for the tick waits — no real sleeps.</span>
+<a id="__codelineno-6-41" name="__codelineno-6-41" href="#__codelineno-6-41"></a>
+<a id="__codelineno-6-42" name="__codelineno-6-42" href="#__codelineno-6-42"></a><span class="w">    </span><span class="cp">#[tokio::test]</span>
+<a id="__codelineno-6-43" name="__codelineno-6-43" href="#__codelineno-6-43"></a><span class="w">    </span><span class="k">async</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="nf">missing_wan_file_is_tolerated</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-6-44" name="__codelineno-6-44" href="#__codelineno-6-44"></a><span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="p">(</span><span class="n">tx</span><span class="p">,</span><span class="w"> </span><span class="n">paths</span><span class="p">,</span><span class="w"> </span><span class="n">_sys</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">spawn_test_actor</span><span class="p">().</span><span class="k">await</span><span class="p">;</span><span class="w"> </span><span class="c1">// build with paths.wan absent</span>
+<a id="__codelineno-6-45" name="__codelineno-6-45" href="#__codelineno-6-45"></a><span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="p">(</span><span class="n">ack</span><span class="p">,</span><span class="w"> </span><span class="n">rx</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">tokio</span><span class="p">::</span><span class="n">sync</span><span class="p">::</span><span class="n">oneshot</span><span class="p">::</span><span class="n">channel</span><span class="p">();</span>
+<a id="__codelineno-6-46" name="__codelineno-6-46" href="#__codelineno-6-46"></a><span class="w">        </span><span class="n">tx</span><span class="p">.</span><span class="n">send</span><span class="p">(</span><span class="n">Cmd</span><span class="p">::</span><span class="n">SetWanMirror</span><span class="p">(</span><span class="n">ack</span><span class="p">)).</span><span class="k">await</span><span class="p">.</span><span class="n">unwrap</span><span class="p">();</span>
+<a id="__codelineno-6-47" name="__codelineno-6-47" href="#__codelineno-6-47"></a><span class="w">        </span><span class="n">rx</span><span class="p">.</span><span class="k">await</span><span class="p">.</span><span class="n">unwrap</span><span class="p">().</span><span class="n">unwrap</span><span class="p">();</span><span class="w"> </span><span class="c1">// must not error; managed file exists (header only)</span>
+<a id="__codelineno-6-48" name="__codelineno-6-48" href="#__codelineno-6-48"></a><span class="w">        </span><span class="fm">assert!</span><span class="p">(</span><span class="n">paths</span><span class="p">.</span><span class="n">managed</span><span class="p">.</span><span class="n">exists</span><span class="p">());</span>
+<a id="__codelineno-6-49" name="__codelineno-6-49" href="#__codelineno-6-49"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-6-50" name="__codelineno-6-50" href="#__codelineno-6-50"></a>
+<a id="__codelineno-6-51" name="__codelineno-6-51" href="#__codelineno-6-51"></a><span class="w">    </span><span class="cp">#[test]</span>
+<a id="__codelineno-6-52" name="__codelineno-6-52" href="#__codelineno-6-52"></a><span class="w">    </span><span class="k">fn</span><span class="w"> </span><span class="nf">managed_updates_use_rename_not_truncate</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-6-53" name="__codelineno-6-53" href="#__codelineno-6-53"></a><span class="w">        </span><span class="c1">// write_managed must create paths.tmp then rename; assert tmp does not linger</span>
+<a id="__codelineno-6-54" name="__codelineno-6-54" href="#__codelineno-6-54"></a><span class="w">        </span><span class="c1">// and managed inode content is complete (write_managed(&amp;paths, "x") → read back "x", !paths.tmp.exists())</span>
+<a id="__codelineno-6-55" name="__codelineno-6-55" href="#__codelineno-6-55"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-6-56" name="__codelineno-6-56" href="#__codelineno-6-56"></a><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li>[ ] <strong>Step 2: Run to verify failure</strong>: <code>cargo test -p nym-dns</code> → FAIL.</li>
+<li>[ ] <strong>Step 3: Implement actor + client</strong>; update <code>mod.rs</code> line 162 → <code>dnsmasq.set_dns(servers).await?</code> and line 180 → <code>dnsmasq.reset().await?</code>.</li>
+<li>[ ] <strong>Step 4: Run to verify pass</strong>: <code>cargo test -p nym-dns</code> → PASS. Then whole-workspace sanity: <code>cargo check -p nym-vpn-lib</code>.</li>
+<li>[ ] <strong>Step 5: Commit</strong>: <code>git commit -am "feat(dns): restart-free dnsmasq switching via single-writer resolv-file actor"</code></li>
+</ul>
+<hr />
+<h3 id="task-4-50ms-handshake-poll">Task 4: 50ms handshake poll<a class="headerlink" href="#task-4-50ms-handshake-poll" title="Permanent link">&para;</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>nym-vpn-core/crates/nym-vpn-lib/src/tunnel_state_machine/tunnel_monitor.rs:92</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Edit</strong> — in <code>wait_for_exit_handshake</code>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="w">    </span><span class="c1">// 50ms: actual exit handshakes complete in 190-350ms; the read is an</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">    </span><span class="c1">// in-process stats peek, so a tight advisory poll costs nothing and</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">    </span><span class="c1">// avoids quantizing the connect path to a coarse interval.</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="n">POLL_INTERVAL</span><span class="p">:</span><span class="w"> </span><span class="nc">Duration</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Duration</span><span class="p">::</span><span class="n">from_millis</span><span class="p">(</span><span class="mi">50</span><span class="p">);</span>
+</code></pre></div>
+<p>(Replace the existing <code>const POLL_INTERVAL: Duration = Duration::from_millis(500);</code>. Do not touch the 10s cap, the pre-sleep first check, the advisory/never-fatal semantics, or the shutdown-token cancel arm.)</p>
+<ul>
+<li>[ ] <strong>Step 2: Verify</strong>: <code>cargo check -p nym-vpn-lib</code> → clean; <code>grep -n "POLL_INTERVAL" nym-vpn-core/crates/nym-vpn-lib/src/tunnel_state_machine/tunnel_monitor.rs</code> shows only the 50ms constant.</li>
+<li>[ ] <strong>Step 3: Commit</strong>: <code>git commit -am "perf(wg): poll exit handshake at 50ms"</code></li>
+</ul>
+<hr />
+<h3 id="task-5-prerm-committed-aware-dns-cleanup">Task 5: prerm committed-aware DNS cleanup<a class="headerlink" href="#task-5-prerm-committed-aware-dns-cleanup" title="Permanent link">&para;</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>scripts/ipk/prerm</code> (and mirror into the APK equivalent if <code>scripts/apk/build-apk.sh</code> embeds its own pre-deinstall script — check <code>grep -n "pre-deinstall\|prerm" scripts/apk/build-apk.sh</code> and apply the same block).</p>
+<ul>
+<li>[ ] <strong>Step 1: Edit</strong> — replace the existing line <code>rm -f /tmp/nym-dns-backup /tmp/resolv.conf.nymbackup 2&gt;/dev/null</code> with:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># DNS cleanup: legacy backup markers (≤1.31) plus the restart-free scheme.</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>rm<span class="w"> </span>-f<span class="w"> </span>/tmp/nym-dns-backup<span class="w"> </span>/tmp/resolv.conf.nymbackup<span class="w"> </span><span class="m">2</span>&gt;/dev/null
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="k">if</span><span class="w"> </span><span class="o">[</span><span class="w"> </span><span class="s2">"</span><span class="nv">$PKG_UPGRADE</span><span class="s2">"</span><span class="w"> </span>!<span class="o">=</span><span class="w"> </span><span class="s2">"1"</span><span class="w"> </span><span class="o">]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">    </span><span class="c1"># Full removal: return dnsmasq to stock resolv handling.</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">    </span><span class="c1"># Staged (uncommitted) repoint: targeted revert only — never wholesale.</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="w">    </span>uci<span class="w"> </span>-q<span class="w"> </span>revert<span class="w"> </span>dhcp.@dnsmasq<span class="o">[</span><span class="m">0</span><span class="o">]</span>.resolvfile
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="w">    </span><span class="c1"># Accidentally-committed repoint (LuCI Save&amp;Apply commits staged deltas):</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="w">    </span><span class="c1"># deleting the option restores the stock default resolvfile.</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="w">    </span><span class="k">if</span><span class="w"> </span>grep<span class="w"> </span>-q<span class="w"> </span><span class="s2">"nym-resolv.conf"</span><span class="w"> </span>/etc/config/dhcp<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="w">        </span>uci<span class="w"> </span>-q<span class="w"> </span>delete<span class="w"> </span>dhcp.@dnsmasq<span class="o">[</span><span class="m">0</span><span class="o">]</span>.resolvfile
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="w">        </span>uci<span class="w"> </span>-q<span class="w"> </span>commit<span class="w"> </span>dhcp
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="w">    </span><span class="k">fi</span>
+<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a><span class="w">    </span>rm<span class="w"> </span>-f<span class="w"> </span>/tmp/resolv.conf.d/nym-resolv.conf<span class="w"> </span>/tmp/resolv.conf.d/.nym-resolv.tmp<span class="w"> </span><span class="m">2</span>&gt;/dev/null
+<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="w">    </span><span class="c1"># Restart only if the running instance still points at our (now removed) file.</span>
+<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="w">    </span><span class="k">if</span><span class="w"> </span>grep<span class="w"> </span>-qs<span class="w"> </span><span class="s2">"resolv-file=.*nym-resolv.conf"</span><span class="w"> </span>/var/etc/dnsmasq.conf.*<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a><span class="w">        </span>/etc/init.d/dnsmasq<span class="w"> </span>restart<span class="w"> </span><span class="m">2</span>&gt;/dev/null
+<a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a><span class="w">    </span><span class="k">fi</span>
+<a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a><span class="k">fi</span>
+</code></pre></div>
+<p>(On upgrade, everything is left in place: the new daemon reconverges without a restart and the mirror resumes; a restart here would be a pointless LAN outage.)</p>
+<ul>
+<li>[ ] <strong>Step 2: Verify</strong>: <code>sh -n scripts/ipk/prerm</code> → no syntax errors.</li>
+<li>[ ] <strong>Step 3: Commit</strong>: <code>git commit -am "fix(ipk): return dnsmasq to stock resolv handling on package removal"</code></li>
+</ul>
+<hr />
+<h3 id="task-6-changelog">Task 6: Changelog<a class="headerlink" href="#task-6-changelog" title="Permanent link">&para;</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>CHANGELOG.md</code> (follow the existing entry format at the top of the file).</p>
+<ul>
+<li>[ ] <strong>Step 1: Add</strong> under the unreleased/next section (match surrounding style):</li>
+<li>perf: VPN connect/disconnect no longer restarts dnsmasq — upstream DNS switches through a managed resolv-file (<code>/tmp/resolv.conf.d/nym-resolv.conf</code>) that dnsmasq reloads via inotify; removes ~3.3s from every connect and the LAN-DNS outage window at teardown. dnsmasq is restarted at most once per boot (first daemon start) and never by a crash-looping daemon.</li>
+<li>perf: exit WireGuard handshake detection polls at 50ms (was 500ms), shaving ~150–300ms off connect.</li>
+<li><strong>Behavior change:</strong> user-configured <code>dhcp.@dnsmasq[0].server</code> entries (e.g. <code>server=/corp.example/10.0.0.1</code> domain forwards) are no longer overridden while the VPN is connected — they stay active, with queries routed through the tunnel. ≤1.31 replaced the whole server list for the session.</li>
+<li>[ ] <strong>Step 2: Commit</strong>: <code>git commit -am "docs: changelog for restart-free dns switching"</code></li>
+</ul>
+<hr />
+<h3 id="task-7-build-deploy-hardware-validation-on-openwrt25">Task 7: Build, deploy, hardware validation on <code>openwrt25</code><a class="headerlink" href="#task-7-build-deploy-hardware-validation-on-openwrt25" title="Permanent link">&para;</a></h3>
+<p>No TDD — this is the measured-evidence gate. Protocol gotchas are hard-won; follow exactly.</p>
+<ul>
+<li>[ ] <strong>Step 1: Build</strong>: <code>./scripts/build-musl.sh x86_64</code> (Docker, ~10 min).</li>
+<li>[ ] <strong>Step 2: Deploy</strong>:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>ssh<span class="w"> </span>openwrt25<span class="w"> </span><span class="s1">'/etc/init.d/nym-vpn-watchdog stop; /etc/init.d/nym-vpnd stop'</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>scp<span class="w"> </span>-O<span class="w"> </span>nym-vpn-core/target/x86_64-unknown-linux-musl/release/nym-vpnd<span class="w"> </span>openwrt25:/tmp/nym-vpnd.new
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>ssh<span class="w"> </span>openwrt25<span class="w"> </span><span class="s1">'cp /usr/sbin/nym-vpnd /tmp/nym-vpnd.bak3; mv /tmp/nym-vpnd.new /usr/sbin/nym-vpnd; chmod 755 /usr/sbin/nym-vpnd'</span>
+</code></pre></div></li>
+<li>[ ] <strong>Step 3: Instrumented run</strong> (watchdog MUST stay stopped; no <code>nohup</code>/<code>pkill</code>; BusyBox <code>time … | tail -3</code>):
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>ssh<span class="w"> </span>openwrt25<span class="w"> </span><span class="s1">'RUST_LOG="info,nym_connection_monitor=trace,gotatun=debug" setsid /usr/sbin/nym-vpnd &gt;/tmp/log 2&gt;&amp;1 &lt;/dev/null &amp;'</span>
+</code></pre></div>
+If the RPC socket is missing after a procd restart, one extra stop/start fixes it (known transient).</li>
+<li>[ ] <strong>Step 4: Benchmark</strong>: 1 smoke + 3 timed cycles of <code>nym-vpnc disconnect; sleep 3; time nym-vpnc connect -w</code>; phase timings from <code>New tunnel state:</code> transitions in /tmp/log; expect no <code>Setting DNS servers</code>→<code>Configured dnsmasq</code> tail beyond ~50ms and total 2.5–3s (registration variance may stretch one cycle; gateway-flake retry once, note it).</li>
+<li>[ ] <strong>Step 5: DNS behavior assertions</strong> (each must pass):</li>
+<li>dnsmasq PID (ubus-reported wrapper) identical before/after a connect+disconnect cycle (proves zero restarts); exactly one restart allowed at first daemon start only if repoint was absent.</li>
+<li>LAN client (or <code>nslookup example.com 10.10.10.1</code> from a LAN-side netns/host) resolves while connected AND while disconnected.</li>
+<li>While disconnected: append a nameserver to <code>/tmp/resolv.conf.d/resolv.conf.auto</code>; within ~6s the managed file contains it (mirror) and logread shows dnsmasq <code>reading /tmp/resolv.conf.d/nym-resolv.conf</code>.</li>
+<li>While connected: same append; managed file must still contain only tunnel resolvers after 10s (single-writer guard). Remove the appended line after.</li>
+<li>Crash recovery: <code>killall -9 nym-vpnd</code> while connected → restart daemon → converge without dnsmasq restart, connect works, no marker files created (<code>ls /tmp/nym-dns-backup</code> → absent).</li>
+<li>Crashloop guard: stop daemon, note dnsmasq uptime, start+<code>killall -9</code> the daemon 3× in a row, verify dnsmasq PID never changed after the first converge.</li>
+<li>Third-party restart while connected: <code>/etc/init.d/dnsmasq restart</code> by hand → next connect self-heals (generated conf re-asserted; log line present).</li>
+<li><code>/etc/init.d/network restart</code> while connected → both <code>resolv.conf.auto</code> tracking (after disconnect) and managed-file serving still work (graybeard's directory-inode note).</li>
+<li>Simulated LuCI accident: <code>uci commit dhcp</code> while connected → restart daemon → converge repairs committed store (log warn; <code>grep nym-resolv /etc/config/dhcp</code> → empty) and stays functional.</li>
+<li>[ ] <strong>Step 6: Restore contract</strong>: procd <code>nym-vpnd</code> + <code>nym-vpn-watchdog</code> running, <code>nym-vpnc status</code> → <code>State: Connected</code>.</li>
+<li>[ ] <strong>Step 7: Append results</strong> to <code>notes/2026-07-19-connect-diag-bump.log</code> (new <code>#</code>-commented section: four-way comparison table) and commit: <code>git commit -am "docs: benchmark restart-free dns + 50ms handshake poll"</code>.</li>
+</ul>
+<hr />
+<h2 id="self-review">Self-Review<a class="headerlink" href="#self-review" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Spec coverage:</strong> review conditions 1 (actor, Task 3) ✓, 2 (committed repair Task 2 + prerm Task 5 + validation 5.9) ✓, 3 (marker deleted, Task 3) ✓, 4 (targeted reverts, Task 2) ✓, 5 (instance-scoped grep + stopped-stays-stopped, Task 2) ✓, 6 (/etc/resolv.conf write deleted, Task 3) ✓; 5s poll not inotify crate ✓ (Task 3); Target 2 ✓ (Task 4); changelog behavior note ✓ (Task 6); validation additions incl. network-restart and crashloop ✓ (Task 7).</li>
+<li><strong>Placeholder scan:</strong> Task 3 Step 1 contains two intentionally-sketched helpers (<code>spawn_test_actor</code>, rename test body) — implementer fills bodies from the converge-test <code>FakeSys</code> pattern shown in full in Task 2; all assertions and semantics are stated. No TBDs elsewhere.</li>
+<li><strong>Type consistency:</strong> <code>Cmd</code>/<code>Mode</code>/<code>Paths</code>/<code>Sys</code>/<code>converge</code> names match across Tasks 2–3; <code>MANAGED_FILE</code> constants defined Task 1, used Tasks 2–3–5 (path string duplicated in prerm by necessity — shell).</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
