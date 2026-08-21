@@ -201,11 +201,19 @@ impl Rule {
     pub fn restore_mark(family: Family) -> Self {
         Self::new(family, Verdict::RestoreMark)
     }
+    /// An ICMP type match implies the ICMP protocol — set it here so no
+    /// backend has to guess. nft doesn't need the proto (`icmp type` carries
+    /// it), but iptables-restore rejects `--icmp-type` without `-p icmp` on
+    /// the line, and a builder that constructs proto-less ICMP rules shipped
+    /// that exact bug to every fw3 router from v1.27.0 to v1.33.1.
     pub fn icmpv4_type(mut self, t: IcmpV4Type) -> Self {
+        self.matches.proto = Some(Proto::Icmp);
         self.matches.icmpv4_type = Some(t);
         self
     }
+    /// See [`Self::icmpv4_type`]: implies `Proto::IcmpV6`.
     pub fn icmpv6_type(mut self, t: IcmpV6Type) -> Self {
+        self.matches.proto = Some(Proto::IcmpV6);
         self.matches.icmpv6_type = Some(t);
         self
     }

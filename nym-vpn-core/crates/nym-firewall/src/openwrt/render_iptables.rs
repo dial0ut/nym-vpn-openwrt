@@ -95,17 +95,18 @@ fn render_rule(rule: &Rule, family: AddrFamily) -> String {
     if let Some(daddr) = &m.daddr {
         parts.push(format!("-d {}", render_addr(daddr)));
     }
+    // Legacy (ip)?(6)?tables-restore only recognizes --icmp-type /
+    // --icmpv6-type once the protocol providing the option is on the line;
+    // without `-p` the whole restore fails with "unknown option". The rule
+    // builder guarantees this (icmp*_type() implies the proto) — assert it
+    // rather than guess here, so a rule built by hand fails loudly in tests
+    // instead of failing an entire restore on a router.
+    debug_assert!(
+        (m.icmpv4_type.is_none() && m.icmpv6_type.is_none()) || m.proto.is_some(),
+        "ICMP type match without a protocol: {m:?}"
+    );
     if let Some(proto) = m.proto {
         parts.push(format!("-p {}", proto_str(proto)));
-    } else if m.icmpv4_type.is_some() {
-        // Legacy (ip)?(6)?tables-restore only recognizes --icmp-type /
-        // --icmpv6-type once the protocol providing the option is on the
-        // line; without `-p` the whole restore fails with "unknown option".
-        // nft has no such coupling, which is how an ICMP rule without an
-        // explicit proto shipped broken for fw3 while fw4 worked.
-        parts.push("-p icmp".into());
-    } else if m.icmpv6_type.is_some() {
-        parts.push("-p icmpv6".into());
     }
     if let Some(t) = m.icmpv4_type {
         parts.push(format!("--icmp-type {}", icmpv4_name(t)));

@@ -285,13 +285,11 @@ fn base_rules(rs: &mut RuleSet) {
             IpAddr::V4(_) => {
                 rs.filter.input.push(
                     Rule::accept(Family::V4)
-                        .proto(Proto::Icmp)
                         .icmpv4_type(IcmpV4Type::EchoReply)
                         .saddr(ip),
                 );
                 rs.filter.output.push(
                     Rule::accept(Family::V4)
-                        .proto(Proto::Icmp)
                         .icmpv4_type(IcmpV4Type::EchoRequest)
                         .daddr(ip),
                 );
@@ -299,13 +297,11 @@ fn base_rules(rs: &mut RuleSet) {
             IpAddr::V6(_) => {
                 rs.filter.input.push(
                     Rule::accept(Family::V6)
-                        .proto(Proto::IcmpV6)
                         .icmpv6_type(IcmpV6Type::EchoReply)
                         .saddr(ip),
                 );
                 rs.filter.output.push(
                     Rule::accept(Family::V6)
-                        .proto(Proto::IcmpV6)
                         .icmpv6_type(IcmpV6Type::EchoRequest)
                         .daddr(ip),
                 );
