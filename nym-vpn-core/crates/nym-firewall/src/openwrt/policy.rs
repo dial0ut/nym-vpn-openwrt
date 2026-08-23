@@ -356,7 +356,10 @@ fn exemption_mangle(rs: &mut RuleSet, exemptions: &[InboundExemption]) {
         );
         return;
     };
+    exemption_mangle_rules(rs, exemptions, &wan_iface);
+}
 
+fn exemption_mangle_rules(rs: &mut RuleSet, exemptions: &[InboundExemption], wan_iface: &str) {
     // Restore comes first so replies on established flows pick up the mark.
     rs.mangle.prerouting.push(Rule::restore_mark(Family::Inet));
     // Set the connmark on the first packet of each exempted inbound flow.
@@ -367,12 +370,20 @@ fn exemption_mangle(rs: &mut RuleSet, exemptions: &[InboundExemption]) {
         };
         rs.mangle.prerouting.push(
             Rule::set_ct_mark(Family::Inet, common::EXEMPT_FWMARK)
-                .iif(&wan_iface)
+                .iif(wan_iface)
                 .proto(proto)
                 .dport(ex.dport)
                 .ct_new(),
         );
     }
+    // Restore again AFTER the set rules: `ct mark set` writes only the
+    // conntrack mark, so the flow-creating packet itself still carries meta
+    // mark 0 — and the filter accepts match the meta mark. Without this the
+    // first packet of every exempted flow falls through to the terminal
+    // reject, which also prevents conntrack confirmation, destroying the
+    // freshly-marked entry: retransmissions repeat identically and the flow
+    // never establishes.
+    rs.mangle.prerouting.push(Rule::restore_mark(Family::Inet));
     // Restore for locally-originated replies (router-hosted services).
     rs.mangle.output.push(Rule::restore_mark(Family::Inet));
 }
@@ -859,6 +870,51 @@ mod tests {
             .find(|r| r.matches.dport == Some(51820))
             .expect("peer endpoint accept present");
         assert_eq!(out.matches.skuid, None, "All endpoint must stay unscoped");
+    }
+
+    #[test]
+    fn exemption_mangle_restores_meta_mark_after_set() {
+        // `ct mark set` writes only the conntrack mark; the filter accepts
+        // match the packet (meta) mark. A restore AFTER the set rules is what
+        // marks the flow-creating packet itself — without it the first packet
+        // is rejected, conntrack never confirms the entry, and the exempted
+        // flow can never establish.
+        let mut rs = RuleSet::default();
+        let exemptions = vec![
+            InboundExemption::new(TransportProtocol::Tcp, 443),
+            InboundExemption::new(TransportProtocol::Udp, 51820),
+        ];
+        exemption_mangle_rules(&mut rs, &exemptions, "eth1");
+
+        let pre = &rs.mangle.prerouting.rules;
+        let first_set = pre
+            .iter()
+            .position(|r| matches!(r.verdict, Verdict::SetCtMark(_)))
+            .expect("set rules present");
+        let last_set = pre
+            .iter()
+            .rposition(|r| matches!(r.verdict, Verdict::SetCtMark(_)))
+            .expect("set rules present");
+        let first_restore = pre
+            .iter()
+            .position(|r| matches!(r.verdict, Verdict::RestoreMark))
+            .expect("restore present");
+        let last_restore = pre
+            .iter()
+            .rposition(|r| matches!(r.verdict, Verdict::RestoreMark))
+            .expect("restore present");
+        // One restore before the sets (replies on established flows) ...
+        assert!(first_restore < first_set);
+        // ... and one after (the first packet of a fresh exempted flow).
+        assert!(last_restore > last_set);
+        // Router-hosted replies still get their output-chain restore.
+        assert!(
+            rs.mangle
+                .output
+                .rules
+                .iter()
+                .any(|r| matches!(r.verdict, Verdict::RestoreMark))
+        );
     }
 
     #[test]
