@@ -673,7 +673,12 @@ impl SharedState {
     /// still permits API and DNS so the account controller and the daemon
     /// itself can self-recover. Otherwise reset the firewall to open so
     /// transient errors cannot deadlock the daemon out of its own API.
-    fn apply_killswitch_policy(&mut self) {
+    ///
+    /// Failures propagate: an unenforced kill-switch is not something to
+    /// merely log while the daemon reports unrestricted-but-protected
+    /// networking. `DisconnectedState` escalates to the error state;
+    /// `ErrorState` (already there) logs.
+    fn apply_killswitch_policy(&mut self) -> Result<(), nym_firewall::Error> {
         // The firewall caches the kill-switch flag; sync it from live settings
         // so a runtime toggle (LuCI / `tunnel set`) takes effect without a
         // daemon restart.
@@ -696,11 +701,9 @@ impl SharedState {
                 allowed_endpoints,
                 dns_servers: self.tunnel_settings.default_dns_ips(),
             };
-            if let Err(e) = self.firewall.apply_policy(policy) {
-                nym_common::trace_err_chain!(e, "Failed to apply kill-switch policy");
-            }
-        } else if let Err(e) = self.firewall.reset_policy() {
-            nym_common::trace_err_chain!(e, "Failed to reset firewall policy");
+            self.firewall.apply_policy(policy)
+        } else {
+            self.firewall.reset_policy()
         }
     }
 }

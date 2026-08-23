@@ -24,7 +24,13 @@ impl ErrorState {
         // Otherwise reset so the daemon can reach the API and self-recover
         // from transient connect errors. The previous behavior — Blocked
         // with empty exemptions — was a one-way deadlock.
-        shared_state.apply_killswitch_policy();
+        //
+        // Already in the error path — a failed apply can only be logged here
+        // (escalating would recurse), and the state shown to the user is an
+        // error either way.
+        if let Err(e) = shared_state.apply_killswitch_policy() {
+            trace_err_chain!(e, "Failed to apply kill-switch policy in error state");
+        }
 
         shared_state.reset_resolver_overrides().await;
         shared_state.allow_networking().await;
@@ -81,7 +87,9 @@ impl TunnelStateHandler for ErrorState {
                             || diff.is_field_changed(&TunnelSettingsDiffFields::EnableIpv6)
                             || diff.is_field_changed(&TunnelSettingsDiffFields::Dns)
                         {
-                            shared_state.apply_killswitch_policy();
+                            if let Err(e) = shared_state.apply_killswitch_policy() {
+                                trace_err_chain!(e, "Failed to apply kill-switch policy in error state");
+                            }
                         }
 
                         NextTunnelState::SameState(self)
