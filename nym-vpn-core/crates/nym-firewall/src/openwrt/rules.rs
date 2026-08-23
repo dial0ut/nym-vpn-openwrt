@@ -299,6 +299,19 @@ impl RuleSet {
         rs
     }
 
+    /// A copy with the mangle chains emptied. This is the fw3 fallback when
+    /// the iptables `CONNMARK` target is unavailable: every mangle rule we
+    /// emit is a CONNMARK set/restore, and one unparseable rule fails the
+    /// whole restore — taking the entire kill-switch (and the tunnel) down
+    /// with it. Inbound exemptions stop working; nothing else degrades. The
+    /// filter-side mark accepts stay: `-m mark` is a separate extension and
+    /// they are inert while nothing sets the mark.
+    pub fn without_mangle_rules(&self) -> RuleSet {
+        let mut rs = self.clone();
+        rs.mangle = MangleRules::default();
+        rs
+    }
+
     fn all_chains(&self) -> impl Iterator<Item = &Chain> {
         [
             &self.filter.input,
@@ -333,6 +346,20 @@ impl RuleSet {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn without_mangle_rules_strips_only_mangle() {
+        let mut rs = RuleSet::default();
+        rs.mangle.prerouting.push(Rule::restore_mark(Family::Inet));
+        rs.mangle.output.push(Rule::restore_mark(Family::Inet));
+        rs.filter.input.push(Rule::accept(Family::Inet).mark_eq(0x14e));
+
+        let stripped = rs.without_mangle_rules();
+        assert!(stripped.mangle.is_empty());
+        // Filter-side mark accepts survive — `-m mark` is a separate
+        // extension and inert while nothing sets the mark.
+        assert_eq!(stripped.filter, rs.filter);
+    }
 
     #[test]
     fn without_skuid_rules_removes_scoped_exceptions() {

@@ -69,6 +69,26 @@ pub fn apply(rs: &RuleSet) -> Result<()> {
 /// Apply the filter (and mangle, when present) plane for one address family
 /// and return the rendered restore script that was applied, for persistence.
 fn apply_family(rs: &RuleSet, family: AddrFamily) -> Result<String> {
+    // Degrade rather than die when the CONNMARK target can't be parsed
+    // (libxt_CONNMARK ships in iptables-mod-conntrack-extra, which stock
+    // images lack): one unparseable mangle rule fails the entire restore,
+    // which would tear the tunnel down over an optional feature. Mirrors
+    // the owner-match fallback in apply_filter.
+    let stripped;
+    let rs = if !rs.mangle.is_empty() && !connmark_target_available(family) {
+        let ipt = ipt_cmd(family);
+        tracing::error!(
+            "{ipt} CONNMARK target unavailable; omitting inbound-exemption \
+             mangle rules. The kill switch remains active but exempted \
+             inbound services will not work. Install \
+             iptables-mod-conntrack-extra and kmod-ipt-conntrack-extra."
+        );
+        stripped = rs.without_mangle_rules();
+        &stripped
+    } else {
+        rs
+    };
+
     let script = apply_filter(rs, family)?;
     setup_jumps(family)?;
     if !rs.mangle.is_empty() {
@@ -77,6 +97,30 @@ fn apply_family(rs: &RuleSet, family: AddrFamily) -> Result<String> {
         cleanup_mangle(family);
     }
     Ok(script)
+}
+
+/// Whether the iptables `CONNMARK` target extension can be loaded. Probed by
+/// appending a real CONNMARK rule to a scratch chain — `--help`-style probes
+/// are useless here (iptables exits 0 for unknown targets with `--help`),
+/// and only an actual append exercises the same parse path as the restore.
+fn connmark_target_available(family: AddrFamily) -> bool {
+    let ipt = ipt_cmd(family);
+    const PROBE: &str = "NYM_CONNMARK_PROBE";
+    let _ = Command::new(ipt)
+        .args(["-w", "-t", "mangle", "-N", PROBE])
+        .output();
+    let ok = Command::new(ipt)
+        .args(["-w", "-t", "mangle", "-A", PROBE, "-j", "CONNMARK", "--restore-mark"])
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false);
+    let _ = Command::new(ipt)
+        .args(["-w", "-t", "mangle", "-F", PROBE])
+        .output();
+    let _ = Command::new(ipt)
+        .args(["-w", "-t", "mangle", "-X", PROBE])
+        .output();
+    ok
 }
 
 /// Persist the applied ruleset for `fw3-include.sh`. Unlike fw4 — whose
