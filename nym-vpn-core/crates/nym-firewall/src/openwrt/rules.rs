@@ -110,6 +110,13 @@ pub struct Match {
     pub rate_limit: Option<RateLimit>,
     /// Match on packet (meta) mark. nft: `meta mark <N>`; iptables: `-m mark --mark <N>`.
     pub mark: Option<u32>,
+    /// Match on the conntrack mark. nft: `ct mark <N>`; iptables:
+    /// `-m connmark --mark <N>` (ships with the CONNMARK target in
+    /// iptables-mod-conntrack-extra). Used to scope mark restores to
+    /// exempted flows only — an unconditioned restore overwrites the
+    /// daemon's own SO_MARK (0x14d) with the zero ct mark of its flows,
+    /// knocking its packets off the VPN policy routes.
+    pub ct_mark: Option<u32>,
     /// Match on the owning socket's uid. nft: `meta skuid <N>`; iptables:
     /// `-m owner --uid-owner <N>`. OUTPUT-chain only: input/forward packets
     /// have no local socket, so the match never fires there (nft) or is
@@ -185,6 +192,10 @@ impl Rule {
     }
     pub fn mark_eq(mut self, mark: u32) -> Self {
         self.matches.mark = Some(mark);
+        self
+    }
+    pub fn ct_mark_eq(mut self, mark: u32) -> Self {
+        self.matches.ct_mark = Some(mark);
         self
     }
     /// Match on the owning socket's uid. Only valid on OUTPUT-chain rules —

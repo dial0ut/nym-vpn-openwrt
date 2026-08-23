@@ -360,8 +360,18 @@ fn exemption_mangle(rs: &mut RuleSet, exemptions: &[InboundExemption]) {
 }
 
 fn exemption_mangle_rules(rs: &mut RuleSet, exemptions: &[InboundExemption], wan_iface: &str) {
+    // Every restore is scoped to `ct mark == EXEMPT_FWMARK`: only exempted
+    // flows may have their packet mark rewritten. An unconditioned
+    // `meta mark set ct mark` runs on EVERY packet, and for the daemon's own
+    // flows (ct mark 0) it OVERWRITES the socket's tunnel fwmark (0x14d)
+    // with zero — the mangle-stage reroute then pulls the daemon's probes
+    // and handshakes off the VPN policy routes and connecting fails
+    // (HW-reproduced on fw3: every connect attempt died on its ICMP probe).
+    // It also stops us stomping marks other systems (mwan3, qos) set.
+    let restore = || Rule::restore_mark(Family::Inet).ct_mark_eq(common::EXEMPT_FWMARK);
+
     // Restore comes first so replies on established flows pick up the mark.
-    rs.mangle.prerouting.push(Rule::restore_mark(Family::Inet));
+    rs.mangle.prerouting.push(restore());
     // Set the connmark on the first packet of each exempted inbound flow.
     for ex in exemptions {
         let proto = match ex.proto {
@@ -383,9 +393,9 @@ fn exemption_mangle_rules(rs: &mut RuleSet, exemptions: &[InboundExemption], wan
     // reject, which also prevents conntrack confirmation, destroying the
     // freshly-marked entry: retransmissions repeat identically and the flow
     // never establishes.
-    rs.mangle.prerouting.push(Rule::restore_mark(Family::Inet));
+    rs.mangle.prerouting.push(restore());
     // Restore for locally-originated replies (router-hosted services).
-    rs.mangle.output.push(Rule::restore_mark(Family::Inet));
+    rs.mangle.output.push(restore());
 }
 
 fn allow_endpoint(rs: &mut RuleSet, ep: &AllowedEndpoint) {
@@ -915,6 +925,23 @@ mod tests {
                 .iter()
                 .any(|r| matches!(r.verdict, Verdict::RestoreMark))
         );
+        // Every restore must be scoped to the exempt ct mark: an
+        // unconditioned restore zeroes the daemon's socket fwmark (0x14d)
+        // on its own flows and reroutes its probes off the VPN policy
+        // routes — connect attempts then fail on their ICMP probe.
+        for chain in [&rs.mangle.prerouting, &rs.mangle.output] {
+            for rule in chain
+                .rules
+                .iter()
+                .filter(|r| matches!(r.verdict, Verdict::RestoreMark))
+            {
+                assert_eq!(
+                    rule.matches.ct_mark,
+                    Some(common::EXEMPT_FWMARK),
+                    "unscoped mark restore: {rule:?}"
+                );
+            }
+        }
     }
 
     #[test]

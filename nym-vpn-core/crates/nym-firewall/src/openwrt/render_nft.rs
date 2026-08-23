@@ -99,6 +99,9 @@ fn render_rule(rule: &Rule) -> String {
     if let Some(mark) = m.mark {
         parts.push(format!("meta mark {mark:#x}"));
     }
+    if let Some(ct_mark) = m.ct_mark {
+        parts.push(format!("ct mark {ct_mark:#x}"));
+    }
     if let Some(uid) = m.skuid {
         parts.push(format!("meta skuid {uid}"));
     }
@@ -283,6 +286,12 @@ mod tests {
     fn renders_restore_mark() {
         let rule = Rule::restore_mark(Family::Inet);
         assert_eq!(render_rule(&rule), "meta mark set ct mark");
+    }
+
+    #[test]
+    fn renders_ct_mark_scoped_restore() {
+        let rule = Rule::restore_mark(Family::Inet).ct_mark_eq(0x14e);
+        assert_eq!(render_rule(&rule), "ct mark 0x14e meta mark set ct mark");
     }
 
     #[test]

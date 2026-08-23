@@ -131,6 +131,9 @@ fn render_rule(rule: &Rule, family: AddrFamily) -> String {
     if let Some(mark) = m.mark {
         parts.push(format!("-m mark --mark {mark:#x}"));
     }
+    if let Some(ct_mark) = m.ct_mark {
+        parts.push(format!("-m connmark --mark {ct_mark:#x}"));
+    }
     if let Some(uid) = m.skuid {
         parts.push(format!("-m owner --uid-owner {uid}"));
     }
@@ -308,6 +311,15 @@ mod tests {
         assert_eq!(
             render_rule(&rule, AddrFamily::V4),
             "-i wan -p tcp --dport 443 -m conntrack --ctstate NEW -j CONNMARK --set-mark 0x14e"
+        );
+    }
+
+    #[test]
+    fn renders_ct_mark_scoped_restore() {
+        let rule = Rule::restore_mark(Family::Inet).ct_mark_eq(0x14e);
+        assert_eq!(
+            render_rule(&rule, AddrFamily::V4),
+            "-m connmark --mark 0x14e -j CONNMARK --restore-mark"
         );
     }
 
