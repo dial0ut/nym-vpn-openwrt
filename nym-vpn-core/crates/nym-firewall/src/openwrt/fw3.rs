@@ -15,7 +15,7 @@ use std::process::{Command, Stdio};
 
 use super::common::{
     FW3_HOOK_FORWARD, FW3_HOOK_INPUT, FW3_HOOK_OUTPUT, FW3_RULES_V4_PATH, FW3_RULES_V6_PATH,
-    IFACES_PATH, is_ipv6_enabled,
+    IFACES_PATH, Ipv6Status, ipv6_status,
 };
 use super::render_iptables::{
     self, AddrFamily, CHAIN_FORWARD, CHAIN_INPUT, CHAIN_MANGLE_OUTPUT, CHAIN_MANGLE_PREROUTING,
@@ -32,11 +32,29 @@ const NAT_CHAIN: &str = "NYM_POSTROUTING";
 pub fn apply(rs: &RuleSet) -> Result<()> {
     tracing::debug!("Applying firewall policy via fw3/iptables backend");
 
+    // Fail closed on a half-firewallable host: if the kernel routes IPv6 but
+    // ip6tables can't filter it, an IPv4-only ruleset would just be a
+    // kill-switch with a silent v6 bypass.
+    let with_v6 = match ipv6_status() {
+        Ipv6Status::Enabled => true,
+        Ipv6Status::Disabled => {
+            tracing::info!("IPv6 disabled in the kernel, skipping ip6tables rules");
+            false
+        }
+        Ipv6Status::Unusable => {
+            return Err(Error::ApplyError(
+                "IPv6 is enabled in the kernel but ip6tables is unusable; refusing to \
+                 install an IPv4-only kill-switch (IPv6 traffic would bypass it). \
+                 Install ip6tables and kmod-ip6tables, or disable IPv6."
+                    .into(),
+            ));
+        }
+    };
+
     let v4_script = apply_family(rs, AddrFamily::V4)?;
-    let v6_script = if is_ipv6_enabled() {
+    let v6_script = if with_v6 {
         Some(apply_family(rs, AddrFamily::V6)?)
     } else {
-        tracing::info!("IPv6 disabled, skipping ip6tables rules");
         None
     };
 
@@ -125,12 +143,12 @@ pub fn apply_forwarding_only(rs: &RuleSet) -> Result<()> {
     tracing::debug!("Applying tunnel forwarding plane (kill-switch off) via fw3/iptables");
 
     // Lift any blocking left over from a previous kill-switch-on state.
+    // Cleanup is best-effort for both families — no ipv6_status() gate, the
+    // commands fail harmlessly when ip6tables is absent.
     cleanup_filter(AddrFamily::V4);
     cleanup_mangle(AddrFamily::V4);
-    if is_ipv6_enabled() {
-        cleanup_filter(AddrFamily::V6);
-        cleanup_mangle(AddrFamily::V6);
-    }
+    cleanup_filter(AddrFamily::V6);
+    cleanup_mangle(AddrFamily::V6);
 
     add_masquerade_rules(&rs.tunnel_interfaces)?;
 
@@ -151,10 +169,8 @@ pub fn reset() -> Result<()> {
     remove_masquerade_rules();
     cleanup_filter(AddrFamily::V4);
     cleanup_mangle(AddrFamily::V4);
-    if is_ipv6_enabled() {
-        cleanup_filter(AddrFamily::V6);
-        cleanup_mangle(AddrFamily::V6);
-    }
+    cleanup_filter(AddrFamily::V6);
+    cleanup_mangle(AddrFamily::V6);
 
     clear_persisted_state();
 

@@ -107,25 +107,39 @@ fn parse_ubus_l3_device(json: &str) -> Option<String> {
     }
 }
 
-/// Check whether IPv6 is enabled in the kernel and `ip6tables` is usable.
-pub fn is_ipv6_enabled() -> bool {
+/// Whether the kernel's IPv6 stack is up and, if so, whether `ip6tables`
+/// can actually filter it. The distinction matters for fail-closed behavior:
+/// "kernel IPv6 off" legitimately needs no v6 rules, while "kernel IPv6 on
+/// but ip6tables broken" means v6 traffic flows and CANNOT be firewalled —
+/// treating that as "disabled" would install a v4-only kill-switch with a
+/// silent IPv6 bypass.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ipv6Status {
+    /// IPv6 is disabled in (or absent from) the kernel: nothing to filter.
+    Disabled,
+    /// IPv6 is up and `ip6tables` works.
+    Enabled,
+    /// IPv6 is up but `ip6tables` is missing or broken (no binary, no
+    /// kernel module): v6 traffic flows unfiltered.
+    Unusable,
+}
+
+/// Probe the kernel IPv6 stack and the `ip6tables` toolchain.
+pub fn ipv6_status() -> Ipv6Status {
+    if !Path::new("/proc/sys/net/ipv6").exists() {
+        return Ipv6Status::Disabled;
+    }
     if let Ok(content) = std::fs::read_to_string("/proc/sys/net/ipv6/conf/all/disable_ipv6")
         && content.trim() == "1"
     {
-        return false;
+        return Ipv6Status::Disabled;
     }
-    if !Path::new("/proc/sys/net/ipv6").exists() {
-        return false;
+    // Smoke-test ip6tables: present-but-broken (missing ip6_tables kernel
+    // module) exits non-zero, and a missing binary fails the spawn.
+    match std::process::Command::new("ip6tables").args(["-L", "-n"]).output() {
+        Ok(output) if output.status.success() => Ipv6Status::Enabled,
+        _ => Ipv6Status::Unusable,
     }
-    // Final probe: some systems have IPv6 enabled in sysctl but ip6tables is
-    // missing or broken (no kernel module). Smoke-test it.
-    if let Ok(output) = std::process::Command::new("ip6tables")
-        .args(["-L", "-n"])
-        .output()
-    {
-        return output.status.success();
-    }
-    true
 }
 
 /// Read mwan3 tracking IPs from UCI config.
