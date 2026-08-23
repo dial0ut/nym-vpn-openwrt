@@ -33,9 +33,6 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     #[error("failed to apply firewall rules: {0}")]
     ApplyError(String),
-
-    #[error("failed to install include script: {0}")]
-    InstallError(String),
 }
 
 /// OpenWrt firewall handle. Detects whether the host runs fw3 or fw4 at
@@ -112,19 +109,6 @@ impl Firewall {
             FirewallSystem::Fw3 => fw3::reset(),
             FirewallSystem::Fw4 => fw4::reset(),
             FirewallSystem::Unknown => fw3::reset(),
-        }
-    }
-
-    /// Install the OpenWrt include scripts so our chains survive an
-    /// `/etc/init.d/firewall reload`. Called once during package install.
-    pub fn install_include_scripts() -> Result<()> {
-        match detect_system() {
-            FirewallSystem::Fw3 => fw3::install_include_script(),
-            FirewallSystem::Fw4 => fw4::install_include_script(),
-            FirewallSystem::Unknown => {
-                tracing::warn!("Unknown system, skipping include script installation");
-                Ok(())
-            }
         }
     }
 }

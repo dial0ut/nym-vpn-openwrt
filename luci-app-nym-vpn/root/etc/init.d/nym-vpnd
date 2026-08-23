@@ -65,4 +65,16 @@ service_stopped() {
         i=$((i + 1))
     done
     nft delete table inet nym 2>/dev/null || true
+
+    # fw3 (iptables) routers: the kill-switch chains live in the shared
+    # filter/mangle/nat tables and outlive the daemon just like the nft
+    # table does. Remove the daemon's persisted ruleset, then let the
+    # include script's cleanup branch tear the chains down — the same code
+    # path a firewall reload takes, so stop and reload can't diverge.
+    rm -f /tmp/nym-firewall-v4.rules /tmp/nym-firewall-v6.rules \
+        /tmp/nym-firewall.ifaces 2>/dev/null
+    if ! [ -x /sbin/fw4 ] && ! [ -x /usr/sbin/fw4 ] \
+        && [ -x /usr/share/nym-vpn/fw3-include.sh ]; then
+        /usr/share/nym-vpn/fw3-include.sh 2>/dev/null || true
+    fi
 }

@@ -17,7 +17,6 @@
 use std::io::Write as IoWrite;
 use std::process::{Command, Stdio};
 
-use super::common::FW4_INCLUDE_PATH;
 use super::render_nft;
 use super::rules::RuleSet;
 use super::{Error, Result};
@@ -301,59 +300,4 @@ fn remove_jumps(parent: &str, target: &str) {
             );
         }
     }
-}
-
-/// Configure UCI to use the fw4 include script. The script itself is
-/// installed by the IPK package at [`FW4_INCLUDE_PATH`].
-pub fn install_include_script() -> Result<()> {
-    if !std::path::Path::new(FW4_INCLUDE_PATH).exists() {
-        tracing::warn!(
-            "fw4 include script not found at {FW4_INCLUDE_PATH} \
-             - should be installed by package"
-        );
-    }
-    install_uci_config()
-}
-
-fn install_uci_config() -> Result<()> {
-    let check = Command::new("uci")
-        .args(["get", "firewall.nym_vpn"])
-        .output();
-    if check.map(|o| o.status.success()).unwrap_or(false) {
-        tracing::debug!("UCI firewall.nym_vpn config already exists");
-        return Ok(());
-    }
-
-    // Register as a side-effecting script include: fw4 runs it after building
-    // its table on every start/reload, so our script can re-add the masquerade
-    // and forward jumps inside `inet fw4` that the reload wiped. Note: NOT
-    // `fw4_compatible` — that flag makes fw4 capture the script's stdout as nft
-    // syntax during ruleset assembly (when `inet fw4` doesn't exist yet), which
-    // is wrong for a script that issues `nft add rule inet fw4 ...` side effects.
-    // This matches the proven pattern used by stock OpenWrt/GL.iNet script
-    // includes. (`reload` is an fw3-ism fw4 warns about and ignores — omit it.)
-    let path_setting = format!("firewall.nym_vpn.path={FW4_INCLUDE_PATH}");
-    let commands: &[&[&str]] = &[
-        &["set", "firewall.nym_vpn=include"],
-        &["set", "firewall.nym_vpn.type=script"],
-        &["set", &path_setting],
-        &["set", "firewall.nym_vpn.enabled=1"],
-        &["commit", "firewall"],
-    ];
-
-    for args in commands {
-        let output = Command::new("uci")
-            .args(*args)
-            .output()
-            .map_err(|e| Error::InstallError(format!("spawn uci: {e}")))?;
-        if !output.status.success() {
-            return Err(Error::InstallError(format!(
-                "uci {} failed: {}",
-                args.join(" "),
-                String::from_utf8_lossy(&output.stderr).trim()
-            )));
-        }
-    }
-    tracing::info!("Installed UCI firewall config for Nym VPN (fw4)");
-    Ok(())
 }

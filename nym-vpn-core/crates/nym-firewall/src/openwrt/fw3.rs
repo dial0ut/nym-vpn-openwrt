@@ -13,7 +13,10 @@
 use std::io::Write as IoWrite;
 use std::process::{Command, Stdio};
 
-use super::common::{FW3_HOOK_FORWARD, FW3_HOOK_INPUT, FW3_HOOK_OUTPUT, FW3_INCLUDE_PATH, is_ipv6_enabled};
+use super::common::{
+    FW3_HOOK_FORWARD, FW3_HOOK_INPUT, FW3_HOOK_OUTPUT, FW3_RULES_V4_PATH, FW3_RULES_V6_PATH,
+    IFACES_PATH, is_ipv6_enabled,
+};
 use super::render_iptables::{
     self, AddrFamily, CHAIN_FORWARD, CHAIN_INPUT, CHAIN_MANGLE_OUTPUT, CHAIN_MANGLE_PREROUTING,
     CHAIN_OUTPUT,
@@ -29,30 +32,89 @@ const NAT_CHAIN: &str = "NYM_POSTROUTING";
 pub fn apply(rs: &RuleSet) -> Result<()> {
     tracing::debug!("Applying firewall policy via fw3/iptables backend");
 
-    apply_filter(rs, AddrFamily::V4)?;
-    setup_jumps(AddrFamily::V4)?;
-    if !rs.mangle.is_empty() {
-        setup_mangle_jumps(AddrFamily::V4)?;
-    } else {
-        cleanup_mangle(AddrFamily::V4);
-    }
-
-    if is_ipv6_enabled() {
-        apply_filter(rs, AddrFamily::V6)?;
-        setup_jumps(AddrFamily::V6)?;
-        if !rs.mangle.is_empty() {
-            setup_mangle_jumps(AddrFamily::V6)?;
-        } else {
-            cleanup_mangle(AddrFamily::V6);
-        }
+    let v4_script = apply_family(rs, AddrFamily::V4)?;
+    let v6_script = if is_ipv6_enabled() {
+        Some(apply_family(rs, AddrFamily::V6)?)
     } else {
         tracing::info!("IPv6 disabled, skipping ip6tables rules");
-    }
+        None
+    };
 
     add_masquerade_rules(&rs.tunnel_interfaces)?;
 
+    persist_state(&v4_script, v6_script.as_deref(), &rs.tunnel_interfaces);
+
     tracing::debug!("Firewall policy applied successfully");
     Ok(())
+}
+
+/// Apply the filter (and mangle, when present) plane for one address family
+/// and return the rendered restore script that was applied, for persistence.
+fn apply_family(rs: &RuleSet, family: AddrFamily) -> Result<String> {
+    let script = apply_filter(rs, family)?;
+    setup_jumps(family)?;
+    if !rs.mangle.is_empty() {
+        setup_mangle_jumps(family)?;
+    } else {
+        cleanup_mangle(family);
+    }
+    Ok(script)
+}
+
+/// Persist the applied ruleset for `fw3-include.sh`. Unlike fw4 — whose
+/// `inet nym` table survives a firewall reload untouched — fw3 wipes the
+/// shared iptables tables on every reload, chains and all. The include
+/// script re-applies these files afterwards, so a reload is transparent
+/// exactly like it is on fw4. Best-effort: an unwritable /tmp shouldn't
+/// fail the live apply, but it does degrade reload survival, so log loudly.
+fn persist_state(v4_script: &str, v6_script: Option<&str>, interfaces: &[String]) {
+    write_state_file(FW3_RULES_V4_PATH, v4_script);
+    match v6_script {
+        Some(script) => write_state_file(FW3_RULES_V6_PATH, script),
+        None => remove_state_file(FW3_RULES_V6_PATH),
+    }
+    persist_ifaces(interfaces);
+}
+
+/// Persist (or clear) the tunnel interface list for masquerade restore.
+fn persist_ifaces(interfaces: &[String]) {
+    if interfaces.is_empty() {
+        remove_state_file(IFACES_PATH);
+    } else {
+        let mut buf = interfaces.join("\n");
+        buf.push('\n');
+        write_state_file(IFACES_PATH, &buf);
+    }
+}
+
+/// Write via temp file + rename so a firewall reload racing this apply never
+/// sees a half-written restore script.
+fn write_state_file(path: &str, contents: &str) {
+    let tmp = format!("{path}.tmp");
+    let result = std::fs::write(&tmp, contents).and_then(|()| std::fs::rename(&tmp, path));
+    if let Err(e) = result {
+        tracing::error!(
+            "Failed to persist firewall state to {path}: {e}; \
+             the kill-switch will not survive a firewall reload"
+        );
+        let _ = std::fs::remove_file(&tmp);
+    }
+}
+
+fn remove_state_file(path: &str) {
+    if let Err(e) = std::fs::remove_file(path)
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
+        tracing::warn!("Failed to remove firewall state file {path}: {e}");
+    }
+}
+
+/// Remove all persisted state so the include script's cleanup branch runs on
+/// the next firewall reload instead of resurrecting stale rules.
+fn clear_persisted_state() {
+    remove_state_file(FW3_RULES_V4_PATH);
+    remove_state_file(FW3_RULES_V6_PATH);
+    remove_state_file(IFACES_PATH);
 }
 
 /// Install only the LAN↔tunnel forwarding plane (masquerade), dropping any
@@ -72,6 +134,12 @@ pub fn apply_forwarding_only(rs: &RuleSet) -> Result<()> {
 
     add_masquerade_rules(&rs.tunnel_interfaces)?;
 
+    // No blocking ruleset to resurrect after a reload, but the include
+    // script still needs the interface list to restore masquerade.
+    remove_state_file(FW3_RULES_V4_PATH);
+    remove_state_file(FW3_RULES_V6_PATH);
+    persist_ifaces(&rs.tunnel_interfaces);
+
     tracing::debug!("Tunnel forwarding plane applied successfully");
     Ok(())
 }
@@ -88,6 +156,8 @@ pub fn reset() -> Result<()> {
         cleanup_mangle(AddrFamily::V6);
     }
 
+    clear_persisted_state();
+
     tracing::debug!("Firewall policy reset successfully");
     Ok(())
 }
@@ -97,7 +167,7 @@ pub fn reset() -> Result<()> {
 /// If it is unavailable, remove the daemon-only exceptions entirely. This
 /// preserves the kill switch without silently turning them into unscoped
 /// accepts; reconnect DNS may fail until the extension is installed.
-fn apply_filter(rs: &RuleSet, family: AddrFamily) -> Result<()> {
+fn apply_filter(rs: &RuleSet, family: AddrFamily) -> Result<String> {
     let stripped;
     let rs = if rs.has_skuid() && !owner_match_available(family) {
         let ipt = ipt_cmd(family);
@@ -114,7 +184,8 @@ fn apply_filter(rs: &RuleSet, family: AddrFamily) -> Result<()> {
     };
 
     let script = render_iptables::render(rs, family);
-    run_restore(&script, family)
+    run_restore(&script, family)?;
+    Ok(script)
 }
 
 fn owner_match_available(family: AddrFamily) -> bool {
@@ -345,52 +416,4 @@ fn remove_masquerade_rules() {
     let _ = Command::new("iptables")
         .args(["-w", "-t", "nat", "-X", NAT_CHAIN])
         .output();
-}
-
-/// Configure UCI to use the fw3 include script. The script itself is
-/// installed by the IPK package at [`FW3_INCLUDE_PATH`].
-pub fn install_include_script() -> Result<()> {
-    if !std::path::Path::new(FW3_INCLUDE_PATH).exists() {
-        tracing::warn!(
-            "fw3 include script not found at {FW3_INCLUDE_PATH} \
-             - should be installed by package"
-        );
-    }
-    install_uci_config()
-}
-
-fn install_uci_config() -> Result<()> {
-    let check = Command::new("uci")
-        .args(["get", "firewall.nym_vpn"])
-        .output();
-    if check.map(|o| o.status.success()).unwrap_or(false) {
-        tracing::debug!("UCI firewall.nym_vpn config already exists");
-        return Ok(());
-    }
-
-    let path_setting = format!("firewall.nym_vpn.path={FW3_INCLUDE_PATH}");
-    let commands: &[&[&str]] = &[
-        &["set", "firewall.nym_vpn=include"],
-        &["set", "firewall.nym_vpn.type=script"],
-        &["set", &path_setting],
-        &["set", "firewall.nym_vpn.reload=1"],
-        &["set", "firewall.nym_vpn.enabled=1"],
-        &["commit", "firewall"],
-    ];
-
-    for args in commands {
-        let output = Command::new("uci")
-            .args(*args)
-            .output()
-            .map_err(|e| Error::InstallError(format!("spawn uci: {e}")))?;
-        if !output.status.success() {
-            return Err(Error::InstallError(format!(
-                "uci {} failed: {}",
-                args.join(" "),
-                String::from_utf8_lossy(&output.stderr).trim()
-            )));
-        }
-    }
-    tracing::info!("Installed UCI firewall config for Nym VPN (fw3)");
-    Ok(())
 }

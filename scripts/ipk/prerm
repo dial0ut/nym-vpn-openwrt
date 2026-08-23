@@ -69,7 +69,8 @@ uci delete firewall.nym_vpn 2>/dev/null
 uci commit firewall 2>/dev/null
 
 # Clean up temporary files (safe on both upgrade and removal)
-rm -f /tmp/nym-firewall-v4.rules /tmp/nym-firewall-v6.rules /tmp/nym-firewall.nft 2>/dev/null
+rm -f /tmp/nym-firewall-v4.rules /tmp/nym-firewall-v6.rules /tmp/nym-firewall.nft \
+    /tmp/nym-firewall.ifaces 2>/dev/null
 rm -f /tmp/dnsmasq.d/nym-adblock.conf 2>/dev/null
 rm -f /tmp/nym-dns-backup /tmp/resolv.conf.nymbackup 2>/dev/null
 rm -f /tmp/nym-watchdog.state 2>/dev/null

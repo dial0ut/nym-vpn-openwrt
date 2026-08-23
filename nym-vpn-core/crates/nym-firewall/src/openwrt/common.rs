@@ -5,9 +5,15 @@
 use std::net::IpAddr;
 use std::path::Path;
 
-/// Include script paths (installed by the IPK package).
-pub const FW3_INCLUDE_PATH: &str = "/usr/share/nym-vpn/fw3-include.sh";
-pub const FW4_INCLUDE_PATH: &str = "/usr/share/nym-vpn/fw4-include.sh";
+/// Persisted fw3 state, consumed by `fw3-include.sh` to re-apply the
+/// kill-switch after an fw3 reload wipes the iptables tables. The paths are
+/// part of the contract with that script and with the package prerm — keep
+/// them in sync when renaming.
+pub const FW3_RULES_V4_PATH: &str = "/tmp/nym-firewall-v4.rules";
+pub const FW3_RULES_V6_PATH: &str = "/tmp/nym-firewall-v6.rules";
+/// Tunnel interface list (one name per line) for masquerade restore. Shared
+/// naming with the fw4 include script, which reads it as an optional hint.
+pub const IFACES_PATH: &str = "/tmp/nym-firewall.ifaces";
 
 /// fw3 hook chains — user chains in the `filter` table that survive a fw3
 /// reload. Our chains are jumped to from the front of these.
