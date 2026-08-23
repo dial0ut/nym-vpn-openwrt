@@ -39,8 +39,10 @@ else
         # Remove jump rules from mangle table built-ins (inbound exemption)
         $ipt -t mangle -D PREROUTING -j NYM_MANGLE_PREROUTING 2>/dev/null
         $ipt -t mangle -D OUTPUT -j NYM_MANGLE_OUTPUT 2>/dev/null
+        # Remove the forwarding-plane jump (kill-switch on and off states)
+        $ipt -D forwarding_rule -j NYM_FORWARD_LAN 2>/dev/null
         # Flush and delete our chains in filter + mangle
-        for chain in NYM_INPUT NYM_OUTPUT NYM_FORWARD; do
+        for chain in NYM_INPUT NYM_OUTPUT NYM_FORWARD NYM_FORWARD_LAN; do
             $ipt -F "$chain" 2>/dev/null
             $ipt -X "$chain" 2>/dev/null
         done

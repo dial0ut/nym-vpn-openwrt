@@ -41,6 +41,7 @@ NYM_FORWARD="NYM_FORWARD"
 NYM_MANGLE_PRE="NYM_MANGLE_PREROUTING"
 NYM_MANGLE_OUT="NYM_MANGLE_OUTPUT"
 NAT_CHAIN="NYM_POSTROUTING"
+FORWARD_LAN_CHAIN="NYM_FORWARD_LAN"
 
 # Set up jump rules from fw3's hook chains to our filter chains.
 setup_jumps() {
@@ -144,6 +145,45 @@ cleanup_masquerade() {
     iptables -w -t nat -X "$NAT_CHAIN" 2>/dev/null || true
 }
 
+# Rebuild the LAN<->tunnel forwarding plane (fw3 analogue of fw4's
+# nym_forward_lan): per-interface MSS clamps and forward accepts, jumped
+# from forwarding_rule. Mirrors add_forwarding_rules in the fw3 backend.
+# Needed with the kill-switch on AND off — the tun devices are in no fw3
+# zone, so fw3's global forward policy rejects LAN clients without it.
+restore_forwarding() {
+    if [ ! -f "$IFACES_FILE" ]; then
+        cleanup_forwarding
+        return 0
+    fi
+
+    local ipt iface
+    for ipt in iptables ip6tables; do
+        $ipt -w -N "$FORWARD_LAN_CHAIN" 2>/dev/null || true
+        $ipt -w -F "$FORWARD_LAN_CHAIN" 2>/dev/null || true
+        while read -r iface; do
+            [ -n "$iface" ] || continue
+            $ipt -w -A "$FORWARD_LAN_CHAIN" -o "$iface" -p tcp --tcp-flags SYN,RST SYN \
+                -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
+            $ipt -w -A "$FORWARD_LAN_CHAIN" -i "$iface" -p tcp --tcp-flags SYN,RST SYN \
+                -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
+            $ipt -w -A "$FORWARD_LAN_CHAIN" -o "$iface" -j ACCEPT 2>/dev/null || true
+            $ipt -w -A "$FORWARD_LAN_CHAIN" -i "$iface" -m conntrack \
+                --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
+        done < "$IFACES_FILE"
+        $ipt -w -D "$HOOK_FORWARD" -j "$FORWARD_LAN_CHAIN" 2>/dev/null || true
+        $ipt -w -I "$HOOK_FORWARD" 1 -j "$FORWARD_LAN_CHAIN" 2>/dev/null || true
+    done
+}
+
+cleanup_forwarding() {
+    local ipt
+    for ipt in iptables ip6tables; do
+        $ipt -w -D "$HOOK_FORWARD" -j "$FORWARD_LAN_CHAIN" 2>/dev/null || true
+        $ipt -w -F "$FORWARD_LAN_CHAIN" 2>/dev/null || true
+        $ipt -w -X "$FORWARD_LAN_CHAIN" 2>/dev/null || true
+    done
+}
+
 # Main logic
 main() {
     if [ -f "$RULES_V4" ]; then
@@ -165,9 +205,11 @@ main() {
         cleanup_mangle "ip6tables"
     fi
 
-    # Always reconcile masquerade with the persisted interface list — it is
-    # needed with the kill-switch both on and off (forwarding-only mode).
+    # Always reconcile the tunnel plane (masquerade + LAN forwarding) with
+    # the persisted interface list — it is needed with the kill-switch both
+    # on and off (forwarding-only mode).
     restore_masquerade
+    restore_forwarding
 }
 
 main "$@"

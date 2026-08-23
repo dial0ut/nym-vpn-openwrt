@@ -27,6 +27,15 @@ use super::{Error, Result};
 /// Chain we own in the iptables `nat` table; POSTROUTING jumps to it.
 const NAT_CHAIN: &str = "NYM_POSTROUTING";
 
+/// Chain we own in the `filter` table holding the LAN↔tunnel forwarding
+/// plane — the fw3 analogue of fw4's `nym_forward_lan` inside `inet fw4`.
+/// Needed whenever a tunnel is up, kill-switch on or off: the tun devices
+/// belong to no fw3 zone, so without explicit accepts fw3's global forward
+/// policy rejects every forwarded LAN flow the moment our kill-switch
+/// chains are absent. Also carries the TCP MSS clamp — the 1340-MTU 2-hop
+/// tunnel blackholes full-size segments whenever ICMP frag-needed is lost.
+const FORWARD_LAN_CHAIN: &str = "NYM_FORWARD_LAN";
+
 /// Apply the [`RuleSet`] to fw3. Order is deliberate: install the kill-switch
 /// chains first (fail-closed) before touching the nat table for masquerade.
 pub fn apply(rs: &RuleSet) -> Result<()> {
@@ -58,7 +67,16 @@ pub fn apply(rs: &RuleSet) -> Result<()> {
         None
     };
 
-    add_masquerade_rules(&rs.tunnel_interfaces)?;
+    // No interfaces (Blocked) means no masquerade/forwarding chains at all —
+    // matching what the include script reconstructs, so a reload round-trips
+    // to the exact same state instead of dropping our empty chains.
+    if rs.tunnel_interfaces.is_empty() {
+        remove_masquerade_rules();
+        remove_forwarding_rules();
+    } else {
+        add_masquerade_rules(&rs.tunnel_interfaces)?;
+        add_forwarding_rules(&rs.tunnel_interfaces)?;
+    }
 
     persist_state(&v4_script, v6_script.as_deref(), &rs.tunnel_interfaces);
 
@@ -194,7 +212,13 @@ pub fn apply_forwarding_only(rs: &RuleSet) -> Result<()> {
     cleanup_filter(AddrFamily::V6);
     cleanup_mangle(AddrFamily::V6);
 
-    add_masquerade_rules(&rs.tunnel_interfaces)?;
+    if rs.tunnel_interfaces.is_empty() {
+        remove_masquerade_rules();
+        remove_forwarding_rules();
+    } else {
+        add_masquerade_rules(&rs.tunnel_interfaces)?;
+        add_forwarding_rules(&rs.tunnel_interfaces)?;
+    }
 
     // No blocking ruleset to resurrect after a reload, but the include
     // script still needs the interface list to restore masquerade.
@@ -211,6 +235,7 @@ pub fn reset() -> Result<()> {
     tracing::debug!("Resetting firewall policy via fw3/iptables backend");
 
     remove_masquerade_rules();
+    remove_forwarding_rules();
     cleanup_filter(AddrFamily::V4);
     cleanup_mangle(AddrFamily::V4);
     cleanup_filter(AddrFamily::V6);
@@ -456,6 +481,96 @@ fn add_masquerade_rules(interfaces: &[String]) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Populate [`FORWARD_LAN_CHAIN`] with per-interface MSS clamps and forward
+/// accepts, and jump to it from fw3's `forwarding_rule` hook. Mirrors
+/// `integrate_with_fw4`: owned chain, flush + repopulate, jump re-inserted
+/// at position 1. IPv4 failures are hard errors; IPv6 is best-effort (the
+/// kernel may not have v6 at all, and these rules are additive accepts).
+fn add_forwarding_rules(interfaces: &[String]) -> Result<()> {
+    add_forwarding_rules_family("iptables", interfaces)?;
+    if let Err(e) = add_forwarding_rules_family("ip6tables", interfaces) {
+        tracing::debug!("ip6tables forwarding plane (non-fatal): {e}");
+    }
+    Ok(())
+}
+
+fn add_forwarding_rules_family(ipt: &str, interfaces: &[String]) -> Result<()> {
+    // -N errors with "Chain already exists" on re-runs; treat as success.
+    let output = Command::new(ipt)
+        .args(["-w", "-N", FORWARD_LAN_CHAIN])
+        .output()
+        .map_err(|e| Error::ApplyError(format!("spawn {ipt}: {e}")))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if !stderr.contains("exists") {
+            return Err(Error::ApplyError(format!(
+                "{ipt} -N {FORWARD_LAN_CHAIN} failed: {}",
+                stderr.trim()
+            )));
+        }
+    }
+
+    run_ipt(ipt, &["-w", "-F", FORWARD_LAN_CHAIN])?;
+
+    for iface in interfaces {
+        // Clamp TCP MSS to the path MTU for flows entering/leaving the
+        // tunnel (see the fw4 backend for the full rationale). Must precede
+        // the accepts.
+        run_ipt(ipt, &[
+            "-w", "-A", FORWARD_LAN_CHAIN, "-o", iface, "-p", "tcp", "--tcp-flags",
+            "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu",
+        ])?;
+        run_ipt(ipt, &[
+            "-w", "-A", FORWARD_LAN_CHAIN, "-i", iface, "-p", "tcp", "--tcp-flags",
+            "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu",
+        ])?;
+        run_ipt(ipt, &["-w", "-A", FORWARD_LAN_CHAIN, "-o", iface, "-j", "ACCEPT"])?;
+        // Return traffic from tunnel to LAN, scoped to established flows —
+        // the exit never initiates into the LAN.
+        run_ipt(ipt, &[
+            "-w", "-A", FORWARD_LAN_CHAIN, "-i", iface, "-m", "conntrack", "--ctstate",
+            "ESTABLISHED,RELATED", "-j", "ACCEPT",
+        ])?;
+        tracing::debug!("Populated {FORWARD_LAN_CHAIN} ({ipt}) for interface {iface}");
+    }
+
+    // Re-insert the jump at position 1 (delete first: idempotent re-applies).
+    let _ = Command::new(ipt)
+        .args(["-w", "-D", FW3_HOOK_FORWARD, "-j", FORWARD_LAN_CHAIN])
+        .output();
+    run_ipt(ipt, &["-w", "-I", FW3_HOOK_FORWARD, "1", "-j", FORWARD_LAN_CHAIN])
+}
+
+fn remove_forwarding_rules() {
+    for ipt in ["iptables", "ip6tables"] {
+        let _ = Command::new(ipt)
+            .args(["-w", "-D", FW3_HOOK_FORWARD, "-j", FORWARD_LAN_CHAIN])
+            .output();
+        let _ = Command::new(ipt)
+            .args(["-w", "-F", FORWARD_LAN_CHAIN])
+            .output();
+        let _ = Command::new(ipt)
+            .args(["-w", "-X", FORWARD_LAN_CHAIN])
+            .output();
+    }
+}
+
+fn run_ipt(ipt: &str, args: &[&str]) -> Result<()> {
+    let output = Command::new(ipt)
+        .args(args)
+        .output()
+        .map_err(|e| Error::ApplyError(format!("spawn {ipt}: {e}")))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(Error::ApplyError(format!(
+            "{ipt} {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr).trim()
+        )))
+    }
 }
 
 fn remove_masquerade_rules() {
