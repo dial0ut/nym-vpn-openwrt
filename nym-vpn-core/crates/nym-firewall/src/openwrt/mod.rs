@@ -188,8 +188,9 @@ mod e2e_tests {
         // Per-chain hook headers at filter -10.
         assert!(script.contains("priority filter - 10"));
 
-        // Allowed endpoint shows up in OUTPUT.
-        assert!(script.contains("ip daddr 1.2.3.4 udp dport 443 accept"));
+        // Allowed endpoint shows up in OUTPUT, uid-scoped to the daemon:
+        // the endpoint is marked `AllowedClients::Root`.
+        assert!(script.contains("meta skuid 0 ip daddr 1.2.3.4 udp dport 443 accept"));
 
         // DNS to 8.8.8.8 allowed for the daemon (root) only — dnsmasq relays
         // LAN queries as router OUTPUT, so an unscoped accept is a LAN leak.
@@ -249,8 +250,9 @@ mod e2e_tests {
         // v6 uses icmp6 variants.
         assert!(v6.contains("-j REJECT --reject-with icmp6-port-unreachable"));
 
-        // Allowed endpoint in v4 only (it's an IPv4 address).
-        assert!(v4.contains("-d 1.2.3.4 -p udp --dport 443 -j ACCEPT"));
+        // Allowed endpoint in v4 only (it's an IPv4 address), uid-scoped to
+        // the daemon: the endpoint is marked `AllowedClients::Root`.
+        assert!(v4.contains("-d 1.2.3.4 -p udp --dport 443 -m owner --uid-owner 0 -j ACCEPT"));
         assert!(!v6.contains("-d 1.2.3.4"));
 
         // Both files end with COMMIT.
@@ -355,8 +357,9 @@ mod e2e_tests {
         assert!(nft.contains("meta mark 0x14e accept"));
         assert!(v4.contains("-m mark --mark 0x14e -j ACCEPT"));
         // CF edge endpoint from allowed_endpoints flows into Connected — the
-        // test helper builds UDP endpoints, so we assert the UDP variant.
-        assert!(nft.contains("ip daddr 198.41.192.167 udp dport 7844 accept"));
+        // test helper builds UDP endpoints marked Root, so the accept is
+        // uid-scoped to the daemon.
+        assert!(nft.contains("meta skuid 0 ip daddr 198.41.192.167 udp dport 7844 accept"));
         // Mangle priority + chain ordering checks.
         assert!(nft.contains("type filter hook prerouting priority mangle - 10"));
         assert!(nft.contains("type filter hook output priority mangle - 10"));

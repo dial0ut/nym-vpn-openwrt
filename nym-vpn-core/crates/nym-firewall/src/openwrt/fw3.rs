@@ -188,10 +188,11 @@ fn apply_filter(rs: &RuleSet, family: AddrFamily) -> Result<String> {
     let rs = if rs.has_skuid() && !owner_match_available(family) {
         let ipt = ipt_cmd(family);
         tracing::error!(
-            "{ipt} owner match unavailable; omitting daemon-only DNS exceptions. \
-             The kill switch remains active but the daemon cannot resolve DNS, \
-             so connecting will fail until the extension is installed. Install \
-             iptables-mod-extra and kmod-ipt-extra, or disable the kill switch."
+            "{ipt} owner match unavailable; omitting daemon-only exceptions \
+             (DNS and API endpoints). The kill switch remains active but the \
+             daemon cannot resolve DNS or reach the API, so connecting will \
+             fail until the extension is installed. Install iptables-mod-extra \
+             and kmod-ipt-extra, or disable the kill switch."
         );
         stripped = rs.without_skuid_rules();
         &stripped

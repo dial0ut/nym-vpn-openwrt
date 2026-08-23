@@ -13,7 +13,9 @@ use ipnetwork::IpNetwork;
 use super::common;
 use super::rules::*;
 use crate::FirewallPolicy;
-use crate::net::{AllowedEndpoint, InboundExemption, TransportProtocol, TunnelMetadata};
+use crate::net::{
+    AllowedClients, AllowedEndpoint, InboundExemption, TransportProtocol, TunnelMetadata,
+};
 
 /// LAN networks (RFC1918 private + IPv6 link-local + ULA).
 const LAN_NETS_V4: &[&str] = &["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"];
@@ -383,12 +385,20 @@ fn allow_endpoint(rs: &mut RuleSet, ep: &AllowedEndpoint) {
         TransportProtocol::Udp => Proto::Udp,
     };
     let family = family_of(&ip);
-    rs.filter.output.push(
-        Rule::accept(family)
-            .proto(proto)
-            .daddr(ip)
-            .dport(port),
-    );
+    let mut out = Rule::accept(family)
+        .proto(proto)
+        .daddr(ip)
+        .dport(port);
+    // Honor the `AllowedClients` contract: `Root`-marked endpoints (API,
+    // gateway control while blocked/connecting) are the daemon's own — scope
+    // the output accept to uid 0 like the daemon-only DNS exceptions, so no
+    // other router-local process can use the hole. Input stays unscoped:
+    // inbound packets carry no local socket owner, and without the scoped
+    // output rule no reply traffic exists anyway.
+    if ep.clients == AllowedClients::Root {
+        out = out.skuid(crate::ROOT_UID);
+    }
+    rs.filter.output.push(out);
     rs.filter.input.push(
         Rule::accept(family)
             .proto(proto)
@@ -802,6 +812,53 @@ mod tests {
                 && r.verdict == Verdict::Accept
         });
         assert!(has_endpoint_accept, "allowed_endpoints not emitted in OUTPUT");
+    }
+
+    #[test]
+    fn root_endpoints_are_uid_scoped_in_output() {
+        // `AllowedClients::Root` is a contract: only the daemon (uid 0) may
+        // use the hole. The output accept must carry the uid scope, exactly
+        // like the daemon-only DNS exceptions.
+        let policy = FirewallPolicy::Blocked {
+            allow_lan: false,
+            allowed_endpoints: vec![ep([1, 2, 3, 4], 443)], // ep() marks Root
+            dns_servers: vec![],
+        };
+        let rs = compile(&policy);
+        let out = rs
+            .filter
+            .output
+            .rules
+            .iter()
+            .find(|r| r.matches.dport == Some(443) && r.matches.daddr.is_some())
+            .expect("endpoint accept present");
+        assert_eq!(out.matches.skuid, Some(0), "Root endpoint must be uid-scoped");
+
+        // `All`-marked endpoints (Connected peer endpoints) stay unscoped.
+        let all_ep = AllowedEndpoint::new(
+            Endpoint::from_socket_address(
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::new(5, 6, 7, 8)), 51820),
+                TransportProtocol::Udp,
+            ),
+            AllowedClients::All,
+        );
+        let policy = FirewallPolicy::Connected {
+            peer_endpoints: vec![all_ep],
+            tunnel: tunnel_iface("wg0", [10, 64, 0, 2]),
+            allow_lan: false,
+            dns_config: dns_config(&[], &[]),
+            allowed_endpoints: vec![],
+            inbound_exemptions: vec![],
+        };
+        let rs = compile(&policy);
+        let out = rs
+            .filter
+            .output
+            .rules
+            .iter()
+            .find(|r| r.matches.dport == Some(51820))
+            .expect("peer endpoint accept present");
+        assert_eq!(out.matches.skuid, None, "All endpoint must stay unscoped");
     }
 
     #[test]
