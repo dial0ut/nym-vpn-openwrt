@@ -11,6 +11,12 @@ use std::path::Path;
 /// them in sync when renaming.
 pub const FW3_RULES_V4_PATH: &str = "/tmp/nym-firewall-v4.rules";
 pub const FW3_RULES_V6_PATH: &str = "/tmp/nym-firewall-v6.rules";
+/// Present for the full duration of any fw3 state transition. The reload
+/// include treats its presence as an instruction to install an emergency
+/// OUTPUT/FORWARD block instead of reading or cleaning partially-updated
+/// persisted state. A crash deliberately leaves it behind; a later successful
+/// apply/reset or an explicit daemon stop removes it.
+pub const FW3_TRANSITION_PATH: &str = "/tmp/nym-firewall.transition";
 /// Tunnel interface list (one name per line) for masquerade restore. Shared
 /// naming with the fw4 include script, which reads it as an optional hint.
 pub const IFACES_PATH: &str = "/tmp/nym-firewall.ifaces";

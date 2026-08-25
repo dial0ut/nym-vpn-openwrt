@@ -100,23 +100,42 @@ not an egress bypass. Output and forward established accepts are scoped to the t
 inside the tunnel-allow rules instead. A blanket established accept in those chains let WAN-bound
 established flows — IPv6 during reconnects especially — walk straight past the kill-switch.
 
-### Nothing is applied during connect
+### Bootstrap stays fail-closed
 
-While the daemon is still in `Connecting`, it does not know the gateway endpoints yet. Applying
-the kill-switch at that point would block all outbound traffic including the connection setup —
-the daemon would firewall itself away from the gateways it is trying to reach.
-
-So the apply is skipped entirely while both the peer endpoint list and the allowed endpoint list
-are empty, and runs as soon as either is populated.
+The first `Connecting` policy is applied even before gateway/API endpoints are known. It permits
+only daemon-scoped bootstrap DNS and NTP plus the base DHCP/NDP/mwan3 traffic, so endpoint
+resolution can proceed without opening router or LAN egress. As addresses are resolved they are
+added to the daemon-scoped allow-list. Disconnected and Error use the same blocked bootstrap
+policy when the on-disk endpoint cache is absent or expired.
 
 ## Surviving firewall reloads
 
 OpenWrt rebuilds its entire ruleset from scratch on every reload, and reloads are frequent:
 network reconfiguration, DHCP changes, dnsmasq restarts, a manual `fw3 reload` or `fw4 reload`.
 
-What a reload wipes is not the kill-switch itself — that lives in its own `inet nym` table and
-survives — but the daemon's masquerade and forward integration inside `inet fw4`. Lose that and
-LAN clients drop off until the daemon happens to re-apply.
+On fw4 the kill-switch lives in its own `inet nym` table and survives; the reload only wipes the
+daemon's masquerade and forward integration inside `inet fw4`. On fw3 all custom iptables chains
+are wiped, so the daemon persists the applied restore scripts and tunnel-interface list under
+`/tmp`; the fw3 include restores both blocking and forwarding planes.
+
+fw3 policy changes use a fail-closed transition protocol. Before touching live or persisted state,
+the daemon creates `/tmp/nym-firewall.transition`. While the marker exists, a firewall reload's
+include run installs dedicated emergency OUTPUT/FORWARD drop chains (`NYM_EMERGENCY_OUT/FWD`;
+INPUT is untouched and reply-direction packets are accepted, preserving SSH/LuCI management) instead of interpreting absent or
+partially-written rules files as kill-switch-off. Once every v4/v6/interface file is complete, the
+daemon removes the marker; if fw3's hook jumps are gone (a reload raced the apply) it re-activates
+the desired policy from the same persisted scripts and lifts the emergency block last. The daemon
+installs the emergency block itself only for a family's first activation (no hook jumps exist yet
+for it — on first start, or for IPv6 when it becomes enabled after an IPv4-only policy — so a crash
+between creating the chains and hooking them would otherwise leave that traffic open until the
+daemon respawns); re-applying a live policy never blackholes traffic, because `*-restore` replaces
+chain contents atomically and hook jumps are only (re)inserted when absent or when a foreign rule
+has been placed ahead of them — each Nym jump must lead its `*_rule` hook chain, and the LAN
+forwarding plane (`NYM_FORWARD_LAN`, which carries the MSS clamp) must be rule 1 ahead of
+`NYM_FORWARD`. A
+crash leaves the marker behind (reloads stay fail-closed); a later successful apply/reset or an
+explicit service stop clears it. In the include, a restore or mandatory-jump failure also falls
+back to the emergency block and returns failure rather than claiming success.
 
 Both backends register a `firewall.nym_vpn` UCI include section pointing at a script the firewall
 framework runs during its reload cycle:
@@ -131,8 +150,13 @@ stdout and splice it into the ruleset as nft syntax during assembly. What is nee
 opposite: the script's `nft add` side effects have to run *after* the table is loaded. Setting the
 flag looks like the obvious fix and quietly breaks the integration.
 
-The fw4 include is also registered at install time by `/etc/uci-defaults/luci-app-nym-vpn`, not
-only by the running daemon, so a fresh install is covered before the daemon first connects.
+The active backend's include is reconciled at install and upgrade time by
+`/etc/uci-defaults/luci-app-nym-vpn` (invoked immediately by package `postinst`), so a fresh install
+does not wait for the next reboot to gain reload protection. Backend detection is shared
+(`/usr/share/nym-vpn/fw-backend.sh`, used by uci-defaults, `prerm` and the init script): live
+state first, then the firewall init script's own backend, then binary presence — so a boot-time
+run on a vendor image shipping both stacks still registers the right include. `prerm` leaves the
+UCI section alone on upgrades so an interrupted transaction cannot strand the router without it.
 
 ## Inbound service exemptions
 

@@ -13,7 +13,11 @@
 #     /tmp/nym-firewall-v4.rules  iptables-restore script (filter [+ mangle])
 #     /tmp/nym-firewall-v6.rules  ip6tables-restore script, if IPv6 is up
 #     /tmp/nym-firewall.ifaces    tunnel interfaces needing masquerade
-#   and this script re-applies them after every reload. No rules files means
+#     /tmp/nym-firewall.transition fail-closed multi-file update marker
+#   and this script re-applies them after every reload. While the transition
+#   marker exists it installs dedicated emergency OUTPUT/FORWARD drops (reply
+#   traffic for inbound management sessions excepted) instead of reading or
+#   cleaning partially-updated state. No rules files means
 #   no blocking policy is in force (kill-switch off, or daemon stopped) and
 #   any leftover Nym chains are torn down instead. The init script runs this
 #   script for that cleanup branch on explicit daemon stop, too.
@@ -27,6 +31,7 @@ set -e
 RULES_V4="/tmp/nym-firewall-v4.rules"
 RULES_V6="/tmp/nym-firewall-v6.rules"
 IFACES_FILE="/tmp/nym-firewall.ifaces"
+TRANSITION_FILE="/tmp/nym-firewall.transition"
 
 # fw3 hook chains (user chains fw3 recreates on every reload).
 HOOK_INPUT="input_rule"
@@ -42,20 +47,116 @@ NYM_MANGLE_PRE="NYM_MANGLE_PREROUTING"
 NYM_MANGLE_OUT="NYM_MANGLE_OUTPUT"
 NAT_CHAIN="NYM_POSTROUTING"
 FORWARD_LAN_CHAIN="NYM_FORWARD_LAN"
+EMERGENCY_OUT="NYM_EMERGENCY_OUT"
+EMERGENCY_FWD="NYM_EMERGENCY_FWD"
 
-# Set up jump rules from fw3's hook chains to our filter chains.
+# Make a jump lead its hook chain. Mode "first": it must be rule 1. Mode
+# "leading": only jumps to our own NYM_* chains may precede it (a foreign
+# rule inserted ahead of the kill-switch could accept traffic past it). A
+# jump already in a valid position is left alone — deleting and re-inserting
+# would leave the chain unhooked for a moment. Otherwise insert at 1 first,
+# then drop stale later copies, so there is never a moment without it.
+ensure_jump() {
+    local ipt="$1" hook="$2" target="$3" mode="$4" rules pos n ok first
+
+    rules=$($ipt -w -S "$hook" 2>/dev/null | grep -e "^-A ") || rules=""
+    pos=$(printf "%s\n" "$rules" | grep -n -x -e "-A $hook -j $target" | head -1 | cut -d: -f1)
+    ok=0
+    if [ "$pos" = 1 ]; then
+        ok=1
+    elif [ -n "$pos" ] && [ "$mode" = leading ] \
+        && ! printf "%s\n" "$rules" | head -n $((pos - 1)) | grep -qv -e "-j NYM_"; then
+        ok=1
+    fi
+    if [ "$ok" != 1 ]; then
+        $ipt -w -I "$hook" 1 -j "$target" 2>/dev/null || return 1
+    fi
+    # Drop stale duplicates after the leading occurrence, highest first.
+    first=""
+    for n in $($ipt -w -S "$hook" 2>/dev/null | grep -e "^-A " \
+        | grep -n -x -e "-A $hook -j $target" | cut -d: -f1 | sort -rn); do
+        first="$n"
+    done
+    for n in $($ipt -w -S "$hook" 2>/dev/null | grep -e "^-A " \
+        | grep -n -x -e "-A $hook -j $target" | cut -d: -f1 | sort -rn); do
+        [ "$n" -gt "${first:-1}" ] && $ipt -w -D "$hook" "$n" 2>/dev/null
+    done
+    return 0
+}
+
+# Mangle has no fw3 *_rule hook chains and position is not security-relevant
+# there (an unmarked exempted flow stays blocked), so presence is enough.
+ensure_mangle_jump() {
+    local ipt="$1" hook="$2" target="$3"
+
+    $ipt -w -t mangle -C "$hook" -j "$target" 2>/dev/null \
+        || $ipt -w -t mangle -I "$hook" 1 -j "$target" 2>/dev/null
+}
+
+# Set up jump rules from fw3's hook chains to our filter chains. Insertion is
+# mandatory: restored chain contents provide no protection when unreachable.
 setup_jumps() {
     local ipt="$1"
 
-    # Remove any existing jumps first (handles duplicates from previous runs)
-    $ipt -w -D "$HOOK_INPUT" -j "$NYM_INPUT" 2>/dev/null || true
-    $ipt -w -D "$HOOK_OUTPUT" -j "$NYM_OUTPUT" 2>/dev/null || true
-    $ipt -w -D "$HOOK_FORWARD" -j "$NYM_FORWARD" 2>/dev/null || true
+    ensure_jump "$ipt" "$HOOK_INPUT" "$NYM_INPUT" leading || return 1
+    ensure_jump "$ipt" "$HOOK_OUTPUT" "$NYM_OUTPUT" leading || return 1
+    ensure_jump "$ipt" "$HOOK_FORWARD" "$NYM_FORWARD" leading || return 1
+}
 
-    # Insert jumps at position 1 (first rule, highest priority)
-    $ipt -w -I "$HOOK_INPUT" 1 -j "$NYM_INPUT" 2>/dev/null || true
-    $ipt -w -I "$HOOK_OUTPUT" 1 -j "$NYM_OUTPUT" 2>/dev/null || true
-    $ipt -w -I "$HOOK_FORWARD" 1 -j "$NYM_FORWARD" 2>/dev/null || true
+# Last-resort fail-closed policy when a transition is active or a saved
+# restore/jump setup fails. Dedicated chains avoid clobbering the desired
+# policy while it is built. The restore transaction creates, fills and hooks
+# both drops atomically. INPUT is deliberately untouched so LuCI/SSH continue
+# to follow fw3's management policy — and because fw3 runs output_rule BEFORE
+# its own established-accept, the OUTPUT block must itself let reply-direction
+# packets through (--ctdir REPLY: the router answering a connection someone
+# opened to it) or those management sessions would be dropped on the way out.
+# Router-originated flows are in the ORIGINAL direction and stay blocked.
+# IPv6 neighbour discovery is kept so on-link reachability survives.
+emergency_block() {
+    local ipt="$1" restore="${1}-restore"
+
+    emergency_rules() {
+        cat <<EOF
+*filter
+:$EMERGENCY_OUT - [0:0]
+:$EMERGENCY_FWD - [0:0]
+-F $EMERGENCY_OUT
+-F $EMERGENCY_FWD
+-A $EMERGENCY_OUT -m conntrack --ctstate RELATED,ESTABLISHED --ctdir REPLY -j ACCEPT
+EOF
+        if [ "$ipt" = "ip6tables" ]; then
+            cat <<EOF
+-A $EMERGENCY_OUT -p icmpv6 --icmpv6-type neighbour-solicitation -j ACCEPT
+-A $EMERGENCY_OUT -p icmpv6 --icmpv6-type neighbour-advertisement -j ACCEPT
+EOF
+        fi
+        cat <<EOF
+-A $EMERGENCY_OUT -j DROP
+-A $EMERGENCY_FWD -j DROP
+-I $HOOK_OUTPUT 1 -j $EMERGENCY_OUT
+-I $HOOK_FORWARD 1 -j $EMERGENCY_FWD
+COMMIT
+EOF
+    }
+
+    emergency_rules | $restore --noflush -w 2>/dev/null \
+        || emergency_rules | $restore --noflush 2>/dev/null
+}
+
+cleanup_emergency() {
+    local ipt="$1" hook chain
+
+    for hook in "$HOOK_OUTPUT" "$HOOK_FORWARD"; do
+        if [ "$hook" = "$HOOK_OUTPUT" ]; then chain="$EMERGENCY_OUT"; else chain="$EMERGENCY_FWD"; fi
+        while $ipt -w -D "$hook" -j "$chain" 2>/dev/null; do :; done
+        # A command error must not masquerade as "rule absent".
+        $ipt -w -C "$hook" -j "$chain" 2>/dev/null && return 1
+        if $ipt -w -L "$chain" -n >/dev/null 2>&1; then
+            $ipt -w -F "$chain" 2>/dev/null || return 1
+            $ipt -w -X "$chain" 2>/dev/null || return 1
+        fi
+    done
 }
 
 # Mangle has no fw3 *_rule hook chains — jump straight from the built-ins,
@@ -63,10 +164,8 @@ setup_jumps() {
 setup_mangle_jumps() {
     local ipt="$1"
 
-    $ipt -w -t mangle -D PREROUTING -j "$NYM_MANGLE_PRE" 2>/dev/null || true
-    $ipt -w -t mangle -D OUTPUT -j "$NYM_MANGLE_OUT" 2>/dev/null || true
-    $ipt -w -t mangle -I PREROUTING 1 -j "$NYM_MANGLE_PRE" 2>/dev/null || true
-    $ipt -w -t mangle -I OUTPUT 1 -j "$NYM_MANGLE_OUT" 2>/dev/null || true
+    ensure_mangle_jump "$ipt" PREROUTING "$NYM_MANGLE_PRE" || true
+    ensure_mangle_jump "$ipt" OUTPUT "$NYM_MANGLE_OUT" || true
 }
 
 cleanup_filter() {
@@ -103,17 +202,26 @@ cleanup_mangle() {
 apply_rules() {
     local restore="$1" file="$2" ipt="$3"
 
-    if $restore --noflush -w < "$file" 2>/dev/null || $restore --noflush < "$file"; then
-        setup_jumps "$ipt"
+    if ($restore --noflush -w < "$file" 2>/dev/null || $restore --noflush < "$file") \
+        && setup_jumps "$ipt"; then
         if grep -q '^\*mangle' "$file"; then
             setup_mangle_jumps "$ipt"
         else
             cleanup_mangle "$ipt"
         fi
-        logger -t nym-vpn "Restored $ipt kill-switch rules after firewall reload"
-    else
-        logger -t nym-vpn "Failed to apply saved $ipt rules"
+        if cleanup_emergency "$ipt"; then
+            logger -t nym-vpn "Restored $ipt kill-switch rules after firewall reload"
+            return 0
+        fi
     fi
+
+    logger -t nym-vpn "Failed to restore $ipt kill-switch; installing emergency output/forward block"
+    if emergency_block "$ipt"; then
+        logger -t nym-vpn "Emergency $ipt kill-switch block installed"
+    else
+        logger -t nym-vpn "CRITICAL: failed to install emergency $ipt kill-switch block"
+    fi
+    return 1
 }
 
 # Rebuild the masquerade chain from the daemon's interface list. Mirrors
@@ -170,8 +278,8 @@ restore_forwarding() {
             $ipt -w -A "$FORWARD_LAN_CHAIN" -i "$iface" -m conntrack \
                 --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
         done < "$IFACES_FILE"
-        $ipt -w -D "$HOOK_FORWARD" -j "$FORWARD_LAN_CHAIN" 2>/dev/null || true
-        $ipt -w -I "$HOOK_FORWARD" 1 -j "$FORWARD_LAN_CHAIN" 2>/dev/null || true
+        # Rule 1: the MSS clamp must run before NYM_FORWARD accepts flows.
+        ensure_jump "$ipt" "$HOOK_FORWARD" "$FORWARD_LAN_CHAIN" first || true
     done
 }
 
@@ -184,15 +292,39 @@ cleanup_forwarding() {
     done
 }
 
+kernel_ipv6_enabled() {
+    [ -d /proc/sys/net/ipv6 ] \
+        && [ "$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null)" != "1" ]
+}
+
 # Main logic
 main() {
+    local failed=0
+
+    # Rust creates this marker before touching live or persisted fw3 state.
+    # Never interpret missing/partially-updated rules files as kill-switch-off
+    # while it exists. A daemon crash leaves the marker and emergency block in
+    # place; a later successful apply/reset or explicit service stop clears it.
+    if [ -f "$TRANSITION_FILE" ]; then
+        logger -t nym-vpn "Firewall transition in progress; enforcing emergency block"
+        emergency_block "iptables" || failed=1
+        if kernel_ipv6_enabled; then
+            emergency_block "ip6tables" || failed=1
+        fi
+        return 1
+    fi
+
     if [ -f "$RULES_V4" ]; then
-        apply_rules "iptables-restore" "$RULES_V4" "iptables"
+        apply_rules "iptables-restore" "$RULES_V4" "iptables" || failed=1
         if [ -f "$RULES_V6" ]; then
-            apply_rules "ip6tables-restore" "$RULES_V6" "ip6tables"
+            apply_rules "ip6tables-restore" "$RULES_V6" "ip6tables" || failed=1
+        elif kernel_ipv6_enabled; then
+            # The daemon persisted a v4 policy while IPv6 was disabled, but
+            # the kernel now routes v6. Never turn that state transition into
+            # a v6 bypass during reload; block until the daemon reapplies.
+            logger -t nym-vpn "IPv6 became enabled without a saved policy; installing emergency block"
+            emergency_block "ip6tables" || failed=1
         else
-            # Daemon decided IPv6 needs no rules (kernel v6 off) — make sure
-            # nothing stale lingers from an earlier v6-enabled apply.
             cleanup_filter "ip6tables"
             cleanup_mangle "ip6tables"
         fi
@@ -203,6 +335,8 @@ main() {
         cleanup_mangle "iptables"
         cleanup_filter "ip6tables"
         cleanup_mangle "ip6tables"
+        cleanup_emergency "iptables" || failed=1
+        cleanup_emergency "ip6tables" 2>/dev/null || true
     fi
 
     # Always reconcile the tunnel plane (masquerade + LAN forwarding) with
@@ -210,6 +344,7 @@ main() {
     # on and off (forwarding-only mode).
     restore_masquerade
     restore_forwarding
+    return "$failed"
 }
 
 main "$@"

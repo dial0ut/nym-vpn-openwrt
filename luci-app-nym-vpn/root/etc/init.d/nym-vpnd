@@ -71,9 +71,13 @@ service_stopped() {
     # table does. Remove the daemon's persisted ruleset, then let the
     # include script's cleanup branch tear the chains down — the same code
     # path a firewall reload takes, so stop and reload can't diverge.
+    # Removing the transition marker is explicit-stop authorization to open;
+    # a crash leaves it intact so fw3 reloads stay emergency-blocked.
     rm -f /tmp/nym-firewall-v4.rules /tmp/nym-firewall-v6.rules \
-        /tmp/nym-firewall.ifaces 2>/dev/null
-    if ! [ -x /sbin/fw4 ] && ! [ -x /usr/sbin/fw4 ] \
+        /tmp/nym-firewall.ifaces /tmp/nym-firewall.transition 2>/dev/null
+    if [ -x /usr/share/nym-vpn/fw-backend.sh ] \
+        && [ "$(/usr/share/nym-vpn/fw-backend.sh)" = "fw3" ] \
+        && iptables -L input_rule -n >/dev/null 2>&1 \
         && [ -x /usr/share/nym-vpn/fw3-include.sh ]; then
         /usr/share/nym-vpn/fw3-include.sh 2>/dev/null || true
     fi
