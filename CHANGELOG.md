@@ -11,6 +11,60 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+### Fixed
+
+- The kill-switch no longer has a fail-open window on a fresh install or an
+  expired endpoint cache: with the kill-switch enabled, the firewall goes to
+  the Blocked policy the moment the daemon starts and stays there through the
+  first `Connecting` phase. Only the daemon's own DNS/NTP bootstrap traffic is
+  let through until the API and gateway addresses are resolved and added to
+  the allow-list. Previously "kill-switch on" could mean an open firewall
+  until the first successful connect.
+- fw3/iptables routers (OpenWrt 21.02 and older): the kill-switch now survives
+  `/etc/init.d/firewall reload` — fw3 wipes every custom chain on reload — by
+  persisting the applied ruleset under `/tmp` and re-applying it from the
+  firewall include, and `/etc/init.d/nym-vpnd stop` tears everything down
+  through the same path. A reload that lands in the middle of a policy change
+  (or after a daemon crash mid-change) installs a fail-closed emergency block
+  instead of reading half-written state as "kill-switch off"; the daemon
+  lifts it once the policy has converged. Reply traffic for SSH/LuCI sessions
+  is exempted from that block, so a stuck state never locks you out.
+- fw3: hook jumps are only inserted when missing or when a foreign rule has
+  been placed ahead of them, instead of being deleted and re-inserted on every
+  policy change (which briefly left the kill-switch chains unhooked). A rule
+  inserted at the head of `output_rule`/`forwarding_rule` by another include
+  can no longer run ahead of the kill-switch.
+- fw3: the `CONNMARK` target (needed for inbound exemptions) is not in stock
+  images; its absence no longer fails the whole policy — exemptions are
+  dropped with a loud log while the kill-switch stays active.
+- fw3: configuring an inbound exemption while the kill-switch was on broke
+  every connect attempt (`failed to send icmp packet: Operation not
+  permitted`) because the exemption mark restore clobbered the daemon's
+  socket mark. Restores are now scoped to exempted flows. This affected
+  nftables routers too.
+- fw3: LAN clients were not forwarded into the tunnel at all with the
+  kill-switch off, and TCP MSS was never clamped for the 1340-MTU tunnel.
+- If the kernel routes IPv6 but `ip6tables` is missing or unusable, the
+  kill-switch now refuses to install an IPv4-only policy (visible as
+  `Error state: SetFirewallPolicy`) instead of silently leaving an IPv6
+  bypass.
+- Kill-switch policy failures while idle (Disconnected) now surface as an
+  error state instead of being logged only.
+- Failures to persist the fw3 ruleset are now reported as policy failures
+  rather than logged and ignored.
+- An endpoint cache stamped in the future (RTC reset) is now rejected instead
+  of being treated as fresh forever.
+
+### Changed
+
+- The firewall include is registered for the *active* backend (fw4 vs fw3 —
+  live state, then the firewall init script, then binary presence, so
+  boot-time runs on images shipping both stacks pick correctly) and applied
+  at package install time, so a fresh install is protected before the first
+  reboot. Existing registrations are reconciled on upgrade, and `prerm` no
+  longer deletes the include on upgrades, so an interrupted upgrade cannot
+  leave the router without it.
+
 ## [1.34.0] - 2026-08-21
 
 ### Fixed
