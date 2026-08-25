@@ -56,7 +56,20 @@ if [ -n "$ARCH" ]; then
     fi
 fi
 
-# Enable and start service
+# Apply backend-aware firewall include registration now. Custom IPK/APK
+# packaging does not get OpenWrt's generated postinst wrapper that normally
+# executes /etc/uci-defaults, and prerm removes the old section during an
+# upgrade. Registering before the daemon starts closes the install-time
+# reload gap. On failure the script stays in place for the boot defaults
+# runner to retry.
+if [ -z "${IPKG_INSTROOT:-}" ] && [ -x /etc/uci-defaults/luci-app-nym-vpn ]; then
+    if /etc/uci-defaults/luci-app-nym-vpn; then
+        rm -f /etc/uci-defaults/luci-app-nym-vpn
+    else
+        echo "Firewall include registration failed; will retry at next boot" >&2
+    fi
+fi
+
 /etc/init.d/nym-vpnd enable
 /etc/init.d/nym-vpnd start
 

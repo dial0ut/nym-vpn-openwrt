@@ -155,6 +155,10 @@ if [ -f "$FW_SCRIPTS_DIR/fw4-include.sh" ]; then
     cp "$FW_SCRIPTS_DIR/fw4-include.sh" "$BUILD_DIR/data/usr/share/nym-vpn/"
     chmod 755 "$BUILD_DIR/data/usr/share/nym-vpn/fw4-include.sh"
 fi
+if [ -f "$FW_SCRIPTS_DIR/fw-backend.sh" ]; then
+    cp "$FW_SCRIPTS_DIR/fw-backend.sh" "$BUILD_DIR/data/usr/share/nym-vpn/"
+    chmod 755 "$BUILD_DIR/data/usr/share/nym-vpn/fw-backend.sh"
+fi
 
 # === DATA: Feed signing public key ===
 echo "=== Adding feed signing key ==="

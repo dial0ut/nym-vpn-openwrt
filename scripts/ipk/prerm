@@ -16,8 +16,16 @@ if [ "$PKG_UPGRADE" != "1" ]; then
     /etc/init.d/nym-vpnd disable 2>/dev/null
 fi
 
-# Clean up firewall rules
-if [ -x /sbin/fw4 ]; then
+# Clean up firewall rules (backend decided by the shared detector so this
+# cannot disagree with the include registration)
+if [ -x /usr/share/nym-vpn/fw-backend.sh ]; then
+    nym_fw_backend="$(/usr/share/nym-vpn/fw-backend.sh)"
+elif [ -x /sbin/fw4 ] || [ -x /usr/sbin/fw4 ]; then
+    nym_fw_backend="fw4"
+else
+    nym_fw_backend="fw3"
+fi
+if [ "$nym_fw_backend" = "fw4" ]; then
     # fw4/nftables cleanup
     nft delete table inet nym 2>/dev/null
     # Remove rules from fw4 chains (srcnat, forward_lan)
@@ -39,10 +47,13 @@ else
         # Remove jump rules from mangle table built-ins (inbound exemption)
         $ipt -t mangle -D PREROUTING -j NYM_MANGLE_PREROUTING 2>/dev/null
         $ipt -t mangle -D OUTPUT -j NYM_MANGLE_OUTPUT 2>/dev/null
-        # Remove the forwarding-plane jump (kill-switch on and off states)
+        # Remove forwarding-plane and transition-emergency jumps.
         $ipt -D forwarding_rule -j NYM_FORWARD_LAN 2>/dev/null
+        while $ipt -D output_rule -j NYM_EMERGENCY_OUT 2>/dev/null; do :; done
+        while $ipt -D forwarding_rule -j NYM_EMERGENCY_FWD 2>/dev/null; do :; done
         # Flush and delete our chains in filter + mangle
-        for chain in NYM_INPUT NYM_OUTPUT NYM_FORWARD NYM_FORWARD_LAN; do
+        for chain in NYM_INPUT NYM_OUTPUT NYM_FORWARD NYM_FORWARD_LAN \
+            NYM_EMERGENCY_OUT NYM_EMERGENCY_FWD; do
             $ipt -F "$chain" 2>/dev/null
             $ipt -X "$chain" 2>/dev/null
         done
@@ -66,13 +77,19 @@ for ip_cmd in "ip" "ip -6"; do
     while $ip_cmd rule del fwmark 0x14e lookup main 2>/dev/null; do :; done
 done
 
-# Remove UCI firewall include config
-uci delete firewall.nym_vpn 2>/dev/null
-uci commit firewall 2>/dev/null
+# Remove the UCI firewall include on real removal only. On an upgrade
+# postinst reconciles it, but if postinst never runs (interrupted
+# transaction) a deleted section would leave the kill-switch unable to
+# survive a firewall reload with nothing to repair it until the next
+# install. Leaving it in place is self-healing.
+if [ "$PKG_UPGRADE" != "1" ]; then
+    uci delete firewall.nym_vpn 2>/dev/null
+    uci commit firewall 2>/dev/null
+fi
 
 # Clean up temporary files (safe on both upgrade and removal)
 rm -f /tmp/nym-firewall-v4.rules /tmp/nym-firewall-v6.rules /tmp/nym-firewall.nft \
-    /tmp/nym-firewall.ifaces 2>/dev/null
+    /tmp/nym-firewall.ifaces /tmp/nym-firewall.transition 2>/dev/null
 rm -f /tmp/dnsmasq.d/nym-adblock.conf 2>/dev/null
 rm -f /tmp/nym-dns-backup /tmp/resolv.conf.nymbackup 2>/dev/null
 rm -f /tmp/nym-watchdog.state 2>/dev/null

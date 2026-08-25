@@ -5,41 +5,39 @@
 # Enable nym-vpnd service on install
 /etc/init.d/nym-vpnd enable 2>/dev/null
 
-# Register the firewall include for the ACTIVE backend — a firewall reload
-# otherwise silently degrades the integration:
-#   fw4 (22.03+): a reload rebuilds `inet fw4` and wipes the daemon's
-#     masquerade/forward integration (the kill-switch lives in a separate
-#     `inet nym` table and survives), breaking LAN clients until the daemon
-#     happens to re-apply. type=script (NOT fw4_compatible: fw4 would capture
-#     stdout as nft syntax during assembly instead of running the script's
-#     `nft add` side effects post-load).
-#   fw3 (<=21.02): a reload wipes ALL custom iptables state — the entire
-#     kill-switch, chains included. The include re-applies the ruleset the
-#     daemon persisted to /tmp. reload=1 makes fw3 run it on reload too, not
-#     just start/restart.
-# Self-correcting on purpose: earlier packages registered the fw4 path
-# unconditionally, so fw3 routers carry a broken include that must be fixed
-# up on upgrade, not just on fresh install.
-if [ -x /sbin/fw4 ] || [ -x /usr/sbin/fw4 ]; then
+# Register the include for the ACTIVE firewall backend, as decided by the
+# shared detector (live state, then the firewall init script, then binary
+# presence — the boot-time defaults runner executes before the firewall
+# service, so this must still resolve correctly with nothing loaded).
+if [ -x /usr/share/nym-vpn/fw-backend.sh ]; then
+    nym_fw_backend="$(/usr/share/nym-vpn/fw-backend.sh)"
+elif grep -q -w fw4 /etc/init.d/firewall 2>/dev/null || [ -x /sbin/fw4 ]; then
+    nym_fw_backend="fw4"
+else
+    nym_fw_backend="fw3"
+fi
+if [ "$nym_fw_backend" = "fw4" ]; then
     nym_fw_include="/usr/share/nym-vpn/fw4-include.sh"
     nym_fw_reload=""
 else
     nym_fw_include="/usr/share/nym-vpn/fw3-include.sh"
     nym_fw_reload="1"
 fi
-if [ "$(uci -q get firewall.nym_vpn.path)" != "$nym_fw_include" ]; then
-    uci set firewall.nym_vpn=include
-    uci set firewall.nym_vpn.type=script
-    uci set firewall.nym_vpn.path="$nym_fw_include"
-    if [ -n "$nym_fw_reload" ]; then
-        uci set firewall.nym_vpn.reload="$nym_fw_reload"
-    else
-        # fw4 warns about and ignores the fw3-ism `reload` — drop it.
-        uci -q delete firewall.nym_vpn.reload
-    fi
-    uci set firewall.nym_vpn.enabled=1
-    uci commit firewall
+
+# Reconcile every field, not just the path. This repairs disabled or legacy
+# sections left by earlier packages and removes fw4_compatible, which would
+# make fw4 capture stdout instead of running the include's nft side effects.
+uci set firewall.nym_vpn=include
+uci set firewall.nym_vpn.type=script
+uci set firewall.nym_vpn.path="$nym_fw_include"
+uci set firewall.nym_vpn.enabled=1
+uci -q delete firewall.nym_vpn.fw4_compatible
+if [ -n "$nym_fw_reload" ]; then
+    uci set firewall.nym_vpn.reload="$nym_fw_reload"
+else
+    uci -q delete firewall.nym_vpn.reload
 fi
+uci commit firewall
 
 # Restart rpcd to register the ubus backend
 /etc/init.d/rpcd restart 2>/dev/null
