@@ -668,11 +668,11 @@ impl SharedState {
     }
 
     /// Apply the between-sessions kill-switch policy used by idle states
-    /// (Disconnected, Error). When the user opted in AND we have cached API
-    /// endpoints to whitelist, lock the firewall to a Blocked policy that
-    /// still permits API and DNS so the account controller and the daemon
-    /// itself can self-recover. Otherwise reset the firewall to open so
-    /// transient errors cannot deadlock the daemon out of its own API.
+    /// (Disconnected, Error). When the user opted in, always lock the
+    /// firewall to a Blocked policy. Cached API endpoints are optional
+    /// additions to the allow-list: on a fresh install the daemon-scoped DNS
+    /// and NTP bootstrap exceptions are sufficient to resolve them without
+    /// opening the router or its LAN in the meantime.
     ///
     /// Failures propagate: an unenforced kill-switch is not something to
     /// merely log while the daemon reports unrestricted-but-protected
@@ -683,7 +683,7 @@ impl SharedState {
         // so a runtime toggle (LuCI / `tunnel set`) takes effect without a
         // daemon restart.
         self.firewall.set_killswitch(self.tunnel_settings.killswitch);
-        if self.tunnel_settings.killswitch && !self.api_endpoints.is_empty() {
+        if self.tunnel_settings.killswitch {
             let enable_ipv6 = self.tunnel_settings.enable_ipv6;
             let allowed_endpoints = self
                 .api_endpoints

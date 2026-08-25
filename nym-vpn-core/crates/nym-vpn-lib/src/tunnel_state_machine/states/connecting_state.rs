@@ -171,28 +171,11 @@ impl ConnectingState {
     ) -> Result<()> {
         let policy = params.as_policy();
 
-        // On routers with mwan3 (load-balancing / failover), the first
-        // Connecting policy we'd compute here has no resolved peer or
-        // allowed endpoints yet — only DNS. Applying it briefly looks like
-        // "block everything outbound", which is enough for mwan3's ICMP
-        // tracker to flap and trigger an `/etc/init.d/firewall reload`
-        // that wipes our rules mid-connect. Defer the apply until we have
-        // something concrete; the Disconnected → Connecting transition
-        // already leaves the firewall in `Blocked` with DNS allowed, so the
-        // host stays protected in the meantime.
-        if let FirewallPolicy::Connecting {
-            peer_endpoints,
-            allowed_endpoints,
-            ..
-        } = &policy
-            && peer_endpoints.is_empty()
-            && allowed_endpoints.is_empty()
-        {
-            tracing::info!(
-                "Skipping firewall apply: Connecting state with no peers/endpoints yet"
-            );
-            return Ok(());
-        }
+        // Apply even before peer/API endpoints are known. Base rules retain
+        // mwan3 tracking traffic, while daemon-scoped DNS/NTP bootstrap
+        // exceptions let endpoint resolution proceed. Skipping this apply
+        // left a fresh install fully open because there was no prior cached
+        // Blocked policy to inherit.
 
         // The firewall caches the kill-switch flag; sync it from live settings
         // so a runtime toggle (LuCI / `tunnel set`) takes effect without a

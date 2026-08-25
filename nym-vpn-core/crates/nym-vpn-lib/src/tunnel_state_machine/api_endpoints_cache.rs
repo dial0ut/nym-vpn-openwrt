@@ -12,10 +12,10 @@
 //! `SharedState` is constructed closes that gap.
 //!
 //! The cache is bounded by `MAX_AGE_SECS` so a router that sat powered off
-//! for a long time can't pin the firewall to truly stale endpoints; once the
-//! cache is past its TTL we fall back to the original cold-boot behaviour
-//! (open firewall until the first Connecting refresh) rather than block
-//! traffic against IPs that may have been reassigned.
+//! for a long time can't pin the firewall to truly stale endpoints. An absent
+//! or expired cache no longer opens the firewall: idle/initial Connecting
+//! states stay blocked with daemon-scoped DNS/NTP bootstrap exceptions until
+//! fresh endpoint addresses are resolved.
 
 use std::{
     fs, io,
@@ -27,6 +27,11 @@ use std::{
 const FILENAME: &str = "api_endpoints.cache";
 const FORMAT_TAG: &str = "v1";
 const MAX_AGE_SECS: u64 = 7 * 24 * 3600;
+/// Tolerate small wall-clock adjustments, but reject a cache timestamp far
+/// ahead of the current clock. `saturating_sub` alone treated every future
+/// timestamp as age zero, so a router whose RTC reset could trust stale
+/// endpoints indefinitely.
+const MAX_FUTURE_SKEW_SECS: u64 = 5 * 60;
 
 fn cache_path(data_path: &Path) -> PathBuf {
     data_path.join(FILENAME)
@@ -70,8 +75,9 @@ pub fn load(data_path: Option<&Path>) -> Vec<SocketAddr> {
             return Vec::new();
         }
     };
-    if now_unix().saturating_sub(saved_at) > MAX_AGE_SECS {
-        tracing::info!("api_endpoints cache is older than TTL, ignoring");
+    let now = now_unix();
+    if !timestamp_is_fresh(saved_at, now) {
+        tracing::info!("api_endpoints cache timestamp is stale or in the future, ignoring");
         return Vec::new();
     }
 
@@ -93,6 +99,11 @@ pub fn load(data_path: Option<&Path>) -> Vec<SocketAddr> {
         );
     }
     endpoints
+}
+
+fn timestamp_is_fresh(saved_at: u64, now: u64) -> bool {
+    saved_at <= now.saturating_add(MAX_FUTURE_SKEW_SECS)
+        && now.saturating_sub(saved_at) <= MAX_AGE_SECS
 }
 
 pub fn save(data_path: Option<&Path>, endpoints: &[SocketAddr]) {
@@ -120,5 +131,25 @@ pub fn save(data_path: Option<&Path>, endpoints: &[SocketAddr]) {
     if let Err(e) = fs::rename(&tmp_path, &path) {
         tracing::warn!("Failed to commit api_endpoints cache: {e}");
         let _ = fs::remove_file(&tmp_path);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn timestamp_rejects_stale_and_far_future_entries() {
+        let now = 1_000_000;
+        assert!(timestamp_is_fresh(now, now));
+        assert!(timestamp_is_fresh(now + MAX_FUTURE_SKEW_SECS, now));
+        assert!(!timestamp_is_fresh(now + MAX_FUTURE_SKEW_SECS + 1, now));
+        assert!(timestamp_is_fresh(now - MAX_AGE_SECS, now));
+        assert!(!timestamp_is_fresh(now - MAX_AGE_SECS - 1, now));
+    }
+
+    #[test]
+    fn reset_clock_does_not_make_a_future_cache_fresh_forever() {
+        assert!(!timestamp_is_fresh(1_700_000_000, 0));
     }
 }
