@@ -67,6 +67,12 @@ jobs:
         with:
           workspaces: nym-vpn-core
 
+      - name: Allow unprivileged ICMP sockets
+        # The connection-monitor loopback probe tests open ICMP datagram
+        # sockets, which the runner's default ping_group_range forbids for
+        # non-root users.
+        run: sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"
+
       - name: Run tests
         working-directory: nym-vpn-core
         # --locked: fail if Cargo.lock would have to change, i.e. Cargo.toml
