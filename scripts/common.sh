@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 check_unstaged_changes() {
     # Confirm we don't have unstaged changes
     if ! git diff --exit-code > /dev/null; then

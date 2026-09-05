@@ -11,6 +11,19 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+### Security
+
+- CI now runs the workspace test suite and a fast security job on every push
+  to `develop` and feature branches: secret scanning of the pushed commits,
+  dependency policy and advisory checks (`cargo deny`), shellcheck over the
+  scripts that run as root on the router, and a lint of the workflows
+  themselves. A weekly run repeats the secret scan over the full history and
+  re-checks advisories against a fresh database.
+- Release pipeline hardened: every action pinned to a commit, workflow tokens
+  read-only except where a job needs to write, checkouts no longer persist
+  credentials, dispatch inputs and signing keys reach shell steps through the
+  environment instead of expression interpolation.
+
 ### Fixed
 
 - The kill-switch no longer has a fail-open window on a fresh install or an
