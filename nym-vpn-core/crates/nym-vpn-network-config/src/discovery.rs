@@ -491,7 +491,10 @@ mod tests {
         test_discovery_equality(Discovery::default_sandbox()).await;
     }
 
+    // todo: remove ignore once canary discovery is back online (the
+    // well-known endpoint currently times out, which fails CI)
     #[tokio::test]
+    #[ignore]
     async fn test_canary_discovery_same_as_fetched() {
         test_discovery_equality(Discovery::default_canary()).await;
     }

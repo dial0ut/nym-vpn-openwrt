@@ -1,0 +1,130 @@
+# Continuous checks for develop and feature branches.
+#
+#   test      cargo test over the whole workspace, lockfile enforced.
+#   security  fast checks that need no Rust build: secret scan of the pushed
+#             commits, dependency policy (licenses, bans, sources), dependency
+#             advisories, shellcheck over the root-run scripts, and a lint of
+#             these workflows themselves.
+#
+# The weekly schedule repeats the secret scan over the full history and
+# re-checks advisories against a fresh RUSTSEC database, so a newly published
+# advisory surfaces even when nothing was pushed.
+name: CI
+
+on:
+  push:
+    branches:
+      - develop
+      - 'feat/**'
+      - 'fix/**'
+      - 'ci/**'
+  pull_request:
+    branches: [develop]
+  schedule:
+    - cron: '23 5 * * 1'
+  workflow_dispatch:
+
+# No token scopes by default; each job grants exactly what it needs.
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: cargo test
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Install build dependencies
+        # protoc plus the google/protobuf well-known-type includes for
+        # nym-vpn-proto; libnftnl/libmnl headers for nym-firewall's sys crates.
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            protobuf-compiler libprotobuf-dev libnftnl-dev libmnl-dev pkg-config
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version
+          cargo --version
+
+      - name: Cache cargo registry and build outputs
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: nym-vpn-core
+
+      - name: Run tests
+        working-directory: nym-vpn-core
+        # --locked: fail if Cargo.lock would have to change, i.e. Cargo.toml
+        # was edited without updating the lockfile.
+        run: cargo test --workspace --locked --no-fail-fast
+
+  security:
+    name: security checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # TruffleHog walks the pushed commit range; the weekly run walks everything.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Secret scan (TruffleHog)
+        # push: event.before..event.after   pull_request: base..head
+        # schedule / workflow_dispatch: the full history of the checked-out branch
+        uses: trufflesecurity/trufflehog@363923b901c911a9164f50b6c423f47c15372b1c # v3.97.4
+        with:
+          version: 3.97.4
+          extra_args: --results=verified,unknown
+
+      - name: Dependency policy (cargo-deny licenses, bans, sources)
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          manifest-path: nym-vpn-core/Cargo.toml
+          arguments: --locked
+          command: check
+          command-arguments: licenses bans sources
+
+      - name: Dependency advisories (cargo-deny advisories)
+        # Advisory findings are reported but do not fail the job yet: the
+        # lockfile carries a RUSTSEC backlog that needs a dedicated triage pass.
+        # Flip this to blocking once that pass lands.
+        continue-on-error: true
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          manifest-path: nym-vpn-core/Cargo.toml
+          arguments: --locked
+          command: check
+          command-arguments: advisories
+
+      - name: Shell scripts (shellcheck)
+        run: |
+          shellcheck --version
+          scripts/security/shellcheck.sh
+
+      - name: Workflow lint (zizmor)
+        uses: zizmorcore/zizmor-action@70fb788f84895a7701f5643d103d587e460b5c99 # v0.6.3
+        with:
+          version: 1.30.0
+          # Fail the job on findings instead of uploading SARIF.
+          advanced-security: false
+          # Informational findings (e.g. static matrix values in run: blocks) don't block.
+          min-severity: low

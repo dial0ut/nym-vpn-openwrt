@@ -15,21 +15,29 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+# Read-only token for every job unless it says otherwise.
+permissions:
+  contents: read
+
 jobs:
   verify:
     name: Verify release invariants
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
           fetch-tags: true
+          persist-credentials: false
 
       - name: Verify tag, version, and branches
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG="${{ inputs.tag }}"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            TAG="$INPUT_TAG"
           else
             TAG="${GITHUB_REF#refs/tags/}"
           fi
@@ -80,9 +88,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           submodules: recursive
+          persist-credentials: false
 
       - name: Setup swap for LTO linking
         run: |
@@ -119,7 +128,7 @@ jobs:
           sha256sum nym-vpn-${{ matrix.arch }}.tar.gz > nym-vpn-${{ matrix.arch }}.tar.gz.sha256
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: nym-vpn-${{ matrix.arch }}
           path: artifacts/*
@@ -148,9 +157,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           submodules: recursive
+          persist-credentials: false
 
       - name: Setup swap for Tier 3 linking
         run: |
@@ -192,7 +202,7 @@ jobs:
           sha256sum nym-vpn-${{ matrix.arch }}.tar.gz > nym-vpn-${{ matrix.arch }}.tar.gz.sha256
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: nym-vpn-${{ matrix.arch }}
           path: artifacts/*
@@ -257,19 +267,24 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: nym-vpn-${{ matrix.arch }}
           path: artifacts
 
       - name: Get version
         id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ inputs.tag }}"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            VERSION="$INPUT_TAG"
           else
             VERSION="${GITHUB_REF#refs/tags/}"
           fi
@@ -302,7 +317,7 @@ jobs:
             "."
 
       - name: Upload package artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: pkg-${{ matrix.openwrt_arch }}
           path: |
@@ -320,13 +335,14 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
           fetch-tags: true
+          persist-credentials: false
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: artifacts
           merge-multiple: true
@@ -364,7 +380,7 @@ jobs:
           } >> $GITHUB_OUTPUT
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ steps.version.outputs.version }}
           name: Nym VPN ${{ steps.version.outputs.version }}
@@ -475,10 +491,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Download all package artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: artifacts
           pattern: pkg-*
@@ -495,13 +513,17 @@ jobs:
         run: sudo apt-get install -y -qq signify-openbsd
 
       - name: Write signing keys
+        # Keys reach the shell through the environment, never by interpolating
+        # the secret into the command line.
+        env:
+          OPKG_SIGNING_KEY: ${{ secrets.DIAL0UT_OPKG }}
+          APK_SIGNING_KEY: ${{ secrets.DIAL0UT_APK }}
         run: |
-          echo "${{ secrets.DIAL0UT_OPKG }}" > /tmp/opkg.sec
-          chmod 600 /tmp/opkg.sec
+          umask 077
+          printf '%s\n' "$OPKG_SIGNING_KEY" > /tmp/opkg.sec
           # Basename must match the public key shipped on-device
           # (/etc/apk/keys/dial0ut-apk.pem) — apk matches signatures by key name.
-          echo "${{ secrets.DIAL0UT_APK }}" > /tmp/dial0ut-apk.pem
-          chmod 600 /tmp/dial0ut-apk.pem
+          printf '%s\n' "$APK_SIGNING_KEY" > /tmp/dial0ut-apk.pem
 
       - name: Generate opkg feed
         run: |
@@ -570,23 +592,25 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
           R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.eu.r2.cloudflarestorage.com
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           # Upload install script
-          aws s3 cp scripts/install.sh s3://${{ secrets.R2_BUCKET }}/install.sh \
+          aws s3 cp scripts/install.sh s3://$R2_BUCKET/install.sh \
             --endpoint-url "$R2_ENDPOINT"
 
           # Upload latest version marker
-          echo "${{ steps.version.outputs.version }}" > /tmp/latest
-          aws s3 cp /tmp/latest s3://${{ secrets.R2_BUCKET }}/latest \
+          printf '%s\n' "$VERSION" > /tmp/latest
+          aws s3 cp /tmp/latest s3://$R2_BUCKET/latest \
             --endpoint-url "$R2_ENDPOINT" \
             --content-type "text/plain"
 
           # Upload opkg feed
-          aws s3 sync feed/opkg/ s3://${{ secrets.R2_BUCKET }}/opkg/ \
+          aws s3 sync feed/opkg/ s3://$R2_BUCKET/opkg/ \
             --endpoint-url "$R2_ENDPOINT" \
             --delete
 
           # Upload apk feed
-          aws s3 sync feed/apk/ s3://${{ secrets.R2_BUCKET }}/apk/ \
+          aws s3 sync feed/apk/ s3://$R2_BUCKET/apk/ \
             --endpoint-url "$R2_ENDPOINT" \
             --delete
