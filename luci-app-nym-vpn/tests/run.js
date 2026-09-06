@@ -611,7 +611,8 @@ async function scenarioMixnetTuning() {
   const t = setup({ init: baseInit({ tunnel_config: Object.assign({}, TUNNEL, { disable_poisson: 'true', loop_cover_delay: '50' }) }) });
   check(byId(t, 'tuning-poisson-toggle').checked && !byId(t, 'tuning-cover-toggle').checked && byId(t, 'tuning-loop-cover').value === '50', 'init values bound');
   byId(t, 'tuning-message-delay').value = '3';
-  card(t, 'Mixnet Tuning').querySelector('.nym-action-buttons button').click();
+  card(t, 'Mixnet Tuning').querySelector('.nym-card-actions button').click();
+  check(qa(t, '.nym-action-buttons').length === 1 && q(t, '.nym-status-hero').contains(q(t, '.nym-action-buttons')), 'only the hero carries the centred action button');
   check(toasts(t).some((m) => /out of range/.test(m)) && callsTo(t, 'tunnel_set').length === 0, 'out-of-range sending delay rejected without rpc');
   byId(t, 'tuning-message-delay').value = '';
   byId(t, 'tuning-packet-delay').value = '120';

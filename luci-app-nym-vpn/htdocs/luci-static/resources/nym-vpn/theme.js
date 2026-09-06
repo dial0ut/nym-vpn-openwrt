@@ -106,8 +106,8 @@ return baseclass.extend({
     .nym-btn-danger:hover:not(:disabled) { background: var(--danger-dim) !important; box-shadow: 0 0 24px var(--danger-dim) !important; transform: translateY(-1px); }\
     .nym-btn-danger:focus:not(:disabled) { background: transparent !important; box-shadow: none !important; }\
     .nym-btn-danger:active:not(:disabled) { background: var(--danger-dim) !important; transform: translateY(0); }\
-    .nym-btn-secondary { background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color); }\
-    .nym-btn-secondary:hover:not(:disabled) { border-color: var(--text-secondary); color: var(--text-primary); }\
+    .nym-btn-secondary { background: transparent !important; color: var(--text-secondary) !important; border: 1px solid var(--border-color) !important; padding: 8px 16px; font-size: 12px; }\
+    .nym-btn-secondary:hover:not(:disabled) { background: var(--bg-card-hover) !important; color: var(--text-primary) !important; border-color: var(--border-accent) !important; }\
     .nym-btn-small { padding: 8px 16px; font-size: 13px; }\
     .nym-card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; margin-bottom: 16px; overflow: hidden; }\
     .nym-card-header { padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; transition: background 0.2s; user-select: none; }\
@@ -158,6 +158,7 @@ return baseclass.extend({
     .nym-card-description { color: var(--text-muted); font-size: 13px; margin-bottom: 20px; line-height: 1.6; }\
     .nym-form-group { margin-bottom: 20px; }\
     .nym-form-label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: var(--label-spacing); color: var(--text-secondary); margin-bottom: 8px; }\
+    .nym-select, .nym-input { box-sizing: border-box; }\
     .nym-select { width: 100%; padding: 12px 16px; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); font-size: 14px; font-family: inherit; cursor: pointer; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'12\' height=\'12\' viewBox=\'0 0 12 12\'%3E%3Cpath fill=\'%23606070\' d=\'M6 8L1 3h10z\'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 16px center; transition: border-color 0.2s, box-shadow 0.2s; }\
     .nym-select:hover { border-color: var(--border-accent); }\
     .nym-select:focus { outline: none; border-color: var(--nym-green); box-shadow: 0 0 0 3px var(--nym-green-dim); }\
@@ -285,7 +286,7 @@ return baseclass.extend({
     .nym-pill-group { display: flex; gap: 6px; flex-wrap: wrap; }\
     /* Always-on check interval: a full-width row under the switch. */\
     .nym-interval-row { width: 100%; align-items: center; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color); }\
-    .nym-interval-label { font-size: 12px; color: var(--text-muted); }\
+    .nym-interval-label { font-size: 12px; color: var(--text-muted); white-space: nowrap; }\
     .nym-pill { padding: 5px 12px; font-size: 12px; font-weight: 500; border: 1px solid var(--border-color); border-radius: 16px; background: transparent; color: var(--text-secondary); cursor: pointer; transition: all 0.2s ease; font-family: inherit; }\
     .nym-pill:hover { border-color: var(--text-secondary); color: var(--text-primary); }\
     .nym-pill.active { background: var(--nym-green-dim); border-color: var(--nym-green); color: var(--nym-green); }\
@@ -337,15 +338,19 @@ return baseclass.extend({
     .nym-form-row { display: flex; gap: 10px; align-items: center; }\
     .nym-form-row .nym-input { flex: 1; height: 44px; padding-top: 0; padding-bottom: 0; }\
     .nym-form-row .nym-btn { height: 40px; padding: 0 18px; font-size: 13px; flex-shrink: 0; }\
+    /* Card-level form action (Apply in Mixnet Tuning): right-aligned and\
+       small, so only the Connect button in the hero reads as the main action. */\
+    .nym-card-actions { display: flex; justify-content: flex-end; margin-top: 16px; }\
     .nym-btn-spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; vertical-align: -2px; margin-right: 6px; animation: rotate-ring 0.8s linear infinite; }\
     @media (max-width: 600px) {\
         .nym-exemption-header { display: none; }\
-        .nym-exemption-row { grid-template-columns: 1fr auto; gap: 4px 12px; }\
-        .nym-exemption-row > .nym-exemption-proto { grid-column: 1; }\
-        .nym-exemption-row > .nym-exemption-port { grid-column: 1; }\
+        .nym-exemption-row { grid-template-columns: auto auto 1fr auto; gap: 4px 12px; }\
+        .nym-exemption-row > .nym-exemption-proto { grid-column: 1; grid-row: 1; }\
+        .nym-exemption-row > .nym-exemption-port { grid-column: 2; grid-row: 1; }\
+        .nym-exemption-row > .nym-exemption-status { grid-column: 3; grid-row: 1; justify-self: end; }\
+        .nym-exemption-row > .nym-exemption-delete { grid-column: 4; grid-row: 1; }\
         .nym-exemption-row > .nym-exemption-label { grid-column: 1 / -1; grid-row: 2; font-size: 11px; }\
-        .nym-exemption-row > .nym-exemption-status { grid-column: 1; grid-row: 1; justify-self: end; }\
-        .nym-exemption-row > .nym-exemption-delete { grid-column: 2; grid-row: 1; }\
+        .nym-subpanel { margin-left: 4px; padding-left: 12px; }\
         .nym-exemption-addrow { grid-template-columns: 96px 1fr; }\
         .nym-exemption-addrow > input[type="text"]:nth-of-type(2) { grid-column: 1 / -1; }\
         .nym-exemption-addrow > button { grid-column: 1 / -1; }\
@@ -431,8 +436,6 @@ return baseclass.extend({
     .nym-log-viewer .nym-log-error { color: var(--danger); }\
     .nym-log-viewer .nym-log-debug { color: var(--text-muted); }\
     .nym-log-viewer .nym-log-trace { color: var(--text-muted); opacity: 0.7; }\
-    .nym-btn-secondary { background: transparent !important; color: var(--text-secondary) !important; border: 1px solid var(--border-color) !important; padding: 8px 16px; font-size: 12px; }\
-    .nym-btn-secondary:hover:not(:disabled) { background: var(--bg-card-hover) !important; color: var(--text-primary) !important; border-color: var(--border-accent) !important; }\
     .nym-diag-controls { display: flex; align-items: center; gap: 16px; margin-bottom: 14px; flex-wrap: wrap; }\
     .nym-diag-check { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); cursor: pointer; }\
     .nym-diag-results { background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px 16px; max-height: 420px; overflow: auto; }\

@@ -115,7 +115,7 @@ return baseclass.extend({
         // https-dns-proxy, stubby), so the servers below are configured but
         // not in force. Say so rather than letting the card imply otherwise.
         var userManagedNotice = dns_config.user_managed
-            ? E('div', { 'class': 'nym-card-description', 'style': 'color: #e67e22' }, [
+            ? E('div', { 'class': 'nym-note nym-note-warn' }, [
                 E('strong', {}, 'Not in effect: '),
                 'dnsmasq has ',
                 E('code', {}, 'noresolv'),
