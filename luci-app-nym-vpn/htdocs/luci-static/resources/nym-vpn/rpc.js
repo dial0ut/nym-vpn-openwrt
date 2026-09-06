@@ -15,9 +15,23 @@ return baseclass.extend({
         params: []
     }),
 
+    // relax_independence is an optional one-shot boolean: that connect (and
+    // its automatic reconnects) skips the gateway-independence criteria
+    // without touching the persisted setting. Omitted (undefined) when the
+    // caller passes nothing, so an older bridge sees the same request as
+    // before.
     connect: rpc.declare({
         object: 'nym-vpn',
         method: 'connect',
+        params: ['relax_independence']
+    }),
+
+    // Pre-connect check: which entry/exit pair the daemon would pick for the
+    // saved selection and whether it satisfies the independence criteria.
+    // {status: 'selected'|'needs_relaxed'|'none', entry?, exit?}.
+    tentativeGateways: rpc.declare({
+        object: 'nym-vpn',
+        method: 'tentative_gateways',
         params: []
     }),
 
@@ -76,6 +90,15 @@ return baseclass.extend({
         object: 'nym-vpn',
         method: 'tunnel_set',
         params: ['ipv6', 'two_hop', 'killswitch', 'circumvention', 'legacy_split_tunnel', 'stealth_api']
+    }),
+
+    // Gateway independence also rides on tunnel_set. Pass 'on'/'off' for the
+    // one being changed and leave the other undefined so it is omitted from
+    // the request and the daemon leaves it alone.
+    gatewayIndependenceSet: rpc.declare({
+        object: 'nym-vpn',
+        method: 'tunnel_set',
+        params: ['gateway_independence', 'family_reminders']
     }),
 
     // Mixnet tuning shares the tunnel_set ubus method (no new ACL surface);

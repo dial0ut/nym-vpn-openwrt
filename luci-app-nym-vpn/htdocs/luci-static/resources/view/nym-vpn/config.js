@@ -79,6 +79,73 @@ return view.extend({
         // occurrence instead of re-toasting on every 5s poll.
         var prevTunnelError = (status && status.tunnel_error) || '';
         var actionInProgress = false;
+
+        // Gateway independence (upstream calls it node families). tunnel_get
+        // reports {enabled, notifications, different_node_family,
+        // different_asn, different_subnet}; the bridge may emit booleans or
+        // 'on'/'off', and an older bridge emits nothing, so read it
+        // defensively. Defaults mirror the daemon's: criteria enforced,
+        // reminders on.
+        var onish = function(v) { return v === true || v === 'on' || v === 'true' || v === 1; };
+        var readIndependence = function(raw) {
+            if (!raw || typeof raw !== 'object') return null;
+            return {
+                enabled: raw.enabled === undefined ? true : onish(raw.enabled),
+                notifications: raw.notifications === undefined ? true : onish(raw.notifications)
+            };
+        };
+        var gwIndependence = readIndependence(tunnel_config.gateway_independence) ||
+            { enabled: true, notifications: true };
+        // Whether any bridge reply has carried the field yet; the init batch
+        // may predate it, so the toggles re-check with tunnel_get once.
+        var gwIndependenceKnown = !!readIndependence(tunnel_config.gateway_independence);
+
+        // Operator family of one side of a status reply. Flat entry_family /
+        // exit_family like the other entry_*/exit_* fields; a nested
+        // {entry: {family}} shape is accepted too.
+        var familyOf = function(st, side) {
+            if (!st) return '';
+            var v = st[side + '_family'];
+            if ((v === undefined || v === null) && st[side] && typeof st[side] === 'object') v = st[side].family;
+            return (typeof v === 'string') ? v.trim() : '';
+        };
+        var sameFamily = function(a, b) {
+            return !!a && !!b && a.toLowerCase() === b.toLowerCase();
+        };
+
+        // Operator family (and the same-family warning) under a connected
+        // gateway panel. DOM nodes, not innerHTML: the family name comes from
+        // the directory and must render as text.
+        var appendFamilyInfo = function(container, family, same) {
+            if (!container || !family) return;
+            container.appendChild(E('div', {
+                'class': 'nym-gateway-family' + (same ? ' same' : ''),
+                'title': 'Operator family'
+            }, [family]));
+            if (same) {
+                container.appendChild(E('div', { 'class': 'nym-gateway-family-warn' }, '⚠ Same operator family'));
+            }
+        };
+        var renderConnectedGateways = function(st) {
+            var ef = familyOf(st, 'entry');
+            var xf = familyOf(st, 'exit');
+            var same = sameFamily(ef, xf);
+            nymUI.renderGatewayInfo(entryGatewayDisplay, st.entry_name, st.entry_id, st.entry_ip, st.entry_country, countries.data);
+            appendFamilyInfo(entryGatewayDisplay, ef, same);
+            nymUI.renderGatewayInfo(exitGatewayDisplay, st.exit_name, st.exit_id, st.exit_ip, st.exit_country, countries.data);
+            appendFamilyInfo(exitGatewayDisplay, xf, same);
+        };
+
+        // The daemon's error-state reason for a non-independent pair. The
+        // bridge passes the variant name through (error_reason_ident), so
+        // match case- and separator-insensitively: both
+        // NeedsRelaxedIndependenceCriteria and
+        // NEEDS_RELAXED_INDEPENDENCE_CRITERIA hit.
+        var isIndependenceError = function(reason) {
+            return typeof reason === 'string' &&
+                reason.replace(/[^a-z]/gi, '').toLowerCase() === 'needsrelaxedindependencecriteria';
+        };
+        var INDEPENDENCE_ERROR_COPY = 'The selected entry and exit are not independent. Connect anyway or change servers.';
         var daemonStatusBadge;
         var daemonStatusBadgeText;
         var serviceInfoFrame;
@@ -178,6 +245,15 @@ return view.extend({
             var reason = result && result.tunnel_error;
             if (!reason) return false;
             if (!force && reason === prevTunnelError) return false;
+            if (isIndependenceError(reason)) {
+                // Not a dead gateway: the pair is valid but shares an
+                // operator family. Offer the same two ways out as the
+                // pre-connect check instead of a bare toast.
+                confirmSameFamily(null, function() {
+                    startConnect(true).catch(connectFailed);
+                }, focusPickers);
+                return true;
+            }
             showToast(TUNNEL_ERROR_COPY[reason] || 'Tunnel error — switch gateways.', 'error');
             return true;
         };
@@ -223,7 +299,8 @@ return view.extend({
                         // Persistent cue once the toast has faded: the tunnel
                         // bounced to Error (e.g. gateway unavailable), not a
                         // clean user disconnect.
-                        statusLabel.textContent = 'Gateway unavailable';
+                        statusLabel.textContent = isIndependenceError(result.tunnel_error)
+                            ? 'Not independent' : 'Gateway unavailable';
                         stopUptimeTimer();
                     } else {
                         statusLabel.textContent = 'Disconnected';
@@ -262,21 +339,11 @@ return view.extend({
                     var hops = isTwoHopMode ? 2 : 5;
                     var sig = [result.entry_name, result.entry_id, result.entry_ip, result.entry_country,
                                result.exit_name, result.exit_id, result.exit_ip, result.exit_country,
+                               familyOf(result, 'entry'), familyOf(result, 'exit'),
                                hops].join('|');
                     if (sig !== lastConnectedSig) {
                         lastConnectedSig = sig;
-                        nymUI.renderGatewayInfo(entryGatewayDisplay,
-                            result.entry_name,
-                            result.entry_id,
-                            result.entry_ip,
-                            result.entry_country,
-                            countries.data);
-                        nymUI.renderGatewayInfo(exitGatewayDisplay,
-                            result.exit_name,
-                            result.exit_id,
-                            result.exit_ip,
-                            result.exit_country,
-                            countries.data);
+                        renderConnectedGateways(result);
                         buildConnectionChain(hops);
                     }
 
@@ -399,15 +466,10 @@ return view.extend({
                 return;
             }
 
-            actionInProgress = true;
-            if (statusHero) statusHero.className = 'nym-status-hero connecting';
-            if (statusLabel) statusLabel.textContent = 'Connecting';
-            if (actionBtn) {
-                actionBtn.textContent = 'Cancel';
-                actionBtn.className = 'nym-btn nym-btn-danger';
-                actionBtn.disabled = false;
-                actionBtn.onclick = handleCancel;
-            }
+            // Nothing has reached the daemon yet, so the button waits
+            // disabled through the pre-connect check; startConnect arms
+            // Cancel once the connect is actually issued.
+            showConnectingUi(false);
 
             var entry_random = false;
             var exit_random = false;
@@ -419,14 +481,147 @@ return view.extend({
             if (entry_id) entry_country = null;
             if (exit_id) exit_country = null;
 
-            // Save gateway settings first, then connect
+            // Save gateway settings, ask the daemon which pair it would pick,
+            // then connect — plainly, relaxed, or after the user has agreed.
             rpc.gatewaySet(entry_country, exit_country, entry_id || null, exit_id || null, entry_random, exit_random, null)
                 .then(function(gwResult) {
                     if (!gwResult || !gwResult.success) {
                         console.warn('Gateway config warning:', gwResult ? gwResult.error : 'Unknown');
                     }
-                    return rpc.connect();
+                    return checkTentativeGateways();
                 })
+                .then(function(tent) {
+                    var verdict = tent && tent.status;
+                    // 'selected', 'none', or no usable answer (older bridge,
+                    // error, timeout): connect as before and let the daemon
+                    // speak for itself.
+                    if (verdict !== 'needs_relaxed') return startConnect(false);
+                    if (!gwIndependence.notifications) {
+                        showToast('Entry and exit share an operator family — gateway independence relaxed for this connection.', 'warning');
+                        return startConnect(true);
+                    }
+                    confirmSameFamily(tent, function() {
+                        startConnect(true).catch(connectFailed);
+                    }, abortConnectUi);
+                })
+                .catch(connectFailed);
+        };
+
+        // Put the hero into its connecting look. `cancelable` arms the
+        // Cancel button; before the connect has been sent there is nothing
+        // to cancel, so the button sits disabled.
+        var showConnectingUi = function(cancelable) {
+            actionInProgress = true;
+            if (statusHero) statusHero.className = 'nym-status-hero connecting';
+            if (statusLabel) statusLabel.textContent = 'Connecting';
+            if (actionBtn) {
+                actionBtn.className = 'nym-btn nym-btn-danger';
+                if (cancelable) {
+                    actionBtn.textContent = 'Cancel';
+                    actionBtn.disabled = false;
+                    actionBtn.onclick = handleCancel;
+                } else {
+                    actionBtn.textContent = 'Connecting';
+                    actionBtn.disabled = true;
+                    actionBtn.onclick = null;
+                }
+            }
+        };
+
+        // Back out of a connect that never reached the daemon (user chose
+        // "Change servers"): restore the disconnected hero and hand the
+        // user the pickers.
+        var abortConnectUi = function() {
+            actionInProgress = false;
+            if (statusHero) statusHero.className = 'nym-status-hero disconnected';
+            if (statusLabel) statusLabel.textContent = 'Disconnected';
+            if (actionBtn) {
+                actionBtn.textContent = 'Connect';
+                actionBtn.className = 'nym-btn nym-btn-primary';
+                actionBtn.disabled = false;
+                actionBtn.onclick = handleConnect;
+            }
+            updateStatus();
+            focusPickers();
+        };
+
+        var focusPickers = function() {
+            if (statusHero && statusHero.scrollIntoView) {
+                statusHero.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+            if (entryCountrySelect) {
+                try { entryCountrySelect.focus({ preventScroll: true }); } catch (e) { entryCountrySelect.focus(); }
+            }
+        };
+
+        var connectFailed = function(err) {
+            actionInProgress = false;
+            showToast('Connection error: ' + (err && err.message ? err.message : err), 'error');
+            updateStatus();
+        };
+
+        // Ask the daemon which entry/exit pair the saved selection resolves
+        // to and whether it passes the independence criteria. Resolves to the
+        // reply object or null — never rejects — and gives up after 6 s so a
+        // slow directory can't stall the Connect button. The daemon bounds
+        // the check itself; the client timeout is a belt to its braces.
+        var TENTATIVE_TIMEOUT_MS = 6000;
+        var checkTentativeGateways = function() {
+            if (typeof rpc.tentativeGateways !== 'function') return Promise.resolve(null);
+            return new Promise(function(resolve) {
+                var settled = false;
+                var finish = function(value) {
+                    if (settled) return;
+                    settled = true;
+                    clearTimeout(timer);
+                    resolve(value && typeof value === 'object' && !Array.isArray(value) ? value : null);
+                };
+                var timer = setTimeout(function() { finish(null); }, TENTATIVE_TIMEOUT_MS);
+                try {
+                    rpc.tentativeGateways().then(finish, function() { finish(null); });
+                } catch (e) {
+                    finish(null);
+                }
+            });
+        };
+
+        // Same-operator-family confirmation, shared by the pre-connect check
+        // and the NeedsRelaxedIndependenceCriteria error state. `tent` is the
+        // tentative_gateways reply (names the family when it can) or null.
+        // Confirm (red) = connect with the criteria relaxed; the safe green
+        // button closes the modal and returns to the pickers.
+        var confirmSameFamily = function(tent, onConnectAnyway, onChangeServers) {
+            var risk = 'One operator seeing both ends of the tunnel can link your traffic going in and coming out, which defeats the point of two hops.';
+            var lead;
+            var ef = tent && tent.entry && typeof tent.entry.family === 'string' ? tent.entry.family.trim() : '';
+            var xf = tent && tent.exit && typeof tent.exit.family === 'string' ? tent.exit.family.trim() : '';
+            if (ef && xf && sameFamily(ef, xf)) {
+                var en = tent.entry.name ? String(tent.entry.name) : 'gateway';
+                var xn = tent.exit.name ? String(tent.exit.name) : 'gateway';
+                lead = 'Entry ' + en + ' and exit ' + xn + ' are both run by ' + ef + '.';
+            } else if (tent) {
+                lead = 'The entry and exit the daemon would pick are not independent — they share an operator family, network or subnet.';
+            } else {
+                lead = INDEPENDENCE_ERROR_COPY;
+            }
+            confirmModal(
+                'The selected servers are in the same operator family!',
+                lead + ' ' + risk,
+                '⚠',
+                function() { hideModal(); if (onConnectAnyway) onConnectAnyway(); },
+                function() { if (onChangeServers) onChangeServers(); },
+                'Connect anyway',
+                'Change servers'
+            );
+        };
+
+        // Issue the connect and follow it to a settled state. `relax` sends
+        // relax_independence:true — a one-shot for this connect and its
+        // automatic reconnects; the persisted setting is untouched.
+        var startConnect = function(relax) {
+            showConnectingUi(true);
+            var call = relax ? rpc.connect(true) : rpc.connect();
+            return call
                 .then(function(result) {
                     if (!result || !result.success) {
                         showToast('Connection failed: ' + (result.error || 'Unknown error'), 'error');
@@ -494,11 +689,7 @@ return view.extend({
                     };
 
                     setTimeout(pollStatus, 250);
-                }).catch(function(err) {
-                    actionInProgress = false;
-                    showToast('Connection error: ' + err.message, 'error');
-                    updateStatus();
-                });
+                }).catch(connectFailed);
         };
 
         var handleCancel = function() {
@@ -700,18 +891,27 @@ return view.extend({
                     var inputAttrs = { 'type': 'radio', 'name': inputName, 'value': gw.id || '' };
                     if (ctIncompatible) inputAttrs.disabled = 'disabled';
 
+                    // Array-wrap: gateway name/perf come from the directory
+                    // (operator-controlled) and must render as text, not innerHTML.
+                    var infoChildren = [
+                        E('div', { 'class': 'nym-gateway-option-name' }, nameChildren),
+                        E('div', { 'class': 'nym-gateway-option-perf' }, [String(perf)])
+                    ];
+                    // Operator family chip; the field is null or absent on
+                    // gateways without one and on an older bridge.
+                    if (typeof gw.family === 'string' && gw.family.trim()) {
+                        infoChildren.push(E('div', { 'class': 'nym-gateway-option-family' }, [
+                            E('span', { 'class': 'nym-family-chip', 'title': 'Operator family' }, [gw.family.trim()])
+                        ]));
+                    }
+
                     var option = E('label', {
                         'class': 'nym-gateway-option' + (ctIncompatible ? ' disabled' : ''),
                         'style': ctIncompatible ? 'opacity:0.5; cursor:not-allowed' : ''
                     }, [
                         E('input', inputAttrs),
                         iconDiv,
-                        E('div', { 'class': 'nym-gateway-option-info' }, [
-                            // Array-wrap: gateway name/perf come from the directory
-                            // (operator-controlled) and must render as text, not innerHTML.
-                            E('div', { 'class': 'nym-gateway-option-name' }, nameChildren),
-                            E('div', { 'class': 'nym-gateway-option-perf' }, [String(perf)])
-                        ])
+                        E('div', { 'class': 'nym-gateway-option-info' }, infoChildren)
                     ]);
                     if (!ctIncompatible) {
                         option.addEventListener('click', function() {
@@ -1315,6 +1515,70 @@ return view.extend({
             });
         };
 
+        // Gateway independence switches (Tunnel Settings card). Both ride on
+        // tunnel_set with only the changed key present, so the daemon leaves
+        // the other alone; a failed save reverts the switch like the Privacy
+        // card does. Independence itself applies on the next connect;
+        // reminders are consulted by this page before each connect, so they
+        // take effect at once.
+        var handleIndependenceToggle = function(key, enabled) {
+            var id = key === 'enabled' ? 'gw-independence-toggle' : 'family-reminders-toggle';
+            var revert = function() {
+                var toggle = document.getElementById(id);
+                if (toggle) toggle.checked = !enabled;
+            };
+            var value = enabled ? 'on' : 'off';
+            var call = key === 'enabled'
+                ? rpc.gatewayIndependenceSet(value, undefined)
+                : rpc.gatewayIndependenceSet(undefined, value);
+            call.then(function(result) {
+                if (result && result.success) {
+                    gwIndependence[key] = enabled;
+                    showToast(key === 'enabled'
+                        ? 'Gateway independence ' + (enabled ? 'enabled' : 'disabled') + ' — applies on reconnect'
+                        : 'Server family reminders ' + (enabled ? 'enabled' : 'disabled'), 'success');
+                } else {
+                    showToast('Failed: ' + ((result && result.error) || 'Unknown'), 'error');
+                    revert();
+                }
+            }).catch(function(err) {
+                showToast('Error: ' + (err && err.message ? err.message : err), 'error');
+                revert();
+            });
+        };
+
+        // Sync the independence switches from a tunnel_get reply. Called when
+        // the init batch did not carry the field: an older bridge answers
+        // without it, in which case the switches are greyed out rather than
+        // left pretending. A degraded reply (daemon unreachable, every field
+        // '') proves nothing, so it changes nothing.
+        var applyIndependenceConfig = function(cfg) {
+            var ind = readIndependence(cfg && cfg.gateway_independence);
+            var row1 = document.getElementById('gw-independence-row');
+            var row2 = document.getElementById('family-reminders-row');
+            var t1 = document.getElementById('gw-independence-toggle');
+            var t2 = document.getElementById('family-reminders-toggle');
+            var note = document.getElementById('gw-independence-note');
+            if (ind) {
+                gwIndependence = ind;
+                gwIndependenceKnown = true;
+                if (t1) { t1.checked = ind.enabled; t1.disabled = false; }
+                if (t2) { t2.checked = ind.notifications; t2.disabled = false; }
+                if (row1) row1.style.opacity = '';
+                if (row2) row2.style.opacity = '';
+                if (note) note.style.display = 'none';
+                return;
+            }
+            var realReply = cfg && (cfg.two_hop === 'on' || cfg.two_hop === 'off');
+            if (!gwIndependenceKnown && realReply) {
+                if (t1) t1.disabled = true;
+                if (t2) t2.disabled = true;
+                if (row1) row1.style.opacity = '0.5';
+                if (row2) row2.style.opacity = '0.5';
+                if (note) note.style.display = 'block';
+            }
+        };
+
         // Anonymous statistics handler (Privacy card)
         var handleStatsToggle = function(enabled) {
             var revert = function() {
@@ -1535,6 +1799,43 @@ return view.extend({
                                 'id': 'stealth-api-toggle',
                                 'checked': tunnel_config.stealth_api === 'on' ? 'checked' : null,
                                 'change': saveTunnelSettings
+                            }),
+                            E('span', { 'class': 'nym-toggle-slider' })
+                        ])
+                    ]),
+                    E('div', { 'class': 'nym-toggle-row', 'id': 'gw-independence-row' }, [
+                        E('div', { 'class': 'nym-toggle-info' }, [
+                            E('div', { 'class': 'nym-toggle-title' }, 'Gateway Independence'),
+                            E('div', { 'class': 'nym-toggle-desc' }, 'Entry and exit must be run by different operators, in different networks and subnets. Requires reconnect.'),
+                            // Shown only when a real tunnel_get reply lacks the
+                            // field, i.e. the daemon predates the feature.
+                            E('div', {
+                                'class': 'nym-toggle-warning',
+                                'id': 'gw-independence-note',
+                                'style': 'color: #e67e22; font-size: 11px; margin-top: 4px; display: none'
+                            }, 'The installed daemon does not report gateway independence; these switches have no effect until it is updated.')
+                        ]),
+                        E('label', { 'class': 'nym-toggle' }, [
+                            E('input', {
+                                'type': 'checkbox',
+                                'id': 'gw-independence-toggle',
+                                'checked': gwIndependence.enabled ? 'checked' : null,
+                                'change': function(ev) { handleIndependenceToggle('enabled', ev.target.checked); }
+                            }),
+                            E('span', { 'class': 'nym-toggle-slider' })
+                        ])
+                    ]),
+                    E('div', { 'class': 'nym-toggle-row', 'id': 'family-reminders-row' }, [
+                        E('div', { 'class': 'nym-toggle-info' }, [
+                            E('div', { 'class': 'nym-toggle-title' }, 'Server Family Reminders'),
+                            E('div', { 'class': 'nym-toggle-desc' }, 'Warn before connecting when the chosen entry and exit are in the same operator family. Off, the connection goes ahead with independence relaxed and a notice is shown instead. Applies immediately.')
+                        ]),
+                        E('label', { 'class': 'nym-toggle' }, [
+                            E('input', {
+                                'type': 'checkbox',
+                                'id': 'family-reminders-toggle',
+                                'checked': gwIndependence.notifications ? 'checked' : null,
+                                'change': function(ev) { handleIndependenceToggle('notifications', ev.target.checked); }
                             }),
                             E('span', { 'class': 'nym-toggle-slider' })
                         ])
@@ -3106,18 +3407,7 @@ return view.extend({
             statusLabel.textContent = status.state.charAt(0).toUpperCase() + status.state.slice(1);
 
             if (status.state === 'connected') {
-                nymUI.renderGatewayInfo(entryGatewayDisplay,
-                    status.entry_name,
-                    status.entry_id,
-                    status.entry_ip,
-                    status.entry_country,
-                    countries.data);
-                nymUI.renderGatewayInfo(exitGatewayDisplay,
-                    status.exit_name,
-                    status.exit_id,
-                    status.exit_ip,
-                    status.exit_country,
-                    countries.data);
+                renderConnectedGateways(status);
                 buildConnectionChain(isTwoHopMode ? 2 : 5);
 
                 actionBtn.textContent = 'Disconnect';
@@ -3149,6 +3439,12 @@ return view.extend({
         // poll's disconnected transition handles later drops.
         if (!status.state || status.state === 'disconnected' || status.state === 'unknown') {
             restoreGatewaySelection();
+        }
+
+        // The init batch may predate the independence field; one tunnel_get
+        // settles whether the daemon has it (and its current values).
+        if (!gwIndependenceKnown) {
+            rpc.tunnelGet().then(applyIndependenceConfig).catch(function() {});
         }
 
         // Start polling
