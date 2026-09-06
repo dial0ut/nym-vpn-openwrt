@@ -14,7 +14,7 @@ use time::OffsetDateTime;
 #[cfg(feature = "typescript-bindings")]
 use ts_rs::TS;
 
-use crate::{EntryPoint, ExitPoint, NetworkStatisticsConfig, NymNetworkDetails, NymVpnNetwork};
+use crate::{EntryPoint, ExitPoint, NymNetworkDetails, NymVpnNetwork};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(
@@ -40,7 +40,6 @@ pub struct VpnServiceConfig {
     pub custom_dns: Vec<IpAddr>,
     pub enable_ad_blocking: bool,
     pub mixnet_traffic: MixnetTrafficConfig,
-    pub network_stats: NetworkStatisticsConfig,
     pub killswitch: bool,
     /// Legacy (inclusive) split tunneling: hand routing to `luci-app-pbr`.
     /// When enabled, the daemon withholds the default route into the tunnel so
@@ -162,7 +161,6 @@ impl fmt::Display for VpnServiceConfig {
         writeln!(f, "legacy_split_tunnel: {}", self.legacy_split_tunnel)?;
         writeln!(f, "stealth_api: {}", self.stealth_api)?;
         writeln!(f, "mixnet traffic config: {}", self.mixnet_traffic)?;
-        writeln!(f, "networks stats config: {}", self.network_stats)?;
 
         Ok(())
     }
@@ -195,7 +193,6 @@ impl Default for VpnServiceConfig {
             enable_custom_dns: false,
             custom_dns: vec![],
             enable_ad_blocking: false,
-            network_stats: Default::default(),
             mixnet_traffic: MixnetTrafficConfig::default(),
             killswitch: true,
             legacy_split_tunnel: false,

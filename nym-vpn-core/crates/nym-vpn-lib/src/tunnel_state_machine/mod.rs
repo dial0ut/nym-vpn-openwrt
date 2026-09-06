@@ -16,7 +16,6 @@ use nym_config::defaults::{WG_METADATA_PORT, WG_TUN_DEVICE_IP_ADDRESS_V4};
 use nym_dns::ResolvedDnsConfig;
 use nym_offline_monitor::ConnectivityHandle;
 use nym_registration_client::MixnetClientConfig;
-use nym_statistics::StatisticsSender;
 use nym_vpn_account_controller::{AccountCommandSender, AccountStateReceiver};
 use nym_vpn_api_client::ResolverOverrides;
 use nym_vpn_network_config::{DiscoveryRefresherCommand, Network};
@@ -590,7 +589,6 @@ pub struct SharedState {
     status_listener_handle: Option<JoinHandle<()>>,
     account_command_tx: AccountCommandSender,
     account_controller_state: AccountStateReceiver,
-    statistics_event_sender: StatisticsSender,
     gateway_cache_handle: GatewayCacheHandle,
     topology_service: VpnTopologyServiceHandle,
     discovery_refresher_command_tx: mpsc::UnboundedSender<DiscoveryRefresherCommand>,
@@ -736,7 +734,6 @@ impl TunnelStateMachine {
         tunnel_constants: TunnelConstants,
         account_command_tx: AccountCommandSender,
         account_controller_state: AccountStateReceiver,
-        statistics_event_sender: StatisticsSender,
         gateway_cache_handle: GatewayCacheHandle,
         topology_service: VpnTopologyServiceHandle,
         connectivity_handle: ConnectivityHandle,
@@ -781,7 +778,6 @@ impl TunnelStateMachine {
             status_listener_handle: None,
             account_command_tx,
             account_controller_state,
-            statistics_event_sender,
             gateway_cache_handle,
             topology_service,
             discovery_refresher_command_tx,
@@ -832,9 +828,6 @@ impl TunnelStateMachine {
                     self.current_state_handler = new_state_handler;
                     let state = TunnelState::from(new_state);
                     tracing::info!("New tunnel state: {}", state);
-                    self.shared_state
-                        .statistics_event_sender
-                        .report_tunnel_state(state.clone());
                     let _ = self.event_sender.send(TunnelEvent::NewState(state));
                 }
                 NextTunnelState::SameState(same_state) => {

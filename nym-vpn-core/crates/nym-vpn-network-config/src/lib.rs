@@ -22,7 +22,6 @@ pub use discovery_refresher::{
 pub use feature_flags::{FeatureFlags, FlagValue};
 use futures_util::FutureExt;
 pub use nym_network::NymNetwork;
-use nym_sdk::mixnet::Recipient;
 use nym_vpn_api_client::{ResolverOverrides, str_to_socket_addr};
 pub use nym_vpn_network::NymVpnNetwork;
 pub use system_configuration::{ScoreThresholds, SystemConfiguration};
@@ -184,12 +183,6 @@ impl Network {
                     .ok(),
                 _ => None,
             })
-    }
-
-    pub fn stats_recipient(&self) -> Option<Recipient> {
-        self.feature_flags
-            .as_ref()
-            .and_then(|ff| ff.stats_recipient())
     }
 
     /// Get the version of the gateway from where the metadata endpoint should start to be used

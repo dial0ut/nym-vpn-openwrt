@@ -7,7 +7,6 @@ mod command_interface;
 mod config;
 mod environment;
 mod logging;
-mod sentry;
 mod service;
 mod shutdown_handler;
 
@@ -45,12 +44,6 @@ async fn async_main() -> anyhow::Result<()> {
 }
 
 async fn run_vpn_service(args: CliArgs) -> anyhow::Result<()> {
-    // It would be better to call `init_sentry()` much later, as it forces a double-read
-    // of the global configuration file, however there is a chicken-and-egg problem WRT
-    // logging setup and reading the config file.
-    let _sentry_guard = sentry::init_sentry().await;
-    let sentry_enabled = _sentry_guard.is_some();
-
     let shutdown_token = CancellationToken::new();
     let run_as_service = args.is_run_as_service();
     let options = logging::Options {
@@ -58,7 +51,6 @@ async fn run_vpn_service(args: CliArgs) -> anyhow::Result<()> {
         enable_file_log: run_as_service,
         enable_stdout_log: !run_as_service,
         enable_json_log: args.json_output,
-        sentry: sentry_enabled,
     };
     let logging_setup =
         logging::setup_logging_with_file_remover(options, shutdown_token.child_token());
@@ -66,12 +58,9 @@ async fn run_vpn_service(args: CliArgs) -> anyhow::Result<()> {
     let remove_log_file_signal = logging_setup
         .as_ref()
         .map(|s| s.log_file_remover_handle.clone());
-    let run_parameters = RunParameters::new_with_cli_args(args, log_path, sentry_enabled);
+    let run_parameters = RunParameters::new_with_cli_args(args, log_path);
 
     log_software_and_os_version();
-    if sentry_enabled {
-        tracing::info!("Sentry monitoring enabled");
-    }
 
     run_standalone(run_parameters, remove_log_file_signal, shutdown_token).await?;
 
@@ -92,17 +81,15 @@ struct RunParameters {
     log_path: Option<LogPath>,
     network: Option<String>,
     config_env_file: Option<PathBuf>,
-    sentry_enabled: bool,
     user_agent: UserAgent,
 }
 
 impl RunParameters {
-    fn new_with_cli_args(args: CliArgs, log_path: Option<LogPath>, sentry_enabled: bool) -> Self {
+    fn new_with_cli_args(args: CliArgs, log_path: Option<LogPath>) -> Self {
         Self {
             log_path,
             network: args.network,
             config_env_file: args.config_env_file,
-            sentry_enabled,
             user_agent: args.user_agent.unwrap_or_else(|| new_user_agent!()),
         }
     }
@@ -125,7 +112,6 @@ async fn run_standalone(
     let vpn_service_params = NymVpnServiceParameters {
         log_path: parameters.log_path,
         network_env: Box::new(network_env),
-        sentry_enabled: parameters.sentry_enabled,
         user_agent: parameters.user_agent,
     };
 

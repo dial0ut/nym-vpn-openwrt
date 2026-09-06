@@ -32,13 +32,6 @@ impl TryFrom<proto::VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
             ))?
             .into();
 
-        let network_stats = value
-            .network_stats
-            .ok_or(ConversionError::NoValueSet(
-                "VpnServiceConfig.network_stats",
-            ))?
-            .into();
-
         let inbound_exemptions = value
             .inbound_exemptions
             .into_iter()
@@ -77,7 +70,6 @@ impl TryFrom<proto::VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
             killswitch: value.killswitch,
             legacy_split_tunnel: value.legacy_split_tunnel,
             mixnet_traffic,
-            network_stats,
             inbound_exemptions,
             stealth_api: value.stealth_api,
         };
@@ -94,8 +86,6 @@ impl From<nym_vpn_lib_types::VpnServiceConfig> for proto::VpnServiceConfig {
         let custom_dns = Some(proto::IpAddrList::from(value.custom_dns));
 
         let mixnet_traffic = Some(proto::MixnetTrafficConfig::from(value.mixnet_traffic));
-
-        let network_stats = Some(proto::NetworkStatsConfig::from(value.network_stats));
 
         let inbound_exemptions = value
             .inbound_exemptions
@@ -131,7 +121,6 @@ impl From<nym_vpn_lib_types::VpnServiceConfig> for proto::VpnServiceConfig {
             killswitch: value.killswitch,
             legacy_split_tunnel: value.legacy_split_tunnel,
             mixnet_traffic,
-            network_stats,
             inbound_exemptions,
             stealth_api: value.stealth_api,
         }

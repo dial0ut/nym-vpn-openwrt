@@ -205,7 +205,6 @@ pub struct ScoreThresholds {
 pub struct SystemConfiguration {
     pub mix_thresholds: ScoreThresholds,
     pub wg_thresholds: ScoreThresholds,
-    pub statistics_api: Option<String>,
     pub min_supported_app_versions: Option<NetworkCompatibility>,
 }
 
@@ -253,7 +252,6 @@ impl From<nym_vpn_api_client::response::SystemConfigurationResponse> for SystemC
         SystemConfiguration {
             wg_thresholds: ScoreThresholds::from(value.wg_thresholds),
             mix_thresholds: ScoreThresholds::from(value.mix_thresholds),
-            statistics_api: value.statistics_api,
             min_supported_app_versions: value
                 .min_supported_app_versions
                 .map(NetworkCompatibility::from),
@@ -267,7 +265,6 @@ impl From<nym_vpn_network_config::SystemConfiguration> for SystemConfiguration {
         SystemConfiguration {
             wg_thresholds: ScoreThresholds::from(value.wg_thresholds),
             mix_thresholds: ScoreThresholds::from(value.mix_thresholds),
-            statistics_api: value.statistics_api.map(|url| url.to_string()),
             min_supported_app_versions: value
                 .min_supported_app_versions
                 .map(NetworkCompatibility::from),

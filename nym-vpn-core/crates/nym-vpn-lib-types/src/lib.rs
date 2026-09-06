@@ -34,7 +34,6 @@ mod gateway;
 mod gateway_test;
 mod log_path;
 mod network;
-mod network_stats;
 mod privy;
 mod rpc_requests;
 mod service;
@@ -81,7 +80,6 @@ pub use network::{
     NetworkCompatibility, NymContracts, NymNetworkDetails, NymVpnNetwork, ParsedAccountLinks,
     SystemConfiguration, SystemMessage, ValidatorDetails,
 };
-pub use network_stats::{NetworkStatisticsConfig, NetworkStatisticsIdentity};
 pub use privy::PrivyDerivationMessage;
 pub use rpc_requests::{
     AccountBalanceResponse, AccountCommandResponse, Coin, DecentralisedObtainTicketbooksRequest,
