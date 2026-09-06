@@ -6342,6 +6342,7 @@ dependencies = [
  "anyhow",
  "celes",
  "clap",
+ "libc",
  "nym-diagnostic",
  "nym-vpn-lib-types",
  "nym-vpn-proto",

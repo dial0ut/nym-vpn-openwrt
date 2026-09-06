@@ -20,6 +20,7 @@ use crate::{display_helpers::error_state_hint, table_style::TableStyle};
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    restore_default_sigpipe();
     let args = ProgramArgs::parse();
 
     // The rpcd bridge connects lazily per-method: it must keep answering
@@ -163,6 +164,18 @@ pub enum Command {
     /// ubus rpcd bridge used by the OpenWrt LuCI app (not for interactive use)
     #[clap(hide = true)]
     Rpcd(commands::rpcd::Args),
+}
+
+/// The Rust runtime ignores SIGPIPE, so `nym-vpnc ... | head` ends with a
+/// write to a closed pipe that panics, and the release profile turns the
+/// panic into an abort. Behave like any Unix tool instead: die quietly on
+/// SIGPIPE.
+fn restore_default_sigpipe() {
+    // SAFETY: SIG_DFL is a valid disposition, signal() has no other
+    // preconditions, and the effect is process-wide and thread-safe.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
 }
 
 impl Command {
