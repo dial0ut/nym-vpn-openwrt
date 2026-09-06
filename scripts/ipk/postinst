@@ -73,10 +73,35 @@ fi
 /etc/init.d/nym-vpnd enable
 /etc/init.d/nym-vpnd start
 
-# Enable watchdog if always_on was previously set (e.g. upgrade)
-if [ "$(uci -q get nym-vpn.settings.always_on)" = "1" ]; then
-    /etc/init.d/nym-vpn-watchdog enable
-    /etc/init.d/nym-vpn-watchdog start
+# One-shot migration of the retired shell watchdog (<= 1.34.x): its UCI
+# always_on flag becomes the daemon's Always On setting. The old package's
+# prerm has already stopped the watchdog; its files are gone but the rc.d
+# symlinks, pidfile and state file are not. Bounded wait for the daemon
+# socket, since the setting can only be written once it answers. The uci
+# deletes are no-ops on a fresh install. Drop this block two releases on.
+if [ -z "${IPKG_INSTROOT:-}" ]; then
+    if [ "$(uci -q get nym-vpn.settings.always_on)" = "1" ]; then
+        i=0
+        while [ "$i" -lt 15 ] && ! /usr/bin/nym-vpnc tunnel get >/dev/null 2>&1; do
+            sleep 1
+            i=$((i + 1))
+        done
+        if /usr/bin/nym-vpnc tunnel set --always-on on >/dev/null 2>&1; then
+            echo "Always On carried over to the daemon setting"
+        else
+            echo "Could not enable Always On in the daemon; run: nym-vpnc tunnel set --always-on on" >&2
+        fi
+    fi
+    uci -q delete nym-vpn.settings.always_on
+    uci -q delete nym-vpn.settings.watchdog_interval
+    uci -q delete nym-vpn.settings.watchdog_max_retries
+    uci -q commit nym-vpn
+    rm -f /etc/rc.d/S91nym-vpn-watchdog /etc/rc.d/K09nym-vpn-watchdog
+    pid=$(cat /var/run/nym-vpn-watchdog.pid 2>/dev/null)
+    if [ -n "$pid" ] && grep -q nym-vpn-watchdog "/proc/$pid/cmdline" 2>/dev/null; then
+        kill "$pid" 2>/dev/null
+    fi
+    rm -f /var/run/nym-vpn-watchdog.pid /tmp/nym-watchdog.state
 fi
 
 # LuCI plumbing. Clear the menu/module caches so the new menu entry and
