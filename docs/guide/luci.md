@@ -78,6 +78,19 @@ If the custom DNS setting appears to do nothing, dnsmasq is probably set to igno
 file; see [Custom DNS setting has no
 effect](../troubleshooting.md#custom-dns-setting-has-no-effect).
 
+## Privacy
+
+**Anonymous Statistics** — whether the daemon sends anonymous, aggregated usage statistics to
+Nym. On by default. Reports only travel through the tunnel while connected; nothing is sent
+while disconnected unless disconnected reporting was turned on from the CLI (`nym-vpnc
+network-stats`), in which case the card says so. Turn it off to send nothing at all.
+
+While the daemon is up but not connected, it also keeps its own background traffic low: the
+account state is re-checked every 30 minutes instead of every 2, and the hourly network
+discovery check is suspended. Both catch up the moment you connect, so this does not slow a
+connect down. Error recovery is not slowed either: while the account is in an error state the
+daemon keeps retrying every 2 minutes.
+
 ## Account
 
 Logged in: identity and account state, with **Rotate Keys** and **Logout**. Logged out: recovery

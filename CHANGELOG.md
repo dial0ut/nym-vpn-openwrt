@@ -34,6 +34,9 @@ the GitHub release notes.
   without a reconnect, and it is persisted in the daemon config. CLI and web
   UI both say so when the network environment publishes no cover domains, in
   which case the setting has nothing to route through.
+- LuCI **Privacy** card with the anonymous statistics switch, previously
+  reachable only through `nym-vpnc network-stats`. The rpcd bridge gained
+  `stats_get`/`stats_set` for it.
 
 ### Security
 
@@ -131,6 +134,17 @@ the GitHub release notes.
   re-checked a few times while the daemon catches up. A link change also
   resets the retry escalation, so a WAN flap no longer counts towards a
   daemon restart. The periodic poll stays as the fallback.
+- Less background traffic while the daemon is up but not connected (reported
+  from a mirrored-port capture by a forum user). The account state is now
+  re-checked every 30 minutes instead of every 2 while the tunnel is down and
+  nothing has asked for it, and the hourly network discovery check is
+  suspended. A connect request switches both back at once: the account state
+  is re-synced immediately if it is more than 2 minutes old and discovery
+  re-checks if its last run is more than an hour old, before the tunnel is
+  brought up. The sync on daemon start and the manual refresh from the
+  account card / `nym-vpnc account get` are unchanged, and so is error
+  recovery: while the account is in an error state (API unreachable, clock
+  not yet synced at boot) retries stay at the 2-minute cadence.
 - The firewall include is registered for the *active* backend (fw4 vs fw3 —
   live state, then the firewall init script, then binary presence, so
   boot-time runs on images shipping both stacks pick correctly) and applied

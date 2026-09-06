@@ -29,6 +29,7 @@ return view.extend({
         var network = data.network || {};
         var daemon_status = data.daemon || {};
         var ad_block = data.ad_block || {};
+        var stats_config = data.stats || {};
         var dns_config = data.dns || {};
         var watchdog = data.watchdog || {};
         var inbound_exemptions = data.inbound_exemptions || [];
@@ -1314,6 +1315,25 @@ return view.extend({
             });
         };
 
+        // Anonymous statistics handler (Privacy card)
+        var handleStatsToggle = function(enabled) {
+            var revert = function() {
+                var toggle = document.getElementById('stats-toggle');
+                if (toggle) toggle.checked = !enabled;
+            };
+            rpc.statsSet(enabled).then(function(result) {
+                if (result && result.success) {
+                    showToast(enabled ? 'Anonymous statistics enabled' : 'Anonymous statistics disabled', 'success');
+                } else {
+                    showToast('Failed: ' + ((result && result.error) || 'Unknown'), 'error');
+                    revert();
+                }
+            }).catch(function(err) {
+                showToast('Error: ' + (err && err.message ? err.message : err), 'error');
+                revert();
+            });
+        };
+
         // Derive account flags from an `account get` result. A leftover device
         // identity paired with a LoggedOut/cleared state must NOT read as
         // logged in — that is the 1.27.1 desync where the Account card offered
@@ -2244,6 +2264,45 @@ return view.extend({
         ]);
         container.appendChild(dnsCard);
         redrawDnsList();
+
+        // Privacy Card — the daemon's anonymous statistics switch, CLI-only until
+        // now (`nym-vpnc network-stats`). Reports leave only through the tunnel
+        // unless disconnected reporting was turned on from the CLI; the card
+        // says so when that is the case rather than implying otherwise.
+        var statsEnabled = stats_config.enabled ? true : false;
+        var statsDesc = stats_config.allow_disconnected
+            ? 'Send anonymous, aggregated usage statistics to Nym. Disconnected reporting is on (set from the CLI), so reports can also leave outside the tunnel.'
+            : 'Send anonymous, aggregated usage statistics to Nym. Reports only travel through the tunnel while connected; nothing is sent while disconnected.';
+
+        var privacyCard = E('div', { 'class': 'nym-card' }, [
+            E('div', { 'class': 'nym-card-header', 'click': function() { toggleCard(privacyCard); } }, [
+                E('div', { 'class': 'nym-card-title' }, [
+                    svgIcon(assets.iconShield),
+                    'Privacy'
+                ]),
+                E('div', { 'class': 'nym-card-chevron' }, '▼')
+            ]),
+            E('div', { 'class': 'nym-card-body' }, [
+                E('div', { 'class': 'nym-toggle-row' }, [
+                    E('div', { 'class': 'nym-toggle-info' }, [
+                        E('div', { 'class': 'nym-toggle-title' }, 'Anonymous Statistics'),
+                        E('div', { 'class': 'nym-toggle-desc' }, statsDesc)
+                    ]),
+                    E('label', { 'class': 'nym-toggle' }, [
+                        E('input', {
+                            'type': 'checkbox',
+                            'id': 'stats-toggle',
+                            'checked': statsEnabled ? 'checked' : null,
+                            'change': function(ev) {
+                                handleStatsToggle(ev.target.checked);
+                            }
+                        }),
+                        E('span', { 'class': 'nym-toggle-slider' })
+                    ])
+                ])
+            ])
+        ]);
+        container.appendChild(privacyCard);
 
         // Account Card. The body is rebuilt from a fresh `account get` each
         // time refreshAccountCard() runs, so a recovered account clears the

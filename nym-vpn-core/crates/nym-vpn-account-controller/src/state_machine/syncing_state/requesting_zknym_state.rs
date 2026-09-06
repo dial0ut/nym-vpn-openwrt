@@ -257,7 +257,7 @@ impl RequestingZkNymsState {
                     .await
                 {
                     // let's see if next sync fixes it
-                    return NextAccountControllerState::NewState(ReadyState::enter());
+                    return NextAccountControllerState::NewState(ReadyState::enter(shared_state));
                 }
                 return match zk_nym_error {
                     ZkNymError::Storage(_) | ZkNymError::Internal(_) => {
@@ -284,7 +284,7 @@ impl RequestingZkNymsState {
                             .await
                         {
                             tracing::warn!("We still have some tickets though");
-                            NextAccountControllerState::NewState(ReadyState::enter())
+                            NextAccountControllerState::NewState(ReadyState::enter(shared_state))
                         } else {
                             NextAccountControllerState::NewState(ErrorState::enter(
                                 ZkNymError::BandwidthExceeded.into(),
@@ -297,7 +297,7 @@ impl RequestingZkNymsState {
 
         match retrieval_result {
             ZkNymFetchResult::SufficientBandwidth | ZkNymFetchResult::FetchedTickets { .. } => {
-                NextAccountControllerState::NewState(ReadyState::enter())
+                NextAccountControllerState::NewState(ReadyState::enter(shared_state))
             }
             ZkNymFetchResult::UpgradeMode => {
                 NextAccountControllerState::NewState(UpgradeModeState::enter(shared_state).await)
@@ -376,6 +376,9 @@ impl RequestingZkNymsState {
                 shared_state.firewall_active = true;
                 self.zk_nym_fetching_handle.abort();
                 return_sender.send(Ok(()));
+            }
+            AccountCommand::SetRefreshMode(mode) => {
+                shared_state.refresh_mode = mode;
             }
             AccountCommand::Common(common_command) => {
                 common_handler::handle_common_command(common_command, shared_state).await

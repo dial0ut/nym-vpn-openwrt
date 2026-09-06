@@ -5,6 +5,7 @@ use crate::{
     AvailableTicketbooks,
     commands::{AccountCommand, CommonCommand, ReturnSender, UpgradeModeCommand},
     deeplink::CreateDeeplinkParams,
+    state_machine::AccountRefreshMode,
 };
 use nym_credentials_interface::VerificationKeyAuth;
 use nym_validator_client::nyxd::Coin;
@@ -248,6 +249,15 @@ impl AccountCommandSender {
             .send(AccountCommand::VpnApiFirewallDown(tx))
             .map_err(AccountCommandError::internal)?;
         rx.await.map_err(AccountCommandError::internal)?
+    }
+
+    /// Fire-and-forget: the controller records the mode and re-arms its refresh timer. There is
+    /// nothing to wait for, and the caller sits on the tunnel-event path.
+    #[instrument]
+    pub fn set_refresh_mode(&self, mode: AccountRefreshMode) -> Result<(), AccountCommandError> {
+        self.command_tx
+            .send(AccountCommand::SetRefreshMode(mode))
+            .map_err(AccountCommandError::internal)
     }
 
     #[instrument]

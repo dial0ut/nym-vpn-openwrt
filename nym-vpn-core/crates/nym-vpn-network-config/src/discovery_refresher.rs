@@ -6,6 +6,7 @@ use std::{path::PathBuf, time::Duration};
 use tokio::{
     sync::mpsc::{UnboundedReceiver, UnboundedSender},
     task::JoinHandle,
+    time::Instant,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -27,7 +28,13 @@ pub struct DiscoveryRefresher {
     events_tx: UnboundedSender<DiscoveryRefresherEvent>,
     cancel_token: CancellationToken,
     current_resolver_overrides: Option<ResolverOverrides>,
+    /// Set by the tunnel state machine while the firewall blocks the API.
     paused: bool,
+    /// Set by the daemon while the tunnel is down and nobody has asked for it. Unlike `paused`
+    /// it never blocks the very first check, so a fresh start still validates its network files.
+    idle: bool,
+    /// When the last check ran, so leaving idle can tell a stale schedule from a fresh one.
+    last_check: Option<Instant>,
 }
 
 impl DiscoveryRefresher {
@@ -50,6 +57,8 @@ impl DiscoveryRefresher {
             cancel_token,
             current_resolver_overrides: current_resolver_overrides.cloned(),
             paused: false,
+            idle: false,
+            last_check: None,
         };
 
         Ok(tokio::spawn(refresher.run(network, connectivity_monitor)))
@@ -83,6 +92,26 @@ impl DiscoveryRefresher {
                                 self.paused = pause;
                             }
                         }
+                        DiscoveryRefresherCommand::SetIdle(idle) => {
+                            if self.idle == idle {
+                                continue;
+                            }
+                            self.idle = idle;
+                            if idle {
+                                tracing::debug!("Discovery Refresher idle, periodic checks suspended");
+                            } else {
+                                // Catch up now if the last check is older than the interval,
+                                // otherwise keep its schedule. Resetting either way stops the
+                                // ticks missed while idle from firing in a burst.
+                                match self.last_check {
+                                    Some(last) if last.elapsed() < CHECK_INTERVAL => {
+                                        interval.reset_at(last + CHECK_INTERVAL)
+                                    }
+                                    _ => interval.reset_immediately(),
+                                }
+                                tracing::debug!("Discovery Refresher active, periodic checks resumed");
+                            }
+                        }
                         DiscoveryRefresherCommand::UseResolverOverrides(resolver_overrides) => {
                             if self.current_resolver_overrides.as_ref() == resolver_overrides.as_deref() {
                                 tracing::debug!("Discovery Refresher received identical resolver overrides; ignoring");
@@ -105,7 +134,8 @@ impl DiscoveryRefresher {
                 Some(connectivity) = connectivity_monitor.next() => {
                     current_connectivity = connectivity;
                 }
-                _ = interval.tick(), if !self.paused && current_connectivity.is_online() => {
+                _ = interval.tick(), if !self.paused && current_connectivity.is_online() && (!self.idle || self.last_check.is_none()) => {
+                    self.last_check = Some(Instant::now());
                     if !checked_consistency {
                         match network.check_consistency().await {
                             Err(e) => tracing::warn!("Discovery refresher could not check consistency: {e:?}"),
@@ -204,7 +234,12 @@ impl DiscoveryRefresher {
 
 #[derive(Debug)]
 pub enum DiscoveryRefresherCommand {
+    /// The firewall blocks (true) or permits (false) API traffic; no checks while blocked.
     Pause(bool),
+    /// The tunnel is down and nobody has asked for it (true): suspend the periodic check until a
+    /// connect is requested (false), at which point a check runs right away if the last one is
+    /// older than the interval. The first check after start always runs.
+    SetIdle(bool),
     UseResolverOverrides(Option<Box<ResolverOverrides>>),
 }
 

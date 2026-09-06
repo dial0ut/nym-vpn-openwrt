@@ -16,6 +16,7 @@ use crate::{
     AccountControllerConfig, AccountControllerEventSender,
     deeplink::Deeplinks,
     nyxd_client::NyxdClient,
+    state_machine::AccountRefreshMode,
     storage::{AccountStorageOp, VpnCredentialStorage},
 };
 
@@ -56,6 +57,9 @@ pub(crate) struct SharedAccountState<C: ConnectivityMonitor> {
     /// Firewall status
     pub(crate) firewall_active: bool,
 
+    /// How often the timed states re-sync on their own; set by the daemon from the tunnel state
+    pub(crate) refresh_mode: AccountRefreshMode,
+
     /// Channel to send storage operation to the AccountController
     pub(crate) storage_op_sender: mpsc::UnboundedSender<AccountStorageOp>,
 
@@ -91,6 +95,7 @@ impl<C: ConnectivityMonitor> SharedAccountState<C> {
             device,
             deeplinks,
             firewall_active: false,
+            refresh_mode: AccountRefreshMode::default(),
             storage_op_sender,
             event_sender,
         }

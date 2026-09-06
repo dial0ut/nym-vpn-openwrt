@@ -116,6 +116,8 @@ fn method_signatures() -> Value {
         "dns_set": { "enabled": "bool", "servers": "str" },
         "ad_block_get": {},
         "ad_block_set": { "enabled": "bool" },
+        "stats_get": {},
+        "stats_set": { "enabled": "bool", "allow_disconnected": "bool" },
         "diagnostic_run": { "skip_dns": "bool", "skip_http": "bool", "gateway": "str" },
         "split_list": {},
         "split_add": { "type": "str", "mac": "str", "domain": "str", "label": "str" },
@@ -154,6 +156,7 @@ fn method_takes_args(method: &str) -> bool {
             | "inbound_del"
             | "dns_set"
             | "ad_block_set"
+            | "stats_set"
             | "diagnostic_run"
             | "logs_get"
             | "split_add"
@@ -201,6 +204,8 @@ async fn dispatch(method: &str, args: &Value) -> Value {
         "dns_set" => dns_set(args).await,
         "ad_block_get" => ad_block_get().await,
         "ad_block_set" => ad_block_set(args).await,
+        "stats_get" => stats_get().await,
+        "stats_set" => stats_set(args).await,
         "diagnostic_run" => diagnostic_run(args).await,
         "init" => init_batch().await,
         "split_list" => split_list(),
@@ -1562,6 +1567,70 @@ async fn ad_block_set(args: &Value) -> Value {
 }
 
 //-------------------------------------------------------------------------------
+// stats_get / stats_set — anonymous network statistics (`nym-vpnc network-stats`)
+//-------------------------------------------------------------------------------
+
+fn stats_json(config: &VpnServiceConfig) -> Value {
+    json!({
+        "enabled": config.network_stats.enabled,
+        "allow_disconnected": config.network_stats.allow_disconnected,
+    })
+}
+
+fn degraded_stats(err: String) -> Value {
+    json!({ "enabled": false, "allow_disconnected": false, "error": err })
+}
+
+async fn stats_get() -> Value {
+    let mut client = match RpcClient::new().await {
+        Ok(client) => client,
+        Err(err) => return degraded_stats(format!("{err:#}")),
+    };
+    match client.get_config().await {
+        Ok(config) => stats_json(&config),
+        Err(err) => degraded_stats(format!("{err:#}")),
+    }
+}
+
+async fn stats_set(args: &Value) -> Value {
+    let enabled = arg_flag_present(args, "enabled");
+    let allow_disconnected = arg_flag_present(args, "allow_disconnected");
+    if enabled.is_none() && allow_disconnected.is_none() {
+        return fail("Nothing to set: pass enabled and/or allow_disconnected");
+    }
+
+    let mut client = match RpcClient::new().await {
+        Ok(client) => client,
+        Err(err) => return fail(format!("{err:#}")),
+    };
+    if let Some(enabled) = enabled
+        && let Err(err) = client.network_stats_set_enabled(enabled).await
+    {
+        return fail(format!("{err:#}"));
+    }
+    if let Some(allow) = allow_disconnected
+        && let Err(err) = client.network_stats_allow_disconnected(allow).await
+    {
+        return fail(format!("{err:#}"));
+    }
+
+    let mut parts = Vec::new();
+    if let Some(enabled) = enabled {
+        parts.push(format!(
+            "Anonymous statistics {}",
+            if enabled { "enabled" } else { "disabled" }
+        ));
+    }
+    if let Some(allow) = allow_disconnected {
+        parts.push(format!(
+            "Disconnected reporting {}",
+            if allow { "enabled" } else { "disabled" }
+        ));
+    }
+    ok_msg(parts.join(", "))
+}
+
+//-------------------------------------------------------------------------------
 // diagnostic_run
 //-------------------------------------------------------------------------------
 
@@ -2352,6 +2421,7 @@ async fn init_batch() -> Value {
                         "ad_block".into(),
                         json!({ "enabled": config.enable_ad_blocking }),
                     );
+                    out.insert("stats".into(), stats_json(&config));
                     out.insert("dns".into(), dns_json_with_owner(&mut client, &config).await);
                 }
                 Err(err) => insert_degraded_config_members(&mut out, format!("{err:#}")),
@@ -2418,6 +2488,7 @@ fn insert_degraded_config_members(out: &mut serde_json::Map<String, Value>, err:
         "gateway_config".into(),
         json!({ "entry_point": "", "exit_point": "", "residential_exit": "" }),
     );
+    out.insert("stats".into(), degraded_stats(err.clone()));
     out.insert("tunnel_config".into(), degraded_tunnel_config(err));
     out.insert("lan".into(), json!({ "policy": "" }));
     out.insert("inbound_exemptions".into(), json!([]));

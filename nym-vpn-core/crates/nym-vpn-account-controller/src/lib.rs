@@ -29,6 +29,7 @@ pub use deeplink::{CreateDeeplinkParams, Deeplink, DeeplinkError, Deeplinks};
 pub use error::Error;
 pub use event_sender::AccountControllerEventSender;
 pub use nyxd_client::NyxdClient;
+pub use state_machine::AccountRefreshMode;
 pub use state_receiver::AccountStateReceiver;
 pub use storage::remove_files_for_account;
 pub use ticketbooks::AvailableTicketbooks;

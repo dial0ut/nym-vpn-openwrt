@@ -354,6 +354,9 @@ impl<C: ConnectivityMonitor> AccountControllerStateHandler<C> for SyncingState {
                         self.syncing_state_handle.abort();
                         return_sender.send(Ok(()));
                     },
+                    AccountCommand::SetRefreshMode(mode) => {
+                        shared_state.refresh_mode = mode;
+                    },
 
                     AccountCommand::Common(common_command) => {
                         common_handler::handle_common_command(common_command, shared_state).await

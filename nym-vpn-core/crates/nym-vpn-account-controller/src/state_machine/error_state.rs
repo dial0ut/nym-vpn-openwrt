@@ -1,19 +1,18 @@
 // Copyright 2025 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::pin::Pin;
-
 use crate::{
     SharedAccountState,
     commands::{AccountCommand, UpgradeModeCommand, common_handler, handler},
     state_machine::{
-        ACCOUNT_UPDATE_INTERVAL, AccountControllerStateHandler, LoggedOutState,
-        NextAccountControllerState, OfflineState, PrivateAccountControllerState, SyncingState,
+        AccountControllerStateHandler, AccountRefreshMode, LoggedOutState,
+        NextAccountControllerState, OfflineState, PrivateAccountControllerState, RefreshTimer,
+        SyncingState,
     },
 };
 use nym_offline_monitor::ConnectivityMonitor;
 use nym_vpn_lib_types::{AccountCommandError, AccountControllerErrorStateReason};
-use tokio::{sync::mpsc, time::Sleep};
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
@@ -25,11 +24,13 @@ use tracing::warn;
 /// Crucially, we are online and an account is stored.
 ///
 /// Possible next state :
-/// - SyncingState : We go into that state on a timer, to see if the problem persists. The refresh account commands allows for manually go there
+/// - SyncingState : We go into that state on a timer, to see if the problem persists. The refresh account commands allows for manually go there.
+///   The timer always runs on the normal cadence, whatever refresh mode the daemon set: idle backoff must not slow error recovery
+///   (an API outage or a boot-time clock skew fixed later by NTP should clear within minutes, not half an hour).
 /// - OfflineState : the connectivity monitor is telling we're not connected
 /// - LoggedOutState : We successfully handled a forget_account command
 pub struct ErrorState {
-    refresh_timer: Pin<Box<Sleep>>,
+    refresh_timer: RefreshTimer,
     reason: AccountControllerErrorStateReason,
 }
 
@@ -40,15 +41,16 @@ impl ErrorState {
         Box<dyn AccountControllerStateHandler<C>>,
         PrivateAccountControllerState,
     ) {
-        let refresh_timer = Box::pin(tokio::time::sleep(ACCOUNT_UPDATE_INTERVAL));
         tracing::error!("Account Controller entering error state : {reason:#?}");
-        (
-            Box::new(Self {
-                refresh_timer,
-                reason: reason.clone(),
-            }),
-            PrivateAccountControllerState::Error(reason),
-        )
+        let state = PrivateAccountControllerState::Error(reason.clone());
+        (Box::new(Self::new(reason)), state)
+    }
+
+    fn new(reason: AccountControllerErrorStateReason) -> Self {
+        Self {
+            refresh_timer: RefreshTimer::start(AccountRefreshMode::Active),
+            reason,
+        }
     }
 }
 
@@ -61,7 +63,7 @@ impl<C: ConnectivityMonitor> AccountControllerStateHandler<C> for ErrorState {
         shared_state: &'async_trait mut SharedAccountState<C>,
     ) -> NextAccountControllerState<C> {
         tokio::select! {
-        _ = &mut self.refresh_timer => {
+            _ = self.refresh_timer.tick() => {
                 if shared_state.firewall_active {
                     tracing::debug!("VPN API is firewalled, timed account syncing skipped");
                     return NextAccountControllerState::NewState(ErrorState::enter(self.reason));
@@ -120,6 +122,11 @@ impl<C: ConnectivityMonitor> AccountControllerStateHandler<C> for ErrorState {
                         shared_state.firewall_active = true;
                         return_sender.send(Ok(()));
                     },
+                    // Recorded for the ReadyState we hope to reach; the error retry timer itself
+                    // stays on the normal cadence.
+                    AccountCommand::SetRefreshMode(mode) => {
+                        shared_state.refresh_mode = mode;
+                    },
 
                     AccountCommand::Common(common_command) => {
                         common_handler::handle_common_command(common_command, shared_state).await
@@ -149,5 +156,30 @@ impl<C: ConnectivityMonitor> AccountControllerStateHandler<C> for ErrorState {
                 NextAccountControllerState::Finished
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state_machine::{ACCOUNT_IDLE_UPDATE_INTERVAL, ACCOUNT_UPDATE_INTERVAL};
+
+    /// Idle backoff applies to `ReadyState` only: an error retry is never further away than the
+    /// normal cadence, so a boot-time clock skew or API outage clears within minutes even when
+    /// the daemon has declared itself idle.
+    #[tokio::test(start_paused = true)]
+    async fn error_retry_stays_on_the_normal_cadence() {
+        assert!(ACCOUNT_IDLE_UPDATE_INTERVAL > ACCOUNT_UPDATE_INTERVAL);
+        let mut state = ErrorState::new(AccountControllerErrorStateReason::DeviceTimeDesynced);
+        assert!(
+            tokio::time::timeout(ACCOUNT_UPDATE_INTERVAL / 2, state.refresh_timer.tick())
+                .await
+                .is_err()
+        );
+        assert!(
+            tokio::time::timeout(ACCOUNT_UPDATE_INTERVAL, state.refresh_timer.tick())
+                .await
+                .is_ok()
+        );
     }
 }

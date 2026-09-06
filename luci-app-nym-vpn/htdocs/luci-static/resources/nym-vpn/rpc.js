@@ -212,6 +212,20 @@ return baseclass.extend({
         params: ['enabled']
     }),
 
+    // Anonymous network statistics (`nym-vpnc network-stats`). Both params are
+    // optional on set; the view only drives `enabled`.
+    statsGet: rpc.declare({
+        object: 'nym-vpn',
+        method: 'stats_get',
+        params: []
+    }),
+
+    statsSet: rpc.declare({
+        object: 'nym-vpn',
+        method: 'stats_set',
+        params: ['enabled', 'allow_disconnected']
+    }),
+
     daemonStatus: rpc.declare({
         object: 'nym-vpn',
         method: 'daemon_status',
