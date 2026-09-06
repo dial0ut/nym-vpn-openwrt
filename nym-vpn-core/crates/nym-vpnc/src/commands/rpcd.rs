@@ -35,7 +35,7 @@ use nym_vpn_lib_types::{
 };
 use nym_vpn_proto::rpc_client::RpcClient;
 
-use crate::display_helpers::display_on_off;
+use crate::display_helpers::{LEWES_PROTOCOL_LINE, LEWES_PROTOCOL_STATE, display_on_off};
 
 /// How long the /tmp id→(name, country) maps stay fresh. Matches the daemon's
 /// own directory cache so a stale-but-present file is never older than one
@@ -973,10 +973,7 @@ fn tunnel_flags_json(config: &VpnServiceConfig) -> serde_json::Map<String, Value
 
 fn tunnel_config_json(config: &VpnServiceConfig) -> Value {
     let mut out = tunnel_flags_json(config);
-    out.insert(
-        "lewes_protocol".into(),
-        json!(display_on_off(config.enable_lewes_protocol)),
-    );
+    out.insert("lewes_protocol".into(), json!(LEWES_PROTOCOL_STATE));
     let mt = &config.mixnet_traffic;
     out.insert(
         "loop_cover_delay".into(),
@@ -1039,10 +1036,10 @@ async fn tunnel_get() -> Value {
             .join(", ")
     };
     let raw_config = format!(
-        "IPv6: {}\nTwo-hop: {}\nLewes protocol: {}\nNetstack: {}\nCircumvention transports: {}\nKill-switch: {}\nLegacy-split-tunnel: {}\nInbound exemptions: {}\nMixnet traffic configuration: {}",
+        "IPv6: {}\nTwo-hop: {}\n{}\nNetstack: {}\nCircumvention transports: {}\nKill-switch: {}\nLegacy-split-tunnel: {}\nInbound exemptions: {}\nMixnet traffic configuration: {}",
         display_on_off(!config.disable_ipv6),
         display_on_off(config.enable_two_hop),
-        display_on_off(config.enable_lewes_protocol),
+        LEWES_PROTOCOL_LINE,
         display_on_off(config.netstack),
         display_on_off(config.enable_bridges),
         display_on_off(config.killswitch),
