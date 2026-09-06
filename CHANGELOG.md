@@ -211,6 +211,16 @@ the GitHub release notes.
   module tree (`api`, `store`, `components/`, `flows/`, `cards/`) with a jsdom
   test harness under `luci-app-nym-vpn/tests/`; the statistics card went with
   the telemetry removal.
+- The gateway picker rows in the LuCI page are redrawn as a ledger: the
+  gateway name (wrapping to two lines, full text on hover) beside a
+  content-sized status column holding the performance tier as a small dotted
+  label and, while Circumvention Transports is on, an amber outlined `No CT`
+  tag; under them one telemetry line (load, uptime, city) and the operator
+  family as plain text instead of a chip. The status column can no longer be
+  squeezed off the row by a long name, which is how the `No CT` marker used
+  to vanish, and the signal-bars icon is gone since the tier is now spelled
+  out. Selection, sorting, CT gating and the saved-selection restore are
+  unchanged.
 
 ## [1.34.0] - 2026-08-21
 

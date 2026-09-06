@@ -261,10 +261,25 @@ async function scenarioPickers() {
   await pickGateways(t);
   check(callsTo(t, 'gateway_list_full').length === 2, 'one gateway_list_full per type (warm-up + pickers share the cache)');
   const rows = qa(t, '.nym-gateway-option');
-  const chips = qa(t, '.nym-family-chip').map((c) => c.textContent);
+  const fams = qa(t, '.nym-gateway-option-family').map((c) => c.textContent);
   check(rows.length === 5, 'entry (3 incl. random) + exit (2 incl. random) rows rendered: ' + rows.length);
-  check(chips.length === 2 && chips.every((c) => c === 'Acme Ops'), 'chips only on rows with a family: ' + JSON.stringify(chips));
+  check(fams.length === 2 && fams.every((c) => c === 'Acme Ops'), 'family shown only on rows with one, as text in the telemetry line: ' + JSON.stringify(fams));
   check(qa(t, '.nym-gateway-option-perf').length === 3, 'performance lines intact');
+  // Ledger row: the bridge's "High (load: Low, uptime: 99%)" is split into a
+  // tier label in the status column and a telemetry line under the name.
+  const tiers = qa(t, '.nym-gateway-tier').map((e) => e.textContent + '/' + e.className.replace('nym-gateway-tier ', ''));
+  check(eq(tiers, ['High/high', 'Medium/medium', 'High/high']), 'tier labels and classes from the performance string: ' + JSON.stringify(tiers));
+  check(qa(t, '.nym-gateway-option-perf')[0].textContent === 'load low · uptime 99%', 'telemetry line parsed from the performance string');
+  check(qa(t, '.nym-gateway-tier')[0].title === 'High (load: Low, uptime: 99%)', 'raw performance string kept in the tier title');
+  check(qa(t, '.nym-gateway-option-name').every((e) => e.title === e.textContent), 'every name carries its full text in a title');
+  check(qa(t, '.nym-gateway-option-status').every((s) => s.parentNode.classList.contains('nym-gateway-option') && s.previousElementSibling.classList.contains('nym-gateway-option-name') && s.nextElementSibling.classList.contains('nym-gateway-option-meta')), 'row order: name, status column, telemetry line');
+  check(qa(t, '.nym-gateway-option-family').every((f) => f.parentNode.classList.contains('nym-gateway-option') && f.previousElementSibling.classList.contains('nym-gateway-option-meta')), 'family is its own last line of the row');
+  check(qa(t, '.nym-gateway-option-icon').length === 0, 'signal-bars icon column gone');
+  check(rows[0].querySelector('.nym-gateway-option-note') !== null && rows[0].querySelector('.nym-gateway-tier') === null, 'Random row has a note and no tier');
+  check(qa(t, '.nym-gateway-option').every((r) => /--i:\d+/.test(r.getAttribute('style') || '')), 'rows carry the stagger index');
+  const css = t.modules['nym-vpn.theme'].css;
+  check(/\.nym-gateway-ct-tag \{[^}]*flex-shrink: 0/.test(css) && /\.nym-gateway-option \{[^}]*grid-template-columns: minmax\(0, 1fr\) auto/.test(css) && /\.nym-gateway-option-name \{[^}]*min-width: 0/.test(css) && /\.nym-gateway-option-meta, \.nym-gateway-option-family \{[^}]*grid-column: 1 \/ -1/.test(css), 'theme: content-sized status column, shrinkable name, full-width telemetry/family lines');
+  check(/\.nym-gateway-option-name \{[^}]*-webkit-line-clamp: 2/.test(css) && !/\.nym-family-chip/.test(css), 'theme: two-line name clamp, chip style retired');
   const entrySel = q(t, 'select[name="entry_country"]');
   check(Array.from(entrySel.options).some((o) => o.value === 'DE' && /\(2\)/.test(o.textContent)), 'country dropdown counts intact');
   check(Array.from(entrySel.options).map((o) => o.value).slice(0, 2).join(',') === 'none,random', 'placeholder and Random options first');
@@ -281,8 +296,28 @@ async function scenarioPickers() {
   const entryRows = Array.from(q(t2, 'select[name="entry_country"]').closest('.nym-panel-picker').querySelectorAll('.nym-gateway-option'));
   const last = entryRows[entryRows.length - 1];
   check(last.classList.contains('disabled') && last.querySelector('input').disabled && /No CT/.test(last.textContent), 'CT on: bridges:false entry gateway disabled with No CT badge');
+  const ctTag = last.querySelector('.nym-gateway-ct-tag');
+  check(ctTag && ctTag.parentNode.classList.contains('nym-gateway-option-status') && !last.querySelector('.nym-gateway-option-name .nym-gateway-ct-tag') && ctTag.title.length > 0, 'No CT is its own tag in the status column, under the tier, with an explanatory title');
+  check(last.querySelector('.nym-gateway-option-name').textContent === 'alpha-two', 'No CT no longer rides inside the name text');
+  check(entryRows.filter((r) => r.querySelector('.nym-gateway-ct-tag')).length === 1 && qa(t2, '.nym-gateway-ct-tag').length === 1, 'exactly one No CT tag, on the bridges:false row');
   const exitRows = Array.from(q(t2, 'select[name="exit_country"]').closest('.nym-panel-picker').querySelectorAll('.nym-gateway-option'));
   check(exitRows.every((r) => !r.classList.contains('disabled')), 'CT gating applies to the entry side only');
+
+  // Degraded performance strings and the optional city field.
+  const ODD = [
+    { id: 'N1', name: 'na-node', country: 'DE', performance: 'N/A', bridges: true, city: 'Berlin' },
+    { id: 'N2', name: 'bare-tier', country: 'DE', performance: 'Offline', bridges: true },
+    { id: 'N3', name: 'weird', country: 'DE', performance: 'score=7', bridges: true, family: 'Fam' },
+    { id: 'N4', name: 'x', country: 'FR', performance: 'High (load: Low, uptime: 99%)', bridges: true },
+  ];
+  const t7 = setup({ rpc: { gateway_list_full: { gateways: ODD } } });
+  await pickGateways(t7);
+  const rowFor = (name) => qa(t7, '.nym-gateway-option').find((r) => r.querySelector('.nym-gateway-option-name').textContent === name);
+  const na = rowFor('na-node');
+  check(na.querySelector('.nym-gateway-tier').textContent === 'N/A' && na.querySelector('.nym-gateway-tier').classList.contains('unknown') && !na.querySelector('.nym-gateway-option-perf') && na.querySelector('.nym-gateway-option-city').textContent === 'Berlin', 'N/A: tier reads N/A, no telemetry span, city shown');
+  check(rowFor('bare-tier').querySelector('.nym-gateway-tier').textContent === 'Offline' && !rowFor('bare-tier').querySelector('.nym-gateway-option-perf'), 'bare tier word: tier only');
+  check(rowFor('weird').querySelector('.nym-gateway-option-perf').textContent === 'score=7' && rowFor('weird').querySelector('.nym-gateway-option-family').textContent === 'Fam', 'unknown format: raw string kept as telemetry, family still shown');
+  check(qa(t7, '.nym-gateway-option-city').length === 1, 'city only when the row has one');
 
   // Restore from the saved daemon selection on first render.
   const t3 = setup({ rpc: { gateway_list_full: { gateways: GATEWAYS }, gateway_get: { entry_type: 'gateway', entry_country: 'DE', entry_id: 'A2', exit_type: 'random' } } });
