@@ -13,7 +13,6 @@
           "gateway_list_by_country",
           "tentative_gateways",
           "tunnel_get",
-          "tentative_gateways",
           "account_get",
           "network_get",
           "lan_get",
