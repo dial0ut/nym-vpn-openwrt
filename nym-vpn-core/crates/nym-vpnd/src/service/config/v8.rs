@@ -36,6 +36,8 @@ pub struct VpnServiceConfig {
     pub legacy_split_tunnel: bool,
     #[serde(default)]
     pub inbound_exemptions: Vec<InboundExemption>,
+    #[serde(default)]
+    pub stealth_api: bool,
 }
 
 fn default_killswitch() -> bool {
@@ -118,6 +120,7 @@ impl TryFrom<VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
                     label: e.label,
                 })
                 .collect(),
+            stealth_api: value.stealth_api,
         };
 
         Ok(config)

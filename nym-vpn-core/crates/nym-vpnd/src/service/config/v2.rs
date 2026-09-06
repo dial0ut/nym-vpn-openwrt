@@ -79,6 +79,7 @@ impl TryFrom<VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
             mixnet_traffic,
             killswitch: true,
             legacy_split_tunnel: false,
+            stealth_api: false,
             ..Default::default()
         };
         Ok(config)

@@ -98,7 +98,7 @@ fn method_signatures() -> Value {
         "tunnel_get": {},
         "tunnel_set": {
             "ipv6": "str", "two_hop": "str", "killswitch": "str", "legacy_split_tunnel": "str",
-            "circumvention": "str", "loop_cover_delay": "str", "packet_delay": "str",
+            "circumvention": "str", "stealth_api": "str", "loop_cover_delay": "str", "packet_delay": "str",
             "message_delay": "str", "disable_poisson": "str", "disable_cover": "str"
         },
         "account_get": {},
@@ -968,6 +968,10 @@ fn tunnel_flags_json(config: &VpnServiceConfig) -> serde_json::Map<String, Value
         "legacy_split_tunnel".into(),
         json!(display_on_off(config.legacy_split_tunnel)),
     );
+    out.insert(
+        "stealth_api".into(),
+        json!(display_on_off(config.stealth_api)),
+    );
     out
 }
 
@@ -1002,6 +1006,7 @@ fn degraded_tunnel_config(err: String) -> Value {
     json!({
         "ipv6": "", "two_hop": "", "netstack": "", "lewes_protocol": "",
         "circumvention_transports": "", "killswitch": "", "legacy_split_tunnel": "",
+        "stealth_api": "", "stealth_api_note": "",
         "loop_cover_delay": "", "packet_delay": "", "message_delay": "",
         "disable_poisson": "", "disable_cover": "",
         "raw_config": err,
@@ -1023,6 +1028,19 @@ async fn tunnel_get() -> Value {
         _ => unreachable!(),
     };
 
+    // Stealth API has nothing to route through when the environment publishes
+    // no cover domains; say so rather than letting the toggle pretend.
+    let cover_domains = match client.get_info().await {
+        Ok(info) => info.has_api_cover_domains(),
+        Err(_) => true,
+    };
+    let stealth_api_note = if cover_domains {
+        ""
+    } else {
+        "no cover domains available"
+    };
+    out.insert("stealth_api_note".into(), json!(stealth_api_note));
+
     // Reconstruction of the old `nym-vpnc tunnel get` text; nothing parses it
     // anymore, but it is surfaced in diagnostics views.
     let inbound = if config.inbound_exemptions.is_empty() {
@@ -1036,7 +1054,7 @@ async fn tunnel_get() -> Value {
             .join(", ")
     };
     let raw_config = format!(
-        "IPv6: {}\nTwo-hop: {}\n{}\nNetstack: {}\nCircumvention transports: {}\nKill-switch: {}\nLegacy-split-tunnel: {}\nInbound exemptions: {}\nMixnet traffic configuration: {}",
+        "IPv6: {}\nTwo-hop: {}\n{}\nNetstack: {}\nCircumvention transports: {}\nKill-switch: {}\nLegacy-split-tunnel: {}\nStealth API connect: {}{}\nInbound exemptions: {}\nMixnet traffic configuration: {}",
         display_on_off(!config.disable_ipv6),
         display_on_off(config.enable_two_hop),
         LEWES_PROTOCOL_LINE,
@@ -1044,6 +1062,12 @@ async fn tunnel_get() -> Value {
         display_on_off(config.enable_bridges),
         display_on_off(config.killswitch),
         display_on_off(config.legacy_split_tunnel),
+        display_on_off(config.stealth_api),
+        if cover_domains {
+            ""
+        } else {
+            " (no cover domains available)"
+        },
         inbound,
         config.mixnet_traffic,
     );
@@ -1058,6 +1082,7 @@ async fn tunnel_set(args: &Value) -> Value {
     let killswitch = arg_onoff(args, "killswitch");
     let legacy_split_tunnel = arg_onoff(args, "legacy_split_tunnel");
     let circumvention = arg_onoff(args, "circumvention");
+    let stealth_api = arg_onoff(args, "stealth_api");
     // Numeric ranges mirror the shell (and daemon-side) validation.
     let loop_cover_delay = arg_u32(args, "loop_cover_delay").filter(|v| *v <= 200);
     let packet_delay = arg_u32(args, "packet_delay").filter(|v| *v <= 200);
@@ -1076,6 +1101,7 @@ async fn tunnel_set(args: &Value) -> Value {
         && killswitch.is_none()
         && legacy_split_tunnel.is_none()
         && circumvention.is_none()
+        && stealth_api.is_none()
         && !any_mixnet
     {
         return fail("No tunnel parameters specified");
@@ -1104,6 +1130,9 @@ async fn tunnel_set(args: &Value) -> Value {
         }
         if let Some(circumvention) = circumvention {
             client.set_enable_bridges(circumvention).await?;
+        }
+        if let Some(stealth_api) = stealth_api {
+            client.set_stealth_api(stealth_api).await?;
         }
         if any_mixnet {
             let mut config = client.get_config().await?;

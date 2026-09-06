@@ -212,8 +212,8 @@ async fn build_vpn_api_clients(network: &Network) -> Result<Vec<VpnApiClient>> {
                 let fronted_url = Url::new(url.inner_url().clone(), Some(vec![front.clone()]))
                     .map_err(|_e| Error::MissingApiUrl)?;
 
-                // The pinned http-api-client has no runtime set_front_policy, so
-                // force always-on fronting at build time instead.
+                // A client-local always-on policy, detached from the shared one
+                // the Stealth API setting drives, so this probe always fronts.
                 let fronted_client = VpnApiClient::new_with_front_policy(
                     vec![fronted_url],
                     new_user_agent!(),

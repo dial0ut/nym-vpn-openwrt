@@ -79,6 +79,7 @@ impl TryFrom<proto::VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
             mixnet_traffic,
             network_stats,
             inbound_exemptions,
+            stealth_api: value.stealth_api,
         };
         Ok(config)
     }
@@ -132,6 +133,7 @@ impl From<nym_vpn_lib_types::VpnServiceConfig> for proto::VpnServiceConfig {
             mixnet_traffic,
             network_stats,
             inbound_exemptions,
+            stealth_api: value.stealth_api,
         }
     }
 }

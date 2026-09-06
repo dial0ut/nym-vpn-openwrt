@@ -76,6 +76,7 @@ pub enum VpnServiceCommand {
     SetAllowLan(oneshot::Sender<Result<(), String>>, bool),
     SetKillswitch(oneshot::Sender<Result<(), String>>, bool),
     SetLegacySplitTunnel(oneshot::Sender<Result<(), String>>, bool),
+    SetStealthApi(oneshot::Sender<Result<(), String>>, bool),
     SetInboundExemptions(
         oneshot::Sender<Result<(), String>>,
         Vec<nym_vpn_lib_types::InboundExemption>,
@@ -191,6 +192,19 @@ pub enum VpnServiceCommand {
         oneshot::Sender<Result<GatewayTestReport, GatewayTestError>>,
         GatewayTestParams,
     ),
+}
+
+/// Stealth API connect routes every API request through the cover domains the
+/// environment lists for its API URLs. An environment that publishes none
+/// leaves the setting with nothing to act on; say so instead of silently
+/// going direct.
+fn warn_if_no_cover_domains(network: &Network) {
+    if !network.has_api_cover_domains() {
+        tracing::warn!(
+            "Stealth API connect is on but the '{}' environment lists no cover domains for its API URLs; API requests go direct",
+            network.nym_network_details().network_name
+        );
+    }
 }
 
 pub struct NymVpnServiceParameters {
@@ -357,6 +371,14 @@ impl NymVpnService {
             .await
             .map_err(Error::ConfigSetup)?;
 
+        // Read the service config before any API client exists: loading it
+        // also installs the persisted API fronting policy (Stealth API).
+        let config_manager =
+            VpnServiceConfigManager::new(&config_dir, Some(tunnel_event_tx.clone())).await?;
+        if config_manager.config().stealth_api {
+            warn_if_no_cover_domains(&parameters.network_env);
+        }
+
         let state_machine_shutdown_token = CancellationToken::new();
         let services_shutdown_token = CancellationToken::new();
 
@@ -408,9 +430,6 @@ impl NymVpnService {
         let account_state_rx = account_controller.get_state_receiver();
         let wireguard_keys_db = account_controller.get_wireguard_keys_storage();
         let account_controller_handle = tokio::task::spawn(account_controller.run());
-
-        let config_manager =
-            VpnServiceConfigManager::new(&config_dir, Some(tunnel_event_tx.clone())).await?;
 
         // Statistics collection setup
         let statistics_controller_config = config_manager.config().network_stats;
@@ -837,6 +856,10 @@ impl NymVpnService {
                 let result = self.handle_set_legacy_split_tunnel(legacy_split_tunnel).await;
                 let _ = tx.send(result);
             }
+            VpnServiceCommand::SetStealthApi(tx, stealth_api) => {
+                let result = self.handle_set_stealth_api(stealth_api).await;
+                let _ = tx.send(result);
+            }
             VpnServiceCommand::SetInboundExemptions(tx, exemptions) => {
                 let result = self.handle_set_inbound_exemptions(exemptions).await;
                 let _ = tx.send(result);
@@ -1116,6 +1139,16 @@ impl NymVpnService {
             .await;
         self.update_tunnel_settings_with_throttle();
         result
+    }
+
+    async fn handle_set_stealth_api(&mut self, stealth_api: bool) -> Result<(), String> {
+        // API transport only. The shared fronting policy is consulted on every
+        // request, so the change is live at once and the tunnel is left alone:
+        // no settings update, no reconnect, no gateway re-selection.
+        if stealth_api {
+            warn_if_no_cover_domains(&self.network_tx.borrow());
+        }
+        self.config_manager.set_stealth_api(stealth_api).await
     }
 
     async fn handle_set_inbound_exemptions(

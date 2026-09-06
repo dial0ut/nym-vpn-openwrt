@@ -24,6 +24,16 @@ the GitHub release notes.
   while disconnected and while connected with the kill switch on; the
   kill-switch policy gained a matching rate-limited, mark-scoped echo-request
   accept in every state. Requested by a forum user (#8).
+- "Stealth API connect", the same switch the NymVPN mobile and desktop apps
+  have: `nym-vpnc tunnel set --stealth-api on|off` and a toggle in the LuCI
+  Tunnel Settings card. The daemon reaches the Nym API (account, gateway
+  directory, discovery) directly and only falls back to cover domains after a
+  direct request fails; with this on, every API request goes through the cover
+  domains from the start. Helps where the API hosts are blocked, at the cost
+  of slower API calls. It affects API traffic only, so it applies immediately
+  without a reconnect, and it is persisted in the daemon config. CLI and web
+  UI both say so when the network environment publishes no cover domains, in
+  which case the setting has nothing to route through.
 
 ### Security
 

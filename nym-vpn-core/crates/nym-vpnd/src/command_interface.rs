@@ -220,6 +220,18 @@ impl NymVpnService for CommandInterface {
         Ok(tonic::Response::new(()))
     }
 
+    async fn set_stealth_api(&self, request: tonic::Request<bool>) -> Result<tonic::Response<()>> {
+        let stealth_api = request.into_inner();
+
+        self
+            .send_and_wait(VpnServiceCommand::SetStealthApi, stealth_api)
+            .await
+            .map_err(|e| tonic::Status::internal(format!("Failed to set stealth API: {e}")))?
+            .map_err(tonic::Status::internal)?;
+
+        Ok(tonic::Response::new(()))
+    }
+
     async fn set_legacy_split_tunnel(
         &self,
         request: tonic::Request<bool>,

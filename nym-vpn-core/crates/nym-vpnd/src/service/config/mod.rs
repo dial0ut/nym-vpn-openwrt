@@ -224,6 +224,7 @@ impl TryFrom<&nym_vpn_lib_types::VpnServiceConfig> for VpnServiceConfigExt {
             killswitch: value.killswitch,
             legacy_split_tunnel: value.legacy_split_tunnel,
             inbound_exemptions,
+            stealth_api: value.stealth_api,
         };
 
         Ok(VpnServiceConfigExt::V8(v8))
