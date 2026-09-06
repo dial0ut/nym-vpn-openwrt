@@ -530,6 +530,7 @@ message TunnelState {
     DEVICE_TIME_OUT_OF_SYNC = 15;
     DEVICE_LOGGED_OUT = 16;
     INTERNAL = 17;
+    NEEDS_RELAXED_INDEPENDENCE_CRITERIA = 22;
   }
 
   enum ActionAfterDisconnect {

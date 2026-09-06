@@ -111,7 +111,8 @@ impl TunnelStateHandler for OfflineState {
             Some(command) = command_rx.recv() => {
                 tracing::debug!("OfflineState received command: {command:?}");
                 match command {
-                    TunnelCommand::Connect => {
+                    TunnelCommand::Connect { relax_independence } => {
+                        shared_state.relax_independence = relax_independence;
                         if self.reconnect {
                             NextTunnelState::SameState(self)
                         } else {

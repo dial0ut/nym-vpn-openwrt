@@ -31,6 +31,7 @@ mod connection_data;
 mod device;
 mod diagnostic;
 mod gateway;
+mod gateway_independence;
 mod gateway_test;
 mod log_path;
 mod network;
@@ -70,6 +71,7 @@ pub use gateway::{
     LookupGatewayFilters, Lp, NodeIdentity, ParseRecipientError, Performance, Probe, ProbeOutcome,
     QuicClientOptions, Recipient, Score, Socks5,
 };
+pub use gateway_independence::{GatewayIndependence, TentativeGateways};
 pub use gateway_test::{
     DEFAULT_PROBE_COUNT, DEFAULT_PROBE_TIMEOUT_MS, DEFAULT_TOP_CANDIDATES, GatewayPairResult,
     GatewayTestParams, GatewayTestReport, GatewayTestResult, GatewayTestRole, GatewayTestSelector,

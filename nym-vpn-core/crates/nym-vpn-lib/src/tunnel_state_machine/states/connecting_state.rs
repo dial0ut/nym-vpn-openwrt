@@ -382,6 +382,7 @@ impl ConnectingState {
             selected_gateways: self.selected_gateways.clone(),
             user_agent: shared_state.user_agent.clone(),
             blacklisted_entry_gateways: shared_state.blacklisted_entry_gateways.clone(),
+            relax_independence: shared_state.relax_independence,
         };
         let tunnel_monitor_handle = TunnelMonitor::start(
             tunnel_parameters,
@@ -726,7 +727,8 @@ impl TunnelStateHandler for ConnectingState {
             Some(command) = command_rx.recv() => {
                 tracing::debug!("ConnectingState received command: {command:?}");
                 match command {
-                    TunnelCommand::Connect => {
+                    TunnelCommand::Connect { relax_independence } => {
+                        shared_state.relax_independence = relax_independence;
                         if let Some(tunnel_monitor_handle) = self.tunnel_monitor_handle {
                             Self::disconnect(PrivateActionAfterDisconnect::Reconnect { gateways: None }, tunnel_monitor_handle, shared_state).await
                         } else {

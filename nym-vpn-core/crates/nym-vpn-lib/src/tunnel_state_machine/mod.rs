@@ -42,8 +42,8 @@ use nym_gateway_directory::{
 };
 use nym_vpn_lib_types::{
     AccountControllerErrorStateReason, ActionAfterDisconnect, ConnectionData, EntryPoint,
-    ErrorStateReason, EstablishConnectionData, EstablishConnectionState, ExitPoint, TunnelEvent,
-    TunnelState, TunnelType,
+    ErrorStateReason, EstablishConnectionData, EstablishConnectionState, ExitPoint,
+    GatewayIndependence, TunnelEvent, TunnelState, TunnelType,
 };
 
 use tunnel::SelectedGateways;
@@ -149,9 +149,24 @@ pub struct TunnelSettings {
     /// `{proto, dport}` pairs is routed via the real WAN instead of the VPN,
     /// so port-forwarded services remain reachable while the kill-switch is on.
     pub inbound_exemptions: Vec<nym_firewall::InboundExemption>,
+
+    /// Which relations between the entry and the exit gateway rule a pair out
+    /// (same node family, ASN, subnet). Only the criteria feed gateway
+    /// selection; `enable_notifications` is a hint for user interfaces.
+    pub gateway_independence: GatewayIndependence,
 }
 
 impl TunnelSettings {
+    /// The independence criteria a selection runs under: the configured ones,
+    /// or none when the user asked to connect regardless for this session.
+    pub fn independence_criteria(&self, relax_independence: bool) -> GatewayIndependence {
+        if relax_independence {
+            GatewayIndependence::disabled()
+        } else {
+            self.gateway_independence
+        }
+    }
+
     /// Returns resolved DNS config resolved against default DNS IPs.
     pub fn resolved_dns_config(&self) -> ResolvedDnsConfig {
         self.dns.to_dns_config().resolve(&self.dns_ips())
@@ -239,6 +254,15 @@ impl TunnelSettings {
         if self.inbound_exemptions != other.inbound_exemptions {
             diff.add(TunnelSettingsDiffFields::InboundExemptions);
         }
+        // Only the criteria matter here; the notification switch is a UI hint
+        // and must not disturb a running tunnel.
+        let criteria_of = |gi: &GatewayIndependence| GatewayIndependence {
+            enable_notifications: false,
+            ..*gi
+        };
+        if criteria_of(&self.gateway_independence) != criteria_of(&other.gateway_independence) {
+            diff.add(TunnelSettingsDiffFields::GatewayIndependence);
+        }
 
         if diff.is_empty() { None } else { Some(diff) }
     }
@@ -261,6 +285,7 @@ pub enum TunnelSettingsDiffFields {
     Killswitch,
     LegacySplitTunnel,
     InboundExemptions,
+    GatewayIndependence,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
@@ -345,9 +370,11 @@ impl TunnelSettingsDiff {
     /// the entry/exit points themselves, the tunnel type (mixnet and
     /// wireguard draw from different gateway sets), QUIC/bridges (entry
     /// gateways are filtered to those advertising bridge params),
-    /// residential exit (exit filter), and the min-performance thresholds
-    /// (applied to the directory lookup). Anything else — IPv6, DNS,
-    /// kill-switch, split tunnel — leaves the current pair perfectly valid.
+    /// residential exit (exit filter), the min-performance thresholds
+    /// (applied to the directory lookup) and the gateway independence
+    /// criteria (which pairs are acceptable). Anything else — IPv6, DNS,
+    /// kill-switch, split tunnel, independence reminders — leaves the current
+    /// pair perfectly valid.
     pub fn affects_gateway_selection(&self) -> bool {
         self.0.iter().any(|f| {
             matches!(
@@ -358,6 +385,7 @@ impl TunnelSettingsDiff {
                     | TunnelSettingsDiffFields::QUIC
                     | TunnelSettingsDiffFields::ResidentialExit
                     | TunnelSettingsDiffFields::GatewayPerformanceOptions
+                    | TunnelSettingsDiffFields::GatewayIndependence
             )
         })
     }
@@ -418,7 +446,12 @@ impl DnsOptions {
 #[derive(Debug)]
 pub enum TunnelCommand {
     /// Connect the tunnel.
-    Connect,
+    Connect {
+        /// Select gateways with the independence criteria switched off, for
+        /// this connect session only (until the next disconnect). The
+        /// persisted settings are untouched.
+        relax_independence: bool,
+    },
 
     /// Disconnect the tunnel.
     Disconnect,
@@ -604,6 +637,10 @@ pub struct SharedState {
     /// gateway (blacklist + re-selection) would switch the user's server on
     /// every WAN blip.
     entry_gateway_grace: Option<(NodeIdentity, std::time::Instant)>,
+    /// Whether the current connect session was started with the gateway
+    /// independence criteria relaxed ("connect anyway"). Set by the Connect
+    /// command, kept across automatic reconnects, cleared on disconnect.
+    relax_independence: bool,
     /// Nym VPN API socket addresses resolved during the most recent Connecting
     /// state. Used by DisconnectedState to build a kill-switch Blocked policy
     /// that still permits traffic to the API so the account controller can
@@ -789,6 +826,7 @@ impl TunnelStateMachine {
             user_agent,
             blacklisted_entry_gateways: BlacklistedGateways::new(),
             entry_gateway_grace: None,
+            relax_independence: false,
             api_endpoints,
         };
 
@@ -952,6 +990,9 @@ impl tunnel::Error {
                 GatewayDirectoryError::SameEntryAndExitGateway { .. } => {
                     Some(ErrorStateReason::SameEntryAndExitGateway)
                 }
+                GatewayDirectoryError::NeedsRelaxedIndependenceCriteria { .. } => {
+                    Some(ErrorStateReason::NeedsRelaxedIndependenceCriteria)
+                }
                 GatewayDirectoryError::EntryGatewayUnavailable { .. } => {
                     Some(ErrorStateReason::PerformantEntryGatewayUnavailable)
                 }
@@ -1102,6 +1143,7 @@ mod tests {
             killswitch: true,
             legacy_split_tunnel: false,
             inbound_exemptions: Vec::new(),
+            gateway_independence: GatewayIndependence::default(),
         }
     }
 
@@ -1150,6 +1192,29 @@ mod tests {
             diff_of(|s| s.gateway_performance_options.mixnet_min_performance = Some(80))
                 .affects_gateway_selection()
         );
+    }
+
+    /// The independence criteria decide which pairs are acceptable, so a
+    /// change must re-select; the reminder switch is a UI hint and must not
+    /// even count as a settings change.
+    #[test]
+    fn independence_criteria_force_reselection_but_reminders_do_not() {
+        assert!(diff_of(|s| s.gateway_independence.set_enabled(false)).affects_gateway_selection());
+        assert!(
+            diff_of(|s| s.gateway_independence.different_subnet = false)
+                .affects_gateway_selection()
+        );
+        let old = settings();
+        let mut new = old.clone();
+        new.gateway_independence.enable_notifications = false;
+        assert!(old.diff(&new).is_none());
+    }
+
+    #[test]
+    fn relaxing_for_one_session_disables_every_criterion() {
+        let s = settings();
+        assert!(s.independence_criteria(false).full_enabled());
+        assert!(s.independence_criteria(true).full_disabled());
     }
 
     /// The two predicates gate different halves of the same decision, so a

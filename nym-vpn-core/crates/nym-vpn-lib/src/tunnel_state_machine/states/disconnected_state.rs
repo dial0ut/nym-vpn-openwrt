@@ -19,8 +19,10 @@ impl DisconnectedState {
         tombstone: Option<Tombstone>,
         shared_state: &mut SharedState,
     ) -> (Box<dyn TunnelStateHandler>, PrivateTunnelState) {
-        // The post-drop gateway grace window is scoped to a connect session.
+        // The post-drop gateway grace window and the "connect anyway" relaxation
+        // of the independence criteria are scoped to a connect session.
         shared_state.entry_gateway_grace = None;
+        shared_state.relax_independence = false;
 
         // Drop tombstone to close tunnel devices.
         drop(tombstone);
@@ -60,7 +62,8 @@ impl TunnelStateHandler for DisconnectedState {
             Some(command) = command_rx.recv() => {
                 tracing::debug!("DisconnectedState received command: {command:?}");
                 match command {
-                    TunnelCommand::Connect => {
+                    TunnelCommand::Connect { relax_independence } => {
+                        shared_state.relax_independence = relax_independence;
                         NextTunnelState::NewState(ConnectingState::enter(0, None, shared_state).await)
                     },
                     TunnelCommand::Disconnect => NextTunnelState::SameState(self),

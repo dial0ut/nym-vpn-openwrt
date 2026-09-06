@@ -702,7 +702,9 @@ impl NymVpnService {
             match new_state {
                 TargetState::Secured => {
                     self.statistics_event_sender.report_connection_request();
-                    let _ = self.command_sender.send(TunnelCommand::Connect);
+                    let _ = self.command_sender.send(TunnelCommand::Connect {
+                        relax_independence: false,
+                    });
                 }
                 TargetState::Unsecured => {
                     self.statistics_event_sender.report_disconnection_request();
@@ -728,7 +730,9 @@ impl NymVpnService {
                     self.update_tunnel_settings();
                 }
                 self.statistics_event_sender.report_connection_request();
-                let _ = self.command_sender.send(TunnelCommand::Connect);
+                let _ = self.command_sender.send(TunnelCommand::Connect {
+                    relax_independence: false,
+                });
                 true
             }
             TargetState::Unsecured => false,

@@ -538,6 +538,7 @@ impl VpnServiceConfigManager {
                     ex
                 })
                 .collect(),
+            gateway_independence: nym_vpn_lib_types::GatewayIndependence::default(),
         }
     }
 }

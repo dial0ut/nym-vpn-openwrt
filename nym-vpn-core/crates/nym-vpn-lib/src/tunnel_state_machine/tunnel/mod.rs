@@ -3,13 +3,15 @@
 
 mod any_tunnel_handle;
 mod gateway_selector;
+mod independence;
 pub mod mixnet;
 mod tombstone;
 pub mod transports;
 pub mod wireguard;
 
-pub use gateway_selector::SelectedGateways;
+pub use gateway_selector::{SelectedGateways, select_gateway_pair};
 use nym_gateway_directory::{BlacklistedGateways, GatewayCacheHandle};
+use nym_vpn_lib_types::GatewayIndependence;
 use nym_vpn_store::keys::wireguard::WireguardKeysDb;
 use tokio_util::sync::CancellationToken;
 
@@ -21,6 +23,7 @@ pub async fn select_gateways(
     gateway_cache_handle: GatewayCacheHandle,
     blacklisted_entry_gateways: &BlacklistedGateways,
     tunnel_settings: &TunnelSettings,
+    independence_criteria: GatewayIndependence,
     wg_keys_db: WireguardKeysDb,
     cancel_token: CancellationToken,
 ) -> Result<SelectedGateways> {
@@ -28,6 +31,7 @@ pub async fn select_gateways(
         gateway_cache_handle,
         blacklisted_entry_gateways,
         tunnel_settings,
+        independence_criteria,
         wg_keys_db,
     );
 
