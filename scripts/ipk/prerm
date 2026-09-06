@@ -1,6 +1,16 @@
 #!/bin/sh
 # Pre-removal script for nym-vpn IPK package
 
+# Upgrade only: remember what rpcd is currently serving. postinst compares
+# this against the new files to pick the least disruptive rpcd refresh
+# (see there); a missing stash makes it restart rpcd.
+if [ "$PKG_UPGRADE" = "1" ]; then
+    {
+        echo "plugin=$(md5sum /usr/libexec/rpcd/nym-vpn 2>/dev/null | cut -d' ' -f1)"
+        echo "acl=$(md5sum /usr/share/rpcd/acl.d/luci-app-nym-vpn.json 2>/dev/null | cut -d' ' -f1)"
+    } > /tmp/nym-vpn.rpcd-state
+fi
+
 # Stop the services: the binaries are about to be replaced either way.
 /etc/init.d/nym-vpn-watchdog stop 2>/dev/null
 /etc/init.d/nym-vpnd stop 2>/dev/null
@@ -119,6 +129,7 @@ fi
 if [ "$PKG_UPGRADE" != "1" ]; then
     rm -rf /etc/nym 2>/dev/null
     rm -rf /var/log/nym-vpnd 2>/dev/null
+    rm -f /tmp/nym-vpn.rpcd-state 2>/dev/null
 
     # Remove package feed registration
     if [ -f /etc/opkg/customfeeds.conf ]; then

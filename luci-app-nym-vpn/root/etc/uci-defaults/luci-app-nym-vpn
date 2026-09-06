@@ -39,10 +39,11 @@ else
 fi
 uci commit firewall
 
-# Restart rpcd to register the ubus backend
-/etc/init.d/rpcd restart 2>/dev/null
-
-# Clear LuCI cache
-rm -rf /tmp/luci-modulecache/* /tmp/luci-indexcache* 2>/dev/null
+# rpcd and the LuCI caches are deliberately left alone here: the package
+# postinst owns that and defers the rpcd refresh until the package
+# transaction has returned. This script runs inside that transaction, and
+# restarting rpcd there breaks installs driven from LuCI's Software page,
+# which runs opkg/apk through rpcd (#13). At first boot rpcd has not
+# started yet, so there is nothing to refresh.
 
 exit 0
