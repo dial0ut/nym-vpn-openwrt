@@ -121,6 +121,15 @@ async function scenarioStructure() {
   const splitCard = card(t, 'Split Tunneling');
   check(!!splitCard && splitCard.contains(byId(t, 'legacy-split-toggle')) && splitCard.contains(q(t, '.nym-split-section')), 'Split Tunneling card holds the legacy PBR switch and the exclusions');
   check(card(t, 'Tunnel Settings').contains(q(t, '.nym-inbound-section')), 'inbound services stay in Tunnel Settings');
+  const groups = Array.from(card(t, 'Tunnel Settings').querySelectorAll('.nym-group-title')).map((e) => e.textContent);
+  check(eq(groups, ['Protection', 'Inbound Services', 'Transport', 'Resilience']), 'Tunnel Settings grouped: ' + JSON.stringify(groups));
+  const protection = card(t, 'Tunnel Settings').querySelector('.nym-group');
+  check(protection.contains(byId(t, 'killswitch-toggle')) && protection.contains(q(t, '.nym-inbound-section')) && protection.contains(byId(t, 'gw-independence-toggle')) && protection.contains(byId(t, 'family-reminders-toggle')),
+    'Protection holds kill-switch, its inbound exceptions, independence and reminders');
+  check(q(t, '.nym-inbound-section').previousElementSibling === byId(t, 'killswitch-row'), 'inbound services sit directly under the kill-switch row');
+  const tagged = qa(t, '.nym-toggle-row').filter((r) => r.querySelector('.nym-toggle-tag')).map((r) => r.querySelector('.nym-toggle-title').textContent);
+  check(eq(tagged, ['Kill-Switch', 'Gateway Independence', 'Two-Hop Mode', 'Circumvention Transports', 'IPv6', 'Legacy Split Tunneling (PBR)']), 'reconnect tag on exactly the switches that apply on the next connect: ' + JSON.stringify(tagged));
+  check(!qa(t, '.nym-toggle-desc').some((d) => /requires reconnect|applies immediately|no reconnect/i.test(d.textContent)), 'no row description repeats the reconnect note');
   check(byId(t, 'legacy-split-note').style.display === 'none', 'legacy note hidden while legacy split is off');
   check(q(t, '.nym-footer').textContent.indexOf('1.2.3') !== -1 && q(t, '.nym-footer').textContent.indexOf('mainnet') !== -1, 'footer shows version and network');
   check(q(t, '.nym-inbound-section').style.display === 'block' && q(t, '.nym-split-section').style.display === 'block', 'inbound and split sections shown (killswitch on, legacy off)');

@@ -185,11 +185,13 @@ return baseclass.extend({
     .nym-group-title { font-size: 10px; text-transform: uppercase; letter-spacing: var(--label-spacing); color: var(--nym-green); opacity: 0.85; font-weight: 500; display: flex; align-items: center; gap: 8px; }\
     .nym-group-title::after { content: ""; flex: 1; height: 1px; background: var(--border-color); }\
     .nym-group-desc { font-size: 12px; color: var(--text-muted); line-height: 1.5; margin-top: 8px; }\
-    .nym-group .nym-toggle-row:first-of-type { padding-top: 12px; }\
-    .nym-group .nym-toggle-row:last-of-type { border-bottom: none; }\
-    /* A block that belongs to the row above it (the inbound\
-       exceptions of the kill-switch): a hairline on the left ties it to that row. */\
-    .nym-subpanel { margin: 4px 0 8px 12px; padding: 4px 0 4px 16px; border-left: 2px solid var(--nym-green-dim); }\
+    /* A row with a block that belongs to it (the kill-switch and its inbound\
+       exceptions): the row loses its own rule, the pair shares one, and a\
+       hairline on the left ties the block to the row. */\
+    .nym-row-with-sub { border-bottom: 1px solid var(--border-color); }\
+    .nym-row-with-sub:last-child { border-bottom: none; }\
+    .nym-row-with-sub > .nym-toggle-row { border-bottom: none; }\
+    .nym-subpanel { margin: 0 0 16px 12px; padding: 4px 0 4px 16px; border-left: 2px solid var(--nym-green-dim); }\
     /* Advisory lines: a plain sentence in the warning colour, no box. */\
     .nym-note { font-size: 12px; line-height: 1.5; color: var(--text-muted); margin-bottom: 16px; }\
     .nym-note-warn { color: var(--warning); }\
@@ -280,7 +282,10 @@ return baseclass.extend({
     .nym-tooltip { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; background: var(--border-color); border-radius: 50%; font-size: 10px; color: var(--text-muted); cursor: help; margin-left: 8px; }\
     .nym-tooltip::after { content: attr(data-tip); position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); padding: 8px 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; font-size: 11px; color: var(--text-secondary); white-space: nowrap; opacity: 0; visibility: hidden; transition: all 0.2s; z-index: 100; margin-bottom: 8px; }\
     .nym-tooltip:hover::after { opacity: 1; visibility: visible; }\
-    .nym-pill-group { display: flex; gap: 6px; }\
+    .nym-pill-group { display: flex; gap: 6px; flex-wrap: wrap; }\
+    /* Always-on check interval: a full-width row under the switch. */\
+    .nym-interval-row { width: 100%; align-items: center; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color); }\
+    .nym-interval-label { font-size: 12px; color: var(--text-muted); }\
     .nym-pill { padding: 5px 12px; font-size: 12px; font-weight: 500; border: 1px solid var(--border-color); border-radius: 16px; background: transparent; color: var(--text-secondary); cursor: pointer; transition: all 0.2s ease; font-family: inherit; }\
     .nym-pill:hover { border-color: var(--text-secondary); color: var(--text-primary); }\
     .nym-pill.active { background: var(--nym-green-dim); border-color: var(--nym-green); color: var(--nym-green); }\

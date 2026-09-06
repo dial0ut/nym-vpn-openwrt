@@ -1,13 +1,14 @@
 'use strict';
 'require baseclass';
 'require dom';
+'require nym-vpn.components.card as card';
 'require nym-vpn.components.toast as toast';
 
 // Inbound Services — ports whose reply traffic bypasses the tunnel so a
 // service on the router or LAN stays reachable from the WAN with the
-// kill-switch on. Renders inside the Tunnel Settings card beneath the
-// Kill-Switch toggle; the daemon stores exemptions independently of the
-// kill-switch, so toggling it off/on never loses them.
+// kill-switch on. Renders inside the Tunnel Settings card as the block
+// nested under the Kill-Switch row; the daemon stores exemptions
+// independently of the kill-switch, so toggling it off/on never loses them.
 
 var E = dom.create.bind(dom);
 
@@ -20,7 +21,7 @@ return baseclass.extend({
         var protoSel, portInp, labelInp, saveBtn;
 
         var renderRow = function(ex) {
-            var killswitchOn = store.data.tunnel_config.killswitch !== 'off';
+            var killswitchOn = store.tunnelSwitches.killswitch && !store.tunnelSwitches.legacy_split_tunnel;
             var statusClass = killswitchOn ? '' : 'inert';
             var statusText = killswitchOn ? 'Active' : 'Inert';
             return E('div', {
@@ -172,17 +173,19 @@ return baseclass.extend({
         }, 'Add');
 
         var section = E('div', { 'class': 'nym-inbound-section' }, [
-            E('div', { 'class': 'nym-divider' }),
-            E('div', { 'class': 'nym-toggle-title', 'style': 'margin-bottom: 6px' }, 'Inbound Services'),
-            E('div', { 'class': 'nym-card-description' },
-                'Ports that stay reachable from the WAN while the kill-switch is on ' +
-                '(e.g. hosted HTTPS, WireGuard, SSH). For LAN services, add the ' +
-                'Network → Firewall port forward first, then the matching port here.'),
-            listEl,
-            E('div', { 'class': 'nym-exemption-add' }, [
-                E('div', { 'class': 'nym-form-label' }, 'Add Exemption'),
-                E('div', { 'class': 'nym-exemption-addrow' }, [protoSel, portInp, labelInp, saveBtn])
-            ])
+            card.group({
+                title: 'Inbound Services',
+                desc: 'Ports that stay reachable from the WAN while the kill-switch is on ' +
+                    '(hosted HTTPS, WireGuard, SSH). For a LAN service, add the ' +
+                    'Network → Firewall port forward first, then the same WAN-side port here.',
+                body: [
+                    listEl,
+                    E('div', { 'class': 'nym-exemption-add' }, [
+                        E('div', { 'class': 'nym-form-label' }, 'Add Exemption'),
+                        E('div', { 'class': 'nym-exemption-addrow' }, [protoSel, portInp, labelInp, saveBtn])
+                    ])
+                ]
+            })
         ]);
         redraw();
         return section;
