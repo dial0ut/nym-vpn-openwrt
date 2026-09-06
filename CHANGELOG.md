@@ -37,6 +37,27 @@ the GitHub release notes.
 - LuCI **Privacy** card with the anonymous statistics switch, previously
   reachable only through `nym-vpnc network-stats`. The rpcd bridge gained
   `stats_get`/`stats_set` for it.
+- Gateway independence, the same guarantee upstream calls node families: the
+  entry and exit gateway of a two-hop tunnel must be run by unrelated
+  parties. The daemon now picks the exit first and only accepts an entry in
+  a different node family (operator group), a different ASN and a
+  non-overlapping announced prefix, for random and country selections as
+  well as pinned gateways. All three criteria are on by default and apply to
+  existing installs without a migration; `nym-vpnc tunnel set
+  --gateway-independence on|off` switches them together and
+  `--family-reminders on|off` controls the reminder shown by user interfaces.
+  When only a related pair matches the settings the connect stops in a
+  distinct error state that says so instead of quietly pairing them;
+  `nym-vpnc connect-v2 --relax-independence` connects anyway for that
+  session only (automatic reconnects keep it, the next disconnect ends it)
+  and never changes the persisted setting. `nym-vpnc gateway tentative`
+  previews the pair a connect would pick, or reports that relaxed criteria
+  are needed, without connecting or creating key material; `gateway list`
+  gained a Family column and `status` names each gateway's family. The rpcd
+  bridge exposes all of it for LuCI: a `gateway_independence` object in the
+  tunnel config, `tunnel_set` toggles, a `relax_independence` flag on
+  `connect`, a `tentative_gateways` method and family fields on gateway rows
+  and on the status entry/exit.
 
 ### Security
 

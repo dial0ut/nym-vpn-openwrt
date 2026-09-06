@@ -7,6 +7,7 @@ LuCI can do goes through the same commands.
 
 ```bash
 nym-vpnc connect-v2
+nym-vpnc connect-v2 --relax-independence   # connect even if entry and exit are related (this session only)
 nym-vpnc disconnect
 nym-vpnc status
 ```
@@ -19,7 +20,38 @@ nym-vpnc gateway list mixnet-exit          # or mixnet-entry, wg
 nym-vpnc gateway set --entry-country DE --exit-country CH
 nym-vpnc gateway set --exit-id <base58-gateway-id>
 nym-vpnc gateway set --entry-random --exit-random
+nym-vpnc gateway tentative                 # the pair a connect would pick right now
 ```
+
+`gateway list` shows each gateway's operator **family** (node family) when it has declared one,
+and `status` names the family of the entry and exit while connected.
+
+### Gateway independence
+
+A two-hop tunnel only hides who talks to whom if the entry and the exit are run by unrelated
+parties. The daemon therefore picks the exit first and then only accepts an entry that is
+**independent** of it: a different node family (operator group), a different ASN and a
+non-overlapping announced prefix. All three criteria are on by default and apply to random and
+country selections as well as to explicitly pinned gateways.
+
+When no independent pair matches the current settings — for example both gateways of a small
+country belong to one operator, or you pinned two gateways of the same family — the connect stops
+in an error state instead of quietly pairing related gateways. `nym-vpnc status` then says:
+
+```
+the selected entry and exit are not independent (same operator family/ASN/subnet);
+reconnect with --relax-independence or change gateways
+```
+
+`nym-vpnc connect-v2 --relax-independence` connects anyway. The relaxation is scoped to that
+connect session: it survives the daemon's automatic reconnects but ends at the next disconnect,
+and the persisted setting is left untouched. To turn the criteria off permanently use
+`nym-vpnc tunnel set --gateway-independence off`.
+
+`nym-vpnc gateway tentative` (or `--json`) previews the outcome without connecting: the probable
+entry and exit with id, name, country and family, "needs relaxed independence criteria" when only
+a related pair exists, or "no gateways available". The daemon runs the same selection a connect
+would, including its temporary blacklist of failing entry gateways, and creates no key material.
 
 ### Latency and packet loss
 
@@ -66,7 +98,16 @@ nym-vpnc tunnel set --killswitch off       # allows WAN fallback and carve-outs
 nym-vpnc tunnel set --killswitch on
 nym-vpnc tunnel set --stealth-api on       # API via cover domains on every request
 nym-vpnc tunnel set --stealth-api off      # default: cover domains only after a direct request fails
+nym-vpnc tunnel set --gateway-independence off   # accept related entry/exit pairs (default: on)
+nym-vpnc tunnel set --family-reminders off       # stop reminding about related pairs (default: on)
 ```
+
+**Gateway independence** switches the three independence criteria (family, ASN, subnet) together;
+`tunnel get` prints `Gateway independence: on (family, ASN, subnet)` or `off`. Changing it while
+connected re-selects the gateways. **Family reminders** only control whether user interfaces
+remind you when a pair is not independent; they never affect the tunnel. See
+[Gateway independence](#gateway-independence) for what the criteria mean and how to connect
+anyway for a single session.
 
 **Stealth API connect** is the same switch as in the NymVPN mobile and desktop apps. The daemon
 talks to the Nym API (account, gateway directory, network discovery) over HTTPS; by default it
