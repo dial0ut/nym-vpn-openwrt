@@ -56,6 +56,10 @@ pub struct VpnServiceConfig {
     /// (same node family, ASN, subnet) and whether to remind the user when the
     /// pair is not independent. Changing a criterion re-selects the gateways.
     pub gateway_independence: GatewayIndependence,
+    /// Always On: the daemon connects on start (once a default route exists)
+    /// and keeps retrying error states with backoff until told to disconnect.
+    /// A policy switch, not a tunnel setting: toggling it never reconnects.
+    pub always_on: bool,
 }
 
 /// Whether the DNS servers in [`VpnServiceConfig`] actually reach the system
@@ -165,6 +169,7 @@ impl fmt::Display for VpnServiceConfig {
         writeln!(f, "legacy_split_tunnel: {}", self.legacy_split_tunnel)?;
         writeln!(f, "stealth_api: {}", self.stealth_api)?;
         writeln!(f, "gateway_independence: {}", self.gateway_independence)?;
+        writeln!(f, "always_on: {}", self.always_on)?;
         writeln!(f, "mixnet traffic config: {}", self.mixnet_traffic)?;
 
         Ok(())
@@ -204,6 +209,7 @@ impl Default for VpnServiceConfig {
             inbound_exemptions: Vec::new(),
             stealth_api: false,
             gateway_independence: GatewayIndependence::default(),
+            always_on: false,
         }
     }
 }

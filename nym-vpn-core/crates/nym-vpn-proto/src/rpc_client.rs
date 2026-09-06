@@ -168,6 +168,15 @@ impl RpcClient {
         Ok(())
     }
 
+    pub async fn set_always_on(&mut self, always_on: bool) -> Result<()> {
+        self.0
+            .set_always_on(always_on)
+            .await
+            .map_err(Error::Rpc)?
+            .into_inner();
+        Ok(())
+    }
+
     pub async fn set_enable_gateway_independence(&mut self, enabled: bool) -> Result<()> {
         self.0
             .set_enable_gateway_independence(enabled)

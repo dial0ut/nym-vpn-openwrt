@@ -292,6 +292,8 @@ message VpnServiceConfig {
   bool legacy_split_tunnel = 30;
   bool stealth_api = 31;
   GatewayIndependence gateway_independence = 32;
+  // Connect on daemon start and keep retrying error states (see AlwaysOnStatus).
+  bool always_on = 33;
 }
 
 // Which relations between the entry and the exit gateway rule a pair out.
@@ -1075,6 +1077,8 @@ service NymVpnService {
   rpc SetKillswitch (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
   rpc SetLegacySplitTunnel (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
   rpc SetStealthApi (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
+  // Always On: connect on daemon start and keep the tunnel up until told otherwise
+  rpc SetAlwaysOn (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
   // Switch every gateway independence criterion on or off at once
   rpc SetEnableGatewayIndependence (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
   // Remind the user when the selected pair is not independent

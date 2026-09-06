@@ -38,6 +38,9 @@ pub struct VpnServiceConfig {
     pub stealth_api: bool,
     #[serde(default)]
     pub gateway_independence: GatewayIndependence,
+    /// Added after V8 shipped; a file without the key loads with it off.
+    #[serde(default)]
+    pub always_on: bool,
 }
 
 fn default_killswitch() -> bool {
@@ -170,6 +173,7 @@ impl TryFrom<VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
                 .collect(),
             stealth_api: value.stealth_api,
             gateway_independence: value.gateway_independence.into(),
+            always_on: value.always_on,
         };
 
         Ok(config)

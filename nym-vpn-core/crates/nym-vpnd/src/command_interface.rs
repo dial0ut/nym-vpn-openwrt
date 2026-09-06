@@ -232,6 +232,18 @@ impl NymVpnService for CommandInterface {
         Ok(tonic::Response::new(()))
     }
 
+    async fn set_always_on(&self, request: tonic::Request<bool>) -> Result<tonic::Response<()>> {
+        let always_on = request.into_inner();
+
+        self
+            .send_and_wait(VpnServiceCommand::SetAlwaysOn, always_on)
+            .await
+            .map_err(|e| tonic::Status::internal(format!("Failed to set always on: {e}")))?
+            .map_err(tonic::Status::internal)?;
+
+        Ok(tonic::Response::new(()))
+    }
+
     async fn set_legacy_split_tunnel(
         &self,
         request: tonic::Request<bool>,

@@ -84,6 +84,7 @@ pub enum VpnServiceCommand {
     SetKillswitch(oneshot::Sender<Result<(), String>>, bool),
     SetLegacySplitTunnel(oneshot::Sender<Result<(), String>>, bool),
     SetStealthApi(oneshot::Sender<Result<(), String>>, bool),
+    SetAlwaysOn(oneshot::Sender<Result<(), String>>, bool),
     SetEnableGatewayIndependence(oneshot::Sender<Result<(), String>>, bool),
     SetGatewayIndependenceNotifications(oneshot::Sender<Result<(), String>>, bool),
     GetTentativeGateways(oneshot::Sender<TentativeGateways>, ()),
@@ -886,6 +887,10 @@ impl NymVpnService {
                 let result = self.handle_set_stealth_api(stealth_api).await;
                 let _ = tx.send(result);
             }
+            VpnServiceCommand::SetAlwaysOn(tx, always_on) => {
+                let result = self.handle_set_always_on(always_on).await;
+                let _ = tx.send(result);
+            }
             VpnServiceCommand::SetEnableGatewayIndependence(tx, enabled) => {
                 let result = self.handle_set_enable_gateway_independence(enabled).await;
                 let _ = tx.send(result);
@@ -1170,6 +1175,11 @@ impl NymVpnService {
             warn_if_no_cover_domains(&self.network_tx.borrow());
         }
         self.config_manager.set_stealth_api(stealth_api).await
+    }
+
+    async fn handle_set_always_on(&mut self, always_on: bool) -> Result<(), String> {
+        // A policy switch for the service loop: persisted, never a reconnect.
+        self.config_manager.set_always_on(always_on).await
     }
 
     async fn handle_set_enable_gateway_independence(
