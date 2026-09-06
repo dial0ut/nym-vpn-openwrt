@@ -39,28 +39,76 @@ Access at: `http://<router-ip>/cgi-bin/luci/admin/vpn/nym-vpn`
 ## Architecture
 
 ```
-LuCI frontend (config.js)
+LuCI frontend (view/nym-vpn/config.js + nym-vpn/ module tree)
     ↓ ubus / JSON-RPC
-rpcd backend (/usr/libexec/rpcd/nym-vpn)
-    ↓ shell (nym-vpnc CLI)
-nym-vpnc ──gRPC──▶ nym-vpnd
+rpcd bridge (nym-vpnc rpcd, registered as /usr/libexec/rpcd/nym-vpn)
+    ↓ gRPC
+nym-vpnd
+```
+
+## Frontend structure
+
+The page is composed from LuCI-native modules under
+`htdocs/luci-static/resources/nym-vpn/`. Each file is a LuCI class
+(`'require ...'` header, `return baseclass.extend({...})`) that LuCI's loader
+resolves by dotted name, so `'require nym-vpn.cards.dns as dnsCard'` loads
+`nym-vpn/cards/dns.js`. No bundler, no build step.
+
+| Module | Role |
+|--------|------|
+| `view/nym-vpn/config.js` | The page: `load()` fetches the init batch, `render()` seeds the store and appends the cards in order |
+| `nym-vpn/rpc.js` | Low-level `rpc.declare` wrappers, one per ubus method |
+| `nym-vpn/api.js` | Everything the page asks the bridge, plus normalisation of the replies (`'on'/'off'` vs booleans, `entry_family` vs `entry.family`, the bounded `tentative_gateways` check, gateway list caching) |
+| `nym-vpn/store.js` | Page state (init data, live status, daemon state, the settings other cards consult), the 5 s status / 10 s daemon polls, and an `on(event, fn)` bus (`status`, `daemon`, `account-recheck`) |
+| `nym-vpn/components/` | `card` (expandable shell), `toggle` (switch row + save-or-revert), `select`, `modal`, `toast`, `gateway-picker` (country dropdown, server list, saved-selection restore) |
+| `nym-vpn/flows/` | `connect` (selection guard → `gateway_set` → `tentative_gateways` → warn/relax → connect, plus disconnect/cancel and tunnel-error handling), `daemon` (start/stop/restart with the disconnect confirmation) |
+| `nym-vpn/cards/` | One module per card, each `render(store, api)` → element: `connection`, `tunnel-settings` (hosts `inbound-services` and `split-tunneling`), `mixnet-tuning`, `dns`, `account`, `service`, `diagnostics`, `logs` |
+| `nym-vpn/theme.js`, `ui.js`, `countries.js`, `assets.js` | CSS-in-JS theme, small formatting/clipboard helpers, country names and flags, inline SVG |
+
+Cards never reach into each other's DOM: shared state goes through the store,
+shared behaviour through components and flows. `modal` and `toast` are module
+singletons (LuCI instantiates every module once), so any card can `require`
+them directly.
+
+### Hot-deploying to a router
+
+Copy the module tree and the view, then make LuCI forget its caches:
+
+```bash
+cd luci-app-nym-vpn/htdocs/luci-static/resources
+scp -r nym-vpn/. root@router:/www/luci-static/resources/nym-vpn/
+scp view/nym-vpn/config.js root@router:/www/luci-static/resources/view/nym-vpn/
+ssh root@router 'rm -rf /tmp/luci-indexcache* /tmp/luci-modulecache/*'
+```
+
+Then hard-refresh the page (Ctrl/Cmd+Shift+R) — LuCI caches module sources
+in the browser under the resource version, so a plain reload may keep the old
+file. A single edited module can be copied on its own to the matching path
+(`nym-vpn/cards/dns.js` → `/www/luci-static/resources/nym-vpn/cards/dns.js`).
+
+### Tests
+
+`tests/` holds a jsdom harness that loads the real modules through a small
+emulation of LuCI's loader and drives the page with a scripted rpc:
+
+```bash
+cd luci-app-nym-vpn/tests
+npm install
+npm test          # parse-check every module, then the behavioural checks
 ```
 
 ## File Layout
 
 | File | Description |
 |------|-------------|
-| `htdocs/.../view/nym-vpn/config.js` | Main view — status ring, gateway selection, settings cards |
-| `htdocs/.../nym-vpn/rpc.js` | LuCI RPC client wrapper (21 methods) |
-| `htdocs/.../nym-vpn/theme.js` | CSS-in-JS dark theme and animations |
-| `htdocs/.../nym-vpn/ui.js` | Uptime formatting, modals, toasts, localStorage helpers |
-| `htdocs/.../nym-vpn/countries.js` | ISO-2 → flag emoji + country name mappings |
-| `htdocs/.../nym-vpn/assets.js` | SVG logos |
-| `root/usr/libexec/rpcd/nym-vpn` | rpcd backend — 21 RPC methods, input validation |
+| `htdocs/.../view/nym-vpn/config.js` | The page composer (see Frontend structure) |
+| `htdocs/.../nym-vpn/` | Module tree: api, store, components/, flows/, cards/, theme, ui, countries, assets |
+| `root/usr/libexec/rpcd/nym-vpn` | rpcd bridge registration (`nym-vpnc rpcd`) |
 | `root/etc/init.d/nym-vpnd` | procd service (respawn, graceful disconnect on stop) |
 | `root/etc/uci-defaults/luci-app-nym-vpn` | First-boot setup (enable service, register the firewall include) |
 | `root/usr/share/luci/menu.d/luci-app-nym-vpn.json` | LuCI menu entry (VPN → Nym VPN) |
-| `root/usr/share/rpcd/acl.d/luci-app-nym-vpn.json` | ubus ACL (11 read + 10 write methods) |
+| `root/usr/share/rpcd/acl.d/luci-app-nym-vpn.json` | ubus ACL (read and write method lists) |
+| `tests/` | jsdom behavioural harness (dev only, not packaged) |
 
 ## Development
 

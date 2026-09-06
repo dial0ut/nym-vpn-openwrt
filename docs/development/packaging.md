@@ -27,8 +27,12 @@ nym-vpn_1.33.1_aarch64_generic.ipk (tar.gz)
     ├── usr/sbin/nym-vpn-watchdog
     ├── usr/bin/nym-vpnc
     ├── usr/libexec/rpcd/nym-vpn
-    ├── www/luci-static/resources/view/nym-vpn/*.js
-    ├── www/luci-static/resources/nym-vpn/*.js
+    ├── www/luci-static/resources/view/nym-vpn/config.js   # the page (composer)
+    ├── www/luci-static/resources/nym-vpn/                  # module tree, copied recursively
+    │   ├── api.js, store.js, rpc.js, ui.js, theme.js, countries.js, assets.js
+    │   ├── components/   # card, toggle, select, modal, toast, gateway-picker
+    │   ├── flows/        # connect, daemon
+    │   └── cards/        # connection, tunnel-settings, mixnet-tuning, dns, ...
     ├── etc/init.d/nym-vpnd
     ├── etc/init.d/nym-vpn-watchdog
     ├── etc/hotplug.d/iface/90-nym-vpn-watchdog
