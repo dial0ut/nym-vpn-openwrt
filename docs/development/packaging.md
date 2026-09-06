@@ -24,7 +24,6 @@ nym-vpn_1.33.1_aarch64_generic.ipk (tar.gz)
 │   └── prerm
 └── data.tar.gz
     ├── usr/sbin/nym-vpnd
-    ├── usr/sbin/nym-vpn-watchdog
     ├── usr/bin/nym-vpnc
     ├── usr/libexec/rpcd/nym-vpn
     ├── www/luci-static/resources/view/nym-vpn/config.js   # the page (composer)
@@ -34,8 +33,6 @@ nym-vpn_1.33.1_aarch64_generic.ipk (tar.gz)
     │   ├── flows/        # connect, daemon
     │   └── cards/        # connection, tunnel-settings, mixnet-tuning, dns, ...
     ├── etc/init.d/nym-vpnd
-    ├── etc/init.d/nym-vpn-watchdog
-    ├── etc/hotplug.d/iface/90-nym-vpn-watchdog
     ├── etc/config/nym-vpn
     ├── etc/uci-defaults/luci-app-nym-vpn
     ├── etc/nym/data/                       # empty, for daemon state
@@ -55,11 +52,6 @@ usign looks keys up that way.
 
 `etc/uci-defaults/luci-app-nym-vpn` runs once on first boot after install. It is what registers
 the firewall include, so the kill-switch survives `fw4 reload`.
-
-`etc/hotplug.d/iface/90-nym-vpn-watchdog` is sourced by netifd's `hotplug-call` on every
-interface event. On `ifup`/`ifdown` of a WAN-facing interface it signals the always-on watchdog
-(pid from `/var/run/nym-vpn-watchdog.pid`, written by procd) so the tunnel is checked at once
-instead of at the next poll tick.
 
 Dependencies come from `scripts/ipk/control.template`, and `build-apk.sh` repeats the same list:
 
@@ -85,8 +77,13 @@ so `kmod-tun` was never pulled in and the daemon died at TUN device creation.
     - apk: removes any stale nym-vpn lines from `/etc/apk/repositories` and
       `/etc/apk/repositories.d/*.list`, then writes `/etc/apk/repositories.d/nym-vpn.list`
     - opkg: appends a `src/gz nym-vpn` line to `/etc/opkg/customfeeds.conf`
-3. **Service** — enables and starts `nym-vpnd`. If `nym-vpn.settings.always_on` is already `1`
-   (i.e. this is an upgrade), enables and starts `nym-vpn-watchdog` too.
+3. **Service** — enables and starts `nym-vpnd`. Then the one-shot migration of the retired shell
+   watchdog (packages ≤ 1.34.x): if UCI `nym-vpn.settings.always_on` is `1`, wait up to 15 s for
+   the daemon socket and run `nym-vpnc tunnel set --always-on on`; either way delete the
+   `always_on`/`watchdog_interval`/`watchdog_max_retries` options, remove the old service's
+   `/etc/rc.d` symlinks, kill a leftover watchdog process by its pidfile and remove the pidfile
+   and `/tmp/nym-watchdog.state`. The block is a no-op on a fresh install and is due to be
+   dropped two releases after it shipped.
 4. **LuCI plumbing** — clears `/tmp/luci-indexcache*` and `/tmp/luci-modulecache/`, then refreshes
    rpcd from a detached job that fires about five seconds *after* the transaction has returned.
    rpcd scans `/usr/libexec/rpcd` only at start-up and computes a session's ACL grants at login,
@@ -108,7 +105,7 @@ in `/tmp/nym-vpn.rpcd-state` for postinst's rpcd decision above. Steps 1–3 the
 removal including upgrades. The rest is gated on `PKG_UPGRADE != 1`, so an upgrade does not tear
 down state the incoming version is about to reuse.
 
-1. **Stop** `nym-vpn-watchdog` and `nym-vpnd`; disable both on real removal only
+1. **Stop** `nym-vpnd`; disable it on real removal only
 2. **Firewall cleanup** — the part that matters. fw4: `nft delete table inet nym`, then walk fw4's
    own chains deleting rules tagged `nym-vpn:` by handle. fw3: remove jump rules from the hook
    chains, flush and delete the `NYM_*` chains, delete the NAT POSTROUTING masquerade rules by
@@ -117,8 +114,7 @@ down state the incoming version is about to reuse.
    The daemon normally clears these itself on stop; a crashed one does not. Matching on fwmark
    rather than priority avoids touching unrelated rules.
 4. **UCI** — delete the `firewall.nym_vpn` include and commit
-5. **Temp files** — the saved firewall rulesets, the adblock dnsmasq drop-in, DNS backups, the
-   watchdog state file
+5. **Temp files** — the saved firewall rulesets, the adblock dnsmasq drop-in, DNS backups
 
 Then, full removal only:
 
@@ -150,9 +146,8 @@ The shipped default:
 config nym-vpn 'settings'
     option enabled '0'
     option network 'mainnet'
-    option always_on '0'
-    option watchdog_interval '30'
-    option watchdog_max_retries '3'
 ```
 
-Disabled on install — you enable it from LuCI or the CLI.
+Nothing reads `enabled` or `network` today; they stay for compatibility. Daemon settings — Always
+On included — live in `/etc/nym/nym-vpnd.json` and are changed over gRPC, not UCI. The file also
+holds the split-tunnel exclusion sections the rpcd bridge parses.

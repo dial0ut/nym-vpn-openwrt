@@ -13,6 +13,23 @@ the GitHub release notes.
 
 ### Added
 
+- Always On now lives in the daemon. With the setting on, the tunnel
+  connects at boot, waits for a default route instead of polling for one,
+  retries error states with backoff (5 s doubling to 5 min for
+  firewall/routing/DNS/TUN failures, 60 s then 5 min for missing gateways,
+  clock skew or exhausted bandwidth) while moving off blacklisted gateways,
+  forces a fresh gateway selection after ten minutes of Connecting, stops on
+  errors that need a change from you (account state, a non-independent pinned
+  pair) until the configuration or account changes, and pauses when you
+  disconnect. After six consecutive infrastructure failures the daemon exits
+  for procd to respawn it with the kill-switch table still in place, and an
+  in-process liveness check does the same for a service loop that stops
+  answering. Set it with `nym-vpnc tunnel set --always-on on` or the Tunnel
+  Settings row; `nym-vpnc status` and the LuCI row show what it is doing
+  (`Always on: retrying in 42 s (attempt 3, last error SetRouting)`). The
+  bridge reports the daemon's Offline state as `offline` instead of
+  `unknown`, so the web UI says "Waiting for network" during a WAN outage.
+  An upgrade carries UCI `always_on=1` over to the daemon setting. Closes #6.
 - `nym-vpnc gateway test` probes gateways with ICMP echo from the router and
   prints RTT min/avg/max and packet loss per gateway, plus a summed pair RTT
   for every entry/exit combination. Without options it tests the configured
@@ -71,6 +88,10 @@ the GitHub release notes.
 
 ### Removed
 
+- The `nym-vpn-watchdog` service, its WAN hotplug hook, `/tmp/nym-watchdog.state`
+  and the UCI `always_on`/`watchdog_interval`/`watchdog_max_retries` options,
+  replaced by the daemon's Always On above. The rpcd `watchdog_get`/
+  `watchdog_set` methods and the interval pills in the web UI go with them.
 - All telemetry. The daemon no longer collects or reports anonymous network
   statistics and no longer carries Sentry crash reporting; neither can be
   turned on. `nym-vpnc network-stats`, `nym-vpnc sentry`, the matching gRPC
@@ -168,14 +189,6 @@ the GitHub release notes.
 
 ### Changed
 
-- The always-on watchdog now reacts to WAN link events instead of only
-  noticing a dropped tunnel at its next poll. A hotplug hook wakes it on
-  `ifup`/`ifdown` of a WAN-facing interface (`wan`, `wan6`, anything in the
-  `wan` firewall zone or carrying a default route — PPPoE and renamed WANs
-  included), so after an outage or re-dial the tunnel is checked at once and
-  re-checked a few times while the daemon catches up. A link change also
-  resets the retry escalation, so a WAN flap no longer counts towards a
-  daemon restart. The periodic poll stays as the fallback.
 - Less background traffic while the daemon is up but not connected (reported
   from a mirrored-port capture by a forum user). The account state is now
   re-checked every 30 minutes instead of every 2 while the tunnel is down and
