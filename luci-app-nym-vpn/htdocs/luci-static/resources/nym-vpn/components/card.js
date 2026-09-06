@@ -8,6 +8,14 @@
 
 var E = dom.create.bind(dom);
 
+// Card and group bodies are built from arrays that may hold null for an
+// element that is not shown (a notice, an optional row). LuCI's dom.append
+// renders non-element children as text, so a null would show up on the page
+// as the word "null"; drop those before handing the list over.
+function children(list) {
+    return (list || []).filter(function(c) { return c !== null && c !== undefined; });
+}
+
 return baseclass.extend({
     // A titled run inside a card body. opts: {title, desc, body (children),
     // id, cls}. The title is a muted micro-label, so a card reads as a few
@@ -19,7 +27,7 @@ return baseclass.extend({
         if (opts.desc) head.push(E('div', { 'class': 'nym-group-desc' }, opts.desc));
         return E('div', attrs, [
             E('div', { 'class': 'nym-group-head' }, head)
-        ].concat(opts.body || []));
+        ].concat(children(opts.body)));
     },
 
     // A card header icon from an inline SVG string.
@@ -32,7 +40,7 @@ return baseclass.extend({
     // opts: {icon (svg string), title, id, body (children), onToggle(expanded)}
     // Returns {el, body} so the caller can rebuild the body in place.
     create: function(opts) {
-        var body = E('div', { 'class': 'nym-card-body' }, opts.body || []);
+        var body = E('div', { 'class': 'nym-card-body' }, children(opts.body));
         var attrs = { 'class': 'nym-card' };
         if (opts.id) attrs.id = opts.id;
         var el = E('div', attrs, [

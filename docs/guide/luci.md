@@ -53,6 +53,15 @@ reminders off the connection goes ahead relaxed and a notice says so. The check 
 few seconds and never blocks connecting: if the daemon cannot answer, the connect proceeds as
 usual and any refusal shows up as a status error with the same two choices.
 
+**Always On** — a watchdog that reconnects when the tunnel drops: soft reconnects first, then a
+daemon restart with growing backoff. It polls the tunnel at the chosen interval (**Check every**,
+30 s by default) and is also woken by the router's WAN link events, so when the WAN comes back
+after an outage or a PPPoE re-dial the tunnel is checked immediately, followed by a few quick
+re-checks while the daemon catches up. A link change also resets the retry escalation, since a
+daemon restart cannot fix a WAN that is down. `wan` and `wan6` count as WAN, as does any
+interface in the `wan` firewall zone or carrying a default route. Its log lines are tagged
+`nym-watchdog` in `logread`.
+
 ### Transport
 
 **Two-Hop Mode** (`reconnect`) — 2-hop WireGuard (faster) versus 5-hop mixnet routing.
@@ -72,17 +81,6 @@ switch has no effect.
 **IPv6** (`reconnect`) — off by default. Most exit gateways have no IPv6 egress, and IPv6 that
 gets tunnelled and then dropped makes dual-stack clients stall on every new connection. Turn it
 on only if your exit demonstrably carries IPv6.
-
-### Resilience
-
-**Always On** — a watchdog that reconnects when the tunnel drops: soft reconnects first, then a
-daemon restart with growing backoff. It polls the tunnel at the chosen interval (**Check every**,
-30 s by default) and is also woken by the router's WAN link events, so when the WAN comes back
-after an outage or a PPPoE re-dial the tunnel is checked immediately, followed by a few quick
-re-checks while the daemon catches up. A link change also resets the retry escalation, since a
-daemon restart cannot fix a WAN that is down. `wan` and `wan6` count as WAN, as does any
-interface in the `wan` firewall zone or carrying a default route. Its log lines are tagged
-`nym-watchdog` in `logread`.
 
 ## Split Tunneling
 

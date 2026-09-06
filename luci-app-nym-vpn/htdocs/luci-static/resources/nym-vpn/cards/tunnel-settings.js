@@ -12,9 +12,9 @@
 //
 //   Protection  kill-switch (first: it decides whether anything leaks),
 //               with its inbound-service exceptions nested beneath it,
-//               then gateway independence and the family reminders
+//               then gateway independence, the family reminders and the
+//               always-on watchdog with its check interval
 //   Transport   two-hop, circumvention transports, stealth API, IPv6
-//   Resilience  the always-on watchdog and its check interval
 //
 // Switches that only apply on the next connect carry a 'reconnect' tag;
 // the card lead explains it once. The legacy PBR switch lives in the Split
@@ -204,7 +204,7 @@ return baseclass.extend({
             onChange: saveSwitch('ipv6')
         });
 
-        // --- resilience: always on ------------------------------------------
+        // --- protection: always on -------------------------------------------
         var alwaysOnStatus = E('div', {
             'class': 'nym-toggle-status' + (watchdog.always_on ? ' active' : ''),
             'id': 'always-on-status'
@@ -281,16 +281,13 @@ return baseclass.extend({
                     body: [
                         E('div', { 'class': 'nym-row-with-sub' }, [killswitchRow, inboundMount]),
                         independenceRow,
-                        remindersRow
+                        remindersRow,
+                        alwaysOnRow
                     ]
                 }),
                 card.group({
                     title: 'Transport',
                     body: [twoHopRow, circumventionRow, stealthRow, ipv6Row]
-                }),
-                card.group({
-                    title: 'Resilience',
-                    body: [alwaysOnRow]
                 })
             ]
         }).el;

@@ -152,7 +152,7 @@ function makeDom(document) {
       if (Array.isArray(children)) {
         for (let i = 0; i < children.length; i++) {
           if (this.elem(children[i])) node.appendChild(children[i]);
-          else if (children[i] !== null && children[i] !== undefined) node.appendChild(document.createTextNode('' + children[i]));
+          else node.appendChild(document.createTextNode('' + children[i])); // like luci.js: null renders as the text "null"
         }
         return node.lastChild;
       } else if (typeof children == 'function') {

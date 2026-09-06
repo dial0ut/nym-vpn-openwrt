@@ -114,6 +114,8 @@ async function scenarioStructure() {
   check(!card(t, 'Privacy') && !byId(t, 'stats-toggle'), 'no Privacy card / statistics toggle');
   check(t.declared.indexOf('stats_get') === -1 && t.declared.indexOf('stats_set') === -1, 'stats_get / stats_set never declared');
   check(!t.calls.some((c) => /^stats_/.test(c.method)), 'no stats_* rpc call issued');
+  const strayText = Array.from(t.document.body.querySelectorAll('*')).flatMap((el) => Array.from(el.childNodes)).filter((n) => n.nodeType === 3 && /^(null|undefined)$/.test(n.textContent.trim())).length;
+  check(strayText === 0, 'no "null"/"undefined" text rendered anywhere on the page: ' + strayText);
   const rows = Array.from(card(t, 'Tunnel Settings').querySelectorAll('.nym-toggle-row .nym-toggle-title')).map((e) => e.textContent);
   check(rows[0] === 'Kill-Switch', 'kill-switch is the first Tunnel Settings row: ' + JSON.stringify(rows));
   check(eq(rows.slice().sort(), ['Always On', 'Circumvention Transports', 'Gateway Independence', 'IPv6', 'Kill-Switch', 'Server Family Reminders', 'Stealth API Connect', 'Two-Hop Mode'].sort()),
@@ -122,10 +124,10 @@ async function scenarioStructure() {
   check(!!splitCard && splitCard.contains(byId(t, 'legacy-split-toggle')) && splitCard.contains(q(t, '.nym-split-section')), 'Split Tunneling card holds the legacy PBR switch and the exclusions');
   check(card(t, 'Tunnel Settings').contains(q(t, '.nym-inbound-section')), 'inbound services stay in Tunnel Settings');
   const groups = Array.from(card(t, 'Tunnel Settings').querySelectorAll('.nym-group-title')).map((e) => e.textContent);
-  check(eq(groups, ['Protection', 'Inbound Services', 'Transport', 'Resilience']), 'Tunnel Settings grouped: ' + JSON.stringify(groups));
+  check(eq(groups, ['Protection', 'Inbound Services', 'Transport']), 'Tunnel Settings grouped: ' + JSON.stringify(groups));
   const protection = card(t, 'Tunnel Settings').querySelector('.nym-group');
-  check(protection.contains(byId(t, 'killswitch-toggle')) && protection.contains(q(t, '.nym-inbound-section')) && protection.contains(byId(t, 'gw-independence-toggle')) && protection.contains(byId(t, 'family-reminders-toggle')),
-    'Protection holds kill-switch, its inbound exceptions, independence and reminders');
+  check(protection.contains(byId(t, 'killswitch-toggle')) && protection.contains(q(t, '.nym-inbound-section')) && protection.contains(byId(t, 'gw-independence-toggle')) && protection.contains(byId(t, 'family-reminders-toggle')) && protection.contains(byId(t, 'always-on-toggle')),
+    'Protection holds kill-switch, its inbound exceptions, independence, reminders and always-on');
   check(q(t, '.nym-inbound-section').previousElementSibling === byId(t, 'killswitch-row'), 'inbound services sit directly under the kill-switch row');
   const tagged = qa(t, '.nym-toggle-row').filter((r) => r.querySelector('.nym-toggle-tag')).map((r) => r.querySelector('.nym-toggle-title').textContent);
   check(eq(tagged, ['Kill-Switch', 'Gateway Independence', 'Two-Hop Mode', 'Circumvention Transports', 'IPv6', 'Legacy Split Tunneling (PBR)']), 'reconnect tag on exactly the switches that apply on the next connect: ' + JSON.stringify(tagged));
