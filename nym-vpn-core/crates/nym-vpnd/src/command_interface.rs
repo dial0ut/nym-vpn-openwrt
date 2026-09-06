@@ -16,8 +16,8 @@ use tokio_util::sync::CancellationToken;
 use tonic::{Request, Response, Status, transport::Server};
 
 use nym_vpn_lib_types::{
-    EnableSocks5Request, EntryPoint, ExitPoint, GetDeeplinkParams, ListGatewaysOptions,
-    LookupGatewayFilters, TargetState, TunnelEvent,
+    EnableSocks5Request, EntryPoint, ExitPoint, GatewayTestParams, GetDeeplinkParams,
+    ListGatewaysOptions, LookupGatewayFilters, TargetState, TunnelEvent,
 };
 
 use nym_vpn_proto::proto::{
@@ -25,7 +25,7 @@ use nym_vpn_proto::proto::{
     nym_vpn_service_server::{NymVpnService, NymVpnServiceServer},
 };
 
-use crate::service::{SetNetworkError, Socks5Error, VpnServiceCommand};
+use crate::service::{GatewayTestError, SetNetworkError, Socks5Error, VpnServiceCommand};
 
 pub type Result<T> = std::result::Result<T, tonic::Status>;
 
@@ -557,6 +557,28 @@ impl NymVpnService for CommandInterface {
                 .collect(),
         };
         Ok(tonic::Response::new(response))
+    }
+
+    async fn test_gateways(
+        &self,
+        request: tonic::Request<proto::GatewayTestParams>,
+    ) -> Result<tonic::Response<proto::GatewayTestReport>> {
+        let params = GatewayTestParams::try_from(request.into_inner())
+            .map_err(|err| tonic::Status::invalid_argument(err.to_string()))?;
+
+        let report = self
+            .send_and_wait(VpnServiceCommand::TestGateways, params)
+            .await?
+            .map_err(|err| match err {
+                GatewayTestError::InvalidGatewayId(_) | GatewayTestError::NoTargets => {
+                    tonic::Status::invalid_argument(err.to_string())
+                }
+                GatewayTestError::GetGateways { .. } | GatewayTestError::Probe(_) => {
+                    tonic::Status::internal(format!("Failed to test gateways: {err}"))
+                }
+            })?;
+
+        Ok(tonic::Response::new(proto::GatewayTestReport::from(report)))
     }
 
     async fn list_filtered_gateways(

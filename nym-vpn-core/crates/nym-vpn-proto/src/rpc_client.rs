@@ -4,11 +4,11 @@
 use nym_vpn_lib_types::{
     AccountBalanceResponse, AccountCommandResponse, AccountControllerState, AvailableTickets,
     DiagnosticReport, DnsUpstreamOwner, EntryPoint, ExitPoint, FeatureFlags, Gateway,
-    GetDeeplinkParams,
-    HttpRpcSettings, ListGatewaysOptions, LogPath, LookupGatewayFilters, NetworkCompatibility,
-    NetworkStatisticsIdentity, NymVpnDevice, NymVpnUsage, ParsedAccountLinks,
-    PrivyDerivationMessage, RegistrationReport, Socks5Settings, Socks5Status, StoreAccountRequest,
-    SystemMessage, TunnelEvent, TunnelState, VpnAccountSummary, VpnServiceConfig, VpnServiceInfo,
+    GatewayTestParams, GatewayTestReport, GetDeeplinkParams, HttpRpcSettings, ListGatewaysOptions,
+    LogPath, LookupGatewayFilters, NetworkCompatibility, NetworkStatisticsIdentity, NymVpnDevice,
+    NymVpnUsage, ParsedAccountLinks, PrivyDerivationMessage, RegistrationReport, Socks5Settings,
+    Socks5Status, StoreAccountRequest, SystemMessage, TunnelEvent, TunnelState, VpnAccountSummary,
+    VpnServiceConfig, VpnServiceInfo,
 };
 use std::{net::IpAddr, path::PathBuf};
 use tokio_stream::{Stream, StreamExt};
@@ -402,6 +402,17 @@ impl RpcClient {
             .into_iter()
             .map(|gateway| Gateway::try_from(gateway).map_err(Error::InvalidResponse))
             .collect::<Result<Vec<_>>>()
+    }
+
+    pub async fn test_gateways(&mut self, params: GatewayTestParams) -> Result<GatewayTestReport> {
+        let request = proto::GatewayTestParams::from(params);
+        let response = self
+            .0
+            .test_gateways(request)
+            .await
+            .map(|v| v.into_inner())
+            .map_err(Error::Rpc)?;
+        GatewayTestReport::try_from(response).map_err(Error::InvalidResponse)
     }
 
     pub async fn list_filtered_gateways(

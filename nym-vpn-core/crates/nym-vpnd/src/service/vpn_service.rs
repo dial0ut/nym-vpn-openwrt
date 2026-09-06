@@ -21,8 +21,10 @@ use super::{
     Socks5Error, Socks5Service, Socks5Status,
     config::{NetworkEnvironments, VpnServiceConfigManager},
     error::{
-        AccountLinksError, Error, GlobalConfigError, ListGatewaysError, Result, SetNetworkError,
+        AccountLinksError, Error, GatewayTestError, GlobalConfigError, ListGatewaysError, Result,
+        SetNetworkError,
     },
+    gateway_test::{self, GatewayTestContext},
     socks5::Socks5EnableConfig,
     socks5_idle_timeout, socks5_request_timeout,
 };
@@ -46,12 +48,11 @@ use nym_vpn_lib_types::{
     AccountBalanceResponse, AccountCommandError, AccountControllerState,
     DecentralisedObtainTicketbooksRequest, DeeplinkClient, DeeplinkKind, DiagnosticRegisterParams,
     DiagnosticReport, DiagnosticRunParams, DnsUpstreamOwner, EnableSocks5Request, EntryPoint,
-    ExitPoint, FeatureFlags, Gateway, GetDeeplinkParams, ListGatewaysOptions, LogPath,
-    LookupGatewayFilters,
-    MixnetTrafficConfig, NetworkCompatibility, NetworkStatisticsIdentity, NymNetworkDetails,
-    NymVpnDevice, NymVpnNetwork, NymVpnUsage, ParsedAccountLinks, RegistrationReport,
-    StoreAccountRequest, SystemMessage, TargetState, TunnelEvent, TunnelState, VpnAccountSummary,
-    VpnServiceConfig, VpnServiceInfo,
+    ExitPoint, FeatureFlags, Gateway, GatewayTestParams, GatewayTestReport, GetDeeplinkParams,
+    ListGatewaysOptions, LogPath, LookupGatewayFilters, MixnetTrafficConfig, NetworkCompatibility,
+    NetworkStatisticsIdentity, NymNetworkDetails, NymVpnDevice, NymVpnNetwork, NymVpnUsage,
+    ParsedAccountLinks, RegistrationReport, StoreAccountRequest, SystemMessage, TargetState,
+    TunnelEvent, TunnelState, VpnAccountSummary, VpnServiceConfig, VpnServiceInfo,
 };
 use nym_vpn_network_config::{DiscoveryRefresher, DiscoveryRefresherEvent, Network};
 use nym_vpn_store::types::{StorableAccount, StoredAccountMode};
@@ -185,6 +186,10 @@ pub enum VpnServiceCommand {
     RegisterDiagnostic(
         oneshot::Sender<RegistrationReport>,
         DiagnosticRegisterParams,
+    ),
+    TestGateways(
+        oneshot::Sender<Result<GatewayTestReport, GatewayTestError>>,
+        GatewayTestParams,
     ),
 }
 
@@ -1018,6 +1023,9 @@ impl NymVpnService {
             VpnServiceCommand::RegisterDiagnostic(tx, params) => {
                 let _ = tx.send(Box::pin(self.handle_register_diagnostic(params)).await);
             }
+            VpnServiceCommand::TestGateways(tx, params) => {
+                self.handle_test_gateways(params, tx).await;
+            }
         }
     }
 
@@ -1285,6 +1293,37 @@ impl NymVpnService {
                 })
                 .map(|gateways| gateways.into_iter().map(Gateway::from).collect::<Vec<_>>());
 
+            completion_tx.send(result).ok();
+        });
+    }
+
+    async fn handle_test_gateways(
+        &self,
+        params: GatewayTestParams,
+        completion_tx: oneshot::Sender<Result<GatewayTestReport, GatewayTestError>>,
+    ) {
+        let config = self.config_manager.config();
+        let active = match &*self.tunnel_state.read().await {
+            TunnelState::Connected { connection_data } => Some((
+                connection_data.entry_gateway.id.clone(),
+                connection_data.exit_gateway.id.clone(),
+            )),
+            _ => None,
+        };
+        let ctx = GatewayTestContext {
+            gateway_cache: self.gateway_cache_handle.clone(),
+            entry_point: config.entry_point.clone(),
+            exit_point: config.exit_point.clone(),
+            two_hop: config.enable_two_hop,
+            active,
+        };
+
+        // Probing takes seconds; keep the service loop free for status polls.
+        tokio::spawn(async move {
+            let result = gateway_test::run(ctx, params).await;
+            if let Err(err) = &result {
+                tracing::warn!("Gateway test failed: {err}");
+            }
             completion_tx.send(result).ok();
         });
     }
