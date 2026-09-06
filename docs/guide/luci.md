@@ -7,8 +7,14 @@ disconnected), uptime since the tunnel came up, and the hop chain through entry 
 While connected, each gateway also shows its operator family when the directory knows one; if
 entry and exit turn out to share a family, both are marked **Same operator family** in amber.
 
-The gateway pickers show the operator family as a small chip on each server row, so you can
-avoid picking two servers from the same operator by hand.
+While disconnected, the two side panels are the gateway pickers. Choose a country (the dropdown
+shows how many gateways each has, or **Random**), then a row in the list under it. The first row,
+**Any Gateway (Random)**, leaves the pick within that country to the daemon; each row below is one
+gateway: its name (long names wrap to two lines; hover for the full text), a performance tier at
+the right — `HIGH`, `MEDIUM`, `LOW`, `OFFLINE` or `N/A`, with a green / amber / red / grey dot — a
+telemetry line with the load, the 24-hour uptime and the city, and, when the directory knows one,
+the operator family on its own line, so you can avoid picking two servers from the same operator
+by hand. Rows are sorted best tier first; the selected row is outlined in green.
 
 Below the connection hero the settings come as expandable cards, in this order: **Tunnel
 Settings**, **Split Tunneling**, **Mixnet Tuning**, **DNS & Ad Blocking**, **Account**, **Service
@@ -68,7 +74,8 @@ interface in the `wan` firewall zone or carrying a default route. Its log lines 
 
 **Circumvention Transports** (`reconnect`) — wraps the entry gateway connection in a QUIC
 transport to get past censorship. Two-hop mode only; while it is on, entry gateways that cannot
-carry it are greyed out in the picker with a `No CT` badge.
+carry it sink to the bottom of the picker, greyed out with a dashed border and an amber `No CT`
+tag under their tier, and cannot be selected.
 
 **Stealth API Connect** — the same switch as in the NymVPN apps. The daemon normally reaches the
 Nym API (account, gateway directory, discovery) directly and only falls back to *cover domains*
