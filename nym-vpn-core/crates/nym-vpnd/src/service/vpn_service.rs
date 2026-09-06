@@ -53,7 +53,9 @@ use nym_vpn_lib_types::{
     StoreAccountRequest, SystemMessage, TargetState, TunnelEvent, TunnelState, VpnAccountSummary,
     VpnServiceConfig, VpnServiceInfo,
 };
-use nym_vpn_network_config::{DiscoveryRefresher, DiscoveryRefresherEvent, Network};
+use nym_vpn_network_config::{
+    DiscoveryRefresher, DiscoveryRefresherCommand, DiscoveryRefresherEvent, Network,
+};
 use nym_vpn_store::types::{StorableAccount, StoredAccountMode};
 
 // Seed used to generate device identity keys
@@ -269,8 +271,12 @@ pub struct NymVpnService {
     // Discovery refresher join handle
     discovery_refresher_join_handle: JoinHandle<()>,
 
-    // Whether the account controller has been told the daemon is idle: tunnel down and nobody
-    // asking for it
+    // Discovery refresher command channel, used for the idle hint (the tunnel state machine
+    // holds its own clone for firewall pause/resume)
+    discovery_refresher_command_tx: mpsc::UnboundedSender<DiscoveryRefresherCommand>,
+
+    // Whether the account controller and discovery refresher have been told the daemon is idle:
+    // tunnel down and nobody asking for it
     idle: bool,
 
     // VPN service shutdown token.
@@ -519,7 +525,7 @@ impl NymVpnService {
             gateway_cache_handle.clone(),
             topology_service.clone(),
             connectivity_handle,
-            discovery_refresher_command_tx,
+            discovery_refresher_command_tx.clone(),
             wireguard_keys_db,
             route_handler,
             parameters.user_agent.clone(),
@@ -556,6 +562,7 @@ impl NymVpnService {
             gateway_cache_join_handle,
             discovery_refresher_event_rx,
             discovery_refresher_join_handle,
+            discovery_refresher_command_tx,
             idle: false,
             sentry_enabled: parameters.sentry_enabled,
             statistics_event_sender,
@@ -721,9 +728,10 @@ impl NymVpnService {
         }
     }
 
-    /// Tell the account controller whether anyone needs it fresh. The daemon is idle while the
-    /// tunnel is down and nobody has asked for it: the account controller then drops to a slow
-    /// sync heartbeat, and catches up when a connect is requested (issue #9).
+    /// Tell the account controller and the discovery refresher whether anyone needs them fresh.
+    /// The daemon is idle while the tunnel is down and nobody has asked for it: the account
+    /// controller then drops to a slow sync heartbeat and the discovery refresher stops its
+    /// hourly check. Both catch up when a connect is requested (issue #9).
     fn update_idle_hint(&mut self, tunnel_state: &TunnelState) {
         let tunnel_down = matches!(
             tunnel_state,
@@ -744,6 +752,9 @@ impl NymVpnService {
         if let Err(err) = self.account_command_tx.set_refresh_mode(mode) {
             tracing::error!("Failed to set account refresh mode: {err}");
         }
+        self.discovery_refresher_command_tx
+            .send(DiscoveryRefresherCommand::SetIdle(idle))
+            .ok();
     }
 
     fn handle_tunnel_event(&mut self, event: TunnelEvent) {
