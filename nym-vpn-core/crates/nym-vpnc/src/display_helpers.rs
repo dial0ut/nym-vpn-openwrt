@@ -40,7 +40,9 @@ pub fn gateway_independence_summary(gateway_independence: &GatewayIndependence) 
 }
 
 /// What to do about an entry/exit pair the independence criteria rule out.
-pub const RELAX_INDEPENDENCE_HINT: &str = "the selected entry and exit are not independent (same      operator family/ASN/subnet); reconnect with --relax-independence or change gateways";
+pub const RELAX_INDEPENDENCE_HINT: &str = "the selected entry and exit are not independent \
+                                           (same operator family/ASN/subnet); reconnect with \
+                                           --relax-independence or change gateways";
 
 /// Advice for error states the user can act on themselves.
 pub fn error_state_hint(reason: &ErrorStateReason) -> Option<&'static str> {
@@ -53,6 +55,13 @@ pub fn error_state_hint(reason: &ErrorStateReason) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relax_hint_is_a_single_line_without_runs_of_spaces() {
+        assert!(!RELAX_INDEPENDENCE_HINT.contains('\n'));
+        assert!(!RELAX_INDEPENDENCE_HINT.contains("  "));
+        assert!(RELAX_INDEPENDENCE_HINT.contains("(same operator family/ASN/subnet)"));
+    }
 
     #[test]
     fn independence_summary_lists_active_criteria() {
