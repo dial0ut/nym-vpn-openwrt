@@ -80,10 +80,9 @@ effect](../troubleshooting.md#custom-dns-setting-has-no-effect).
 
 ## Privacy
 
-**Anonymous Statistics** — whether the daemon sends anonymous, aggregated usage statistics to
-Nym. On by default. Reports only travel through the tunnel while connected; nothing is sent
-while disconnected unless disconnected reporting was turned on from the CLI (`nym-vpnc
-network-stats`), in which case the card says so. Turn it off to send nothing at all.
+The daemon collects no usage statistics and sends no crash reports; there is nothing to turn
+off. This is not an official NymVPN build, and the upstream client's anonymous statistics and
+error reporting were removed rather than disabled.
 
 While the daemon is up but not connected, it also keeps its own background traffic low: the
 account state is re-checked every 30 minutes instead of every 2, and the hourly network
