@@ -190,8 +190,12 @@ the GitHub release notes.
   family as plain text instead of a chip. The status column can no longer be
   squeezed off the row by a long name, which is how the `No CT` marker used
   to vanish, and the signal-bars icon is gone since the tier is now spelled
-  out. Selection, sorting, CT gating and the saved-selection restore are
-  unchanged.
+  out. Every row in a list has the same height (a two-line slot for the
+  name, one telemetry line, one family line), and the hero gives the two
+  picker panels most of its width: the ring sits in a fixed 200 px column
+  between them, moves above them below about 960 px, and the whole hero
+  stacks below about 700 px as before. Selection, sorting, CT gating and the
+  saved-selection restore are unchanged.
 
 ## [1.34.0] - 2026-08-21
 
