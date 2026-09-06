@@ -196,6 +196,20 @@ the GitHub release notes.
   between them, moves above them below about 960 px, and the whole hero
   stacks below about 700 px as before. Selection, sorting, CT gating and the
   saved-selection restore are unchanged.
+- The LuCI settings cards say less up front. Every switch row now carries a
+  single short clause ("Blocks all traffic outside the tunnel"); the full
+  explanation sits behind a small ⓘ button after the title that unfolds it
+  under the row, remembers which rows you leave open, and ends in a *Learn
+  more* link to the matching section of the LuCI guide on the docs site.
+  Card lead sentences, the Mixnet Tuning warning paragraph and the standing
+  group notes (Inbound Services, Exclusions) move into those expanders; the
+  `reconnect` tag explains itself on hover. Amber notes stay only for live
+  state — kill-switch off, PBR owning the routing, DNS not in effect, no
+  cover domains, an older daemon. The Inbound Services add form opens on
+  demand from a `+ Add exemption` button once there are exemptions to look
+  at (it is open from the start while the list is empty), and rows sit a
+  little tighter, so Tunnel Settings open is about 30 % shorter than before.
+  Nothing changes in what the switches do or send.
 
 ## [1.34.0] - 2026-08-21
 
