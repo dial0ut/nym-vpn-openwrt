@@ -70,6 +70,18 @@ nym-vpnc ad-block set enabled
 nym-vpnc ad-block set disabled
 ```
 
+## Anonymous statistics
+
+Anonymous, aggregated usage statistics for Nym. On by default; reports only leave through the
+tunnel while connected unless `--allow-disconnected on` is set. The same switch is in LuCI under
+**Privacy**.
+
+```bash
+nym-vpnc network-stats get
+nym-vpnc network-stats set --enabled off
+nym-vpnc network-stats set --enabled on --allow-disconnected off
+```
+
 ## LAN policy
 
 Whether LAN devices can reach each other and local services while the VPN is up.

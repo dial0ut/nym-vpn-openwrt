@@ -11,6 +11,12 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+### Added
+
+- LuCI **Privacy** card with the anonymous statistics switch, previously
+  reachable only through `nym-vpnc network-stats`. The rpcd bridge gained
+  `stats_get`/`stats_set` for it.
+
 ### Security
 
 - CI now runs the workspace test suite and a fast security job on every push
