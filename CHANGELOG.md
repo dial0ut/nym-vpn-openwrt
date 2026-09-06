@@ -67,6 +67,11 @@ the GitHub release notes.
   rather than logged and ignored.
 - An endpoint cache stamped in the future (RTC reset) is now rejected instead
   of being treated as fresh forever.
+- `nym-vpnc tunnel get` no longer reports `Lewes protocol: off` while the
+  tunnel negotiates the Lewes Protocol with every gateway that advertises it.
+  The line now reads `auto (used when the gateway supports it)`, the
+  `tunnel set --lewes-protocol` toggle — which never affected the connection —
+  is gone, and the LuCI bridge's `lewes_protocol` field reports `auto`.
 
 ### Changed
 
