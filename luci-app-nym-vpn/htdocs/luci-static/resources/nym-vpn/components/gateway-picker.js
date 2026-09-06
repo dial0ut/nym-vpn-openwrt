@@ -160,7 +160,7 @@ return baseclass.extend({
                 // Every string here comes from the directory (operator-
                 // controlled) and is array-wrapped so it renders as text.
                 //   row: {name, value, checked, disabled, perf, city, family,
-                //         noCt, note, index}
+                //         noCt, note, compact, index}
                 var buildRow = function(row) {
                     var inputAttrs = { 'type': 'radio', 'name': inputName, 'value': row.value };
                     if (row.checked) inputAttrs.checked = 'checked';
@@ -201,14 +201,19 @@ return baseclass.extend({
                     if (status.length) children.push(E('div', { 'class': 'nym-gateway-option-status' }, status));
                     // The telemetry and family lines are always present (empty
                     // when there is nothing to say) and the name has a two-line
-                    // slot, so every row in a list is the same height.
+                    // slot, so every gateway row in a list is the same height.
+                    // The Random row is compact instead: it always sits at the
+                    // top, has no telemetry or family, and would only waste
+                    // height by reserving the slots.
                     children.push(E('div', { 'class': 'nym-gateway-option-meta' }, meta));
-                    var familyAttrs = { 'class': 'nym-gateway-option-family' };
-                    if (row.family) familyAttrs.title = 'Operator family: ' + row.family;
-                    children.push(E('div', familyAttrs, row.family ? [row.family] : []));
+                    if (!row.compact) {
+                        var familyAttrs = { 'class': 'nym-gateway-option-family' };
+                        if (row.family) familyAttrs.title = 'Operator family: ' + row.family;
+                        children.push(E('div', familyAttrs, row.family ? [row.family] : []));
+                    }
 
                     var option = E('label', {
-                        'class': 'nym-gateway-option' + (row.checked ? ' selected' : '') + (row.disabled ? ' disabled' : ''),
+                        'class': 'nym-gateway-option' + (row.compact ? ' compact' : '') + (row.checked ? ' selected' : '') + (row.disabled ? ' disabled' : ''),
                         // Staggered entrance; capped so a long list settles quickly.
                         'style': '--i:' + Math.min(row.index || 0, 10)
                     }, children);
@@ -223,6 +228,7 @@ return baseclass.extend({
                     value: '',
                     checked: true,
                     note: 'picked by the daemon at connect',
+                    compact: true,
                     index: 0
                 }));
 

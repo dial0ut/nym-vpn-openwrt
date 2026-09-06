@@ -237,6 +237,8 @@ return baseclass.extend({
     .nym-gateway-option-meta > span + span::before { content: "\\00b7"; margin: 0 6px; color: var(--border-accent); }\
     .nym-gateway-option-family { color: var(--text-secondary); }\
     .nym-gateway-option-note { font-style: italic; }\
+    /* The Random row keeps a single-line name and no family slot. */\
+    .nym-gateway-option.compact .nym-gateway-option-name { min-height: 0; -webkit-line-clamp: 1; }\
     .nym-gateway-option-status { grid-column: 2; grid-row: 1; justify-self: end; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; padding-top: 2px; }\
     /* Tier: tracked micro-label with a state dot, same family as the\
        Inbound Services status. Colour lives in the dot; the word stays\
