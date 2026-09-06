@@ -244,6 +244,16 @@ impl NymVpnService for CommandInterface {
         Ok(tonic::Response::new(()))
     }
 
+    async fn get_always_on_status(
+        &self,
+        _request: tonic::Request<()>,
+    ) -> Result<tonic::Response<proto::AlwaysOnStatus>> {
+        let status = self
+            .send_and_wait(VpnServiceCommand::GetAlwaysOnStatus, ())
+            .await?;
+        Ok(tonic::Response::new(status.into()))
+    }
+
     async fn set_legacy_split_tunnel(
         &self,
         request: tonic::Request<bool>,

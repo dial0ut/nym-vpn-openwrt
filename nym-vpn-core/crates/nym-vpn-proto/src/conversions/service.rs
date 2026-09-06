@@ -165,6 +165,41 @@ impl From<nym_vpn_lib_types::MixnetTrafficConfig> for proto::MixnetTrafficConfig
     }
 }
 
+impl From<nym_vpn_lib_types::AlwaysOnStatus> for proto::AlwaysOnStatus {
+    fn from(value: nym_vpn_lib_types::AlwaysOnStatus) -> Self {
+        proto::AlwaysOnStatus {
+            enabled: value.enabled,
+            active: value.active,
+            paused: value.paused,
+            attempt: value.attempt,
+            next_retry_in_secs: value
+                .next_retry_in
+                .map(|d| u32::try_from(d.as_secs()).unwrap_or(u32::MAX)),
+            last_error: value.last_error.map(proto::tunnel_state::Error::from),
+            latched_reason: value.latched_reason,
+        }
+    }
+}
+
+impl From<proto::AlwaysOnStatus> for nym_vpn_lib_types::AlwaysOnStatus {
+    fn from(value: proto::AlwaysOnStatus) -> Self {
+        nym_vpn_lib_types::AlwaysOnStatus {
+            enabled: value.enabled,
+            active: value.active,
+            paused: value.paused,
+            attempt: value.attempt,
+            next_retry_in: value
+                .next_retry_in_secs
+                .map(|s| std::time::Duration::from_secs(u64::from(s))),
+            // An unknown reason from a newer daemon is dropped, not an error.
+            last_error: value
+                .last_error
+                .and_then(|e| nym_vpn_lib_types::ErrorStateReason::try_from(e).ok()),
+            latched_reason: value.latched_reason,
+        }
+    }
+}
+
 impl From<nym_vpn_lib_types::DnsUpstreamOwner> for proto::DnsUpstreamOwnerResponse {
     fn from(value: nym_vpn_lib_types::DnsUpstreamOwner) -> Self {
         use proto::dns_upstream_owner_response::Owner;

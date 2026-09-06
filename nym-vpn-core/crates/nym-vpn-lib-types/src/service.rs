@@ -1,7 +1,7 @@
 // Copyright 2025 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{fmt, net::IpAddr, ops::RangeInclusive};
+use std::{fmt, net::IpAddr, ops::RangeInclusive, time::Duration};
 
 const LOOP_COVER_DELAY_RANGE: RangeInclusive<u32> = 0..=200;
 const AVG_PACKET_DELAY_RANGE: RangeInclusive<u32> = 0..=200;
@@ -14,7 +14,9 @@ use time::OffsetDateTime;
 #[cfg(feature = "typescript-bindings")]
 use ts_rs::TS;
 
-use crate::{EntryPoint, ExitPoint, GatewayIndependence, NymNetworkDetails, NymVpnNetwork};
+use crate::{
+    EntryPoint, ErrorStateReason, ExitPoint, GatewayIndependence, NymNetworkDetails, NymVpnNetwork,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(
@@ -294,6 +296,53 @@ impl MixnetTrafficConfig {
         }
 
         Ok(())
+    }
+}
+
+/// A snapshot of the daemon's Always On supervisor, polled by clients.
+///
+/// `enabled` is the persisted setting; `active` says the daemon currently
+/// wants the tunnel up (target state Secured); `paused` that the user
+/// disconnected for this session, which suspends the supervisor without
+/// touching the setting. While retrying, `attempt` counts the retries of
+/// the current error series and `next_retry_in` the time to the next one;
+/// `latched_reason` names the terminal error that stopped retries until the
+/// configuration, the account state or the user changes something.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct AlwaysOnStatus {
+    pub enabled: bool,
+    pub active: bool,
+    pub paused: bool,
+    pub attempt: u32,
+    pub next_retry_in: Option<Duration>,
+    pub last_error: Option<ErrorStateReason>,
+    pub latched_reason: Option<String>,
+}
+
+impl fmt::Display for AlwaysOnStatus {
+    /// The one-liner `nym-vpnc status` prints after `State:`.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if !self.enabled {
+            return write!(f, "off");
+        }
+        if self.paused {
+            return write!(f, "paused (disconnected by user)");
+        }
+        if let Some(reason) = &self.latched_reason {
+            return write!(f, "stopped — {reason}");
+        }
+        if let Some(next) = self.next_retry_in {
+            write!(f, "retrying in {} s (attempt {}", next.as_secs(), self.attempt)?;
+            if let Some(err) = &self.last_error {
+                write!(f, ", last error {err:?}")?;
+            }
+            return write!(f, ")");
+        }
+        if !self.active {
+            return write!(f, "on");
+        }
+        write!(f, "active")
     }
 }
 

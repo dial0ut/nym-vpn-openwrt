@@ -19,6 +19,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::{
     Socks5Error, Socks5Service, Socks5Status,
+    always_on::{self, AlwaysOn},
     config::{NetworkEnvironments, VpnServiceConfigManager},
     error::{
         AccountLinksError, Error, GatewayTestError, ListGatewaysError, Result, SetNetworkError,
@@ -45,7 +46,7 @@ use nym_vpn_lib::{
     },
 };
 use nym_vpn_lib_types::{
-    AccountBalanceResponse, AccountCommandError, AccountControllerState,
+    AccountBalanceResponse, AccountCommandError, AccountControllerState, AlwaysOnStatus,
     DecentralisedObtainTicketbooksRequest, DeeplinkClient, DeeplinkKind, DiagnosticRegisterParams,
     DiagnosticReport, DiagnosticRunParams, DnsUpstreamOwner, EnableSocks5Request, EntryPoint,
     ExitPoint, FeatureFlags, Gateway, GatewayTestParams, GatewayTestReport, GetDeeplinkParams,
@@ -85,6 +86,7 @@ pub enum VpnServiceCommand {
     SetLegacySplitTunnel(oneshot::Sender<Result<(), String>>, bool),
     SetStealthApi(oneshot::Sender<Result<(), String>>, bool),
     SetAlwaysOn(oneshot::Sender<Result<(), String>>, bool),
+    GetAlwaysOnStatus(oneshot::Sender<AlwaysOnStatus>, ()),
     SetEnableGatewayIndependence(oneshot::Sender<Result<(), String>>, bool),
     SetGatewayIndependenceNotifications(oneshot::Sender<Result<(), String>>, bool),
     GetTentativeGateways(oneshot::Sender<TentativeGateways>, ()),
@@ -252,6 +254,11 @@ pub struct NymVpnService {
 
     // Timer used to throttle changes to tunnel settings
     tunnel_settings_update_timer: Pin<Box<Fuse<tokio::time::Sleep>>>,
+
+    // Always On policy: connect at start, retry error states, re-select after
+    // a long Connecting. Pure; this loop feeds it events and owns its timer.
+    always_on: AlwaysOn,
+    always_on_timer: Pin<Box<Fuse<tokio::time::Sleep>>>,
 
     // Command channel for state machine
     command_sender: mpsc::UnboundedSender<TunnelCommand>,
@@ -510,6 +517,7 @@ impl NymVpnService {
         .map_err(Error::StartDiscoveryRefresh)?;
 
         let blacklisted_entry_gateways = BlacklistedGateways::new();
+        let always_on = AlwaysOn::with_random_jitter(config_manager.config().always_on);
 
         let state_machine_handle = TunnelStateMachine::spawn(
             command_receiver,
@@ -545,6 +553,8 @@ impl NymVpnService {
             target_state: TargetState::Unsecured,
             tunnel_state,
             tunnel_settings_update_timer: Box::pin(Fuse::terminated()),
+            always_on,
+            always_on_timer: Box::pin(Fuse::terminated()),
             state_machine_handle: Some(state_machine_handle),
             account_controller_handle,
             topology_service_join_handle,
@@ -578,6 +588,16 @@ impl NymVpnService {
         let tunnel_state = self.tunnel_state.read().await.clone();
         self.update_idle_hint(&tunnel_state);
 
+        // Always On: the state machine is up and the offline monitor with it,
+        // so a Connect now either starts Connecting or arms Offline{reconnect}
+        // to fire the moment a default route appears. Never relaxed: a pinned
+        // pair that fails the independence criteria latches with the usual
+        // error instead of silently downgrading at boot.
+        if self.always_on.enabled() {
+            tracing::info!("always-on: connecting at start");
+            self.set_target_state(TargetState::Secured, false).await;
+        }
+
         loop {
             tokio::select! {
                 Some(command) = self.vpn_command_rx.recv() => {
@@ -594,6 +614,10 @@ impl NymVpnService {
                 }
                 _ = &mut self.tunnel_settings_update_timer => {
                     self.update_tunnel_settings();
+                }
+                _ = &mut self.always_on_timer => {
+                    let action = self.always_on.poll(std::time::Instant::now());
+                    self.apply_always_on(action);
                 }
                 _ = self.shutdown_token.cancelled() => {
                     tracing::info!("Received shutdown signal");
@@ -673,6 +697,11 @@ impl NymVpnService {
             let tunnel_state = self.tunnel_state.read().await.clone();
             self.update_idle_hint(&tunnel_state);
 
+            // A user connect starts a fresh retry series and clears a latch; a
+            // user disconnect pauses the supervisor for the session.
+            self.always_on.on_target_state(new_state);
+            self.rearm_always_on_timer();
+
             match new_state {
                 TargetState::Secured => {
                     let _ = self
@@ -725,6 +754,41 @@ impl NymVpnService {
             }
             TargetState::Unsecured => self.update_tunnel_settings(),
         }
+        // The user changed something the tunnel depends on: a latched or
+        // backed-off Always On retries at once with the new settings.
+        let action = self.always_on.on_config_or_account_changed();
+        self.apply_always_on(action);
+    }
+
+    /// Carry out a supervisor decision, then re-arm its timer.
+    fn apply_always_on(&mut self, action: always_on::Action) {
+        match action {
+            always_on::Action::Nothing => {}
+            always_on::Action::Connect => {
+                // Same as reconnect_tunnel(): flush a throttled settings update
+                // first so the Connect does not run with stale settings, and
+                // keep this session's independence relaxation.
+                if !self.tunnel_settings_update_timer.is_terminated() {
+                    self.tunnel_settings_update_timer.set(Fuse::terminated());
+                    self.update_tunnel_settings();
+                }
+                let _ = self.command_sender.send(TunnelCommand::Connect {
+                    relax_independence: self.relax_independence,
+                });
+            }
+        }
+        self.rearm_always_on_timer();
+    }
+
+    fn rearm_always_on_timer(&mut self) {
+        match self.always_on.next_deadline() {
+            Some(deadline) => {
+                let deadline = tokio::time::Instant::from_std(deadline);
+                self.always_on_timer
+                    .set(tokio::time::sleep_until(deadline).fuse());
+            }
+            None => self.always_on_timer.set(Fuse::terminated()),
+        }
     }
 
     /// Tell the account controller and the discovery refresher whether anyone needs them fresh.
@@ -765,6 +829,11 @@ impl NymVpnService {
             }
             self.update_idle_hint(new_state);
 
+            let action = self
+                .always_on
+                .on_tunnel_state(new_state, std::time::Instant::now());
+            self.apply_always_on(action);
+
             // Auto-disable SOCKS5 when VPN disconnects
             if matches!(new_state, TunnelState::Disconnected | TunnelState::Error(_))
                 && self.socks5_service.is_enabled()
@@ -794,6 +863,12 @@ impl NymVpnService {
     }
 
     fn handle_account_state_change(&mut self, account_state: AccountControllerState) {
+        // A renewed subscription or a re-registered device lifts an account
+        // error the tunnel latched on.
+        if account_state == AccountControllerState::ReadyToConnect {
+            let action = self.always_on.on_config_or_account_changed();
+            self.apply_always_on(action);
+        }
         if self
             .tunnel_event_tx
             .send(TunnelEvent::AccountState(account_state))
@@ -890,6 +965,9 @@ impl NymVpnService {
             VpnServiceCommand::SetAlwaysOn(tx, always_on) => {
                 let result = self.handle_set_always_on(always_on).await;
                 let _ = tx.send(result);
+            }
+            VpnServiceCommand::GetAlwaysOnStatus(tx, ()) => {
+                let _ = tx.send(self.always_on.status(std::time::Instant::now()));
             }
             VpnServiceCommand::SetEnableGatewayIndependence(tx, enabled) => {
                 let result = self.handle_set_enable_gateway_independence(enabled).await;
@@ -1178,8 +1256,28 @@ impl NymVpnService {
     }
 
     async fn handle_set_always_on(&mut self, always_on: bool) -> Result<(), String> {
-        // A policy switch for the service loop: persisted, never a reconnect.
-        self.config_manager.set_always_on(always_on).await
+        // A policy switch for the service loop: persisted, never a reconnect
+        // of a running tunnel.
+        let was_on = self.config_manager.config().always_on;
+        self.config_manager.set_always_on(always_on).await?;
+        self.always_on.set_enabled(always_on);
+        if always_on && !was_on {
+            if self.target_state == TargetState::Unsecured {
+                // "Connected whenever the daemon runs" starts now, not at the
+                // next boot.
+                self.set_target_state(TargetState::Secured, false).await;
+            } else {
+                // Already wanted up: adopt an error state the machine is
+                // sitting in so the retry series starts from it.
+                let state = self.tunnel_state.read().await.clone();
+                let action = self
+                    .always_on
+                    .on_tunnel_state(&state, std::time::Instant::now());
+                self.apply_always_on(action);
+            }
+        }
+        self.rearm_always_on_timer();
+        Ok(())
     }
 
     async fn handle_set_enable_gateway_independence(
