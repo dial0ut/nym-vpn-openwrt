@@ -268,8 +268,11 @@ async function scenarioPickers() {
   // same line slots — name, telemetry, family — and the theme gives the name
   // a two-line minimum and the two lines a one-line minimum.
   const lineSig = (r) => ['name', 'meta', 'family'].map((k) => r.querySelectorAll('.nym-gateway-option-' + k).length).join('');
-  check(rows.every((r) => lineSig(r) === '111'), 'every row has exactly one name, telemetry and family line: ' + JSON.stringify(rows.map(lineSig)));
-  check(qa(t, '.nym-gateway-option-family').length === rows.length && qa(t, '.nym-gateway-option-family').filter((f) => !f.textContent).every((f) => !f.title), 'family line rendered on every row, empty and untitled when unknown');
+  const gatewayRows = rows.filter((r) => !r.classList.contains('compact'));
+  const randomRows = rows.filter((r) => r.classList.contains('compact'));
+  check(gatewayRows.every((r) => lineSig(r) === '111'), 'every gateway row has exactly one name, telemetry and family line: ' + JSON.stringify(gatewayRows.map(lineSig)));
+  check(randomRows.length === 2 && randomRows.every((r) => lineSig(r) === '110' && r === r.parentNode.firstElementChild), 'the Random row is compact (no family slot) and first in each list');
+  check(qa(t, '.nym-gateway-option-family').length === gatewayRows.length && qa(t, '.nym-gateway-option-family').filter((f) => !f.textContent).every((f) => !f.title), 'family line rendered on every row, empty and untitled when unknown');
   check(qa(t, '.nym-gateway-option-perf').length === 3, 'performance lines intact');
   // Ledger row: the bridge's "High (load: Low, uptime: 99%)" is split into a
   // tier label in the status column and a telemetry line under the name.
@@ -287,6 +290,7 @@ async function scenarioPickers() {
   check(/\.nym-gateway-ct-tag \{[^}]*flex-shrink: 0/.test(css) && /\.nym-gateway-option \{[^}]*grid-template-columns: minmax\(0, 1fr\) auto/.test(css) && /\.nym-gateway-option-name \{[^}]*min-width: 0/.test(css) && /\.nym-gateway-option-meta, \.nym-gateway-option-family \{[^}]*grid-column: 1 \/ -1/.test(css), 'theme: content-sized status column, shrinkable name, full-width telemetry/family lines');
   check(/\.nym-gateway-option-name \{[^}]*-webkit-line-clamp: 2/.test(css) && !/\.nym-family-chip/.test(css), 'theme: two-line name clamp, chip style retired');
   check(/\.nym-gateway-option-name \{[^}]*min-height: 2\.7em/.test(css) && /\.nym-gateway-option-meta, \.nym-gateway-option-family \{[^}]*min-height: 1\.4em/.test(css), 'theme: fixed two-line name slot and one-line telemetry/family slots');
+  check(/\.nym-gateway-option\.compact \.nym-gateway-option-name \{[^}]*min-height: 0/.test(css), 'theme: compact Random row drops the two-line name minimum');
   check(/\.nym-hero-gateway-row \{[^}]*grid-template-columns: minmax\(0, 1fr\) 200px minmax\(0, 1fr\)/.test(css) && !/\.nym-hero-gateway-panel \{[^}]*max-width: 280px/.test(css) && /max-width: 960px\) \{\s*\.nym-hero-gateway-row \{[^}]*"center center" "entry exit"/.test(css) && /max-width: 700px\) \{\s*\.nym-hero-gateway-row \{[^}]*"center" "entry" "exit"/.test(css), 'theme: hero grid with a 200px ring column, pickers unconstrained, ring-on-top mid layout, single column on phones');
   const entrySel = q(t, 'select[name="entry_country"]');
   check(Array.from(entrySel.options).some((o) => o.value === 'DE' && /\(2\)/.test(o.textContent)), 'country dropdown counts intact');
