@@ -180,8 +180,8 @@ return baseclass.extend({
     .nym-toggle-status.active { color: var(--nym-green); }\
     /* Groups: a muted micro-label over a run of rows. The first group in a\
        card body sits flush; later ones get a rule and breathing room. */\
-    .nym-group { padding-top: 4px; }\
-    .nym-group + .nym-group, .nym-group + .nym-subpanel, .nym-subpanel + .nym-group { margin-top: 20px; }\
+    .nym-group { padding-top: 4px; margin-top: 20px; }\
+    .nym-card-body > .nym-group:first-child, .nym-card-description + .nym-group, .nym-subpanel > .nym-group, .nym-split-section > .nym-group { margin-top: 0; }\
     .nym-group-head { padding: 0 0 4px; }\
     .nym-group-title { font-size: 10px; text-transform: uppercase; letter-spacing: var(--label-spacing); color: var(--nym-green); opacity: 0.85; font-weight: 500; display: flex; align-items: center; gap: 8px; }\
     .nym-group-title::after { content: ""; flex: 1; height: 1px; background: var(--border-color); }\
