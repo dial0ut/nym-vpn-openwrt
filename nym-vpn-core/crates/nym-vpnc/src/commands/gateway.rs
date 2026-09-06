@@ -6,12 +6,14 @@ use tabled::Table;
 
 use nym_vpn_lib_types::{
     EntryPoint, ExitPoint, GatewayFilter, GatewayTestParams, GatewayTestSelector,
-    ListGatewaysOptions, LookupGatewayFilters, NodeIdentity, Recipient,
+    ListGatewaysOptions, LookupGatewayFilters, NodeIdentity, Recipient, TentativeGateways,
 };
 use nym_vpn_proto::rpc_client::RpcClient;
 
 use crate::{
-    boolean_option::BooleanOption, commands::gateway_test, display_helpers::display_on_off,
+    boolean_option::BooleanOption,
+    commands::gateway_test,
+    display_helpers::{RELAX_INDEPENDENCE_HINT, display_on_off},
     table_style::TableStyle,
 };
 
@@ -80,6 +82,18 @@ pub enum Command {
     ///
     /// nym-vpnc gateway test --id <ID> --id <ID> --count 10
     Test(Box<TestArgs>),
+
+    /// Preview the entry and exit gateways a connect would most likely pick
+    ///
+    /// Runs the daemon's gateway selection on the current settings without
+    /// connecting or creating key material. Reports "needs relaxed independence
+    /// criteria" when a pair exists only once the gateway independence
+    /// criteria are relaxed.
+    Tentative {
+        /// Print the result as JSON.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Debug, Clone, clap::Args)]
@@ -259,6 +273,35 @@ impl Args {
                     gateway_test::print_report(&report, self.table_style);
                 }
                 Ok(())
+            }
+            Command::Tentative { json } => {
+                let tentative = rpc_client.get_tentative_gateways().await?;
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&tentative)?);
+                } else {
+                    self.print_tentative(&tentative);
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn print_tentative(&self, tentative: &TentativeGateways) {
+        match tentative {
+            TentativeGateways::Selected { entry, exit } => {
+                let models = [("entry", entry), ("exit", exit)]
+                    .into_iter()
+                    .map(|(role, gateway)| TentativeModel::new(role, gateway))
+                    .collect::<Vec<_>>();
+                let mut table = Table::new(models);
+                self.table_style.apply_style(&mut table);
+                println!("{table}");
+            }
+            TentativeGateways::NeedsRelaxedIndependenceCriteria => {
+                println!("needs relaxed independence criteria: {RELAX_INDEPENDENCE_HINT}");
+            }
+            TentativeGateways::NoGatewaysAvailable => {
+                println!("no gateways available for the current settings");
             }
         }
     }
@@ -452,6 +495,8 @@ pub struct GatewayModel {
     pub name: String,
     #[tabled(rename = "Location")]
     pub location: String,
+    #[tabled(rename = "Family")]
+    pub family: String,
     #[tabled(rename = "Performance")]
     pub performance: String,
     #[tabled(rename = "Exit IPv4")]
@@ -482,6 +527,7 @@ impl GatewayModel {
                     }
                 })
                 .unwrap_or("N/A".to_owned()),
+            family: gateway.node_family_name.unwrap_or("-".to_owned()),
             performance: match gw_type {
                 GatewayType::MixnetEntry | GatewayType::MixnetExit => gateway
                     .performance
@@ -524,6 +570,36 @@ impl GatewayModel {
             } else {
                 "no".to_owned()
             },
+        }
+    }
+}
+
+#[derive(tabled::Tabled)]
+pub struct TentativeModel {
+    #[tabled(rename = "Role")]
+    pub role: String,
+    #[tabled(rename = "ID")]
+    pub id: String,
+    #[tabled(rename = "Name", display("tabled::derive::display::wrap", 40))]
+    pub name: String,
+    #[tabled(rename = "Country")]
+    pub country: String,
+    #[tabled(rename = "Family")]
+    pub family: String,
+}
+
+impl TentativeModel {
+    fn new(role: &str, gateway: &nym_vpn_lib_types::Gateway) -> Self {
+        Self {
+            role: role.to_owned(),
+            id: gateway.identity_key.clone(),
+            name: gateway.name.clone(),
+            country: gateway
+                .location
+                .as_ref()
+                .map(|l| l.two_letter_iso_country_code.clone())
+                .unwrap_or("N/A".to_owned()),
+            family: gateway.node_family_name.clone().unwrap_or("-".to_owned()),
         }
     }
 }
