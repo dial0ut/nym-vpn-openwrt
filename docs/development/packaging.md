@@ -31,6 +31,7 @@ nym-vpn_1.33.1_aarch64_generic.ipk (tar.gz)
     ├── www/luci-static/resources/nym-vpn/*.js
     ├── etc/init.d/nym-vpnd
     ├── etc/init.d/nym-vpn-watchdog
+    ├── etc/hotplug.d/iface/90-nym-vpn-watchdog
     ├── etc/config/nym-vpn
     ├── etc/uci-defaults/luci-app-nym-vpn
     ├── etc/nym/data/                       # empty, for daemon state
@@ -48,6 +49,11 @@ usign looks keys up that way.
 
 `etc/uci-defaults/luci-app-nym-vpn` runs once on first boot after install. It is what registers
 the firewall include, so the kill-switch survives `fw4 reload`.
+
+`etc/hotplug.d/iface/90-nym-vpn-watchdog` is sourced by netifd's `hotplug-call` on every
+interface event. On `ifup`/`ifdown` of a WAN-facing interface it signals the always-on watchdog
+(pid from `/var/run/nym-vpn-watchdog.pid`, written by procd) so the tunnel is checked at once
+instead of at the next poll tick.
 
 Dependencies come from `scripts/ipk/control.template`, and `build-apk.sh` repeats the same list:
 

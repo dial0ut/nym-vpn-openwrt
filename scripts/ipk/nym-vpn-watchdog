@@ -7,6 +7,11 @@
 # Polls the tunnel state and automatically reconnects when the VPN drops.
 # Uses escalating recovery: soft reconnect → hard recovery (daemon restart).
 # Managed by procd as a standalone service. Controlled via UCI config.
+#
+# The poll is also woken by WAN link events: the hotplug hook
+# (/etc/hotplug.d/iface/90-nym-vpn-watchdog) sends SIGUSR1 on ifup and
+# SIGUSR2 on ifdown of a WAN-facing interface, which cuts the current sleep
+# short so the tunnel is checked right away instead of at the next tick.
 
 VPNC="/usr/bin/nym-vpnc"
 UCI_SECTION="nym-vpn.settings"
@@ -17,6 +22,44 @@ STATEFILE="/tmp/nym-watchdog.state"
 DEFAULT_INTERVAL=30
 DEFAULT_MAX_RETRIES=3
 MAX_BACKOFF=300
+# Treat a tunnel that has been connecting this long as stuck
+STUCK_CONNECTING_SECS=180
+# After a link-up event the daemon needs a moment to notice: follow the
+# immediate check with a few quick ones before returning to the poll interval
+LINK_RECHECKS=3
+LINK_RECHECK_INTERVAL=5
+
+#-------------------------------------------------------------------------------
+# Link-event wake-up. Installed first: procd publishes our pid the moment we
+# are forked, and an untrapped SIGUSR1/2 would kill the script.
+#-------------------------------------------------------------------------------
+
+# Set by the traps, consumed by the main loop ("up" or "down")
+link_event=""
+# pid of the background sleep the loop is currently waiting on, if any
+sleep_pid=""
+
+on_link_event() {
+    link_event="$1"
+    [ -n "$sleep_pid" ] && kill "$sleep_pid" 2>/dev/null
+}
+trap 'on_link_event up' USR1
+trap 'on_link_event down' USR2
+
+# Sleep that a link event cuts short. A foreground sleep would defer the trap
+# until it finished; a background sleep plus wait lets the trap run at once
+# and kill the sleep. wait returns early on a trapped signal, so loop until
+# the child is really gone rather than leave it as a zombie.
+nap() {
+    sleep "$1" &
+    sleep_pid=$!
+    # An event that landed before $sleep_pid was recorded
+    [ -n "$link_event" ] && kill "$sleep_pid" 2>/dev/null
+    while kill -0 "$sleep_pid" 2>/dev/null; do
+        wait "$sleep_pid" 2>/dev/null
+    done
+    sleep_pid=""
+}
 
 log_info() {
     logger -t "$LOGPREFIX" "$1"
@@ -120,22 +163,50 @@ log_info "Watchdog started"
 write_state "started" 0 "none"
 
 failures=0
-connecting_ticks=0
+# Seconds the tunnel has been observed in the connecting state
+connecting_secs=0
+# Quick re-checks still owed after a link-up event
+quick_checks=0
 
 while true; do
     interval=$(uci_get "${UCI_SECTION}.watchdog_interval" "$DEFAULT_INTERVAL")
     max_retries=$(uci_get "${UCI_SECTION}.watchdog_max_retries" "$DEFAULT_MAX_RETRIES")
-    sleep "$interval"
+
+    if [ "$quick_checks" -gt 0 ]; then
+        quick_checks=$((quick_checks - 1))
+        slept=$LINK_RECHECK_INTERVAL
+    else
+        slept=$interval
+    fi
+    nap "$slept"
+
+    event=$link_event
+    link_event=""
 
     # Re-check on each iteration — user can toggle at runtime
     if ! is_enabled; then
         if [ $failures -gt 0 ]; then
             log_info "Always-on disabled, resetting state"
             failures=0
-            connecting_ticks=0
+            connecting_secs=0
         fi
+        quick_checks=0
         write_state "disabled" 0 "none"
         continue
+    fi
+
+    # Woken by the hotplug hook. A WAN link change invalidates whatever
+    # failure series was building up, so start over and look right away.
+    if [ -n "$event" ]; then
+        log_info "WAN link $event, checking tunnel now"
+        failures=0
+        connecting_secs=0
+        slept=0
+        if [ "$event" = "up" ]; then
+            quick_checks=$LINK_RECHECKS
+        else
+            quick_checks=0
+        fi
     fi
 
     # Ensure daemon is running
@@ -159,20 +230,20 @@ while true; do
                 log_info "Tunnel recovered after $failures attempts"
             fi
             failures=0
-            connecting_ticks=0
+            connecting_secs=0
             write_state "connected" 0 "none"
             ;;
 
         connecting)
-            # Allow some time for connection to establish
-            # After ~3 minutes of stuck connecting, treat as failure
-            connecting_ticks=$((connecting_ticks + 1))
-            max_connecting_ticks=$(( 180 / interval ))
-            [ $max_connecting_ticks -lt 3 ] && max_connecting_ticks=3
+            # Allow some time for the connection to establish: at least
+            # three polls, and about three minutes at short intervals.
+            connecting_secs=$((connecting_secs + slept))
+            stuck_after=$((interval * 3))
+            [ $stuck_after -lt $STUCK_CONNECTING_SECS ] && stuck_after=$STUCK_CONNECTING_SECS
 
-            if [ $connecting_ticks -ge $max_connecting_ticks ]; then
+            if [ $connecting_secs -ge $stuck_after ]; then
                 log_warn "Stuck in connecting state for too long"
-                connecting_ticks=0
+                connecting_secs=0
                 failures=$((failures + 1))
                 write_state "recovering" "$failures" "stuck_connecting"
                 hard_recovery
@@ -188,7 +259,7 @@ while true; do
 
         disconnected|error)
             failures=$((failures + 1))
-            connecting_ticks=0
+            connecting_secs=0
 
             if [ $failures -le "$max_retries" ]; then
                 # Soft retry
@@ -205,8 +276,9 @@ while true; do
                 write_state "recovering" "$failures" "hard_recovery"
                 hard_recovery
 
+                # A link-up event cuts the backoff short too
                 if [ $backoff -gt 0 ]; then
-                    sleep "$backoff"
+                    nap "$backoff"
                 fi
             fi
             ;;

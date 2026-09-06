@@ -75,6 +75,14 @@ the GitHub release notes.
 
 ### Changed
 
+- The always-on watchdog now reacts to WAN link events instead of only
+  noticing a dropped tunnel at its next poll. A hotplug hook wakes it on
+  `ifup`/`ifdown` of a WAN-facing interface (`wan`, `wan6`, anything in the
+  `wan` firewall zone or carrying a default route — PPPoE and renamed WANs
+  included), so after an outage or re-dial the tunnel is checked at once and
+  re-checked a few times while the daemon catches up. A link change also
+  resets the retry escalation, so a WAN flap no longer counts towards a
+  daemon restart. The periodic poll stays as the fallback.
 - The firewall include is registered for the *active* backend (fw4 vs fw3 —
   live state, then the firewall init script, then binary presence, so
   boot-time runs on images shipping both stacks pick correctly) and applied

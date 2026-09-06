@@ -1,0 +1,65 @@
+#!/bin/sh
+# Copyright 2025 - Nym Technologies SA <contact@nymtech.net>
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# NymVPN always-on watchdog: WAN link-event hook.
+#
+# netifd runs the scripts in this directory (sourced by hotplug-call) on every
+# logical-interface state change. When a WAN-facing interface goes up or down
+# this wakes the watchdog loop (SIGUSR1 = up, SIGUSR2 = down) so the tunnel is
+# checked immediately instead of at the next poll. Everything else is ignored.
+
+[ "$ACTION" = "ifup" ] || [ "$ACTION" = "ifdown" ] || exit 0
+[ -n "$INTERFACE" ] || exit 0
+[ "$INTERFACE" != "loopback" ] || exit 0
+
+# Only relevant while always-on is enabled and the watchdog is running
+[ "$(uci -q get nym-vpn.settings.always_on)" = "1" ] || exit 0
+pid="$(cat /var/run/nym-vpn-watchdog.pid 2>/dev/null)"
+case "$pid" in
+    ''|*[!0-9]*) exit 0 ;;
+esac
+# An untrapped SIGUSR1/2 terminates its target: make sure the pid still
+# belongs to the watchdog and not to something that reused it.
+grep -q "nym-vpn-watchdog" "/proc/$pid/cmdline" 2>/dev/null || exit 0
+
+. /lib/functions.sh
+. /lib/functions/network.sh
+
+# WAN-facing means: the stock wan/wan6 interfaces, any member of the "wan"
+# firewall zone (renamed WANs, PPPoE, LTE), or an interface carrying a default
+# route (a WAN outside that zone — only detectable on ifup, since on ifdown the
+# route is already gone).
+in_wan_zone=0
+check_zone() {
+    local name networks
+    config_get name "$1" name
+    [ "$name" = "wan" ] || return 0
+    config_get networks "$1" network
+    case " $networks " in
+        *" $INTERFACE "*) in_wan_zone=1 ;;
+    esac
+}
+
+is_wan_facing() {
+    local gw
+    case "$INTERFACE" in
+        wan|wan6) return 0 ;;
+    esac
+    config_load firewall
+    config_foreach check_zone zone
+    [ "$in_wan_zone" = "1" ] && return 0
+    network_get_gateway gw "$INTERFACE" && [ -n "$gw" ] && return 0
+    network_get_gateway6 gw "$INTERFACE" && [ -n "$gw" ] && return 0
+    return 1
+}
+
+is_wan_facing || exit 0
+
+logger -t nym-watchdog "$ACTION $INTERFACE${DEVICE:+ ($DEVICE)}, waking watchdog"
+if [ "$ACTION" = "ifup" ]; then
+    kill -USR1 "$pid" 2>/dev/null
+else
+    kill -USR2 "$pid" 2>/dev/null
+fi
+exit 0
