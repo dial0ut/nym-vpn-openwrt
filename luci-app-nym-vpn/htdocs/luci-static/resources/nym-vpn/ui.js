@@ -2,8 +2,7 @@
 'require baseclass';
 
 // Small presentational helpers shared by the cards: uptime formatting, the
-// legacy uptime storage key, quality icons, the connected-gateway panel and
-// clipboard copy.
+// legacy uptime storage key, the connected-gateway panel and clipboard copy.
 
 return baseclass.extend({
     UPTIME_STORAGE_KEY: 'nym_vpn_connection_start',
@@ -38,14 +37,6 @@ return baseclass.extend({
         try {
             localStorage.removeItem(this.UPTIME_STORAGE_KEY);
         } catch (e) {}
-    },
-
-    getQualityIcon: function(performance, assets) {
-        var perf = (performance || '').toLowerCase();
-        if (perf.indexOf('high') >= 0) return assets.qualityHigh;
-        if (perf.indexOf('medium') >= 0) return assets.qualityMedium;
-        if (perf.indexOf('offline') >= 0) return assets.qualityOffline;
-        return assets.qualityLow;
     },
 
     renderGatewayInfo: function(container, name, id, ip, country, countryData) {

@@ -1,14 +1,13 @@
 'use strict';
 'require baseclass';
 'require dom';
-'require nym-vpn.assets as assets';
 'require nym-vpn.countries as countries';
-'require nym-vpn.ui as nymUI';
 
 // The two gateway pickers (entry and exit): a country dropdown filled on
-// first focus, a per-country server list with performance indicators and
-// the operator-family chip, and the restore of the daemon's saved selection
-// after a disconnect.
+// first focus, a per-country server list (one ledger row per gateway: name
+// and a telemetry line on the left, a fixed status column with the tier and
+// the No CT marker on the right), and the restore of the daemon's saved
+// selection after a disconnect.
 
 var E = dom.create.bind(dom);
 
@@ -17,6 +16,30 @@ var perfRank = function(p) {
     return p.indexOf('High') >= 0 ? 3 :
            p.indexOf('Medium') >= 0 ? 2 :
            p.indexOf('Offline') >= 0 ? 0 : 1;
+};
+
+// The bridge reports performance as one string, "High (load: Low, uptime:
+// 95%)" (or "N/A"). Split it into the tier and its two components so the
+// row can show the tier as a label and the rest as telemetry; anything that
+// does not match keeps the raw string as its telemetry line.
+var TIERS = { high: 'High', medium: 'Medium', low: 'Low', offline: 'Offline' };
+var parsePerformance = function(raw) {
+    var s = String(raw || '').trim();
+    var m = /^(\w+)\s*\(load:\s*(\w+),\s*uptime:\s*(\d+)%\)$/i.exec(s);
+    var rank = perfRank(s);
+    var tier = rank === 3 ? 'high' : rank === 2 ? 'medium' : rank === 0 ? 'offline' : 'low';
+    if (!m) {
+        // Only a known tier word is a real tier; "N/A"/"Unknown" is neither.
+        var known = /high|medium|low|offline/i.test(s);
+        var shown = s && !known && !/^n\/?a$/i.test(s) ? s : '';
+        return { tier: known ? tier : 'unknown', label: known ? TIERS[tier] : 'N/A', telemetry: shown, raw: s };
+    }
+    return {
+        tier: tier,
+        label: TIERS[tier],
+        telemetry: 'load ' + m[2].toLowerCase() + ' · uptime ' + m[3] + '%',
+        raw: s
+    };
 };
 
 var selectHasOption = function(select, value) {
@@ -127,58 +150,95 @@ return baseclass.extend({
                     option.classList.add('selected');
                 };
 
-                var randomOption = E('label', { 'class': 'nym-gateway-option selected' }, [
-                    E('input', { 'type': 'radio', 'name': inputName, 'value': '', 'checked': 'checked' }),
-                    E('div', { 'class': 'nym-gateway-option-info' }, [
-                        E('div', { 'class': 'nym-gateway-option-name' }, '🎲 Any Gateway (Random)')
-                    ])
-                ]);
-                randomOption.addEventListener('click', function() { selectOption(randomOption); });
-                gatewayList.appendChild(randomOption);
+                // One ledger row, a two-column grid. Row 1: the name (two-
+                // line clamp, full text in the title) beside a status column
+                // sized by its own content, so the tier label and the No CT
+                // marker can never be pushed under the name's ellipsis. Rows
+                // 2 and 3 span the full width: a telemetry line (load,
+                // uptime, city) and the operator family, each a single line
+                // that ellipsises rather than wraps.
+                // Every string here comes from the directory (operator-
+                // controlled) and is array-wrapped so it renders as text.
+                //   row: {name, value, checked, disabled, perf, city, family,
+                //         noCt, note, index}
+                var buildRow = function(row) {
+                    var inputAttrs = { 'type': 'radio', 'name': inputName, 'value': row.value };
+                    if (row.checked) inputAttrs.checked = 'checked';
+                    if (row.disabled) inputAttrs.disabled = 'disabled';
 
-                sorted.forEach(function(gw) {
-                    var perf = gw.performance || 'Unknown';
-                    var iconDiv = E('div', { 'class': 'nym-gateway-option-icon' });
-                    iconDiv.innerHTML = nymUI.getQualityIcon(perf, assets);
+                    var name = String(row.name || 'Unknown');
+                    var meta = [];
+                    if (row.perf && row.perf.telemetry) {
+                        // One span: the parsed "load · uptime" line, or the raw
+                        // string for a bridge whose format the parser does not
+                        // know. "N/A" has nothing to say here and is skipped
+                        // (the tier label already reads N/A).
+                        meta.push(E('span', { 'class': 'nym-gateway-option-perf', 'title': row.perf.raw }, [row.perf.telemetry]));
+                    }
+                    // City last: the country is already known from the
+                    // dropdown, so it is the token to lose if the line clips.
+                    if (row.city) meta.push(E('span', { 'class': 'nym-gateway-option-city' }, [String(row.city)]));
+                    if (row.note) meta.push(E('span', { 'class': 'nym-gateway-option-note' }, [row.note]));
 
-                    var ctIncompatible = ctFilter && (gw.bridges === false);
-
-                    var nameChildren = [String(gw.name || 'Unknown')];
-                    if (ctIncompatible) {
-                        nameChildren.push(E('span', {
-                            'style': 'margin-left:6px; padding:1px 5px; border-radius:8px; font-size:9px; text-transform:uppercase; letter-spacing:0.5px; background:var(--danger,#e74c3c); color:#fff; vertical-align:middle'
+                    var status = [];
+                    if (row.perf) {
+                        status.push(E('span', {
+                            'class': 'nym-gateway-tier ' + row.perf.tier,
+                            'title': row.perf.raw
+                        }, [row.perf.label]));
+                    }
+                    if (row.noCt) {
+                        status.push(E('span', {
+                            'class': 'nym-gateway-ct-tag',
+                            'title': 'No circumvention transport: not selectable while Circumvention Transports is on'
                         }, 'No CT'));
                     }
 
-                    var inputAttrs = { 'type': 'radio', 'name': inputName, 'value': gw.id || '' };
-                    if (ctIncompatible) inputAttrs.disabled = 'disabled';
-
-                    // Array-wrap: gateway name/perf come from the directory
-                    // (operator-controlled) and must render as text, not innerHTML.
-                    var infoChildren = [
-                        E('div', { 'class': 'nym-gateway-option-name' }, nameChildren),
-                        E('div', { 'class': 'nym-gateway-option-perf' }, [String(perf)])
+                    var children = [
+                        E('input', inputAttrs),
+                        E('div', { 'class': 'nym-gateway-option-name', 'title': name }, [name])
                     ];
-                    // Operator family chip; the field is null or absent on
-                    // gateways without one and on an older bridge.
-                    if (typeof gw.family === 'string' && gw.family.trim()) {
-                        infoChildren.push(E('div', { 'class': 'nym-gateway-option-family' }, [
-                            E('span', { 'class': 'nym-family-chip', 'title': 'Operator family' }, [gw.family.trim()])
-                        ]));
+                    if (status.length) children.push(E('div', { 'class': 'nym-gateway-option-status' }, status));
+                    if (meta.length) children.push(E('div', { 'class': 'nym-gateway-option-meta' }, meta));
+                    if (row.family) {
+                        children.push(E('div', { 'class': 'nym-gateway-option-family', 'title': 'Operator family: ' + row.family }, [row.family]));
                     }
 
                     var option = E('label', {
-                        'class': 'nym-gateway-option' + (ctIncompatible ? ' disabled' : ''),
-                        'style': ctIncompatible ? 'opacity:0.5; cursor:not-allowed' : ''
-                    }, [
-                        E('input', inputAttrs),
-                        iconDiv,
-                        E('div', { 'class': 'nym-gateway-option-info' }, infoChildren)
-                    ]);
-                    if (!ctIncompatible) {
+                        'class': 'nym-gateway-option' + (row.checked ? ' selected' : '') + (row.disabled ? ' disabled' : ''),
+                        // Staggered entrance; capped so a long list settles quickly.
+                        'style': '--i:' + Math.min(row.index || 0, 10)
+                    }, children);
+                    if (!row.disabled) {
                         option.addEventListener('click', function() { selectOption(option); });
                     }
-                    gatewayList.appendChild(option);
+                    return option;
+                };
+
+                gatewayList.appendChild(buildRow({
+                    name: '🎲 Any Gateway (Random)',
+                    value: '',
+                    checked: true,
+                    note: 'picked by the daemon at connect',
+                    index: 0
+                }));
+
+                sorted.forEach(function(gw, i) {
+                    var ctIncompatible = ctFilter && (gw.bridges === false);
+                    // Operator family is null or absent on gateways without
+                    // one and on an older bridge; city likewise.
+                    var family = (typeof gw.family === 'string' && gw.family.trim()) ? gw.family.trim() : '';
+                    var city = (typeof gw.city === 'string' && gw.city.trim()) ? gw.city.trim() : '';
+                    gatewayList.appendChild(buildRow({
+                        name: gw.name,
+                        value: gw.id || '',
+                        disabled: ctIncompatible,
+                        noCt: ctIncompatible,
+                        perf: parsePerformance(gw.performance),
+                        city: city,
+                        family: family,
+                        index: i + 1
+                    }));
                 });
 
                 dom.content(container, [

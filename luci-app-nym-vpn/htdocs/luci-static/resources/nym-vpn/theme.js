@@ -212,17 +212,47 @@ return baseclass.extend({
     .nym-gateway-box-title { font-size: 11px; text-transform: uppercase; letter-spacing: var(--label-spacing); color: var(--nym-green); margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }\
     .nym-gateway-box-title::before { content: ""; width: 6px; height: 6px; background: var(--nym-green); border-radius: 50%; }\
     .nym-gateway-loading { color: var(--text-muted); font-size: 13px; font-style: italic; padding: 12px 0; }\
-    .nym-gateway-option { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 6px; margin-bottom: 6px; cursor: pointer; transition: all 0.2s; }\
-    .nym-gateway-option:hover { border-color: var(--nym-green); background: var(--bg-card-hover); }\
-    .nym-gateway-option.selected { border-color: var(--nym-green); background: var(--nym-green-dim); }\
-    .nym-gateway-option input[type="radio"] { display: none; }\
-    .nym-gateway-option-icon { width: 24px; height: 24px; flex-shrink: 0; }\
-    .nym-gateway-option-icon svg { width: 100%; height: 100%; }\
-    .nym-gateway-option-info { flex: 1; min-width: 0; }\
-    .nym-gateway-option-name { font-size: 13px; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }\
-    .nym-gateway-option-perf { font-size: 11px; color: var(--text-muted); }\
-    .nym-gateway-option-family { margin-top: 3px; min-width: 0; }\
-    .nym-family-chip { display: inline-block; max-width: 100%; padding: 1px 7px; border-radius: 8px; font-size: 10px; line-height: 1.5; color: var(--text-secondary); background: var(--bg-card); border: 1px solid var(--border-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }\
+    /* Gateway ledger row: a two-column grid. Row 1 is the name (minmax(0,\
+       1fr): it may shrink and clamps to two lines, full text in its title)\
+       beside a content-sized status column (tier, No CT) that therefore can\
+       never be squeezed. Rows 2-3 span both columns: one telemetry line and\
+       the operator family, each a single line that ellipsises, not wraps. */\
+    .nym-gateway-option { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; row-gap: 3px; align-items: start; padding: 10px 12px; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 6px; margin-bottom: 6px; cursor: pointer; transition: border-color 0.2s, background 0.2s, box-shadow 0.2s; animation: rowIn 0.22s ease both; animation-delay: calc(var(--i, 0) * 28ms); }\
+    @keyframes rowIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }\
+    .nym-gateway-option:hover { border-color: var(--border-accent); background: var(--bg-card-hover); }\
+    .nym-gateway-option.selected, .nym-gateway-option.selected:hover { border-color: var(--nym-green); background: var(--nym-green-dim); box-shadow: inset 3px 0 0 var(--nym-green); }\
+    .nym-gateway-option.selected .nym-gateway-option-name { color: var(--nym-green); }\
+    /* The radio stays in the tree (keyboard focus, form semantics) but off\
+       the canvas; the row shows focus for it. */\
+    .nym-gateway-option input[type="radio"] { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; pointer-events: none; }\
+    .nym-gateway-option:focus-within { border-color: var(--nym-green); box-shadow: 0 0 0 3px var(--nym-green-dim); }\
+    .nym-gateway-option.selected:focus-within { box-shadow: inset 3px 0 0 var(--nym-green), 0 0 0 3px var(--nym-green-dim); }\
+    .nym-gateway-option-name { grid-column: 1; min-width: 0; font-size: 13px; line-height: 1.35; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; transition: color 0.2s; }\
+    /* Telemetry and family lines: mono, lower-case tokens separated by\
+       middle dots, one line each across the full row width. */\
+    .nym-gateway-option-meta, .nym-gateway-option-family { grid-column: 1 / -1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); font-size: 10px; line-height: 1.4; letter-spacing: 0.2px; color: var(--text-muted); }\
+    .nym-gateway-option-meta > span + span::before { content: "\\00b7"; margin: 0 6px; color: var(--border-accent); }\
+    .nym-gateway-option-family { color: var(--text-secondary); }\
+    .nym-gateway-option-note { font-style: italic; }\
+    .nym-gateway-option-status { grid-column: 2; grid-row: 1; justify-self: end; display: flex; flex-direction: column; align-items: flex-end; gap: 5px; padding-top: 2px; }\
+    /* Tier: tracked micro-label with a state dot, same family as the\
+       Inbound Services status. Colour lives in the dot; the word stays\
+       readable without it. */\
+    .nym-gateway-tier { display: inline-flex; align-items: center; gap: 6px; font-size: 9px; line-height: 1; text-transform: uppercase; letter-spacing: var(--label-spacing); color: var(--text-secondary); white-space: nowrap; }\
+    .nym-gateway-tier::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); flex-shrink: 0; }\
+    .nym-gateway-tier.high::before { background: var(--nym-green); box-shadow: 0 0 6px var(--nym-green-glow); }\
+    .nym-gateway-tier.medium::before { background: var(--warning); }\
+    .nym-gateway-tier.low::before { background: var(--danger); }\
+    .nym-gateway-tier.offline, .nym-gateway-tier.unknown { color: var(--text-muted); }\
+    /* No CT: an outlined tag like the reconnect tag, in the warning colour —\
+       "not applicable while Circumvention Transports is on", not an error. */\
+    .nym-gateway-ct-tag { flex-shrink: 0; font-size: 9px; line-height: 1; text-transform: uppercase; letter-spacing: var(--label-spacing); color: var(--warning); border: 1px solid var(--warning); border-radius: 4px; padding: 3px 5px 2px; white-space: nowrap; opacity: 0.9; }\
+    /* CT-incompatible: the text column dims, the status column keeps full\
+       contrast so the reason is the most legible thing on the row. */\
+    .nym-gateway-option.disabled { cursor: not-allowed; border-style: dashed; }\
+    .nym-gateway-option.disabled:hover { border-color: var(--border-color); background: var(--bg-input); }\
+    .nym-gateway-option.disabled .nym-gateway-option-name, .nym-gateway-option.disabled .nym-gateway-option-meta, .nym-gateway-option.disabled .nym-gateway-option-family { opacity: 0.45; }\
+    .nym-gateway-option.disabled .nym-gateway-tier::before { background: var(--text-muted); box-shadow: none; }\
     .nym-gateway-list { max-height: 200px; overflow-y: auto; }\
     .nym-gateway-list::-webkit-scrollbar { width: 4px; }\
     .nym-gateway-list::-webkit-scrollbar-track { background: var(--bg-input); }\
@@ -391,7 +421,7 @@ return baseclass.extend({
     .nym-hero-gateway-panel .nym-gateway-box-title { margin-bottom: 14px; font-size: 11px; }\
     .nym-hero-gateway-panel .nym-select { font-size: 13px; padding: 0 16px; height: 44px; line-height: 44px; background-position: right 14px center; text-align: center; text-align-last: center; }\
     .nym-hero-gateway-panel .nym-gateway-list { max-height: 160px; margin-top: 14px; }\
-    .nym-hero-gateway-panel .nym-gateway-option { padding: 10px 12px; font-size: 12px; }\
+    .nym-hero-gateway-panel .nym-gateway-option { padding: 9px 11px; gap: 10px; }\
     .nym-hero-gateway-panel .nym-gateway-option-name { font-size: 12px; }\
     .nym-hero-gateway-panel .nym-gateway-loading { font-size: 12px; padding: 10px 0; text-align: center; }\
     .nym-hero-gateway-panel .nym-form-label { font-size: 10px; text-align: center; margin-top: 8px; margin-bottom: 10px; }\
