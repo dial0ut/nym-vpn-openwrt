@@ -62,6 +62,30 @@ uci commit uhttpd
 /etc/init.d/uhttpd restart
 ```
 
+## Upgrade from the LuCI Software page never finishes
+
+Reported against packages up to 1.34.0: *System → Software → Upgrade* sits on "Executing package
+manager", and when the dialog finally goes away LuCI wants a new login — while
+`opkg upgrade nym-vpn` or `apk upgrade nym-vpn` from a shell works. Those packages restarted rpcd
+from their post-install step. LuCI runs opkg and apk *through* rpcd, so the restart cut off the
+reply the page was waiting for and dropped every login session. The upgrade itself normally went
+through; check with
+
+```bash
+opkg list-installed nym-vpn     # or: apk list -I nym-vpn
+```
+
+Newer packages refresh rpcd a few seconds *after* the transaction has returned, so the page gets
+its result. Being asked to log in again after an upgrade that changed the web UI's permissions is
+expected.
+
+Two limits apply to any large package installed from LuCI, not just this one: LuCI stops waiting
+for a package operation after 20 seconds and reports *XHR request timed out*, and rpcd kills the
+wrapper it launched after 30 seconds by default (`rpcd.@rpcd[0].timeout`). The package manager
+itself keeps running in both cases — nym-vpn is a 15–30 MB download written to flash, which can
+take longer than that on a slow router or link. Wait a minute, reload the page and check the
+installed version as above.
+
 ## Not enough disk space
 
 Installed size is roughly 18–36 MB — `nym-vpnd` is 16–33 MB depending on architecture, `nym-vpnc`
