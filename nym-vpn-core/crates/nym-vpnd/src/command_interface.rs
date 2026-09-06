@@ -1121,6 +1121,10 @@ pub async fn start_command_interface(
     let socket_path = default_socket_path();
     let (vpn_command_tx, vpn_command_rx) = mpsc::unbounded_channel();
 
+    // Probe the service loop through the same channel the gRPC handlers use;
+    // a daemon that accepts connections but never answers exits for procd.
+    crate::liveness::spawn(vpn_command_tx.clone(), shutdown_token.child_token());
+
     // Remove previous socket file in case if the daemon crashed in the prior run and could not clean up the socket file.
     remove_previous_socket_file(&socket_path).await;
     tracing::info!("Starting socket listener on: {}", socket_path.display());

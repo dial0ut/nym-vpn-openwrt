@@ -764,6 +764,16 @@ impl NymVpnService {
     fn apply_always_on(&mut self, action: always_on::Action) {
         match action {
             always_on::Action::Nothing => {}
+            always_on::Action::Exit(code) => {
+                // Deliberately not the shutdown path: Error/Offline shutdown
+                // reset the firewall policy, which would open the router for
+                // the seconds until procd respawns us. An abrupt exit leaves
+                // the nftables/iptables policy in place and the fresh daemon
+                // re-applies Blocked on entry.
+                tracing::error!("always-on: exiting with code {code} for procd to restart the daemon");
+                std::thread::sleep(Duration::from_millis(200));
+                std::process::exit(code);
+            }
             always_on::Action::Connect => {
                 // Same as reconnect_tunnel(): flush a throttled settings update
                 // first so the Connect does not run with stale settings, and

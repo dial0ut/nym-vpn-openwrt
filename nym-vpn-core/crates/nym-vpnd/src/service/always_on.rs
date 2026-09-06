@@ -38,6 +38,11 @@ pub const ENVIRONMENTAL_RETRY: Duration = Duration::from_secs(300);
 /// Connecting for this long without reaching Connected forces a fresh
 /// gateway selection, and again every period after that.
 pub const LONG_CONNECTING: Duration = Duration::from_secs(600);
+/// Consecutive infrastructure errors (about five minutes of backoff) after
+/// which the process state itself is suspect and the daemon exits for procd.
+pub const MAX_INFRASTRUCTURE_ERRORS: u32 = 6;
+/// Exit code for that hand-over; procd respawns.
+pub const EXIT_CODE_INFRASTRUCTURE: i32 = 3;
 
 /// What the service loop should do after feeding the supervisor an event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,6 +50,9 @@ pub enum Action {
     Nothing,
     /// Send `TunnelCommand::Connect` with the session's relaxation flag.
     Connect,
+    /// Leave the process with this code, abruptly: no shutdown path, so the
+    /// kill-switch table outlives the process and covers the respawn gap.
+    Exit(i32),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -243,8 +251,16 @@ impl AlwaysOn {
                 match classify(reason) {
                     ErrorClass::Infrastructure => {
                         self.environmental_streak = 0;
-                        let delay = self.backoff(self.infrastructure_streak);
                         self.infrastructure_streak += 1;
+                        if self.infrastructure_streak >= MAX_INFRASTRUCTURE_ERRORS {
+                            tracing::error!(
+                                "always-on: exiting for procd ({} consecutive infrastructure errors, last {})",
+                                self.infrastructure_streak,
+                                reason_ident(reason)
+                            );
+                            return Action::Exit(EXIT_CODE_INFRASTRUCTURE);
+                        }
+                        let delay = self.backoff(self.infrastructure_streak - 1);
                         self.schedule(delay, reason, now);
                     }
                     ErrorClass::Environmental => {
@@ -471,11 +487,12 @@ mod tests {
     }
 
     #[test]
-    fn infrastructure_backoff_doubles_and_caps() {
+    fn infrastructure_backoff_doubles_then_exits_for_procd() {
         let mut ao = supervisor();
         let mut now = Instant::now();
-        // Low-edge jitter: 80 % of 5, 10, 20, 40, 80, 160, 300, 300 s.
-        let expected = [4, 8, 16, 32, 64, 128, 240, 240];
+        // Low-edge jitter: 80 % of 5, 10, 20, 40, 80 s for the five retries
+        // before the sixth consecutive error hands over to procd.
+        let expected = [4, 8, 16, 32, 64];
         for (i, want) in expected.iter().enumerate() {
             assert_eq!(
                 ao.on_tunnel_state(&error(ErrorStateReason::SetRouting), now),
@@ -490,6 +507,62 @@ mod tests {
             assert_eq!(ao.poll(now), Action::Connect);
             assert_eq!(ao.on_tunnel_state(&connecting(), now), Action::Nothing);
             assert_eq!(ao.status(now).next_retry_in, None);
+        }
+        assert_eq!(
+            ao.on_tunnel_state(&error(ErrorStateReason::SetFirewallPolicy), now),
+            Action::Exit(EXIT_CODE_INFRASTRUCTURE)
+        );
+    }
+
+    #[test]
+    fn backoff_caps_at_five_minutes() {
+        // The cap is only reachable through the exponent, so probe it directly.
+        let ao = supervisor();
+        assert_eq!(ao.backoff(0), secs(4));
+        assert_eq!(ao.backoff(5), secs(128));
+        assert_eq!(ao.backoff(6), secs(240));
+        assert_eq!(ao.backoff(7), secs(240));
+        assert_eq!(ao.backoff(40), secs(240), "no overflow far past the cap");
+    }
+
+    #[test]
+    fn a_break_in_the_streak_averts_the_exit() {
+        let mut ao = supervisor();
+        let now = Instant::now();
+        for _ in 0..5 {
+            ao.on_tunnel_state(&error(ErrorStateReason::SetRouting), now);
+            ao.on_tunnel_state(&connecting(), now);
+        }
+        // An environmental error in between resets the infrastructure count.
+        ao.on_tunnel_state(
+            &error(ErrorStateReason::PerformantExitGatewayUnavailable),
+            now,
+        );
+        ao.on_tunnel_state(&connecting(), now);
+        for _ in 0..5 {
+            assert_eq!(
+                ao.on_tunnel_state(&error(ErrorStateReason::SetRouting), now),
+                Action::Nothing
+            );
+            ao.on_tunnel_state(&connecting(), now);
+        }
+        // So does a WAN drop and return.
+        ao.on_tunnel_state(&TunnelState::Offline { reconnect: true }, now);
+        ao.on_tunnel_state(&connecting(), now);
+        for _ in 0..5 {
+            assert_eq!(
+                ao.on_tunnel_state(&error(ErrorStateReason::TunDevice), now),
+                Action::Nothing
+            );
+            ao.on_tunnel_state(&connecting(), now);
+        }
+        // Errors while paused never count either.
+        ao.on_target_state(TargetState::Unsecured);
+        for _ in 0..10 {
+            assert_eq!(
+                ao.on_tunnel_state(&error(ErrorStateReason::SetDns), now),
+                Action::Nothing
+            );
         }
     }
 
