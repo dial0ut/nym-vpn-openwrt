@@ -106,9 +106,10 @@ return baseclass.extend({
                 poissonRow,
                 coverRow,
                 E('div', { 'class': 'nym-tuning-grid' }, [loop.el, packet.el, message.el]),
-                E('div', { 'class': 'nym-action-buttons' }, [
+                E('div', { 'class': 'nym-card-actions' }, [
                     E('button', {
-                        'class': 'nym-btn nym-btn-primary',
+                        'class': 'nym-btn nym-btn-primary nym-btn-small',
+                        'type': 'button',
                         'click': save
                     }, 'Apply Tuning')
                 ])

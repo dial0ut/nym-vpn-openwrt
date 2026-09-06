@@ -9,12 +9,17 @@
 var E = dom.create.bind(dom);
 
 return baseclass.extend({
-    // opts: {id, title, desc, checked, disabled, onChange(ev), extra
+    // opts: {id, title, desc, tag, checked, disabled, onChange(ev), extra
     // (children after the description), after (children after the switch),
-    // rowId, rowStyle}
+    // rowId, rowStyle}. `tag` is a short marker beside the title
+    // ('reconnect' for switches that apply on the next connect); it sits
+    // next to the title element, not inside it, so the title text stays
+    // the bare name.
     row: function(opts) {
+        var head = [E('div', { 'class': 'nym-toggle-title' }, opts.title)];
+        if (opts.tag) head.push(E('span', { 'class': 'nym-toggle-tag' }, opts.tag));
         var info = [
-            E('div', { 'class': 'nym-toggle-title' }, opts.title),
+            E('div', { 'class': 'nym-toggle-head' }, head),
             E('div', { 'class': 'nym-toggle-desc' }, opts.desc)
         ].concat(opts.extra || []);
         var rowAttrs = { 'class': 'nym-toggle-row' };

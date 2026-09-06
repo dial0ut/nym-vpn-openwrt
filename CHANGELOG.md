@@ -194,12 +194,23 @@ the GitHub release notes.
   reboot. Existing registrations are reconciled on upgrade, and `prerm` no
   longer deletes the include on upgrades, so an interrupted upgrade cannot
   leave the router without it.
-- The LuCI Tunnel Settings card now leads with the **Kill-Switch** switch; the
-  other rows keep their order. Behind the page, the web UI was restructured
-  from one view file into a module tree (`api`, `store`, `components/`,
-  `flows/`, `cards/`) with a jsdom test harness under `luci-app-nym-vpn/tests/`;
-  nothing else about it changes, apart from the statistics card going with the
-  telemetry removal.
+- The LuCI settings are regrouped. **Split Tunneling** is its own card, right
+  after Tunnel Settings: the device/domain exclusion list and the legacy
+  luci-app-pbr switch live there, with a note standing in for the exclusions
+  while PBR owns the routing. **Tunnel Settings** keeps the daemon switches,
+  now in three groups — *Protection* (Kill-Switch first, with the Inbound
+  Services exceptions nested directly under it, then Gateway Independence and
+  Server Family Reminders), *Transport* (Two-Hop, Circumvention Transports,
+  Stealth API Connect, IPv6) and *Resilience* (Always On). Switches that only
+  apply on the next connect carry a small `reconnect` tag instead of each
+  description saying so; descriptions are shortened to one or two sentences.
+  Advisory notes share one warning colour across cards, Mixnet Tuning's Apply
+  sits with its form instead of centred like Connect, and add rows no longer
+  overrun a phone-width card. Nothing changes in what the switches do or send.
+  Behind the page, the web UI was restructured from one view file into a
+  module tree (`api`, `store`, `components/`, `flows/`, `cards/`) with a jsdom
+  test harness under `luci-app-nym-vpn/tests/`; the statistics card went with
+  the telemetry removal.
 
 ## [1.34.0] - 2026-08-21
 

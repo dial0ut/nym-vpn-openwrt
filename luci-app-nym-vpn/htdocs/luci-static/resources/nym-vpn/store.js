@@ -10,6 +10,9 @@
 //                   errorReasonChanged, availabilityChanged, newTunnelError}
 //   'daemon'       {running, enabled}
 //   'account-recheck'  the account card should re-ask the daemon
+//   'tunnel-switch' {key, on, switches}  one of the tunnel_set switches
+//                   changed (the Tunnel Settings and Split Tunneling cards
+//                   both drive them and watch each other through this)
 
 return baseclass.extend({
     __init__: function() {
@@ -32,6 +35,12 @@ return baseclass.extend({
 
         this.twoHop = false;
         this.circumvention = false;
+        // The six switches tunnel_set takes as one payload. Kill-switch
+        // defaults to on when the daemon does not report it; the rest to off.
+        this.tunnelSwitches = {
+            ipv6: false, two_hop: false, killswitch: true,
+            circumvention: false, legacy_split_tunnel: false, stealth_api: false
+        };
         this.independence = { enabled: true, notifications: true };
         // Whether any bridge reply has carried the independence field yet;
         // the init batch may predate it.
@@ -71,6 +80,14 @@ return baseclass.extend({
         this.prevUnavailable = status.available === false;
         this.twoHop = tunnel.two_hop === 'on';
         this.circumvention = tunnel.circumvention_transports === 'on';
+        this.tunnelSwitches = {
+            ipv6: tunnel.ipv6 === 'on',
+            two_hop: this.twoHop,
+            killswitch: tunnel.killswitch !== 'off',
+            circumvention: this.circumvention,
+            legacy_split_tunnel: tunnel.legacy_split_tunnel === 'on',
+            stealth_api: tunnel.stealth_api === 'on'
+        };
         var ind = api.readIndependence(tunnel.gateway_independence);
         this.independence = ind || { enabled: true, notifications: true };
         this.independenceKnown = !!ind;
@@ -164,6 +181,33 @@ return baseclass.extend({
     // --- settings -----------------------------------------------------------
     setTwoHop: function(on) { this.twoHop = !!on; },
     setCircumvention: function(on) { this.circumvention = !!on; },
+
+    // Record one tunnel switch and tell the cards. Legacy split tunnelling
+    // and the kill-switch are mutually exclusive: turning legacy on forces
+    // the kill-switch off (the daemon does the same; keeping the stored
+    // value in step means the greyed switch shows the truth).
+    setTunnelSwitch: function(key, on) {
+        if (!(key in this.tunnelSwitches)) return;
+        this.tunnelSwitches[key] = !!on;
+        if (key === 'legacy_split_tunnel' && on) this.tunnelSwitches.killswitch = false;
+        this.emit('tunnel-switch', { key: key, on: !!on, switches: this.tunnelSwitches });
+    },
+
+    // The full tunnel_set payload ('on'/'off' per switch). Every switch
+    // change sends the whole set, so the daemon config never drifts from
+    // what the page shows.
+    tunnelSetPayload: function() {
+        var s = this.tunnelSwitches;
+        var flag = function(v) { return v ? 'on' : 'off'; };
+        return {
+            ipv6: flag(s.ipv6),
+            two_hop: flag(s.two_hop),
+            killswitch: flag(s.killswitch && !s.legacy_split_tunnel),
+            circumvention: flag(s.circumvention),
+            legacy_split_tunnel: flag(s.legacy_split_tunnel),
+            stealth_api: flag(s.stealth_api)
+        };
+    },
 
     // Consulted by the connect flow (notifications) before each connect.
     setIndependence: function(ind) {

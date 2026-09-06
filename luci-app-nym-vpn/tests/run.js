@@ -109,15 +109,28 @@ function connectEnv(overrides, initExtra) {
 async function scenarioStructure() {
   section('page structure');
   const t = setup();
-  check(eq(cardTitles(t), ['Tunnel Settings', 'Mixnet Tuning', 'DNS & Ad Blocking', 'Account', 'Service Management', 'Diagnostics', 'Daemon Logs']),
+  check(eq(cardTitles(t), ['Tunnel Settings', 'Split Tunneling', 'Mixnet Tuning', 'DNS & Ad Blocking', 'Account', 'Service Management', 'Diagnostics', 'Daemon Logs']),
     'card order: ' + JSON.stringify(cardTitles(t)));
   check(!card(t, 'Privacy') && !byId(t, 'stats-toggle'), 'no Privacy card / statistics toggle');
   check(t.declared.indexOf('stats_get') === -1 && t.declared.indexOf('stats_set') === -1, 'stats_get / stats_set never declared');
   check(!t.calls.some((c) => /^stats_/.test(c.method)), 'no stats_* rpc call issued');
   const rows = Array.from(card(t, 'Tunnel Settings').querySelectorAll('.nym-toggle-row .nym-toggle-title')).map((e) => e.textContent);
   check(rows[0] === 'Kill-Switch', 'kill-switch is the first Tunnel Settings row: ' + JSON.stringify(rows));
-  check(eq(rows.slice().sort(), ['Always On', 'Circumvention Transports', 'Gateway Independence', 'IPv6', 'Kill-Switch', 'Legacy Split Tunneling (PBR)', 'Server Family Reminders', 'Stealth API Connect', 'Two-Hop Mode'].sort()),
-    'all nine tunnel rows present');
+  check(eq(rows.slice().sort(), ['Always On', 'Circumvention Transports', 'Gateway Independence', 'IPv6', 'Kill-Switch', 'Server Family Reminders', 'Stealth API Connect', 'Two-Hop Mode'].sort()),
+    'all eight tunnel rows present, legacy split moved out');
+  const splitCard = card(t, 'Split Tunneling');
+  check(!!splitCard && splitCard.contains(byId(t, 'legacy-split-toggle')) && splitCard.contains(q(t, '.nym-split-section')), 'Split Tunneling card holds the legacy PBR switch and the exclusions');
+  check(card(t, 'Tunnel Settings').contains(q(t, '.nym-inbound-section')), 'inbound services stay in Tunnel Settings');
+  const groups = Array.from(card(t, 'Tunnel Settings').querySelectorAll('.nym-group-title')).map((e) => e.textContent);
+  check(eq(groups, ['Protection', 'Inbound Services', 'Transport', 'Resilience']), 'Tunnel Settings grouped: ' + JSON.stringify(groups));
+  const protection = card(t, 'Tunnel Settings').querySelector('.nym-group');
+  check(protection.contains(byId(t, 'killswitch-toggle')) && protection.contains(q(t, '.nym-inbound-section')) && protection.contains(byId(t, 'gw-independence-toggle')) && protection.contains(byId(t, 'family-reminders-toggle')),
+    'Protection holds kill-switch, its inbound exceptions, independence and reminders');
+  check(q(t, '.nym-inbound-section').previousElementSibling === byId(t, 'killswitch-row'), 'inbound services sit directly under the kill-switch row');
+  const tagged = qa(t, '.nym-toggle-row').filter((r) => r.querySelector('.nym-toggle-tag')).map((r) => r.querySelector('.nym-toggle-title').textContent);
+  check(eq(tagged, ['Kill-Switch', 'Gateway Independence', 'Two-Hop Mode', 'Circumvention Transports', 'IPv6', 'Legacy Split Tunneling (PBR)']), 'reconnect tag on exactly the switches that apply on the next connect: ' + JSON.stringify(tagged));
+  check(!qa(t, '.nym-toggle-desc').some((d) => /requires reconnect|applies immediately|no reconnect/i.test(d.textContent)), 'no row description repeats the reconnect note');
+  check(byId(t, 'legacy-split-note').style.display === 'none', 'legacy note hidden while legacy split is off');
   check(q(t, '.nym-footer').textContent.indexOf('1.2.3') !== -1 && q(t, '.nym-footer').textContent.indexOf('mainnet') !== -1, 'footer shows version and network');
   check(q(t, '.nym-inbound-section').style.display === 'block' && q(t, '.nym-split-section').style.display === 'block', 'inbound and split sections shown (killswitch on, legacy off)');
   check(t.poll.queue.some((e) => e.i === 5) && t.poll.queue.some((e) => e.i === 10), 'status (5s) and daemon (10s) polls registered');
@@ -129,6 +142,7 @@ async function scenarioStructure() {
   const t2 = setup({ init: baseInit({ tunnel_config: Object.assign({}, TUNNEL, { legacy_split_tunnel: 'on', killswitch: 'off' }) }) });
   check(byId(t2, 'killswitch-toggle').disabled && byId(t2, 'killswitch-row').style.opacity === '0.5', 'legacy split on: kill-switch disabled and dimmed');
   check(q(t2, '.nym-inbound-section').style.display === 'none' && q(t2, '.nym-split-section').style.display === 'none', 'legacy split on: inbound and split sections hidden');
+  check(byId(t2, 'legacy-split-note').style.display === 'block' && /luci-app-pbr/.test(byId(t2, 'legacy-split-note').textContent), 'legacy split on: PBR note stands in for the exclusions');
 }
 
 async function scenarioTunnelToggles() {
@@ -145,14 +159,16 @@ async function scenarioTunnelToggles() {
   await sleep(10);
   const ks = byId(t, 'killswitch-toggle');
   sets = callsTo(t, 'tunnel_set');
-  check(ks.disabled && !ks.checked, 'legacy split on: kill-switch unchecked and disabled');
+  check(ks.disabled && !ks.checked, 'legacy split on (Split Tunneling card): kill-switch in Tunnel Settings unchecked and disabled');
+  check(byId(t, 'killswitch-row').style.opacity === '0.5' && byId(t, 'legacy-split-note').style.display === 'block', 'kill-switch row dimmed, PBR note shown');
   check(sets[1].killswitch === 'off' && sets[1].legacy_split_tunnel === 'on', 'legacy split forces killswitch=off in the request');
   check(q(t, '.nym-inbound-section').style.display === 'none' && q(t, '.nym-split-section').style.display === 'none', 'sections hidden while legacy split is on');
   check(byId(t, 'killswitch-row').querySelector('.nym-toggle-warning').style.display === 'none', 'kill-switch leak warning hidden under legacy split');
 
   setToggle(t, 'legacy-split-toggle', false);
   await sleep(10);
-  check(!ks.disabled && q(t, '.nym-split-section').style.display === 'block', 'legacy off: kill-switch enabled, split section back');
+  check(!ks.disabled && q(t, '.nym-split-section').style.display === 'block' && byId(t, 'legacy-split-note').style.display === 'none', 'legacy off: kill-switch enabled, split section back, note gone');
+  check(callsTo(t, 'tunnel_set')[2].killswitch === 'off' && callsTo(t, 'tunnel_set')[2].legacy_split_tunnel === 'off', 'legacy off leaves the kill-switch off until the user re-enables it');
   check(byId(t, 'killswitch-row').querySelector('.nym-toggle-warning').style.display === 'block', 'kill-switch off -> leak warning visible');
   setToggle(t, 'killswitch-toggle', true);
   await sleep(10);
@@ -595,7 +611,8 @@ async function scenarioMixnetTuning() {
   const t = setup({ init: baseInit({ tunnel_config: Object.assign({}, TUNNEL, { disable_poisson: 'true', loop_cover_delay: '50' }) }) });
   check(byId(t, 'tuning-poisson-toggle').checked && !byId(t, 'tuning-cover-toggle').checked && byId(t, 'tuning-loop-cover').value === '50', 'init values bound');
   byId(t, 'tuning-message-delay').value = '3';
-  card(t, 'Mixnet Tuning').querySelector('.nym-action-buttons button').click();
+  card(t, 'Mixnet Tuning').querySelector('.nym-card-actions button').click();
+  check(qa(t, '.nym-action-buttons').length === 1 && q(t, '.nym-status-hero').contains(q(t, '.nym-action-buttons')), 'only the hero carries the centred action button');
   check(toasts(t).some((m) => /out of range/.test(m)) && callsTo(t, 'tunnel_set').length === 0, 'out-of-range sending delay rejected without rpc');
   byId(t, 'tuning-message-delay').value = '';
   byId(t, 'tuning-packet-delay').value = '120';

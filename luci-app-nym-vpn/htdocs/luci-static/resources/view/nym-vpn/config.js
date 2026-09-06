@@ -9,6 +9,7 @@
 'require nym-vpn.store as store';
 'require nym-vpn.cards.connection as connectionCard';
 'require nym-vpn.cards.tunnel-settings as tunnelSettingsCard';
+'require nym-vpn.cards.split-tunneling as splitTunnelingCard';
 'require nym-vpn.cards.mixnet-tuning as mixnetTuningCard';
 'require nym-vpn.cards.dns as dnsCard';
 'require nym-vpn.cards.account as accountCard';
@@ -46,10 +47,12 @@ return view.extend({
             connectionCard.render(store, api)
         ]);
 
-        // Settings, then account and service, then the troubleshooting
-        // group (Diagnostics → Logs).
+        // Routing settings (tunnel, then what goes around it), traffic
+        // tuning, DNS; account and service; then the troubleshooting group
+        // (Diagnostics → Logs).
         [
             tunnelSettingsCard,
+            splitTunnelingCard,
             mixnetTuningCard,
             dnsCard,
             accountCard,
