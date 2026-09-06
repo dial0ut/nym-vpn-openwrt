@@ -37,7 +37,19 @@ nym-vpnc tunnel get
 nym-vpnc tunnel set --ipv6 on --two-hop on
 nym-vpnc tunnel set --killswitch off       # allows WAN fallback and carve-outs
 nym-vpnc tunnel set --killswitch on
+nym-vpnc tunnel set --stealth-api on       # API via cover domains on every request
+nym-vpnc tunnel set --stealth-api off      # default: cover domains only after a direct request fails
 ```
+
+**Stealth API connect** is the same switch as in the NymVPN mobile and desktop apps. The daemon
+talks to the Nym API (account, gateway directory, network discovery) over HTTPS; by default it
+goes direct and only falls back to *cover domains* — domain fronting through a CDN — when a
+direct request fails. With it on, every API request uses the cover domains from the start. Turn
+it on where the API hosts are blocked outright; the price is slower API calls (gateway lists,
+account sync, the setup phase of a connect). It only affects API traffic, not the tunnel, so it
+applies immediately without a reconnect. Shown in `nym-vpnc tunnel get`, which also appends
+`(no cover domains available)` when the network environment publishes none — the setting then has
+nothing to route through and requests go direct.
 
 ## Inbound services
 

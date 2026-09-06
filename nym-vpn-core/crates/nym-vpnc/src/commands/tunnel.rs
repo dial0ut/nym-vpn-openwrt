@@ -48,6 +48,12 @@ pub struct SetParams {
     #[arg(long, value_parser = clap::value_parser!(BooleanOption))]
     legacy_split_tunnel: Option<BooleanOption>,
 
+    /// Enable or disable Stealth API connect: reach the Nym API through cover
+    /// domains on every request instead of only after a direct request fails.
+    /// Slower API calls, but works where the API is blocked. No reconnect needed.
+    #[arg(long, value_parser = clap::value_parser!(BooleanOption))]
+    stealth_api: Option<BooleanOption>,
+
     /// Enable Circumvention Transport (CT) wrapping for the connection to the entry gateway in two hop wireguard mode.
     #[arg(long, alias = "ct", value_parser = clap::value_parser!(BooleanOption))]
     circumvention_transports: Option<BooleanOption>,
@@ -116,6 +122,21 @@ impl Command {
                     "Legacy-split-tunnel: {}",
                     display_on_off(config.legacy_split_tunnel)
                 );
+                // Fronting needs cover domains published by the network
+                // environment; without them the setting has nothing to act on.
+                let cover_domains = match rpc_client.get_info().await {
+                    Ok(info) => info.has_api_cover_domains(),
+                    Err(_) => true,
+                };
+                println!(
+                    "Stealth API connect: {}{}",
+                    display_on_off(config.stealth_api),
+                    if cover_domains {
+                        ""
+                    } else {
+                        " (no cover domains available)"
+                    }
+                );
                 if config.inbound_exemptions.is_empty() {
                     println!("Inbound exemptions: none");
                 } else {
@@ -140,6 +161,10 @@ impl Command {
                     rpc_client
                         .set_legacy_split_tunnel(*legacy_split_tunnel)
                         .await?;
+                }
+
+                if let Some(stealth_api) = params.stealth_api {
+                    rpc_client.set_stealth_api(*stealth_api).await?;
                 }
 
                 if let Some(two_hop) = params.two_hop {
