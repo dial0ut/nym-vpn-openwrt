@@ -2,8 +2,8 @@
 'require baseclass';
 'require nym-vpn.components.toast as toast';
 
-// Saving the tunnel switches. tunnel_set takes all six as one payload, and
-// two cards drive them (Tunnel Settings owns five, Split Tunneling owns the
+// Saving the tunnel switches. tunnel_set takes all seven as one payload, and
+// two cards drive them (Tunnel Settings owns six, Split Tunneling owns the
 // legacy PBR switch), so the values live in the store and every change
 // re-sends the whole set from there. A failed save leaves the switch where
 // the user put it and toasts; the next change re-sends the lot.

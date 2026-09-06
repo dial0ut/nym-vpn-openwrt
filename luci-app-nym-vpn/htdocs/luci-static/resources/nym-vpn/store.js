@@ -35,11 +35,12 @@ return baseclass.extend({
 
         this.twoHop = false;
         this.circumvention = false;
-        // The six switches tunnel_set takes as one payload. Kill-switch
+        // The seven switches tunnel_set takes as one payload. Kill-switch
         // defaults to on when the daemon does not report it; the rest to off.
         this.tunnelSwitches = {
             ipv6: false, two_hop: false, killswitch: true,
-            circumvention: false, legacy_split_tunnel: false, stealth_api: false
+            circumvention: false, legacy_split_tunnel: false, stealth_api: false,
+            always_on: false
         };
         this.independence = { enabled: true, notifications: true };
         // Whether any bridge reply has carried the independence field yet;
@@ -65,7 +66,6 @@ return baseclass.extend({
             daemon: data.daemon || {},
             ad_block: data.ad_block || {},
             dns: data.dns || {},
-            watchdog: data.watchdog || {},
             inbound_exemptions: data.inbound_exemptions || [],
             split_exclusions: data.split_exclusions || [],
             split_status: data.split_status || {},
@@ -86,7 +86,8 @@ return baseclass.extend({
             killswitch: tunnel.killswitch !== 'off',
             circumvention: this.circumvention,
             legacy_split_tunnel: tunnel.legacy_split_tunnel === 'on',
-            stealth_api: tunnel.stealth_api === 'on'
+            stealth_api: tunnel.stealth_api === 'on',
+            always_on: tunnel.always_on === 'on'
         };
         var ind = api.readIndependence(tunnel.gateway_independence);
         this.independence = ind || { enabled: true, notifications: true };
@@ -205,7 +206,8 @@ return baseclass.extend({
             killswitch: flag(s.killswitch && !s.legacy_split_tunnel),
             circumvention: flag(s.circumvention),
             legacy_split_tunnel: flag(s.legacy_split_tunnel),
-            stealth_api: flag(s.stealth_api)
+            stealth_api: flag(s.stealth_api),
+            always_on: flag(s.always_on)
         };
     },
 

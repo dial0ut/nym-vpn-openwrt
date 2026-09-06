@@ -46,6 +46,8 @@ return baseclass.extend({
     .nym-status-hero.connecting .nym-status-ring-outer, .nym-status-hero.disconnecting .nym-status-ring-outer { border-color: var(--warning); border-width: 3px; animation: rotate-ring 4s linear infinite; border-style: dashed; }\
     .nym-status-hero.connecting .nym-status-ring-inner, .nym-status-hero.disconnecting .nym-status-ring-inner { background: var(--warning-dim); }\
     .nym-status-hero.disconnected .nym-status-ring-outer { border-color: var(--text-muted); }\
+    .nym-status-hero.offline .nym-status-ring-outer { border-color: var(--warning); border-style: dashed; }\
+    .nym-status-hero.offline .nym-status-label { color: var(--warning); }\
     @keyframes pulse-ring { 0% { transform: scale(1); opacity: 1; } 100% { transform: scale(1.3); opacity: 0; } }\
     @keyframes rotate-ring { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }\
     .nym-status-label { font-size: 13px; text-transform: uppercase; letter-spacing: var(--label-spacing); color: var(--text-secondary); font-weight: 500; text-align: center; }\
@@ -343,13 +345,7 @@ return baseclass.extend({
     .nym-tooltip { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; background: var(--border-color); border-radius: 50%; font-size: 10px; color: var(--text-muted); cursor: help; margin-left: 8px; }\
     .nym-tooltip::after { content: attr(data-tip); position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); padding: 8px 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; font-size: 11px; color: var(--text-secondary); white-space: nowrap; opacity: 0; visibility: hidden; transition: all 0.2s; z-index: 100; margin-bottom: 8px; }\
     .nym-tooltip:hover::after { opacity: 1; visibility: visible; }\
-    .nym-pill-group { display: flex; gap: 6px; flex-wrap: wrap; }\
     /* Always-on check interval: a full-width row under the switch. */\
-    .nym-interval-row { width: 100%; align-items: center; gap: 10px; margin-top: 8px; }\
-    .nym-interval-label { font-size: 12px; color: var(--text-muted); white-space: nowrap; }\
-    .nym-pill { padding: 3px 10px; font-size: 12px; font-weight: 500; border: 1px solid var(--border-color); border-radius: 16px; background: transparent; color: var(--text-secondary); cursor: pointer; transition: all 0.2s ease; font-family: inherit; }\
-    .nym-pill:hover { border-color: var(--text-secondary); color: var(--text-primary); }\
-    .nym-pill.active { background: var(--nym-green-dim); border-color: var(--nym-green); color: var(--nym-green); }\
     .nym-divider { height: 1px; background: var(--border-color); margin: 20px 0; }\
     .nym-exemption-table { display: grid; gap: 6px; }\
     .nym-exemption-header { display: grid; grid-template-columns: 64px 64px 1fr 100px 28px; gap: 12px; padding: 0 12px; font-size: 10px; text-transform: uppercase; letter-spacing: var(--label-spacing); color: var(--text-muted); margin-bottom: 4px; }\

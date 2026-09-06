@@ -6,14 +6,15 @@
 'require nym-vpn.components.toggle as toggle';
 'require nym-vpn.components.toast as toast';
 'require nym-vpn.flows.tunnel as tunnelFlow';
+'require nym-vpn.flows.connect as connectFlow';
 'require nym-vpn.cards.inbound-services as inboundServices';
 
 // Tunnel Settings — the daemon's tunnel switches in three groups:
 //
 //   Protection  kill-switch (first: it decides whether anything leaks),
 //               with its inbound-service exceptions nested beneath it,
-//               then gateway independence, the family reminders and the
-//               always-on watchdog with its check interval
+//               then gateway independence, the family reminders and Always
+//               On, whose status line follows the daemon's supervisor
 //   Transport   two-hop, circumvention transports, stealth API, IPv6
 //
 // Each row states what the switch does in one clause; the full explanation
@@ -25,19 +26,48 @@
 
 var E = dom.create.bind(dom);
 
-var WATCHDOG_INTERVALS = [
-    { value: '1', label: '1s' },
-    { value: '5', label: '5s' },
-    { value: '15', label: '15s' },
-    { value: '30', label: '30s' },
-    { value: '60', label: '60s' },
-    { value: '120', label: '2m' }
-];
+// Copy for the terminal errors Always On latches on, keyed by the daemon's
+// error ident (status.always_on.latched). Account errors reuse the connect
+// flow's headings so the strip and this line agree.
+var LATCHED_COPY = {
+    NeedsRelaxedIndependenceCriteria: connectFlow.INDEPENDENCE_ERROR_COPY,
+    SameEntryAndExitGateway: 'Entry and exit are the same gateway',
+    InvalidEntryGatewayIdentity: 'The pinned entry gateway is not available',
+    InvalidExitGatewayIdentity: 'The pinned exit gateway is not available',
+    InvalidEntryGatewayCountry: 'No entry gateway in the selected country',
+    InvalidExitGatewayCountry: 'No exit gateway in the selected country',
+    Ipv6Unavailable: 'IPv6 is unavailable on this router',
+    InactiveAccount: connectFlow.ERROR_COPY.account_status_not_active.heading,
+    InactiveSubscription: connectFlow.ERROR_COPY.inactive_subscription.heading,
+    MaxDevicesReached: connectFlow.ERROR_COPY.max_device_reached.heading,
+    DeviceLoggedOut: connectFlow.ERROR_COPY.logged_out.heading
+};
+
+// The status line under the Always On row, from the bridge's
+// status.always_on (see rpcd always_on_json) and the tunnel state. `on` is
+// the switch as the page shows it, for when the status carries no
+// supervisor view (older daemon, daemon unreachable).
+// Returns {text, active}.
+function alwaysOnStatus(status, on) {
+    var ao = status && status.always_on;
+    if (!ao) return { text: on ? 'Active' : 'Off', active: on };
+    if (!ao.enabled) return { text: 'Off', active: false };
+    if (ao.paused) return { text: 'Paused — disconnected by you', active: false };
+    if (ao.latched) {
+        return { text: 'Stopped: ' + (LATCHED_COPY[ao.latched] || ao.latched) + ' — fix and connect', active: false };
+    }
+    if (ao.next_retry_secs !== null && ao.next_retry_secs !== undefined) {
+        return { text: 'Retrying in ' + ao.next_retry_secs + ' s (attempt ' + ao.attempt + ')', active: false };
+    }
+    if (status.state === 'offline') return { text: 'Waiting for network', active: false };
+    return { text: 'Active', active: true };
+}
 
 return baseclass.extend({
+    alwaysOnStatus: alwaysOnStatus,
+
     render: function(store, api) {
         var tunnel_config = store.data.tunnel_config;
-        var watchdog = store.data.watchdog;
         var switches = store.tunnelSwitches;
 
         // Every switch saves at once; the flow re-sends the full set.
@@ -221,69 +251,34 @@ return baseclass.extend({
         });
 
         // --- protection: always on -------------------------------------------
-        var alwaysOnStatus = E('div', {
-            'class': 'nym-toggle-status' + (watchdog.always_on ? ' active' : ''),
-            'id': 'always-on-status'
-        }, watchdog.always_on ? 'Watchdog active' + (watchdog.failures > 0 ? ' (' + watchdog.failures + ' recovery attempts)' : '') : 'Disabled');
-
-        var currentInterval = (watchdog.interval || 30).toString();
-        var intervalRow;
-        var alwaysOnEl;
-        var pills = WATCHDOG_INTERVALS.map(function(opt) {
-            return E('button', {
-                'class': 'nym-pill' + (opt.value === currentInterval ? ' active' : ''),
-                'data-value': opt.value,
-                'click': function(ev) {
-                    ev.preventDefault();
-                    intervalRow.querySelectorAll('.nym-pill').forEach(function(p) { p.classList.remove('active'); });
-                    ev.target.classList.add('active');
-                    var isEnabled = alwaysOnEl.checked;
-                    api.watchdogSet(isEnabled ? 1 : 0, parseInt(opt.value)).then(function(result) {
-                        if (result && result.success) {
-                            toast.show('Check interval set to ' + opt.label, 'success');
-                        } else {
-                            toast.show('Failed: ' + (result.error || 'Unknown'), 'error');
-                        }
-                    });
-                }
-            }, opt.label);
+        // A plain tunnel switch: the daemon persists it and does the work
+        // (connect at start once a default route exists, retry error states,
+        // pause on a user disconnect). The line under the row shows what its
+        // supervisor is doing, refreshed by the 5 s status poll.
+        var alwaysOnLine = E('div', { 'class': 'nym-toggle-status', 'id': 'always-on-status' });
+        var syncAlwaysOn = function(status) {
+            var view = alwaysOnStatus(status, switches.always_on);
+            alwaysOnLine.textContent = view.text;
+            alwaysOnLine.className = 'nym-toggle-status' + (view.active ? ' active' : '');
+        };
+        syncAlwaysOn(store.status);
+        store.on('status', function(ev) { syncAlwaysOn(ev.status); });
+        // The switch just moved: say so at once rather than after the next
+        // poll, ignoring a stale supervisor view.
+        store.on('tunnel-switch', function(ev) {
+            if (ev.key === 'always_on') syncAlwaysOn(null);
         });
-        intervalRow = E('div', {
-            'id': 'watchdog-interval-row',
-            'class': 'nym-interval-row',
-            'style': 'display: ' + (watchdog.always_on ? 'flex' : 'none')
-        }, [
-            E('span', { 'class': 'nym-interval-label' }, 'Check every'),
-            E('div', { 'class': 'nym-pill-group' }, pills)
-        ]);
 
         var alwaysOnRow = toggle.row({
-            rowStyle: 'flex-wrap: wrap',
             id: 'always-on-toggle',
             title: 'Always On',
-            desc: 'Reconnects when the tunnel drops.',
-            more: 'A watchdog: soft reconnects first, then a daemon restart with growing backoff. It checks at the chosen interval and is also woken by WAN link events, so the tunnel is re-checked as soon as the WAN comes back. Its log lines are tagged nym-watchdog.',
+            desc: 'Keeps the tunnel up while the router is on.',
+            more: 'The daemon connects when it starts — waiting for a default route rather than polling for one — reconnects after drops and WAN outages, retries error states with growing backoff (moving off gateways that keep failing) and re-selects gateways if a connect drags on. Disconnecting pauses it until you connect again or the router reboots; the setting stays on. Terminal errors (account, an impossible gateway pair) stop the retries until you change something. Log lines are tagged always-on in the daemon log.',
             docs: 'always-on',
-            extra: [alwaysOnStatus],
-            after: [intervalRow],
-            checked: !!watchdog.always_on,
-            onChange: toggle.saver({
-                disableWhileSaving: true,
-                save: function(enabled) {
-                    var interval = null;
-                    var activeBtn = intervalRow.querySelector('.nym-pill.active');
-                    if (activeBtn) interval = parseInt(activeBtn.dataset.value);
-                    return api.watchdogSet(enabled ? 1 : 0, interval);
-                },
-                onSuccess: function(enabled) {
-                    toast.show('Always-on ' + (enabled ? 'enabled' : 'disabled'), 'success');
-                    alwaysOnStatus.textContent = enabled ? 'Watchdog active' : 'Disabled';
-                    alwaysOnStatus.className = 'nym-toggle-status' + (enabled ? ' active' : '');
-                    intervalRow.style.display = enabled ? 'flex' : 'none';
-                }
-            })
+            extra: [alwaysOnLine],
+            checked: switches.always_on,
+            onChange: saveSwitch('always_on')
         });
-        alwaysOnEl = alwaysOnRow.querySelector('input');
 
         var el = card.create({
             icon: assets.iconTunnel,

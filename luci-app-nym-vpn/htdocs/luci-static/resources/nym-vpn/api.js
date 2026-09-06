@@ -208,9 +208,9 @@ return baseclass.extend({
     tunnelGet: function() { return rpc.tunnelGet(); },
 
     // cfg: {ipv6, two_hop, killswitch, circumvention, legacy_split_tunnel,
-    // stealth_api} as 'on'/'off'.
+    // stealth_api, always_on} as 'on'/'off'.
     tunnelSet: function(cfg) {
-        return rpc.tunnelSet(cfg.ipv6, cfg.two_hop, cfg.killswitch, cfg.circumvention, cfg.legacy_split_tunnel, cfg.stealth_api);
+        return rpc.tunnelSet(cfg.ipv6, cfg.two_hop, cfg.killswitch, cfg.circumvention, cfg.legacy_split_tunnel, cfg.stealth_api, cfg.always_on);
     },
 
     // key is 'enabled' (gateway_independence) or 'notifications'
@@ -228,8 +228,6 @@ return baseclass.extend({
     mixnetTuningSet: function(t) {
         return rpc.mixnetTuningSet(t.loop_cover_delay, t.packet_delay, t.message_delay, t.disable_poisson, t.disable_cover);
     },
-
-    watchdogSet: function(alwaysOn, interval) { return rpc.watchdogSet(alwaysOn, interval); },
 
     // --- inbound services / split tunneling --------------------------------
     inboundAdd: function(proto, dport, label) { return rpc.inboundAdd(proto, dport, label); },

@@ -33,7 +33,8 @@ const CONNECTED = {
   exit_name: 'beta-exit', exit_id: 'B1', exit_ip: '2.2.2.2', exit_country: 'FR', exit_family: 'Acme Ops',
 };
 const TUNNEL = { ipv6: 'off', two_hop: 'on', killswitch: 'on', circumvention_transports: 'off', legacy_split_tunnel: 'off', stealth_api: 'off',
-  gateway_independence: { enabled: true, notifications: true } };
+  always_on: 'off', gateway_independence: { enabled: true, notifications: true } };
+const AO_ACTIVE = { enabled: true, active: true, paused: false, attempt: 0, next_retry_secs: null, last_error: null, latched: null };
 
 function baseInit(extra) {
   return Object.assign({
@@ -45,7 +46,6 @@ function baseInit(extra) {
     daemon: { running: true, enabled: true },
     ad_block: { enabled: false },
     dns: { enabled: false, servers: '' },
-    watchdog: { always_on: 0, interval: 30 },
     inbound_exemptions: [],
     split_exclusions: [],
     split_status: { nftset_supported: true },
@@ -211,8 +211,8 @@ async function scenarioTunnelToggles() {
   setToggle(t, 'ipv6-toggle', true);
   await sleep(10);
   let sets = callsTo(t, 'tunnel_set');
-  check(sets.length === 1 && eq(sets[0], { ipv6: 'on', two_hop: 'on', killswitch: 'on', circumvention: 'off', legacy_split_tunnel: 'off', stealth_api: 'off' }),
-    'ipv6 change -> tunnel_set with all six fields: ' + JSON.stringify(sets[0]));
+  check(sets.length === 1 && eq(sets[0], { ipv6: 'on', two_hop: 'on', killswitch: 'on', circumvention: 'off', legacy_split_tunnel: 'off', stealth_api: 'off', always_on: 'off' }),
+    'ipv6 change -> tunnel_set with all seven fields: ' + JSON.stringify(sets[0]));
   check(toasts(t).indexOf('Tunnel settings saved') !== -1, 'saved toast');
 
   setToggle(t, 'legacy-split-toggle', true);
@@ -816,20 +816,60 @@ async function scenarioService() {
 }
 
 async function scenarioAlwaysOn() {
-  section('always on watchdog');
-  const t = setup({ init: baseInit({ watchdog: { always_on: 1, interval: 60, failures: 2 } }), rpc: { watchdog_set: { success: true } } });
-  check(byId(t, 'always-on-toggle').checked && byId(t, 'always-on-status').textContent === 'Watchdog active (2 recovery attempts)', 'active status with failures');
-  check(byId(t, 'watchdog-interval-row').style.display === 'flex' && q(t, '.nym-pill.active').textContent === '60s', 'interval row visible, 60s active');
-  q(t, '.nym-pill[data-value="15"]').click();
-  await sleep(20);
-  check(eq(callsTo(t, 'watchdog_set'), [{ always_on: 1, interval: 15 }]) && toasts(t).indexOf('Check interval set to 15s') !== -1, 'pill -> watchdog_set(1, 15)');
+  section('always on drives the daemon setting');
+  const onInit = baseInit({ tunnel_config: Object.assign({}, TUNNEL, { always_on: 'on' }), status: { state: 'connected', always_on: AO_ACTIVE } });
+  const t = setup({ init: onInit });
+  const line = byId(t, 'always-on-status');
+  check(byId(t, 'always-on-toggle').checked && line.textContent === 'Active' && line.classList.contains('active'), 'tunnel_config.always_on=on -> switch on, status line Active');
+  check(!byId(t, 'watchdog-interval-row') && qa(t, '.nym-pill').length === 0 && !/nym-pill|nym-interval-row/.test(t.modules['nym-vpn.theme'].css), 'no interval pills, their styles gone');
+  check(t.declared.indexOf('watchdog_get') === -1 && t.declared.indexOf('watchdog_set') === -1 && !t.calls.some((c) => /watchdog/.test(c.method)), 'watchdog_get / watchdog_set never declared or called');
   setToggle(t, 'always-on-toggle', false);
-  await sleep(20);
-  check(eq(callsTo(t, 'watchdog_set')[1], { always_on: 0, interval: 15 }) && byId(t, 'watchdog-interval-row').style.display === 'none' && byId(t, 'always-on-status').textContent === 'Disabled', 'toggle off -> watchdog_set(0, current), row hidden');
-  const t2 = setup({ rpc: { watchdog_set: { success: false, error: 'no' } } });
-  setToggle(t2, 'always-on-toggle', true);
-  await sleep(20);
-  check(!byId(t2, 'always-on-toggle').checked && !byId(t2, 'always-on-toggle').disabled, 'failed save reverts and re-enables the switch');
+  await sleep(10);
+  const sets = callsTo(t, 'tunnel_set');
+  check(sets.length === 1 && eq(sets[0], { ipv6: 'off', two_hop: 'on', killswitch: 'on', circumvention: 'off', legacy_split_tunnel: 'off', stealth_api: 'off', always_on: 'off' }),
+    'toggle off -> tunnel_set with always_on=off and the full set: ' + JSON.stringify(sets[0]));
+  check(line.textContent === 'Off' && !line.classList.contains('active') && toasts(t).indexOf('Tunnel settings saved') !== -1, 'status line follows the switch at once, saved toast');
+  setToggle(t, 'always-on-toggle', true);
+  await sleep(10);
+  check(callsTo(t, 'tunnel_set')[1].always_on === 'on' && line.textContent === 'Active', 'toggle on -> always_on=on, line Active');
+
+  // The 5 s status poll feeds the line from status.always_on.
+  let st = { state: 'disconnected', always_on: Object.assign({}, AO_ACTIVE, { attempt: 3, next_retry_secs: 42, last_error: 'SetRouting' }) };
+  const t2 = setup({ init: baseInit({ tunnel_config: Object.assign({}, TUNNEL, { always_on: 'on' }) }), rpc: { status: () => st } });
+  const line2 = byId(t2, 'always-on-status');
+  await t2.poll.fire(5);
+  check(line2.textContent === 'Retrying in 42 s (attempt 3)' && !line2.classList.contains('active'), 'retrying: ' + line2.textContent);
+  st = { state: 'disconnected', always_on: Object.assign({}, AO_ACTIVE, { active: false, paused: true }) };
+  await t2.poll.fire(5);
+  check(line2.textContent === 'Paused — disconnected by you', 'paused after a user disconnect');
+  st = { state: 'disconnected', tunnel_error: 'NeedsRelaxedIndependenceCriteria', always_on: Object.assign({}, AO_ACTIVE, { last_error: 'NeedsRelaxedIndependenceCriteria', latched: 'NeedsRelaxedIndependenceCriteria' }) };
+  await t2.poll.fire(5);
+  check(line2.textContent === 'Stopped: The selected entry and exit are not independent. Connect anyway or change servers. — fix and connect', 'latched: ' + line2.textContent);
+  st = { state: 'disconnected', always_on: Object.assign({}, AO_ACTIVE, { latched: 'InactiveSubscription' }) };
+  await t2.poll.fire(5);
+  check(line2.textContent === 'Stopped: NO ACTIVE SUBSCRIPTION — fix and connect', 'latched account error reuses the connect flow heading');
+  st = { state: 'offline', reconnect: true, always_on: AO_ACTIVE };
+  await t2.poll.fire(5);
+  check(line2.textContent === 'Waiting for network' && statusLabel(t2) === 'Waiting for network' && actionBtn(t2).textContent === 'Cancel', 'offline+reconnect: line and hero say Waiting for network, Cancel offered');
+  check(t2.container.querySelector('.nym-status-hero').classList.contains('offline') && /\.nym-status-hero\.offline/.test(t2.modules['nym-vpn.theme'].css), 'hero carries the offline class and the theme styles it');
+  st = { state: 'offline', reconnect: false, always_on: Object.assign({}, AO_ACTIVE, { enabled: false, active: false }) };
+  await t2.poll.fire(5);
+  check(line2.textContent === 'Off' && statusLabel(t2) === 'Offline' && actionBtn(t2).textContent === 'Connect', 'plain offline: line Off, hero Offline, Connect offered');
+  st = { state: 'connected', connected: true, connected_seconds: 1, always_on: AO_ACTIVE };
+  await t2.poll.fire(5);
+  check(line2.textContent === 'Active' && line2.classList.contains('active'), 'back to Active once connected');
+
+  // Older bridge without status.always_on: the line follows the switch.
+  const t3 = setup({ init: baseInit({ tunnel_config: Object.assign({}, TUNNEL, { always_on: 'on' }) }) });
+  check(byId(t3, 'always-on-status').textContent === 'Active', 'no supervisor view in status -> line follows the switch');
+  const t4 = setup({ init: baseInit({ status: { state: 'offline', reconnect: true } }) });
+  check(statusLabel(t4) === 'Waiting for network' && byId(t4, 'always-on-status').textContent === 'Off', 'initial render of an offline status');
+
+  // A failed save keeps the switch and toasts, like every tunnel switch.
+  const t5 = setup({ rpc: { tunnel_set: { success: false, error: 'no' } } });
+  setToggle(t5, 'always-on-toggle', true);
+  await sleep(10);
+  check(toasts(t5).indexOf('Failed: no') !== -1, 'failed tunnel_set toasts');
 }
 
 async function scenarioLogsAndDiagnostics() {
