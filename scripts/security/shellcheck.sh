@@ -4,7 +4,7 @@
 # Single source of truth for the file set and the severity gate, so CI and
 # local runs agree. Covers the *.sh helpers plus the suffix-less scripts that
 # run as root on the router: the rpcd plugin, the procd init scripts, the
-# package hooks and the watchdog.
+# hotplug hook, the package hooks and the watchdog.
 #
 # Usage: scripts/security/shellcheck.sh [extra shellcheck args...]
 #   SHELLCHECK  override the binary, e.g. SHELLCHECK="uvx --from shellcheck-py shellcheck"
@@ -20,6 +20,7 @@ SHELLCHECK="${SHELLCHECK:-shellcheck}"
 git ls-files -z \
     '*.sh' \
     'luci-app-nym-vpn/root/etc/init.d/*' \
+    'luci-app-nym-vpn/root/etc/hotplug.d/iface/*' \
     'luci-app-nym-vpn/root/usr/libexec/rpcd/*' \
     'scripts/ipk/postinst' \
     'scripts/ipk/prerm' \

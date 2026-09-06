@@ -110,6 +110,14 @@ echo "=== Adding watchdog script ==="
 cp "$IPK_SCRIPT_DIR/nym-vpn-watchdog" "$DATA_DIR/usr/sbin/"
 chmod 755 "$DATA_DIR/usr/sbin/nym-vpn-watchdog"
 
+# === DATA: Hotplug hook ===
+# Sourced by hotplug-call rather than executed, so no exec bit needed
+echo "=== Adding hotplug hook ==="
+mkdir -p "$DATA_DIR/etc/hotplug.d/iface"
+cp "$LUCI_DIR/root/etc/hotplug.d/iface/90-nym-vpn-watchdog" \
+   "$DATA_DIR/etc/hotplug.d/iface/"
+chmod 644 "$DATA_DIR/etc/hotplug.d/iface/90-nym-vpn-watchdog"
+
 # === DATA: Config and UCI defaults ===
 echo "=== Adding config and UCI defaults ==="
 mkdir -p "$DATA_DIR/etc/config"

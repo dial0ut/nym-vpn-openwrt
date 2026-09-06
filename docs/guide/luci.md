@@ -18,6 +18,14 @@ routed into the tunnel whenever connected regardless of this setting. Turn it of
 fallback. You do **not** need to turn it off for
 [split-tunnel carve-outs](split-tunneling.md) — those work with it on. Takes effect on reconnect.
 
+**Always On** — a watchdog that reconnects when the tunnel drops: soft reconnects first, then a
+daemon restart with growing backoff. It polls the tunnel at the chosen interval (30 s by default)
+and is also woken by the router's WAN link events, so when the WAN comes back after an outage or a
+PPPoE re-dial the tunnel is checked immediately, followed by a few quick re-checks while the daemon
+catches up. A link change also resets the retry escalation, since a daemon restart cannot fix a
+WAN that is down. `wan` and `wan6` count as WAN, as does any interface in the `wan` firewall zone
+or carrying a default route. Its log lines are tagged `nym-watchdog` in `logread`.
+
 ## Mixnet Tuning
 
 Sphinx knobs, 5-hop mode only. These trade anonymity for latency — the defaults are the private
