@@ -16,7 +16,7 @@ use tokio_stream::StreamExt;
 use nym_vpn_lib_types::{TunnelEvent, TunnelState, VpnServiceInfo};
 use nym_vpn_proto::rpc_client::RpcClient;
 
-use crate::table_style::TableStyle;
+use crate::{display_helpers::error_state_hint, table_style::TableStyle};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -55,6 +55,13 @@ pub enum Command {
         /// Blocks until the connection is established or failed
         #[arg(short, long)]
         wait: bool,
+
+        /// Connect even if the entry and exit gateways are not independent
+        /// (same node family, ASN or subnet). Applies to this connect session
+        /// only, including its automatic reconnects; the persisted gateway
+        /// independence setting is untouched.
+        #[arg(long)]
+        relax_independence: bool,
     },
 
     /// Reconnect the tunnel to any matching gateway
@@ -161,7 +168,10 @@ pub enum Command {
 impl Command {
     pub async fn execute(self, rpc_client: RpcClient) -> Result<()> {
         match self {
-            Command::Connect { wait } => Self::connect(rpc_client, wait).await,
+            Command::Connect {
+                wait,
+                relax_independence,
+            } => Self::connect(rpc_client, wait, relax_independence).await,
             Command::Reconnect => Self::reconnect(rpc_client).await,
             Command::Disconnect { wait } => Self::disconnect(rpc_client, wait).await,
             Command::Status { listen } => Self::status(rpc_client, listen).await,
@@ -186,8 +196,8 @@ impl Command {
         }
     }
 
-    async fn connect(mut rpc_client: RpcClient, wait: bool) -> Result<()> {
-        rpc_client.connect_tunnel().await?;
+    async fn connect(mut rpc_client: RpcClient, wait: bool, relax_independence: bool) -> Result<()> {
+        rpc_client.connect_tunnel(relax_independence).await?;
 
         if wait {
             println!("Waiting until connected or failed");
@@ -209,6 +219,7 @@ impl Command {
                 continue;
             };
             println!("{new_state}");
+            Self::print_state_details(&new_state);
 
             match new_state {
                 TunnelState::Connected { .. } => {
@@ -221,13 +232,38 @@ impl Command {
                         bail!("Device is offline");
                     }
                 }
-                TunnelState::Error(reason) => {
-                    bail!("Tunnel entered error state {reason:?}");
-                }
+                TunnelState::Error(reason) => match error_state_hint(&reason) {
+                    Some(hint) => bail!("Tunnel entered error state {reason:?}: {hint}"),
+                    None => bail!("Tunnel entered error state {reason:?}"),
+                },
                 _ => {}
             }
         }
         Ok(())
+    }
+
+    /// Lines under `State:` that the state's one-liner has no room for: the
+    /// operator family of each gateway when the daemon knows it, and advice
+    /// for error states the user can act on.
+    fn print_state_details(state: &TunnelState) {
+        match state {
+            TunnelState::Connected { connection_data } => {
+                for (side, gateway) in [
+                    ("Entry", &connection_data.entry_gateway),
+                    ("Exit", &connection_data.exit_gateway),
+                ] {
+                    if let Some(family) = &gateway.family_name {
+                        println!("{side} gateway family: {family}");
+                    }
+                }
+            }
+            TunnelState::Error(reason) => {
+                if let Some(hint) = error_state_hint(reason) {
+                    println!("Hint: {hint}");
+                }
+            }
+            _ => {}
+        }
     }
 
     async fn disconnect(mut rpc_client: RpcClient, wait: bool) -> Result<()> {
@@ -274,6 +310,7 @@ impl Command {
     async fn status(mut rpc_client: RpcClient, listen: bool) -> Result<()> {
         let state = rpc_client.get_tunnel_state().await?;
         println!("State: {state}");
+        Self::print_state_details(&state);
 
         if !listen {
             return Ok(());
@@ -285,6 +322,7 @@ impl Command {
             match event {
                 Ok(TunnelEvent::NewState(new_state)) => {
                     println!("State: {new_state}");
+                    Self::print_state_details(&new_state);
                 }
                 Ok(TunnelEvent::ConfigChanged(new_config)) => {
                     let json = serde_json::to_string_pretty(&new_config)

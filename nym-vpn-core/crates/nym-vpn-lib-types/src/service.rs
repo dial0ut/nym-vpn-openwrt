@@ -14,7 +14,10 @@ use time::OffsetDateTime;
 #[cfg(feature = "typescript-bindings")]
 use ts_rs::TS;
 
-use crate::{EntryPoint, ExitPoint, NetworkStatisticsConfig, NymNetworkDetails, NymVpnNetwork};
+use crate::{
+    EntryPoint, ExitPoint, GatewayIndependence, NetworkStatisticsConfig, NymNetworkDetails,
+    NymVpnNetwork,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(
@@ -53,6 +56,10 @@ pub struct VpnServiceConfig {
     /// direct request fails. Slower, but works where the API hosts are blocked.
     /// Applies to API traffic only, so a change needs no reconnect.
     pub stealth_api: bool,
+    /// Which relations between the entry and the exit gateway rule a pair out
+    /// (same node family, ASN, subnet) and whether to remind the user when the
+    /// pair is not independent. Changing a criterion re-selects the gateways.
+    pub gateway_independence: GatewayIndependence,
 }
 
 /// Whether the DNS servers in [`VpnServiceConfig`] actually reach the system
@@ -161,6 +168,7 @@ impl fmt::Display for VpnServiceConfig {
         writeln!(f, "killswitch: {}", self.killswitch)?;
         writeln!(f, "legacy_split_tunnel: {}", self.legacy_split_tunnel)?;
         writeln!(f, "stealth_api: {}", self.stealth_api)?;
+        writeln!(f, "gateway_independence: {}", self.gateway_independence)?;
         writeln!(f, "mixnet traffic config: {}", self.mixnet_traffic)?;
         writeln!(f, "networks stats config: {}", self.network_stats)?;
 
@@ -201,6 +209,7 @@ impl Default for VpnServiceConfig {
             legacy_split_tunnel: false,
             inbound_exemptions: Vec::new(),
             stealth_api: false,
+            gateway_independence: GatewayIndependence::default(),
         }
     }
 }

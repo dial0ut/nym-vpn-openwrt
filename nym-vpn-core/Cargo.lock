@@ -5030,6 +5030,7 @@ name = "nym-gateway-directory"
 version = "1.34.0"
 dependencies = [
  "anyhow",
+ "ipnetwork",
  "itertools 0.14.0",
  "nym-client-core",
  "nym-http-api-client",

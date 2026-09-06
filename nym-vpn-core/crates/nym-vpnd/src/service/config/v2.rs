@@ -80,6 +80,7 @@ impl TryFrom<VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
             killswitch: true,
             legacy_split_tunnel: false,
             stealth_api: false,
+            gateway_independence: Default::default(),
             ..Default::default()
         };
         Ok(config)

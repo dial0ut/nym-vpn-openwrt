@@ -33,6 +33,11 @@ pub enum GatewayDirectoryError {
     #[error("unable to use same entry and exit gateway: {identity}")]
     SameEntryAndExitGateway { identity: String },
 
+    #[error(
+        "the selected entry and exit gateways are not independent ({violated}); a pair exists only with relaxed independence criteria"
+    )]
+    NeedsRelaxedIndependenceCriteria { violated: String },
+
     #[error("failed to load wireguard keypair from database for {identity} gateway")]
     LoadKeypair {
         identity: String,

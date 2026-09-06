@@ -54,11 +54,17 @@ impl From<nym_gateway_directory::Gateway> for GatewayId {
 pub struct GatewayLightInfo {
     pub id: String,
     pub country_code: Option<String>,
+    /// Node family (operator group) the gateway belongs to, when declared.
+    pub family_name: Option<String>,
 }
 
 impl GatewayLightInfo {
-    pub fn new(id: String, country_code: Option<String>) -> Self {
-        Self { id, country_code }
+    pub fn new(id: String, country_code: Option<String>, family_name: Option<String>) -> Self {
+        Self {
+            id,
+            country_code,
+            family_name,
+        }
     }
 }
 
@@ -68,6 +74,7 @@ impl From<nym_gateway_directory::Gateway> for GatewayLightInfo {
         Self::new(
             value.identity().to_base58_string(),
             value.location.map(|l| l.two_letter_iso_country_code),
+            value.family_data.map(|family| family.name),
         )
     }
 }

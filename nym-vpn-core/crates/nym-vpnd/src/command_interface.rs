@@ -252,6 +252,35 @@ impl NymVpnService for CommandInterface {
         Ok(tonic::Response::new(()))
     }
 
+    async fn set_enable_gateway_independence(
+        &self,
+        request: tonic::Request<bool>,
+    ) -> Result<tonic::Response<()>> {
+        let enabled = request.into_inner();
+
+        self.send_and_wait(VpnServiceCommand::SetEnableGatewayIndependence, enabled)
+            .await?
+            .map_err(tonic::Status::internal)?;
+
+        Ok(tonic::Response::new(()))
+    }
+
+    async fn set_gateway_independence_notifications(
+        &self,
+        request: tonic::Request<bool>,
+    ) -> Result<tonic::Response<()>> {
+        let enabled = request.into_inner();
+
+        self.send_and_wait(
+            VpnServiceCommand::SetGatewayIndependenceNotifications,
+            enabled,
+        )
+        .await?
+        .map_err(tonic::Status::internal)?;
+
+        Ok(tonic::Response::new(()))
+    }
+
     async fn set_inbound_exemptions(
         &self,
         request: tonic::Request<proto::InboundExemptionList>,
@@ -494,9 +523,13 @@ impl NymVpnService for CommandInterface {
         Ok(tonic::Response::new(owner.into()))
     }
 
-    async fn connect_tunnel(&self, _request: tonic::Request<()>) -> Result<tonic::Response<bool>> {
+    async fn connect_tunnel(
+        &self,
+        request: tonic::Request<proto::ConnectRequest>,
+    ) -> Result<tonic::Response<bool>> {
+        let relax_independence = request.into_inner().relax_independence;
         let accepted = self
-            .send_and_wait(VpnServiceCommand::SetTargetState, TargetState::Secured)
+            .send_and_wait(VpnServiceCommand::ConnectTunnel, relax_independence)
             .await?;
 
         Ok(tonic::Response::new(accepted))
@@ -591,6 +624,16 @@ impl NymVpnService for CommandInterface {
             })?;
 
         Ok(tonic::Response::new(proto::GatewayTestReport::from(report)))
+    }
+
+    async fn get_tentative_gateways(
+        &self,
+        _request: tonic::Request<()>,
+    ) -> Result<tonic::Response<proto::TentativeGateways>> {
+        let tentative = self
+            .send_and_wait(VpnServiceCommand::GetTentativeGateways, ())
+            .await?;
+        Ok(tonic::Response::new(proto::TentativeGateways::from(tentative)))
     }
 
     async fn list_filtered_gateways(

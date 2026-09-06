@@ -38,10 +38,63 @@ pub struct VpnServiceConfig {
     pub inbound_exemptions: Vec<InboundExemption>,
     #[serde(default)]
     pub stealth_api: bool,
+    #[serde(default)]
+    pub gateway_independence: GatewayIndependence,
 }
 
 fn default_killswitch() -> bool {
     false
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Gateway independence criteria. Its own object with per-field defaults so a
+/// file written before a criterion existed loads with that criterion on.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub struct GatewayIndependence {
+    #[serde(default = "default_true")]
+    pub enable_notifications: bool,
+    #[serde(default = "default_true")]
+    pub different_node_family: bool,
+    #[serde(default = "default_true")]
+    pub different_asn: bool,
+    #[serde(default = "default_true")]
+    pub different_subnet: bool,
+}
+
+impl Default for GatewayIndependence {
+    fn default() -> Self {
+        Self {
+            enable_notifications: true,
+            different_node_family: true,
+            different_asn: true,
+            different_subnet: true,
+        }
+    }
+}
+
+impl From<GatewayIndependence> for nym_vpn_lib_types::GatewayIndependence {
+    fn from(value: GatewayIndependence) -> Self {
+        Self {
+            enable_notifications: value.enable_notifications,
+            different_node_family: value.different_node_family,
+            different_asn: value.different_asn,
+            different_subnet: value.different_subnet,
+        }
+    }
+}
+
+impl From<&nym_vpn_lib_types::GatewayIndependence> for GatewayIndependence {
+    fn from(value: &nym_vpn_lib_types::GatewayIndependence) -> Self {
+        Self {
+            enable_notifications: value.enable_notifications,
+            different_node_family: value.different_node_family,
+            different_asn: value.different_asn,
+            different_subnet: value.different_subnet,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Hash)]
@@ -121,6 +174,7 @@ impl TryFrom<VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
                 })
                 .collect(),
             stealth_api: value.stealth_api,
+            gateway_independence: value.gateway_independence.into(),
         };
 
         Ok(config)

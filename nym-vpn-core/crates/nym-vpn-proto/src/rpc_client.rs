@@ -7,8 +7,8 @@ use nym_vpn_lib_types::{
     GatewayTestParams, GatewayTestReport, GetDeeplinkParams, HttpRpcSettings, ListGatewaysOptions,
     LogPath, LookupGatewayFilters, NetworkCompatibility, NetworkStatisticsIdentity, NymVpnDevice,
     NymVpnUsage, ParsedAccountLinks, PrivyDerivationMessage, RegistrationReport, Socks5Settings,
-    Socks5Status, StoreAccountRequest, SystemMessage, TunnelEvent, TunnelState, VpnAccountSummary,
-    VpnServiceConfig, VpnServiceInfo,
+    Socks5Status, StoreAccountRequest, SystemMessage, TentativeGateways, TunnelEvent, TunnelState,
+    VpnAccountSummary, VpnServiceConfig, VpnServiceInfo,
 };
 use std::{net::IpAddr, path::PathBuf};
 use tokio_stream::{Stream, StreamExt};
@@ -166,6 +166,34 @@ impl RpcClient {
             .map_err(Error::Rpc)?
             .into_inner();
         Ok(())
+    }
+
+    pub async fn set_enable_gateway_independence(&mut self, enabled: bool) -> Result<()> {
+        self.0
+            .set_enable_gateway_independence(enabled)
+            .await
+            .map_err(Error::Rpc)?
+            .into_inner();
+        Ok(())
+    }
+
+    pub async fn set_gateway_independence_notifications(&mut self, enabled: bool) -> Result<()> {
+        self.0
+            .set_gateway_independence_notifications(enabled)
+            .await
+            .map_err(Error::Rpc)?
+            .into_inner();
+        Ok(())
+    }
+
+    pub async fn get_tentative_gateways(&mut self) -> Result<TentativeGateways> {
+        let response = self
+            .0
+            .get_tentative_gateways(())
+            .await
+            .map_err(Error::Rpc)?
+            .into_inner();
+        TentativeGateways::try_from(response).map_err(Error::InvalidResponse)
     }
 
     pub async fn set_inbound_exemptions(
@@ -344,9 +372,11 @@ impl RpcClient {
         Ok(DnsUpstreamOwner::from(response))
     }
 
-    pub async fn connect_tunnel(&mut self) -> Result<bool> {
+    /// Connect; `relax_independence` switches the gateway independence
+    /// criteria off for this connect session only.
+    pub async fn connect_tunnel(&mut self, relax_independence: bool) -> Result<bool> {
         self.0
-            .connect_tunnel(())
+            .connect_tunnel(proto::ConnectRequest { relax_independence })
             .await
             .map(|v| v.into_inner())
             .map_err(Error::Rpc)

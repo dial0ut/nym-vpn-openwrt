@@ -42,6 +42,7 @@ impl TryFrom<proto::tunnel_state::Error> for ErrorStateReason {
             Reason::TunnelProvider => Self::TunnelProvider,
             Reason::Ipv6Unavailable => Self::Ipv6Unavailable,
             Reason::SameEntryAndExitGateway => Self::SameEntryAndExitGateway,
+            Reason::NeedsRelaxedIndependenceCriteria => Self::NeedsRelaxedIndependenceCriteria,
             Reason::PerformantEntryGatewayUnavailable => Self::PerformantEntryGatewayUnavailable,
             Reason::PerformantExitGatewayUnavailable => Self::PerformantExitGatewayUnavailable,
             Reason::InvalidEntryGatewayIdentity => Self::InvalidEntryGatewayIdentity,
@@ -92,6 +93,10 @@ impl From<ErrorStateReason> for proto::tunnel_state::Error {
             },
             ErrorStateReason::SameEntryAndExitGateway => Self {
                 reason: Reason::SameEntryAndExitGateway.into(),
+                message: None,
+            },
+            ErrorStateReason::NeedsRelaxedIndependenceCriteria => Self {
+                reason: Reason::NeedsRelaxedIndependenceCriteria.into(),
                 message: None,
             },
             ErrorStateReason::PerformantEntryGatewayUnavailable => Self {
@@ -552,7 +557,7 @@ impl From<proto::GatewayId> for GatewayId {
 
 impl From<proto::GatewayLightInfo> for GatewayLightInfo {
     fn from(value: proto::GatewayLightInfo) -> Self {
-        Self::new(value.id, value.country_code)
+        Self::new(value.id, value.country_code, value.family_name)
     }
 }
 
@@ -561,6 +566,7 @@ impl From<GatewayLightInfo> for proto::GatewayLightInfo {
         Self {
             id: value.id,
             country_code: value.country_code,
+            family_name: value.family_name,
         }
     }
 }
