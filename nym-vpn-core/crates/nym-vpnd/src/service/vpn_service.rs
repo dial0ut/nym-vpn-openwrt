@@ -33,8 +33,8 @@ use nym_statistics::{
     StatisticsCommandsSender, StatisticsController, StatisticsControllerError, StatisticsSender,
 };
 use nym_vpn_account_controller::{
-    AccountCommandSender, AccountController, AccountControllerConfig, AccountStateReceiver,
-    AvailableTicketbooks, NyxdClient,
+    AccountCommandSender, AccountController, AccountControllerConfig, AccountRefreshMode,
+    AccountStateReceiver, AvailableTicketbooks, NyxdClient,
 };
 use nym_vpn_api_client::api_urls_to_urls;
 use nym_vpn_lib::{
@@ -268,6 +268,10 @@ pub struct NymVpnService {
 
     // Discovery refresher join handle
     discovery_refresher_join_handle: JoinHandle<()>,
+
+    // Whether the account controller has been told the daemon is idle: tunnel down and nobody
+    // asking for it
+    idle: bool,
 
     // VPN service shutdown token.
     shutdown_token: CancellationToken,
@@ -552,6 +556,7 @@ impl NymVpnService {
             gateway_cache_join_handle,
             discovery_refresher_event_rx,
             discovery_refresher_join_handle,
+            idle: false,
             sentry_enabled: parameters.sentry_enabled,
             statistics_event_sender,
             stats_control_commands_sender,
@@ -565,6 +570,10 @@ impl NymVpnService {
 
         // Skip the initial account state value
         let mut account_state_rx = WatchStream::new(self.account_state_rx.subscribe()).skip(1);
+
+        // Nothing has asked for the tunnel yet: start the side-services on their idle cadence.
+        let tunnel_state = self.tunnel_state.read().await.clone();
+        self.update_idle_hint(&tunnel_state);
 
         loop {
             tokio::select! {
@@ -653,6 +662,12 @@ impl NymVpnService {
             tracing::debug!("Set target state {} => {}", self.target_state, new_state);
             self.target_state = new_state;
 
+            // Before the tunnel state machine is told to connect, so the account controller can
+            // leave its idle cadence (and re-sync a stale account state) ahead of the tunnel
+            // monitor asking for it.
+            let tunnel_state = self.tunnel_state.read().await.clone();
+            self.update_idle_hint(&tunnel_state);
+
             match new_state {
                 TargetState::Secured => {
                     self.statistics_event_sender.report_connection_request();
@@ -706,6 +721,31 @@ impl NymVpnService {
         }
     }
 
+    /// Tell the account controller whether anyone needs it fresh. The daemon is idle while the
+    /// tunnel is down and nobody has asked for it: the account controller then drops to a slow
+    /// sync heartbeat, and catches up when a connect is requested (issue #9).
+    fn update_idle_hint(&mut self, tunnel_state: &TunnelState) {
+        let tunnel_down = matches!(
+            tunnel_state,
+            TunnelState::Disconnected | TunnelState::Error(_) | TunnelState::Offline { .. }
+        );
+        let idle = tunnel_down && self.target_state == TargetState::Unsecured;
+        if self.idle == idle {
+            return;
+        }
+        self.idle = idle;
+        tracing::debug!("Daemon idle: {idle}");
+
+        let mode = if idle {
+            AccountRefreshMode::Idle
+        } else {
+            AccountRefreshMode::Active
+        };
+        if let Err(err) = self.account_command_tx.set_refresh_mode(mode) {
+            tracing::error!("Failed to set account refresh mode: {err}");
+        }
+    }
+
     fn handle_tunnel_event(&mut self, event: TunnelEvent) {
         if let TunnelEvent::NewState(ref new_state) = event {
             if let Ok(mut state) = self.tunnel_state.try_write() {
@@ -713,6 +753,7 @@ impl NymVpnService {
             } else {
                 tracing::error!("Failed to update tunnel state to {new_state}");
             }
+            self.update_idle_hint(new_state);
 
             // Auto-disable SOCKS5 when VPN disconnects
             if matches!(new_state, TunnelState::Disconnected | TunnelState::Error(_))

@@ -1,19 +1,17 @@
 // Copyright 2025 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::pin::Pin;
-
 use crate::{
     SharedAccountState,
     commands::{AccountCommand, UpgradeModeCommand, common_handler, handler},
     state_machine::{
-        ACCOUNT_UPDATE_INTERVAL, AccountControllerStateHandler, LoggedOutState,
-        NextAccountControllerState, OfflineState, PrivateAccountControllerState, SyncingState,
+        AccountControllerStateHandler, LoggedOutState, NextAccountControllerState, OfflineState,
+        PrivateAccountControllerState, RefreshTimer, SyncingState,
     },
 };
 use nym_offline_monitor::ConnectivityMonitor;
 use nym_vpn_lib_types::{AccountCommandError, AccountControllerErrorStateReason};
-use tokio::{sync::mpsc, time::Sleep};
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
@@ -25,22 +23,24 @@ use tracing::warn;
 /// Crucially, we are online and an account is stored.
 ///
 /// Possible next state :
-/// - SyncingState : We go into that state on a timer, to see if the problem persists. The refresh account commands allows for manually go there
+/// - SyncingState : We go into that state on a timer, to see if the problem persists. The refresh account commands allows for manually go there.
+///   The timer's interval follows the refresh mode set by the daemon: slow while the tunnel is idle, normal otherwise.
 /// - OfflineState : the connectivity monitor is telling we're not connected
 /// - LoggedOutState : We successfully handled a forget_account command
 pub struct ErrorState {
-    refresh_timer: Pin<Box<Sleep>>,
+    refresh_timer: RefreshTimer,
     reason: AccountControllerErrorStateReason,
 }
 
 impl ErrorState {
     pub fn enter<C: ConnectivityMonitor>(
+        shared_state: &SharedAccountState<C>,
         reason: AccountControllerErrorStateReason,
     ) -> (
         Box<dyn AccountControllerStateHandler<C>>,
         PrivateAccountControllerState,
     ) {
-        let refresh_timer = Box::pin(tokio::time::sleep(ACCOUNT_UPDATE_INTERVAL));
+        let refresh_timer = RefreshTimer::start(shared_state.refresh_mode);
         tracing::error!("Account Controller entering error state : {reason:#?}");
         (
             Box::new(Self {
@@ -61,10 +61,10 @@ impl<C: ConnectivityMonitor> AccountControllerStateHandler<C> for ErrorState {
         shared_state: &'async_trait mut SharedAccountState<C>,
     ) -> NextAccountControllerState<C> {
         tokio::select! {
-        _ = &mut self.refresh_timer => {
+            _ = self.refresh_timer.tick() => {
                 if shared_state.firewall_active {
                     tracing::debug!("VPN API is firewalled, timed account syncing skipped");
-                    return NextAccountControllerState::NewState(ErrorState::enter(self.reason));
+                    return NextAccountControllerState::NewState(ErrorState::enter(shared_state, self.reason));
                 } else {
                     return NextAccountControllerState::NewState(SyncingState::enter(shared_state, 0));
                 }
@@ -119,6 +119,11 @@ impl<C: ConnectivityMonitor> AccountControllerStateHandler<C> for ErrorState {
                     AccountCommand::VpnApiFirewallUp(return_sender) => {
                         shared_state.firewall_active = true;
                         return_sender.send(Ok(()));
+                    },
+                    AccountCommand::SetRefreshMode(mode) => {
+                        if self.refresh_timer.apply_mode(shared_state, mode) {
+                            return NextAccountControllerState::NewState(SyncingState::enter(shared_state, 0));
+                        }
                     },
 
                     AccountCommand::Common(common_command) => {

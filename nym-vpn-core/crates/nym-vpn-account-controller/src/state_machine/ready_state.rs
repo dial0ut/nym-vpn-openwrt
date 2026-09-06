@@ -1,19 +1,17 @@
 // Copyright 2025 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::pin::Pin;
-
 use crate::{
     SharedAccountState,
     commands::{AccountCommand, ReturnSender, UpgradeModeCommand, common_handler, handler},
     state_machine::{
-        ACCOUNT_UPDATE_INTERVAL, AccountControllerStateHandler, LoggedOutState,
-        NextAccountControllerState, OfflineState, PrivateAccountControllerState, SyncingState,
+        AccountControllerStateHandler, LoggedOutState, NextAccountControllerState, OfflineState,
+        PrivateAccountControllerState, RefreshTimer, SyncingState,
     },
 };
 use nym_offline_monitor::ConnectivityMonitor;
 use nym_vpn_lib_types::AccountCommandError;
-use tokio::{sync::mpsc, time::Sleep};
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
@@ -25,19 +23,22 @@ use tracing::warn;
 /// - We have tickets in storage
 ///
 /// Possible next state :
-/// - SyncingState : We go into that state on a timer, to make sure the above still holds. The refresh account commands allows for manually go there
+/// - SyncingState : We go into that state on a timer, to make sure the above still holds. The refresh account commands allows for manually go there.
+///   The timer's interval follows the refresh mode set by the daemon: slow while the tunnel is idle, normal otherwise.
 /// - OfflineState : the connectivity monitor is telling we're not connected
 /// - LoggedOutState : We successfully handled a forget_account command
 pub struct ReadyState {
-    refresh_timer: Pin<Box<Sleep>>,
+    refresh_timer: RefreshTimer,
 }
 
 impl ReadyState {
-    pub fn enter<C: ConnectivityMonitor>() -> (
+    pub fn enter<C: ConnectivityMonitor>(
+        shared_state: &SharedAccountState<C>,
+    ) -> (
         Box<dyn AccountControllerStateHandler<C>>,
         PrivateAccountControllerState,
     ) {
-        let refresh_timer = Box::pin(tokio::time::sleep(ACCOUNT_UPDATE_INTERVAL));
+        let refresh_timer = RefreshTimer::start(shared_state.refresh_mode);
 
         (
             Box::new(Self { refresh_timer }),
@@ -55,10 +56,10 @@ impl<C: ConnectivityMonitor> AccountControllerStateHandler<C> for ReadyState {
         shared_state: &'async_trait mut SharedAccountState<C>,
     ) -> NextAccountControllerState<C> {
         tokio::select! {
-            _ = &mut self.refresh_timer => {
+            _ = self.refresh_timer.tick() => {
                 if shared_state.firewall_active {
                     tracing::debug!("VPN API is firewalled, timed account syncing skipped");
-                    return NextAccountControllerState::NewState(ReadyState::enter());
+                    return NextAccountControllerState::NewState(ReadyState::enter(shared_state));
                 } else {
                     return NextAccountControllerState::NewState(SyncingState::enter(shared_state, 0));
                 }
@@ -112,6 +113,11 @@ impl<C: ConnectivityMonitor> AccountControllerStateHandler<C> for ReadyState {
                     AccountCommand::VpnApiFirewallUp(return_sender) => {
                         shared_state.firewall_active = true;
                         return_sender.send(Ok(()));
+                    },
+                    AccountCommand::SetRefreshMode(mode) => {
+                        if self.refresh_timer.apply_mode(shared_state, mode) {
+                            return NextAccountControllerState::NewState(SyncingState::enter(shared_state, 0));
+                        }
                     },
 
                     AccountCommand::Common(common_command) => common_handler::handle_common_command(common_command, shared_state).await,

@@ -70,6 +70,14 @@ the GitHub release notes.
 
 ### Changed
 
+- Less background traffic while the daemon is up but not connected (reported
+  from a mirrored-port capture by a forum user). The account state is now
+  re-checked every 30 minutes instead of every 2 while the tunnel is down and
+  nothing has asked for it. A connect request switches back to the normal
+  cadence at once and re-syncs immediately if the account state is more than
+  2 minutes old, before the tunnel is brought up. The sync on daemon start and
+  the manual refresh from the account card / `nym-vpnc account get` are
+  unchanged.
 - The firewall include is registered for the *active* backend (fw4 vs fw3 —
   live state, then the firewall init script, then binary presence, so
   boot-time runs on images shipping both stacks pick correctly) and applied

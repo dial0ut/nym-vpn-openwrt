@@ -3,7 +3,7 @@
 
 use crate::common::{TestBench, account_summary::*, endpoints, mock_account, mock_account_id};
 
-use nym_vpn_account_controller::AvailableTicketbooks;
+use nym_vpn_account_controller::{AccountRefreshMode, AvailableTicketbooks};
 use nym_vpn_api_client::{ResolverOverrides, response::NymVpnDeviceStatus};
 use nym_vpn_lib_types::{
     AccountCommandError, AccountControllerErrorStateReason, AccountControllerState,
@@ -280,9 +280,28 @@ async fn ready_state_command() -> anyhow::Result<()> {
         .assert_state(AccountControllerState::ReadyToConnect)
         .await;
 
+    // Switching refresh mode right after a sync only re-arms the timer: the account state is
+    // fresh, so neither direction triggers a sync. The awaited command after it proves both
+    // hints were consumed (same channel, in order).
+    assert_eq!(
+        test_bench
+            .command_sender
+            .set_refresh_mode(AccountRefreshMode::Idle),
+        Ok(())
+    );
+    assert_eq!(
+        test_bench
+            .command_sender
+            .set_refresh_mode(AccountRefreshMode::Active),
+        Ok(())
+    );
     assert_eq!(
         test_bench.command_sender.get_account_id().await,
         Ok(Some(mock_account_id()))
+    );
+    assert_eq!(
+        test_bench.state_receiver.get_state(),
+        AccountControllerState::ReadyToConnect
     );
     assert_eq!(
         test_bench.command_sender.get_stored_account().await,

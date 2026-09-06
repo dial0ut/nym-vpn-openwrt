@@ -69,16 +69,22 @@ impl RequestingZkNymsState {
             return LoggedOutState::enter();
         };
         let Some(device) = shared_state.device.clone() else {
-            return ErrorState::enter(AccountControllerErrorStateReason::Internal {
-                context: ZK_NYM_STATE_CONTEXT.to_string(),
-                details: "Logged in, but no device keys".into(),
-            });
+            return ErrorState::enter(
+                shared_state,
+                AccountControllerErrorStateReason::Internal {
+                    context: ZK_NYM_STATE_CONTEXT.to_string(),
+                    details: "Logged in, but no device keys".into(),
+                },
+            );
         };
         let Some(ref vpn_account_summary) = shared_state.vpn_account_summary else {
-            return ErrorState::enter(AccountControllerErrorStateReason::Internal {
-                context: ZK_NYM_STATE_CONTEXT.to_string(),
-                details: "Logged in, but no account summary".into(),
-            });
+            return ErrorState::enter(
+                shared_state,
+                AccountControllerErrorStateReason::Internal {
+                    context: ZK_NYM_STATE_CONTEXT.to_string(),
+                    details: "Logged in, but no account summary".into(),
+                },
+            );
         };
 
         let vpn_api_client = shared_state.vpn_api_client.clone();
@@ -246,6 +252,7 @@ impl RequestingZkNymsState {
             Err(zk_nym_error) => {
                 if self.attempts > ZK_NYM_MAX_FAILS {
                     return NextAccountControllerState::NewState(ErrorState::enter(
+                        shared_state,
                         zk_nym_error.into(),
                     ));
                 }
@@ -257,7 +264,7 @@ impl RequestingZkNymsState {
                     .await
                 {
                     // let's see if next sync fixes it
-                    return NextAccountControllerState::NewState(ReadyState::enter());
+                    return NextAccountControllerState::NewState(ReadyState::enter(shared_state));
                 }
                 return match zk_nym_error {
                     ZkNymError::Storage(_) | ZkNymError::Internal(_) => {
@@ -284,9 +291,10 @@ impl RequestingZkNymsState {
                             .await
                         {
                             tracing::warn!("We still have some tickets though");
-                            NextAccountControllerState::NewState(ReadyState::enter())
+                            NextAccountControllerState::NewState(ReadyState::enter(shared_state))
                         } else {
                             NextAccountControllerState::NewState(ErrorState::enter(
+                                shared_state,
                                 ZkNymError::BandwidthExceeded.into(),
                             ))
                         }
@@ -297,7 +305,7 @@ impl RequestingZkNymsState {
 
         match retrieval_result {
             ZkNymFetchResult::SufficientBandwidth | ZkNymFetchResult::FetchedTickets { .. } => {
-                NextAccountControllerState::NewState(ReadyState::enter())
+                NextAccountControllerState::NewState(ReadyState::enter(shared_state))
             }
             ZkNymFetchResult::UpgradeMode => {
                 NextAccountControllerState::NewState(UpgradeModeState::enter(shared_state).await)
@@ -376,6 +384,9 @@ impl RequestingZkNymsState {
                 shared_state.firewall_active = true;
                 self.zk_nym_fetching_handle.abort();
                 return_sender.send(Ok(()));
+            }
+            AccountCommand::SetRefreshMode(mode) => {
+                shared_state.refresh_mode = mode;
             }
             AccountCommand::Common(common_command) => {
                 common_handler::handle_common_command(common_command, shared_state).await

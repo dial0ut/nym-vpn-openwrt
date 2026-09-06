@@ -1,7 +1,9 @@
 // Copyright 2025 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{AvailableTicketbooks, deeplink::CreateDeeplinkParams};
+use crate::{
+    AvailableTicketbooks, deeplink::CreateDeeplinkParams, state_machine::AccountRefreshMode,
+};
 use nym_credentials_interface::VerificationKeyAuth;
 use nym_validator_client::nyxd::Coin;
 use nym_vpn_api_client::{
@@ -52,6 +54,10 @@ pub enum AccountCommand {
     /// Tells the AC free to go ahead
     VpnApiFirewallDown(ReturnSender<(), AccountCommandError>),
 
+    /// Tells the AC how often to re-sync on its own. A hint sent from the tunnel-event path,
+    /// hence no return channel: the daemon must never wait on the AC there.
+    SetRefreshMode(AccountRefreshMode),
+
     /// Upgrade mode-related commands
     UpgradeMode(UpgradeModeCommand),
 
@@ -73,6 +79,7 @@ impl AccountCommand {
             AccountCommand::RefreshAccountState(return_sender) => return_sender.send(Err(error)),
             AccountCommand::VpnApiFirewallUp(return_sender) => return_sender.send(Err(error)),
             AccountCommand::VpnApiFirewallDown(return_sender) => return_sender.send(Err(error)),
+            AccountCommand::SetRefreshMode(_) => {}
             AccountCommand::Common(common_command) => match common_command {
                 CommonCommand::GetStoredAccount(return_sender) => return_sender.send(Err(error)),
                 CommonCommand::GetAccountIdentity(return_sender) => return_sender.send(Err(error)),

@@ -78,6 +78,9 @@ impl<C: ConnectivityMonitor> AccountControllerStateHandler<C> for DecentralisedS
                     AccountCommand::ObtainTicketbooks(return_sender, amount) => {
                         return_sender.send(decentralised_zknym_handler::handle_obtain_ticketbooks(shared_state, amount).await);
                     }
+                    AccountCommand::SetRefreshMode(mode) => {
+                        shared_state.refresh_mode = mode;
+                    }
                     AccountCommand::Common(common_command) => {
                          match common_command {
                             CommonCommand::GetStoredAccount(return_sender) => return_sender.send(common_handler::handle_get_stored_account(shared_state).await),
