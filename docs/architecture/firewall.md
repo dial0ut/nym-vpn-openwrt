@@ -108,6 +108,56 @@ resolution can proceed without opening router or LAN egress. As addresses are re
 added to the daemon-scoped allow-list. Disconnected and Error use the same blocked bootstrap
 policy when the on-disk endpoint cache is absent or expired.
 
+## Boot sequence
+
+Init order on OpenWrt is `firewall` at START=19, `network` at 20 and `nym-vpnd` at 90. Everything
+above exists only once the daemon has applied its first policy, so on its own that leaves a window
+— WAN link up, routes installed, no daemon yet — in which nothing fences egress even with the
+kill-switch on. A forum report of WAN traffic during a reboot was never confirmed with a capture;
+the guard below is a defensive measure that costs nothing when the daemon comes up normally.
+
+The firewall include closes the window itself. Whenever it runs — at firewall start, and on every
+reload before the daemon has converged — and the daemon has not applied a policy since boot (fw4:
+no `inet nym` table, which exists in every tunnel state while the kill-switch is on; fw3: no
+persisted rules file and no transition marker), it asks `fw-boot-guard.sh` whether the kill-switch
+is *armed*:
+
+1. the daemon's saved settings (`/etc/nym/nym-vpnd.json`, read with `jsonfilter`) have
+   `killswitch` on and `legacy_split_tunnel` off — the same effective value the daemon computes;
+2. the daemon is enabled to start at boot (`/etc/rc.d/S*nym-vpnd` exists);
+3. the administrator has not stopped it: `/etc/init.d/nym-vpnd stop` writes
+   `/tmp/nym-vpnd.stopped`, `start` removes it, and tmpfs clears it on reboot.
+
+If all three hold, the include installs a boot-time emergency block. On fw4 that is a separate
+`inet nym_boot` table at priority `filter - 20`, ahead of both `inet nym` and fw4; on fw3 it is the
+`NYM_EMERGENCY_OUT/FWD` chains (see below) loaded with a boot rule set. Either way the block drops
+new router-originated and forwarded traffic and lets through exactly what the router needs to come
+up and stay manageable: loopback, DHCP and DHCPv6 as client and server, IPv6 router/neighbour
+solicitation and advertisement, LAN, link-local and multicast destinations (RFC1918,
+`169.254.0.0/16`, `fe80::/10`, `fc00::/7`), and reply-direction packets of established
+connections. INPUT is never touched. SSH and LuCI from the LAN therefore keep working however long
+the block stays — including when the daemon crash-loops before ever applying a policy, which is
+the case the block exists for.
+
+The block is lifted by whichever comes first: the daemon's first policy (kill-switch on or off —
+`apply`, `apply_forwarding_only` and `reset` all remove it as their last step, once the live state
+has converged), an explicit `/etc/init.d/nym-vpnd stop` (which also writes the stop marker, so a
+later reload does not re-install it), package removal (`prerm`), or a later include run finding
+that a condition no longer holds — kill-switch turned off, daemon disabled or stopped. A setting
+the include cannot read with confidence counts as off: it logs why and does not block, matching
+the daemon's own fallback to defaults for an unreadable config. A `firewall reload` while the
+daemon is up never touches a live policy: the include sees `inet nym` (or the fw3 rules file) and
+at most removes a stale boot block.
+
+Two orderings make the racy cases converge instead of leaving a block nobody removes. The daemon
+applies its table before it deletes the boot block and persists a kill-switch toggle before it
+opens the firewall; the include installs first and then re-checks both the daemon's table and the
+guard, removing the block if either changed underneath it. On fw3 the re-check lifts the block only
+once the daemon's policy is actually hooked; a persisted but unhooked policy means the daemon is
+mid-activation and lifts it itself. A daemon that fails to apply keeps the block: the failure
+surfaces as an error state, the LAN stays reachable, and `/etc/init.d/nym-vpnd stop` opens the
+router again.
+
 ## Surviving firewall reloads
 
 OpenWrt rebuilds its entire ruleset from scratch on every reload, and reloads are frequent:
@@ -116,7 +166,8 @@ network reconfiguration, DHCP changes, dnsmasq restarts, a manual `fw3 reload` o
 On fw4 the kill-switch lives in its own `inet nym` table and survives; the reload only wipes the
 daemon's masquerade and forward integration inside `inet fw4`. On fw3 all custom iptables chains
 are wiped, so the daemon persists the applied restore scripts and tunnel-interface list under
-`/tmp`; the fw3 include restores both blocking and forwarding planes.
+`/tmp`; the fw3 include restores both blocking and forwarding planes. With nothing to restore,
+both includes fall through to the boot-time guard above: arm the block, or make sure none is left.
 
 fw3 policy changes use a fail-closed transition protocol. Before touching live or persisted state,
 the daemon creates `/tmp/nym-firewall.transition`. While the marker exists, a firewall reload's

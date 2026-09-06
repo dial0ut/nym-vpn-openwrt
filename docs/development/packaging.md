@@ -38,6 +38,8 @@ nym-vpn_1.33.1_aarch64_generic.ipk (tar.gz)
     ├── usr/share/rpcd/acl.d/luci-app-nym-vpn.json
     ├── usr/share/nym-vpn/fw3-include.sh
     ├── usr/share/nym-vpn/fw4-include.sh
+    ├── usr/share/nym-vpn/fw-backend.sh       # fw3-or-fw4 detector shared by the scripts
+    ├── usr/share/nym-vpn/fw-boot-guard.sh    # sourced by both includes, not executable
     ├── etc/opkg/keys/<fingerprint>
     └── etc/apk/keys/dial0ut.pub
 ```
