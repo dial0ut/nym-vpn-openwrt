@@ -64,6 +64,12 @@ pub struct SetParams {
     #[arg(long, value_parser = clap::value_parser!(BooleanOption))]
     family_reminders: Option<BooleanOption>,
 
+    /// Always On: connect when the daemon starts (once a default route
+    /// exists) and keep retrying error states with backoff. A disconnect
+    /// pauses it until the next connect or daemon start; the setting stays.
+    #[arg(long, value_parser = clap::value_parser!(BooleanOption))]
+    always_on: Option<BooleanOption>,
+
     /// Enable Circumvention Transport (CT) wrapping for the connection to the entry gateway in two hop wireguard mode.
     #[arg(long, alias = "ct", value_parser = clap::value_parser!(BooleanOption))]
     circumvention_transports: Option<BooleanOption>,
@@ -152,6 +158,7 @@ impl Command {
                     "Family reminders: {}",
                     display_on_off(config.gateway_independence.enable_notifications)
                 );
+                println!("Always on: {}", display_on_off(config.always_on));
                 if config.inbound_exemptions.is_empty() {
                     println!("Inbound exemptions: none");
                 } else {
@@ -192,6 +199,10 @@ impl Command {
                     rpc_client
                         .set_gateway_independence_notifications(*family_reminders)
                         .await?;
+                }
+
+                if let Some(always_on) = params.always_on {
+                    rpc_client.set_always_on(*always_on).await?;
                 }
 
                 if let Some(two_hop) = params.two_hop {

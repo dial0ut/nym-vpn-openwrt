@@ -306,10 +306,21 @@ impl Command {
         }
     }
 
+    /// `Always on: …` under `State:` while the setting is on; silent when it
+    /// is off or the daemon predates it.
+    async fn print_always_on(rpc_client: &mut RpcClient) {
+        if let Ok(status) = rpc_client.get_always_on_status().await
+            && status.enabled
+        {
+            println!("Always on: {status}");
+        }
+    }
+
     async fn status(mut rpc_client: RpcClient, listen: bool) -> Result<()> {
         let state = rpc_client.get_tunnel_state().await?;
         println!("State: {state}");
         Self::print_state_details(&state);
+        Self::print_always_on(&mut rpc_client).await;
 
         if !listen {
             return Ok(());
@@ -322,6 +333,7 @@ impl Command {
                 Ok(TunnelEvent::NewState(new_state)) => {
                     println!("State: {new_state}");
                     Self::print_state_details(&new_state);
+                    Self::print_always_on(&mut rpc_client).await;
                 }
                 Ok(TunnelEvent::ConfigChanged(new_config)) => {
                     let json = serde_json::to_string_pretty(&new_config)
