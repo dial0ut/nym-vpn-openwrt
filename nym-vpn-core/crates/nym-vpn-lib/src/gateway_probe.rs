@@ -11,7 +11,7 @@
 //! `nym-vpnc`: `SO_MARK` needs `CAP_NET_ADMIN`, and unmarked ICMP is rejected
 //! while the kill switch is on.
 
-use std::{net::IpAddr, os::fd::BorrowedFd, time::Duration};
+use std::{net::IpAddr, os::fd::BorrowedFd, sync::Arc, time::Duration};
 
 use futures::{StreamExt, stream};
 use nix::sys::socket::{SetSockOpt, sockopt::Mark};
@@ -45,6 +45,7 @@ pub struct ProbeParams {
 /// What came back from one target.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProbeOutcome {
+    /// Echo requests that left the socket. Only these count towards loss.
     pub sent: u32,
     pub received: u32,
     /// Round-trip time of every reply, in send order.
@@ -66,6 +67,43 @@ impl ProbeOutcome {
         let n = u32::try_from(self.rtts.len()).ok().filter(|n| *n > 0)?;
         Some(self.rtts.iter().sum::<Duration>() / n)
     }
+
+    /// Account for one echo request. Returns `false` when probing this target
+    /// should stop.
+    fn record(&mut self, target: IpAddr, attempt: Result<Duration, SurgeError>) -> bool {
+        match attempt {
+            Ok(rtt) => {
+                self.sent += 1;
+                self.received += 1;
+                self.rtts.push(rtt);
+                true
+            }
+            // The request went out and nothing came back: that is loss.
+            Err(SurgeError::Timeout { .. }) => {
+                self.sent += 1;
+                true
+            }
+            // surge-ping poisons the shared reply map when any `Client` clone
+            // is dropped. `probe_targets` keeps the client alive until every
+            // probe is done, so this cannot happen unless that invariant is
+            // broken. Report it as the bug it is instead of as packet loss,
+            // and stop: every further request would fail the same way.
+            Err(SurgeError::ClientDestroyed) => {
+                tracing::error!(
+                    "ICMP client dropped while probing {target}; this is a bug in gateway_probe"
+                );
+                self.error = Some("internal error: ICMP client dropped while probing".to_owned());
+                false
+            }
+            // Nothing was sent (socket error, e.g. no route), or the reply
+            // channel broke. Report it, but it is not loss on the path.
+            Err(err) => {
+                tracing::debug!("Gateway probe to {target} failed: {err}");
+                self.error = Some(err.to_string());
+                true
+            }
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -86,16 +124,25 @@ pub async fn probe_targets(
 ) -> Result<Vec<ProbeOutcome>, ProbeError> {
     // One socket per family, opened only when needed: an IPv6 socket can be
     // refused outright on a kernel built without IPv6.
+    //
+    // Shared through an `Arc`, never cloned: dropping *any* clone of a
+    // surge-ping `Client` marks its reply map destroyed, so a fast target
+    // finishing first would fail the remaining probes of a slower one with
+    // `ClientDestroyed`. The `Arc`s below outlive the whole probe run — they
+    // drop at the end of this function, after `collect()` has awaited every
+    // probe, timeouts included.
     let v4 = targets
         .iter()
         .any(IpAddr::is_ipv4)
         .then(|| marked_client(ICMP::V4))
-        .transpose()?;
+        .transpose()?
+        .map(Arc::new);
     let v6 = targets
         .iter()
         .any(IpAddr::is_ipv6)
         .then(|| marked_client(ICMP::V6))
-        .transpose()?;
+        .transpose()?
+        .map(Arc::new);
 
     // Owned items: a closure over `&IpAddr` makes the spawned future's
     // lifetime bounds too specific for `tokio::spawn`.
@@ -130,7 +177,7 @@ fn marked_client(kind: ICMP) -> Result<Client, ProbeError> {
 }
 
 async fn probe_one(
-    client: Option<Client>,
+    client: Option<Arc<Client>>,
     addr: IpAddr,
     ident: PingIdentifier,
     params: ProbeParams,
@@ -148,17 +195,12 @@ async fn probe_one(
         if seq > 0 {
             tokio::time::sleep(PROBE_INTERVAL).await;
         }
-        outcome.sent += 1;
-        match pinger.ping(PingSequence(seq as u16), &PAYLOAD).await {
-            Ok((_reply, rtt)) => {
-                outcome.received += 1;
-                outcome.rtts.push(rtt);
-            }
-            Err(SurgeError::Timeout { .. }) => {}
-            Err(err) => {
-                tracing::debug!("Gateway probe to {addr} failed: {err}");
-                outcome.error = Some(err.to_string());
-            }
+        let attempt = pinger
+            .ping(PingSequence(seq as u16), &PAYLOAD)
+            .await
+            .map(|(_reply, rtt)| rtt);
+        if !outcome.record(addr, attempt) {
+            break;
         }
     }
 
@@ -167,11 +209,15 @@ async fn probe_one(
 
 #[cfg(test)]
 mod tests {
+    use std::net::Ipv4Addr;
+
     use super::*;
 
     fn ms(v: u64) -> Duration {
         Duration::from_millis(v)
     }
+
+    const TARGET: IpAddr = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
 
     #[test]
     fn outcome_statistics() {
@@ -195,5 +241,56 @@ mod tests {
         assert_eq!(outcome.min(), None);
         assert_eq!(outcome.avg(), None);
         assert_eq!(outcome.max(), None);
+    }
+
+    #[test]
+    fn only_replies_and_timeouts_count_as_sent() {
+        let mut outcome = ProbeOutcome::default();
+        assert!(outcome.record(TARGET, Ok(ms(10))));
+        assert!(outcome.record(
+            TARGET,
+            Err(SurgeError::Timeout {
+                seq: PingSequence(1)
+            })
+        ));
+        let unreachable = std::io::Error::from(std::io::ErrorKind::NetworkUnreachable);
+        assert!(outcome.record(TARGET, Err(SurgeError::IOError(unreachable))));
+
+        assert_eq!((outcome.sent, outcome.received), (2, 1));
+        assert_eq!(outcome.rtts, vec![ms(10)]);
+        let error = outcome.error.as_deref().expect("send failure is reported");
+        assert!(error.contains("io error"), "{error}");
+    }
+
+    #[test]
+    fn dropped_client_is_a_bug_not_loss_and_stops_probing() {
+        let mut outcome = ProbeOutcome::default();
+        assert!(outcome.record(TARGET, Ok(ms(10))));
+        assert!(
+            !outcome.record(TARGET, Err(SurgeError::ClientDestroyed)),
+            "probing must stop once the client is gone"
+        );
+
+        assert_eq!((outcome.sent, outcome.received), (1, 1));
+        let error = outcome.error.as_deref().expect("bug is reported");
+        assert!(error.contains("internal error"), "{error}");
+    }
+
+    #[test]
+    fn no_targets_opens_no_socket() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let params = ProbeParams {
+            count: 1,
+            timeout: ms(10),
+        };
+        // Would need CAP_NET_RAW or an open ping_group_range if a socket were
+        // created; an empty target list must not touch the network at all.
+        let outcomes = runtime
+            .block_on(probe_targets(&[], params))
+            .expect("no socket needed");
+        assert!(outcomes.is_empty());
     }
 }
