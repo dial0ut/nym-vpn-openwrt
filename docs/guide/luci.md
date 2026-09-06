@@ -7,8 +7,11 @@ disconnected), uptime since the tunnel came up, and the hop chain through entry 
 While connected, each gateway also shows its operator family when the directory knows one; if
 entry and exit turn out to share a family, both are marked **Same operator family** in amber.
 
-While disconnected, the two side panels are the gateway pickers. Choose a country (the dropdown
-shows how many gateways each has, or **Random**), then a row in the list under it. The first row,
+While disconnected, the two side panels are the gateway pickers; they take most of the hero's
+width, with the status ring in a narrow column between them (above them on screens narrower than
+about 960 px, and everything stacks in one column below about 700 px). Choose a country (the
+dropdown shows how many gateways each has, or **Random**), then a row in the list under it. Every
+row in a list has the same height, so the list scans as a grid. The first row,
 **Any Gateway (Random)**, leaves the pick within that country to the daemon; each row below is one
 gateway: its name (long names wrap to two lines; hover for the full text), a performance tier at
 the right — `HIGH`, `MEDIUM`, `LOW`, `OFFLINE` or `N/A`, with a green / amber / red / grey dot — a

@@ -199,10 +199,13 @@ return baseclass.extend({
                         E('div', { 'class': 'nym-gateway-option-name', 'title': name }, [name])
                     ];
                     if (status.length) children.push(E('div', { 'class': 'nym-gateway-option-status' }, status));
-                    if (meta.length) children.push(E('div', { 'class': 'nym-gateway-option-meta' }, meta));
-                    if (row.family) {
-                        children.push(E('div', { 'class': 'nym-gateway-option-family', 'title': 'Operator family: ' + row.family }, [row.family]));
-                    }
+                    // The telemetry and family lines are always present (empty
+                    // when there is nothing to say) and the name has a two-line
+                    // slot, so every row in a list is the same height.
+                    children.push(E('div', { 'class': 'nym-gateway-option-meta' }, meta));
+                    var familyAttrs = { 'class': 'nym-gateway-option-family' };
+                    if (row.family) familyAttrs.title = 'Operator family: ' + row.family;
+                    children.push(E('div', familyAttrs, row.family ? [row.family] : []));
 
                     var option = E('label', {
                         'class': 'nym-gateway-option' + (row.checked ? ' selected' : '') + (row.disabled ? ' disabled' : ''),
