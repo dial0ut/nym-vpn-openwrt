@@ -2,7 +2,8 @@
 # Nym VPN firewall include script for OpenWrt fw4 (nftables)
 #
 # This script is called by fw4 on start and restart.
-# It re-applies the Nym VPN integration that lives inside fw4's own table.
+# It re-applies the Nym VPN integration that lives inside fw4's own table and
+# keeps the boot-time kill-switch block in step with the daemon's state.
 #
 # Installation:
 #   1. Copy to /usr/share/nym-vpn/fw4-include.sh
@@ -10,7 +11,6 @@
 #      config include 'nym_vpn'
 #          option type 'script'
 #          option path '/usr/share/nym-vpn/fw4-include.sh'
-#          option fw4_compatible '1'
 #          option enabled '1'
 #
 # Why this exists:
@@ -24,6 +24,17 @@
 #   Those are wiped on every reload, breaking LAN-client connectivity until the
 #   daemon happens to re-apply. This script restores them on each reload so a
 #   reload (ours via split-tunnel regen, the user's, mwan3's, ...) is transparent.
+#
+#   The boot window is the other gap. The firewall starts at S19 and network
+#   at S20, but nym-vpnd only at S90: until its first policy lands, nothing
+#   fences WAN egress even with the kill-switch on. When the kill-switch is
+#   armed (fw-boot-guard.sh: on in the daemon's saved settings, daemon enabled
+#   at boot, not stopped by the administrator) and no `inet nym` table exists
+#   yet, this script installs a boot-time emergency block in its own
+#   `inet nym_boot` table. The daemon deletes that table once its first policy
+#   (kill-switch on or off) is live; this script removes it whenever the
+#   conditions no longer hold, and the init script and package prerm remove it
+#   on explicit stop and removal.
 #
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright 2025 Nym Technologies SA <contact@nymtech.net>
@@ -40,6 +51,28 @@ IFACES_FILE="/tmp/nym-firewall.ifaces"
 # competing sets of rules.
 NAT_CHAIN="nym_postrouting"
 FORWARD_CHAIN="nym_forward_lan"
+
+# Kill-switch tables. `inet nym` is the daemon's: with the kill-switch on it
+# exists in every tunnel state, so its presence means the daemon has applied a
+# policy since boot. `inet nym_boot` is ours, the boot-time emergency block.
+# Both names are a contract with the fw4 backend (common.rs) and the package
+# scripts.
+NYM_TABLE="nym"
+BOOT_TABLE="nym_boot"
+
+# Boot-time kill-switch guard: the shared decision logic. A missing helper
+# must fail towards not blocking, never towards a block nothing can lift.
+NYM_SHARE_DIR="${NYM_SHARE_DIR:-/usr/share/nym-vpn}"
+if [ -r "$NYM_SHARE_DIR/fw-boot-guard.sh" ]; then
+    # shellcheck source-path=SCRIPTDIR
+    # shellcheck source=fw-boot-guard.sh
+    . "$NYM_SHARE_DIR/fw-boot-guard.sh"
+else
+    nym_boot_block_wanted() {
+        NYM_BOOT_REASON="$NYM_SHARE_DIR/fw-boot-guard.sh is missing; not blocking"
+        return 1
+    }
+fi
 
 # Resolve the active tunnel interfaces to masquerade/forward. Order of trust:
 #   1. daemon-written iface list (authoritative, if present)
@@ -107,8 +140,98 @@ restore_fw4_tunnel_rules() {
         nft add rule inet fw4 forward_lan jump "$FORWARD_CHAIN" 2>/dev/null || true
 }
 
+nym_table_present() {
+    nft list table inet "$NYM_TABLE" >/dev/null 2>&1
+}
+
+boot_block_present() {
+    nft list table inet "$BOOT_TABLE" >/dev/null 2>&1
+}
+
+# Boot-time emergency block for WAN egress: drop new router-originated and
+# forwarded traffic except what the router needs to come up and stay
+# manageable from the LAN. Same allowances as the base of the daemon's Blocked
+# policy — loopback, DHCP/DHCPv6 as client and server, IPv6 ND — plus LAN,
+# link-local, ULA and multicast destinations unconditionally. Reply-direction
+# packets leave so SSH/LuCI sessions to the router keep working; flows the
+# router itself opened stay blocked. INPUT is left to fw4. The chains run
+# ahead of both `inet nym` (filter -10) and fw4 (filter); accept here only
+# means "let the next table decide". The create/delete/create dance makes the
+# load an atomic replace, exactly like the daemon's own table.
+install_boot_block() {
+    nft -f - <<EOF
+table inet $BOOT_TABLE
+delete table inet $BOOT_TABLE
+table inet $BOOT_TABLE {
+    chain output {
+        type filter hook output priority filter - 20; policy accept;
+        oifname "lo" accept
+        ct state established,related ct direction reply accept
+        udp sport 68 udp dport 67 accept
+        udp sport 67 udp dport 68 accept
+        udp sport 546 udp dport 547 accept
+        udp sport 547 udp dport 546 accept
+        icmpv6 type { nd-router-solicit, nd-neighbor-solicit, nd-neighbor-advert } accept
+        ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 224.0.0.0/4 } accept
+        ip6 daddr { fe80::/10, fc00::/7, ff00::/8 } accept
+        drop
+    }
+    chain forward {
+        type filter hook forward priority filter - 20; policy accept;
+        ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } accept
+        ip6 daddr { fe80::/10, fc00::/7 } accept
+        drop
+    }
+}
+EOF
+}
+
+# Remove the boot-time block if present. $1 is the reason, for the log.
+remove_boot_block() {
+    boot_block_present || return 0
+    if nft delete table inet "$BOOT_TABLE" 2>/dev/null; then
+        logger -t nym-vpn "Removed boot-time kill-switch block: $1"
+        return 0
+    fi
+    logger -t nym-vpn "CRITICAL: failed to remove boot-time kill-switch block (inet $BOOT_TABLE)"
+    return 1
+}
+
+# Converge the boot-time block on the current state. Order matters: the
+# daemon applies `inet nym` first and deletes `inet nym_boot` last, and it
+# persists a kill-switch toggle before opening the firewall, so re-checking
+# after the install catches a decision that raced either — the alternative
+# is a block that only the next daemon state change would lift.
+reconcile_boot_block() {
+    if nym_table_present; then
+        # The daemon's policy is live and it lifts the block itself; one left
+        # over here would only keep the daemon's bootstrap traffic blocked.
+        remove_boot_block "daemon policy is live" || return 1
+        return 0
+    fi
+    if ! nym_boot_block_wanted; then
+        remove_boot_block "$NYM_BOOT_REASON" || return 1
+        return 0
+    fi
+
+    logger -t nym-vpn "Installing boot-time kill-switch block: $NYM_BOOT_REASON"
+    if ! install_boot_block; then
+        logger -t nym-vpn "CRITICAL: failed to install boot-time kill-switch block (inet $BOOT_TABLE)"
+        return 1
+    fi
+
+    if nym_table_present; then
+        remove_boot_block "daemon policy went live meanwhile" || return 1
+    elif ! nym_boot_block_wanted; then
+        remove_boot_block "$NYM_BOOT_REASON" || return 1
+    fi
+    return 0
+}
+
 # Main logic
 main() {
+    local failed=0
+
     # If the daemon ever persists its blocking ruleset, re-apply it (the inet nym
     # table is otherwise daemon-managed and survives the reload on its own — we
     # must NOT delete it here, or a firewall reload would silently drop the
@@ -118,8 +241,12 @@ main() {
         nft -f "$RULES_NFT" 2>/dev/null || logger -t nym-vpn "Failed to apply saved rules"
     fi
 
+    # Boot-time block before the tunnel plane: fail closed first.
+    reconcile_boot_block || failed=1
+
     # Always restore the in-fw4 tunnel integration that the reload wiped.
     restore_fw4_tunnel_rules
+    return "$failed"
 }
 
 main "$@"

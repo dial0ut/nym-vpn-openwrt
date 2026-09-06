@@ -21,6 +21,17 @@ pub const FW3_TRANSITION_PATH: &str = "/tmp/nym-firewall.transition";
 /// naming with the fw4 include script, which reads it as an optional hint.
 pub const IFACES_PATH: &str = "/tmp/nym-firewall.ifaces";
 
+/// nftables table holding the boot-time kill-switch block. `fw4-include.sh`
+/// installs it at firewall start when the kill-switch is armed
+/// (`fw-boot-guard.sh`: on in the daemon's saved settings, daemon enabled at
+/// boot, not stopped by the administrator) and no `inet nym` table exists yet
+/// — the window between network-up and this daemon's first policy. The fw4
+/// backend deletes it as the last step of every apply and reset; the init
+/// script and package prerm delete it on explicit stop and removal. The name
+/// is a contract with those scripts. fw3 needs no counterpart: its include
+/// reuses the `NYM_EMERGENCY_*` chains, which the fw3 backend already lifts.
+pub const FW4_BOOT_TABLE: &str = "nym_boot";
+
 /// fw3 hook chains — user chains in the `filter` table that survive a fw3
 /// reload. Our chains are jumped to from the front of these.
 pub const FW3_HOOK_INPUT: &str = "input_rule";

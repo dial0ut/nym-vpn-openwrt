@@ -17,10 +17,16 @@
 #   and this script re-applies them after every reload. While the transition
 #   marker exists it installs dedicated emergency OUTPUT/FORWARD drops (reply
 #   traffic for inbound management sessions excepted) instead of reading or
-#   cleaning partially-updated state. No rules files means
-#   no blocking policy is in force (kill-switch off, or daemon stopped) and
-#   any leftover Nym chains are torn down instead. The init script runs this
-#   script for that cleanup branch on explicit daemon stop, too.
+#   cleaning partially-updated state. No rules files means no blocking policy
+#   is in force: the kill-switch is off, the daemon was stopped, or — the boot
+#   window — the daemon (S90) has not run yet since power-on while the
+#   firewall (S19) and network (S20) are already up. In that last case, when
+#   fw-boot-guard.sh says the kill-switch is armed, the same emergency chains
+#   are installed with a boot rule set that also lets the router come up and
+#   stay manageable from the LAN; the daemon lifts them with its first policy
+#   exactly as it lifts a transition block. Otherwise any leftover Nym chains
+#   are torn down. The init script runs this script for that cleanup branch on
+#   explicit daemon stop, too.
 #
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright 2025 Nym Technologies SA <contact@nymtech.net>
@@ -49,6 +55,28 @@ NAT_CHAIN="NYM_POSTROUTING"
 FORWARD_LAN_CHAIN="NYM_FORWARD_LAN"
 EMERGENCY_OUT="NYM_EMERGENCY_OUT"
 EMERGENCY_FWD="NYM_EMERGENCY_FWD"
+
+# Destinations the boot-time block always lets through: the LAN set the
+# daemon's Blocked policy uses (RFC1918, ULA) plus link-local, and multicast
+# for router-originated traffic only. Mirrors policy.rs.
+LAN_NETS_V4="10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16"
+LAN_NETS_V6="fe80::/10 fc00::/7"
+MCAST_V4="224.0.0.0/4"
+MCAST_V6="ff00::/8"
+
+# Boot-time kill-switch guard: the shared decision logic. A missing helper
+# must fail towards not blocking, never towards a block nothing can lift.
+NYM_SHARE_DIR="${NYM_SHARE_DIR:-/usr/share/nym-vpn}"
+if [ -r "$NYM_SHARE_DIR/fw-boot-guard.sh" ]; then
+    # shellcheck source-path=SCRIPTDIR
+    # shellcheck source=fw-boot-guard.sh
+    . "$NYM_SHARE_DIR/fw-boot-guard.sh"
+else
+    nym_boot_block_wanted() {
+        NYM_BOOT_REASON="$NYM_SHARE_DIR/fw-boot-guard.sh is missing; not blocking"
+        return 1
+    }
+fi
 
 # Make a jump lead its hook chain. Mode "first": it must be rule 1. Mode
 # "leading": only jumps to our own NYM_* chains may precede it (a foreign
@@ -113,10 +141,19 @@ setup_jumps() {
 # opened to it) or those management sessions would be dropped on the way out.
 # Router-originated flows are in the ORIGINAL direction and stay blocked.
 # IPv6 neighbour discovery is kept so on-link reachability survives.
+#
+# Two rule sets share the chains. "transition" (the default) is the strict
+# block for a policy change in flight or a failed restore. "boot" covers the
+# window before the daemon's first policy since power-on and additionally
+# lets the router come up and stay manageable: loopback, DHCP/DHCPv6 as client
+# and server, IPv6 router solicitation, and LAN/link-local/multicast
+# destinations — the base of the daemon's own Blocked policy. The daemon tears
+# both down the same way once its live state has converged.
 emergency_block() {
-    local ipt="$1" restore="${1}-restore"
+    local ipt="$1" mode="${2:-transition}" restore="${1}-restore"
 
     emergency_rules() {
+        local net
         cat <<EOF
 *filter
 :$EMERGENCY_OUT - [0:0]
@@ -125,11 +162,41 @@ emergency_block() {
 -F $EMERGENCY_FWD
 -A $EMERGENCY_OUT -m conntrack --ctstate RELATED,ESTABLISHED --ctdir REPLY -j ACCEPT
 EOF
+        if [ "$mode" = "boot" ]; then
+            echo "-A $EMERGENCY_OUT -o lo -j ACCEPT"
+            if [ "$ipt" = "ip6tables" ]; then
+                cat <<EOF
+-A $EMERGENCY_OUT -p udp --sport 546 --dport 547 -j ACCEPT
+-A $EMERGENCY_OUT -p udp --sport 547 --dport 546 -j ACCEPT
+-A $EMERGENCY_OUT -p icmpv6 --icmpv6-type router-solicitation -j ACCEPT
+EOF
+            else
+                cat <<EOF
+-A $EMERGENCY_OUT -p udp --sport 68 --dport 67 -j ACCEPT
+-A $EMERGENCY_OUT -p udp --sport 67 --dport 68 -j ACCEPT
+EOF
+            fi
+        fi
         if [ "$ipt" = "ip6tables" ]; then
             cat <<EOF
 -A $EMERGENCY_OUT -p icmpv6 --icmpv6-type neighbour-solicitation -j ACCEPT
 -A $EMERGENCY_OUT -p icmpv6 --icmpv6-type neighbour-advertisement -j ACCEPT
 EOF
+        fi
+        if [ "$mode" = "boot" ]; then
+            if [ "$ipt" = "ip6tables" ]; then
+                # shellcheck disable=SC2086  # word-split the network lists
+                set -- $LAN_NETS_V6
+                echo "-A $EMERGENCY_OUT -d $MCAST_V6 -j ACCEPT"
+            else
+                # shellcheck disable=SC2086
+                set -- $LAN_NETS_V4
+                echo "-A $EMERGENCY_OUT -d $MCAST_V4 -j ACCEPT"
+            fi
+            for net in "$@"; do
+                echo "-A $EMERGENCY_OUT -d $net -j ACCEPT"
+                echo "-A $EMERGENCY_FWD -d $net -j ACCEPT"
+            done
         fi
         cat <<EOF
 -A $EMERGENCY_OUT -j DROP
@@ -297,6 +364,93 @@ kernel_ipv6_enabled() {
         && [ "$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null)" != "1" ]
 }
 
+# Re-apply the persisted policy (the daemon has applied one since boot) for
+# every family in force.
+restore_policy() {
+    local failed=0
+
+    apply_rules "iptables-restore" "$RULES_V4" "iptables" || failed=1
+    if [ -f "$RULES_V6" ]; then
+        apply_rules "ip6tables-restore" "$RULES_V6" "ip6tables" || failed=1
+    elif kernel_ipv6_enabled; then
+        # The daemon persisted a v4 policy while IPv6 was disabled, but
+        # the kernel now routes v6. Never turn that state transition into
+        # a v6 bypass during reload; block until the daemon reapplies.
+        logger -t nym-vpn "IPv6 became enabled without a saved policy; installing emergency block"
+        emergency_block "ip6tables" || failed=1
+    else
+        cleanup_filter "ip6tables"
+        cleanup_mangle "ip6tables"
+    fi
+    return "$failed"
+}
+
+# Whether the daemon's own kill-switch chains are hooked for IPv4 — a live
+# policy, not merely a persisted one, protects the router.
+policy_hooked() {
+    iptables -w -C "$HOOK_OUTPUT" -j "$NYM_OUTPUT" 2>/dev/null \
+        && iptables -w -C "$HOOK_FORWARD" -j "$NYM_FORWARD" 2>/dev/null
+}
+
+lift_emergency() {
+    logger -t nym-vpn "Lifting boot-time kill-switch block: $1"
+    cleanup_emergency "iptables" || return 1
+    cleanup_emergency "ip6tables" 2>/dev/null || true
+}
+
+# No persisted policy: the kill-switch is off, the daemon was stopped, or it
+# has not run yet since boot. Stale policy chains go either way; then either
+# arm the boot-time block or make sure none is left behind.
+handle_no_policy() {
+    local failed=0
+
+    cleanup_filter "iptables"
+    cleanup_mangle "iptables"
+    cleanup_filter "ip6tables"
+    cleanup_mangle "ip6tables"
+
+    if ! nym_boot_block_wanted; then
+        logger -t nym-vpn "No active rules, cleaning up ($NYM_BOOT_REASON)"
+        cleanup_emergency "iptables" || failed=1
+        cleanup_emergency "ip6tables" 2>/dev/null || true
+        return "$failed"
+    fi
+
+    logger -t nym-vpn "Installing boot-time kill-switch block: $NYM_BOOT_REASON"
+    if emergency_block "iptables" boot; then
+        logger -t nym-vpn "Boot-time iptables kill-switch block installed"
+    else
+        logger -t nym-vpn "CRITICAL: failed to install boot-time iptables kill-switch block"
+        failed=1
+    fi
+    if kernel_ipv6_enabled; then
+        if emergency_block "ip6tables" boot; then
+            logger -t nym-vpn "Boot-time ip6tables kill-switch block installed"
+        else
+            logger -t nym-vpn "CRITICAL: failed to install boot-time ip6tables kill-switch block"
+            failed=1
+        fi
+    fi
+
+    # Re-check after installing. The daemon persists its state before it lifts
+    # the emergency chains and persists a kill-switch toggle before it opens
+    # the firewall, so a decision that raced either is caught here instead of
+    # leaving a block only the daemon's next state change would lift. A
+    # transition marker means the daemon is mid-apply and lifts the block
+    # itself; a persisted policy that is not hooked yet means the daemon is
+    # about to activate it and does the same.
+    if [ -f "$TRANSITION_FILE" ]; then
+        :
+    elif [ -f "$RULES_V4" ]; then
+        if policy_hooked; then
+            lift_emergency "daemon policy went live meanwhile" || failed=1
+        fi
+    elif ! nym_boot_block_wanted; then
+        lift_emergency "$NYM_BOOT_REASON" || failed=1
+    fi
+    return "$failed"
+}
+
 # Main logic
 main() {
     local failed=0
@@ -315,28 +469,9 @@ main() {
     fi
 
     if [ -f "$RULES_V4" ]; then
-        apply_rules "iptables-restore" "$RULES_V4" "iptables" || failed=1
-        if [ -f "$RULES_V6" ]; then
-            apply_rules "ip6tables-restore" "$RULES_V6" "ip6tables" || failed=1
-        elif kernel_ipv6_enabled; then
-            # The daemon persisted a v4 policy while IPv6 was disabled, but
-            # the kernel now routes v6. Never turn that state transition into
-            # a v6 bypass during reload; block until the daemon reapplies.
-            logger -t nym-vpn "IPv6 became enabled without a saved policy; installing emergency block"
-            emergency_block "ip6tables" || failed=1
-        else
-            cleanup_filter "ip6tables"
-            cleanup_mangle "ip6tables"
-        fi
+        restore_policy || failed=1
     else
-        # No blocking policy in force: kill-switch off or daemon stopped.
-        logger -t nym-vpn "No active rules, cleaning up"
-        cleanup_filter "iptables"
-        cleanup_mangle "iptables"
-        cleanup_filter "ip6tables"
-        cleanup_mangle "ip6tables"
-        cleanup_emergency "iptables" || failed=1
-        cleanup_emergency "ip6tables" 2>/dev/null || true
+        handle_no_policy || failed=1
     fi
 
     # Always reconcile the tunnel plane (masquerade + LAN forwarding) with
