@@ -2,6 +2,8 @@
 // Behavioural checks for the NymVPN LuCI view. Loads the real modules through
 // the LuCI emulation in luci-env.js with a scripted rpc, drives the DOM the
 // way a user would, and asserts on what the page does. Run with `npm test`.
+const fs = require('fs');
+const path = require('path');
 const { createEnv } = require('./luci-env');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -145,6 +147,62 @@ async function scenarioStructure() {
   check(byId(t2, 'killswitch-toggle').disabled && byId(t2, 'killswitch-row').style.opacity === '0.5', 'legacy split on: kill-switch disabled and dimmed');
   check(q(t2, '.nym-inbound-section').style.display === 'none' && q(t2, '.nym-split-section').style.display === 'none', 'legacy split on: inbound and split sections hidden');
   check(byId(t2, 'legacy-split-note').style.display === 'block' && /luci-app-pbr/.test(byId(t2, 'legacy-split-note').textContent), 'legacy split on: PBR note stands in for the exclusions');
+}
+
+// The cards carry one short clause per row; the full explanation sits behind
+// an (i) button that expands inline, remembers itself in localStorage and
+// links into the LuCI guide. Anchors are checked against the real headings
+// of docs/guide/luci.md so a renamed section breaks the build here.
+async function scenarioDisclosure() {
+  section('progressive disclosure');
+  const t = setup();
+  const descs = qa(t, '.nym-toggle-desc').map((d) => d.textContent);
+  const longest = Math.max(...descs.map((d) => d.length));
+  check(descs.length >= 12 && longest <= 60, 'every row description is one clause of at most 60 characters (rows ' + descs.length + ', longest ' + longest + ')');
+  check(qa(t, '.nym-card-description').length === 0 && qa(t, '.nym-tuning-warning').length === 0 && qa(t, '.nym-group-desc').length === 0, 'no card lead, tuning warning or static group description remains');
+
+  const rowsWithMore = qa(t, '.nym-toggle-row').filter((r) => r.querySelector('.nym-more'));
+  const titles = rowsWithMore.map((r) => r.querySelector('.nym-toggle-title').textContent);
+  check(eq(titles, ['Kill-Switch', 'Gateway Independence', 'Server Family Reminders', 'Always On', 'Two-Hop Mode', 'Circumvention Transports', 'Stealth API Connect', 'IPv6', 'Legacy Split Tunneling (PBR)', 'Disable Poisson Delays', 'Disable Background Cover Traffic', 'Custom DNS', 'Ad Blocking']), 'long-form text behind an expander on every switch row: ' + JSON.stringify(titles));
+  check(rowsWithMore.every((r) => {
+    const b = r.querySelector('.nym-toggle-head .nym-info-btn');
+    const p = r.querySelector('.nym-more');
+    return b && b.tagName === 'BUTTON' && b.getAttribute('type') === 'button' && b.getAttribute('aria-controls') === p.id
+      && b.getAttribute('aria-expanded') === 'false' && p.hidden && /^More about /.test(b.getAttribute('aria-label'));
+  }), 'each expander is a type=button in the row head, aria-expanded=false, controlling its hidden panel');
+  // Own head only: Protection contains the Inbound Services group.
+  const groupsWithMore = qa(t, '.nym-group').filter((g) => g.querySelector(':scope > .nym-group-head .nym-info-btn')).map((g) => g.querySelector(':scope > .nym-group-head .nym-group-title').textContent);
+  check(eq(groupsWithMore, ['Inbound Services', 'Exclusions']), 'group-level expanders on Inbound Services and Exclusions: ' + JSON.stringify(groupsWithMore));
+
+  const ksRow = byId(t, 'killswitch-row');
+  const ksBtn = ksRow.querySelector('.nym-info-btn');
+  const ksPanel = ksRow.querySelector('.nym-more');
+  const savesBefore = callsTo(t, 'tunnel_set').length;
+  const wasChecked = byId(t, 'killswitch-toggle').checked;
+  ksBtn.click();
+  check(ksBtn.getAttribute('aria-expanded') === 'true' && !ksPanel.hidden && ksBtn.classList.contains('open'), 'click opens: aria-expanded=true, panel shown');
+  check(byId(t, 'killswitch-toggle').checked === wasChecked && callsTo(t, 'tunnel_set').length === savesBefore, 'opening the details neither flips the switch nor saves');
+
+  const link = ksPanel.querySelector('a.nym-learn-more');
+  check(link && link.getAttribute('href') === 'https://docs.dial0ut.org/guide/luci/#kill-switch' && link.target === '_blank' && /noopener/.test(link.rel), 'Learn more links to the guide anchor in a new tab');
+  const slugify = (h) => h.replace(/[^\w\s-]/g, '').trim().toLowerCase().replace(/[-\s]+/g, '-');
+  const headings = fs.readFileSync(path.resolve(__dirname, '..', '..', 'docs', 'guide', 'luci.md'), 'utf8')
+    .split('\n').filter((l) => /^#{1,6} /.test(l)).map((l) => slugify(l.replace(/^#+\s*/, '')));
+  const hrefs = qa(t, 'a.nym-learn-more').map((a) => a.getAttribute('href'));
+  const bad = hrefs.filter((h) => h.indexOf('https://docs.dial0ut.org/guide/luci/#') !== 0 || headings.indexOf(h.split('#')[1]) === -1);
+  check(hrefs.length === rowsWithMore.length + groupsWithMore.length && bad.length === 0, 'every Learn more anchor is a heading in docs/guide/luci.md' + (bad.length ? ' — missing ' + JSON.stringify(bad) : ''));
+
+  check(t.window.localStorage.getItem('nym-more:killswitch-toggle') === '1', 'open state remembered in localStorage');
+  const again = t.modules['nym-vpn.cards.tunnel-settings'].render(t.modules['nym-vpn.store'], t.modules['nym-vpn.api']);
+  const againRow = again.querySelector('#killswitch-row');
+  check(againRow.querySelector('.nym-info-btn').getAttribute('aria-expanded') === 'true' && !againRow.querySelector('.nym-more').hidden, 're-render restores the remembered open state');
+  ksBtn.click();
+  check(ksBtn.getAttribute('aria-expanded') === 'false' && ksPanel.hidden && t.window.localStorage.getItem('nym-more:killswitch-toggle') === null, 'click again closes and forgets');
+
+  check(qa(t, '.nym-toggle-tag').length >= 6 && qa(t, '.nym-toggle-tag').every((tg) => tg.title === 'Takes effect on the next connect'), 'reconnect tags carry the convention in their title');
+  check(ksRow.querySelector('.nym-toggle-warning') && byId(t, 'legacy-split-note') && byId(t, 'gw-independence-note'), 'live-state notes (kill-switch off, PBR owns routing, older daemon) are kept');
+  const css = t.modules['nym-vpn.theme'].css;
+  check(/\.nym-info-btn:focus-visible/.test(css) && /\.nym-more\[hidden\] \{ display: none/.test(css) && !/\.nym-card-description/.test(css), 'theme: focus ring on the expander, hidden panels collapse, lead style retired');
 }
 
 async function scenarioTunnelToggles() {
@@ -579,6 +637,15 @@ async function scenarioInbound() {
   qa(t, '.nym-exemption-delete')[0].click();
   await sleep(20);
   check(eq(callsTo(t, 'inbound_del'), [{ proto: 'tcp', dport: 443 }]) && qa(t, '.nym-exemption-row').length === 1, 'delete removes the row');
+  // The add form is on demand once exemptions exist, open from the start
+  // when the list is empty; the RPC path above ran with it hidden.
+  const tAdd = setup({ init: baseInit({ inbound_exemptions: [{ proto: 'tcp', dport: 443 }] }) });
+  const opener = byId(tAdd, 'nym-inbound-add-open');
+  check(byId(tAdd, 'nym-inbound-add').hidden && !opener.hidden && opener.getAttribute('aria-expanded') === 'false' && opener.closest('.nym-group-titlebar') !== null, 'with exemptions: add form hidden behind the "+ Add exemption" opener in the group head');
+  opener.click();
+  check(!byId(tAdd, 'nym-inbound-add').hidden && opener.hidden && opener.getAttribute('aria-expanded') === 'true', 'opener reveals the form and retires itself');
+  const tEmpty = setup();
+  check(!byId(tEmpty, 'nym-inbound-add').hidden && byId(tEmpty, 'nym-inbound-add-open').hidden && /No exemptions configured\.$/.test(q(tEmpty, '.nym-exemption-empty').textContent), 'no exemptions: form open from the start, opener hidden');
   const t2 = setup({ init: baseInit({ tunnel_config: Object.assign({}, TUNNEL, { killswitch: 'off' }), inbound_exemptions: [{ proto: 'tcp', dport: 22 }] }) });
   check(q(t2, '.nym-exemption-status').textContent === 'Inert' && q(t2, '.nym-inbound-section').style.display === 'none', 'kill-switch off: rows Inert and section hidden');
   const t3 = setup({ rpc: { inbound_add: { success: false, error: 'denied' } } });
@@ -801,6 +868,7 @@ async function scenarioLogsAndDiagnostics() {
 (async () => {
   const started = Date.now();
   await scenarioStructure();
+  await scenarioDisclosure();
   await scenarioTunnelToggles();
   await scenarioIndependenceToggles();
   await scenarioFallbackTunnelGet();

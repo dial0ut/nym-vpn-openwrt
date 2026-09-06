@@ -132,7 +132,9 @@ return baseclass.extend({
         var dnsRow = toggle.row({
             id: 'dns-toggle',
             title: 'Custom DNS',
-            desc: 'Use custom DNS servers instead of the VPN defaults',
+            desc: 'Uses your own resolvers instead of the VPN\'s.',
+            more: 'Add servers one at a time; they replace the VPN\'s default resolvers for every client that uses the router for DNS, and the queries ride the tunnel while connected. If dnsmasq is set to noresolv (AdGuard Home, https-dns-proxy, stubby) the daemon steps aside and the card says so.',
+            docs: 'custom-dns',
             checked: !!dns_config.enabled,
             onChange: toggle.saver({
                 save: function() { return persist(); },
@@ -147,7 +149,9 @@ return baseclass.extend({
         var adblockRow = toggle.row({
             id: 'adblock-toggle',
             title: 'Ad Blocking',
-            desc: 'Block ads, trackers, and malware domains via DNS',
+            desc: 'Blocks ads, trackers and malware domains via DNS.',
+            more: 'DNS-level blocking on the resolvers the tunnel uses: blocked domains simply fail to resolve, so pages load without them.',
+            docs: 'ad-blocking',
             checked: !!ad_block.enabled,
             onChange: toggle.saver({
                 save: function(enabled) { return api.adBlockSet(enabled); },
@@ -180,8 +184,6 @@ return baseclass.extend({
             icon: assets.iconShield,
             title: 'DNS & Ad Blocking',
             body: [
-                E('div', { 'class': 'nym-card-description' },
-                    'Configure custom DNS servers and block ads at the DNS level.'),
                 userManagedNotice,
                 dnsRow,
                 // Current servers list (above) + single-server add panel

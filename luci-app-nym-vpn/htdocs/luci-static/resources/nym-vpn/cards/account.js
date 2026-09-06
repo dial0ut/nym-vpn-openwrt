@@ -235,11 +235,11 @@ return baseclass.extend({
                 var unavailableBody = [
                     E('div', { 'class': 'nym-account-state', 'style': 'background: var(--danger-dim); color: var(--danger)' },
                         flags.daemonRunning ? 'Service not responding' : 'Service not running'),
-                    E('div', { 'class': 'nym-card-description', 'style': 'margin: 16px 0' },
+                    E('div', { 'class': 'nym-state-note', 'style': 'margin: 16px 0' },
                         'The account state is unknown because the VPN service could not be reached. Your recovery phrase is still stored on this device — nothing has been removed.')
                 ];
                 if (!flags.daemonEnabled) {
-                    unavailableBody.push(E('div', { 'class': 'nym-card-description', 'style': 'margin-bottom: 16px; opacity: 0.8' },
+                    unavailableBody.push(E('div', { 'class': 'nym-state-note', 'style': 'margin-bottom: 16px; opacity: 0.8' },
                         'nym-vpnd is also not enabled at boot, so it will stay down after a reboot. Enable it from the Service Management card or with: /etc/init.d/nym-vpnd enable'));
                 }
                 unavailableBody.push(E('button', {
@@ -302,16 +302,14 @@ return baseclass.extend({
             if (flags.hasError) {
                 return E('div', { 'class': 'nym-account-logged-in' }, [
                     E('div', { 'class': 'nym-account-state', 'style': 'background: var(--danger-dim); color: var(--danger)' }, state || identity),
-                    E('div', { 'class': 'nym-card-description', 'style': 'margin: 16px 0' }, 'There is an issue with the account. You may need to logout and try again.'),
+                    E('div', { 'class': 'nym-state-note', 'style': 'margin: 16px 0' }, 'There is an issue with the account. You may need to logout and try again.'),
                     E('button', { 'class': 'nym-btn nym-btn-danger', 'style': 'width: 100%', 'click': logout }, 'Logout'),
                     E('button', { 'class': 'nym-btn nym-btn-secondary', 'style': 'width: 100%; margin-top: 8px', 'click': reset }, 'Reset account state'),
-                    E('div', { 'class': 'nym-card-description', 'style': 'margin-top: 8px; opacity: 0.7' }, 'If Logout fails or the state is stuck, Reset stops the service and clears the stored account.')
+                    E('div', { 'class': 'nym-state-note', 'style': 'margin-top: 8px; opacity: 0.7' }, 'If Logout fails or the state is stuck, Reset stops the service and clears the stored account.')
                 ]);
             }
 
             var form = E('form', { 'submit': login }, [
-                E('div', { 'class': 'nym-card-description' },
-                    'Enter your Nym account recovery phrase to connect.'),
                 E('div', { 'class': 'nym-form-group' }, [
                     E('label', { 'class': 'nym-form-label' }, 'Recovery Phrase'),
                     // A textarea, not a text input: browsers ignore
@@ -341,7 +339,7 @@ return baseclass.extend({
             if (flags.isLoggedOut && flags.identity) {
                 return E('div', {}, [
                     form,
-                    E('div', { 'class': 'nym-card-description', 'style': 'margin-top: 16px; opacity: 0.7' }, 'Stale account data detected on this device. If login fails, reset the stored account state.'),
+                    E('div', { 'class': 'nym-state-note', 'style': 'margin-top: 16px; opacity: 0.7' }, 'Stale account data detected on this device. If login fails, reset the stored account state.'),
                     E('button', { 'class': 'nym-btn nym-btn-secondary', 'style': 'width: 100%; margin-top: 8px', 'click': reset }, 'Reset account state')
                 ]);
             }

@@ -1,6 +1,7 @@
 'use strict';
 'require baseclass';
 'require dom';
+'require nym-vpn.components.details as details';
 
 // Expandable settings card: header (icon, title, chevron) that toggles the
 // 'expanded' class, and a body. group() is the sub-heading used to break a
@@ -18,13 +19,30 @@ function children(list) {
 
 return baseclass.extend({
     // A titled run inside a card body. opts: {title, desc, body (children),
-    // id, cls}. The title is a muted micro-label, so a card reads as a few
-    // short groups instead of one wall of rows.
+    // id, cls, more, moreId, docs, action}. The title is a muted micro-label,
+    // so a card reads as a few short groups instead of one wall of rows.
+    // `desc` is for live state only; standing advice goes in `more`, behind
+    // the same (i) button the switch rows use. `action` is an element placed
+    // at the right end of the title bar (an "Add" opener, say).
     group: function(opts) {
         var attrs = { 'class': 'nym-group' + (opts.cls ? ' ' + opts.cls : '') };
         if (opts.id) attrs.id = opts.id;
-        var head = [E('div', { 'class': 'nym-group-title' }, opts.title)];
+        var titleChildren = [E('span', {}, opts.title)];
+        var more = null;
+        if (opts.more) {
+            more = details.create({
+                id: opts.moreId || (opts.id || String(opts.title).toLowerCase().replace(/[^a-z0-9]+/g, '-')),
+                label: opts.title,
+                text: opts.more,
+                docs: opts.docs
+            });
+            titleChildren.push(more.button);
+        }
+        var titleBar = [E('div', { 'class': 'nym-group-title' }, titleChildren)];
+        if (opts.action) titleBar.push(opts.action);
+        var head = [E('div', { 'class': 'nym-group-titlebar' }, titleBar)];
         if (opts.desc) head.push(E('div', { 'class': 'nym-group-desc' }, opts.desc));
+        if (more) head.push(more.panel);
         return E('div', attrs, [
             E('div', { 'class': 'nym-group-head' }, head)
         ].concat(children(opts.body)));

@@ -204,8 +204,6 @@ return baseclass.extend({
             icon: assets.iconDiagnostic,
             title: 'Diagnostics',
             body: [
-                E('div', { 'class': 'nym-card-description' },
-                    'Run a connectivity self-test against DNS, the Nym VPN API, and the selected gateway.'),
                 E('div', { 'class': 'nym-diag-controls' }, [
                     runBtn,
                     E('label', { 'class': 'nym-diag-check' }, [skipDns, ' Skip DNS']),

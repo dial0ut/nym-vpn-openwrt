@@ -224,8 +224,6 @@ return baseclass.extend({
                 }
             },
             body: [
-                E('div', { 'class': 'nym-card-description' },
-                    'Live tail of nym-vpnd log entries from the system log.'),
                 E('div', { 'class': 'nym-log-controls' }, [
                     linesSelect,
                     intervalSelect,

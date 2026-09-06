@@ -16,10 +16,12 @@
 //               always-on watchdog with its check interval
 //   Transport   two-hop, circumvention transports, stealth API, IPv6
 //
-// Switches that only apply on the next connect carry a 'reconnect' tag;
-// the card lead explains it once. The legacy PBR switch lives in the Split
-// Tunneling card; its effect on the kill-switch arrives through the store's
-// 'tunnel-switch' event.
+// Each row states what the switch does in one clause; the full explanation
+// sits behind the row's (i) button (components/details via toggle.row's
+// `more`), with a Learn more link into the LuCI guide. Switches that only
+// apply on the next connect carry a 'reconnect' tag. The legacy PBR switch
+// lives in the Split Tunneling card; its effect on the kill-switch arrives
+// through the store's 'tunnel-switch' event.
 
 var E = dom.create.bind(dom);
 
@@ -58,7 +60,9 @@ return baseclass.extend({
             id: 'killswitch-toggle',
             title: 'Kill-Switch',
             tag: 'reconnect',
-            desc: 'Block LAN clients from reaching the internet unless the VPN is connected.',
+            desc: 'Blocks all traffic outside the tunnel.',
+            more: 'A firewall block only: traffic is routed into the tunnel whenever connected regardless of this setting. Off, LAN traffic falls back to the WAN in the clear while the tunnel is down. Split-tunnel exclusions work with it on. Greyed while the legacy PBR switch owns the routing.',
+            docs: 'kill-switch',
             extra: [killswitchWarn],
             checked: killswitchOn,
             disabled: legacyOn,
@@ -116,7 +120,9 @@ return baseclass.extend({
             id: 'gw-independence-toggle',
             title: 'Gateway Independence',
             tag: 'reconnect',
-            desc: 'Require entry and exit to be run by different operators, in different networks and subnets.',
+            desc: 'Requires entry and exit from different operators.',
+            more: 'Entry and exit must be run by different operators (node families), in different networks (ASNs) and different subnets, so no single operator sees both ends of the tunnel. On by default; the daemon refuses a pair that fails. Off allows any combination.',
+            docs: 'gateway-independence',
             // Shown only when a real tunnel_get reply lacks the field, i.e.
             // the daemon predates the feature.
             extra: [independenceNote],
@@ -127,7 +133,9 @@ return baseclass.extend({
             rowId: 'family-reminders-row',
             id: 'family-reminders-toggle',
             title: 'Server Family Reminders',
-            desc: 'Warn before connecting when entry and exit share an operator family. Off, the connection goes ahead relaxed and a notice says so.',
+            desc: 'Warns before connecting through one operator family.',
+            more: 'Before connecting, the page asks the daemon which entry/exit pair your selection resolves to. If they share an operator family you can connect anyway (criteria relaxed for that connection only) or change servers. Off, the connection goes ahead relaxed and a notice says so.',
+            docs: 'server-family-reminders',
             checked: store.independence.notifications,
             onChange: independenceSaver('notifications')
         });
@@ -166,7 +174,9 @@ return baseclass.extend({
             id: 'two-hop-toggle',
             title: 'Two-Hop Mode',
             tag: 'reconnect',
-            desc: 'Faster 2-hop WireGuard routing instead of the 5-hop mixnet. Less private.',
+            desc: 'Faster 2-hop WireGuard instead of the 5-hop mixnet.',
+            more: '2-hop WireGuard skips the mixnet: no per-hop delays or cover traffic, so it is much faster but offers weaker protection against traffic analysis. The two hops still hide your address from the exit.',
+            docs: 'two-hop-mode',
             checked: switches.two_hop,
             onChange: saveSwitch('two_hop')
         });
@@ -175,7 +185,9 @@ return baseclass.extend({
             id: 'circumvention-toggle',
             title: 'Circumvention Transports',
             tag: 'reconnect',
-            desc: 'Wrap the entry gateway connection in a QUIC transport to get past censorship. Two-hop mode only.',
+            desc: 'Wraps the entry connection to get past censorship.',
+            more: 'Wraps the entry gateway connection in a QUIC transport. Two-hop mode only. While on, entry gateways that cannot carry it are greyed in the picker with a No CT tag and cannot be selected.',
+            docs: 'circumvention-transports',
             checked: switches.circumvention,
             onChange: saveSwitch('circumvention')
         });
@@ -183,7 +195,9 @@ return baseclass.extend({
         var stealthRow = toggle.row({
             id: 'stealth-api-toggle',
             title: 'Stealth API Connect',
-            desc: 'Reach the Nym API through cover domains from the first request, not only after a direct one fails. Helps where the API is blocked; API calls get slower.',
+            desc: 'Reaches the Nym API through cover domains.',
+            more: 'The daemon normally reaches the Nym API (account, gateway directory, discovery) directly and only falls back to cover domains — domain fronting through a CDN — when a direct request fails. On, every API request goes through them from the start. Use it where the API hosts are blocked; API calls get slower. Applies at once.',
+            docs: 'stealth-api-connect',
             // The daemon reports whether the network environment publishes
             // cover domains at all; without them the toggle has nothing to
             // route through.
@@ -199,7 +213,9 @@ return baseclass.extend({
             id: 'ipv6-toggle',
             title: 'IPv6',
             tag: 'reconnect',
-            desc: 'Route IPv6 through the tunnel. Only useful when the exit gateway carries IPv6; otherwise dual-stack clients stall.',
+            desc: 'Routes IPv6 through the tunnel.',
+            more: 'Off by default: most exit gateways have no IPv6 egress, and IPv6 that is tunnelled and then dropped makes dual-stack clients stall on every new connection. Turn it on only if your exit demonstrably carries IPv6.',
+            docs: 'ipv6',
             checked: switches.ipv6,
             onChange: saveSwitch('ipv6')
         });
@@ -245,7 +261,9 @@ return baseclass.extend({
             rowStyle: 'flex-wrap: wrap',
             id: 'always-on-toggle',
             title: 'Always On',
-            desc: 'Reconnect automatically when the tunnel drops, escalating to a daemon restart if soft reconnects fail.',
+            desc: 'Reconnects when the tunnel drops.',
+            more: 'A watchdog: soft reconnects first, then a daemon restart with growing backoff. It checks at the chosen interval and is also woken by WAN link events, so the tunnel is re-checked as soon as the WAN comes back. Its log lines are tagged nym-watchdog.',
+            docs: 'always-on',
             extra: [alwaysOnStatus],
             after: [intervalRow],
             checked: !!watchdog.always_on,
@@ -271,11 +289,6 @@ return baseclass.extend({
             icon: assets.iconTunnel,
             title: 'Tunnel Settings',
             body: [
-                E('div', { 'class': 'nym-card-description' }, [
-                    'Switches save as soon as they are flipped. Those marked ',
-                    E('span', { 'class': 'nym-toggle-tag' }, 'reconnect'),
-                    ' take effect on the next connect; the rest apply at once.'
-                ]),
                 card.group({
                     title: 'Protection',
                     body: [
