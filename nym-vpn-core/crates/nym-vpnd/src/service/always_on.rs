@@ -201,7 +201,7 @@ impl AlwaysOn {
     /// A tunnel state event from the state machine.
     pub fn on_tunnel_state(&mut self, state: &TunnelState, now: Instant) -> Action {
         let previous = self.last_seen;
-        let action = match state {
+        match state {
             TunnelState::Connected { .. } => {
                 self.last_seen = Seen::Connected;
                 self.reset_series();
@@ -299,8 +299,7 @@ impl AlwaysOn {
                 }
                 Action::Nothing
             }
-        };
-        action
+        }
     }
 
     fn schedule(&mut self, delay: Duration, reason: &ErrorStateReason, now: Instant) {
