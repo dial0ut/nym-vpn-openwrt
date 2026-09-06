@@ -78,8 +78,10 @@ mkdir -p "$DATA_DIR/www/luci-static/resources/view/nym-vpn"
 cp "$LUCI_DIR/htdocs/luci-static/resources/view/nym-vpn/"*.js \
    "$DATA_DIR/www/luci-static/resources/view/nym-vpn/"
 
+# Module tree (api, store, components/, flows/, cards/, theme, ...) — the
+# view requires these by dotted name, so the directory layout must survive.
 mkdir -p "$DATA_DIR/www/luci-static/resources/nym-vpn"
-cp "$LUCI_DIR/htdocs/luci-static/resources/nym-vpn/"*.js \
+cp -R "$LUCI_DIR/htdocs/luci-static/resources/nym-vpn/." \
    "$DATA_DIR/www/luci-static/resources/nym-vpn/"
 
 # === DATA: RPC backend ===

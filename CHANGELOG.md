@@ -194,6 +194,12 @@ the GitHub release notes.
   reboot. Existing registrations are reconciled on upgrade, and `prerm` no
   longer deletes the include on upgrades, so an interrupted upgrade cannot
   leave the router without it.
+- The LuCI Tunnel Settings card now leads with the **Kill-Switch** switch; the
+  other rows keep their order. Behind the page, the web UI was restructured
+  from one view file into a module tree (`api`, `store`, `components/`,
+  `flows/`, `cards/`) with a jsdom test harness under `luci-app-nym-vpn/tests/`;
+  nothing else about it changes, apart from the statistics card going with the
+  telemetry removal.
 
 ## [1.34.0] - 2026-08-21
 

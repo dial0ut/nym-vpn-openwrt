@@ -1,6 +1,9 @@
 'use strict';
 'require baseclass';
-'require dom';
+
+// Small presentational helpers shared by the cards: uptime formatting, the
+// legacy uptime storage key, quality icons, the connected-gateway panel and
+// clipboard copy.
 
 return baseclass.extend({
     UPTIME_STORAGE_KEY: 'nym_vpn_connection_start',
@@ -71,148 +74,33 @@ return baseclass.extend({
         container.innerHTML = html;
     },
 
-    createCountrySelect: function(countries, name, onSelect, getCountryDisplay) {
-        var E = dom.create.bind(dom);
-        var options = [E('option', { 'value': 'none' }, '— Select Country —')];
-        options.push(E('option', { 'value': 'random' }, '🌐 Random'));
-
-        countries.forEach(function(c) {
-            var info = getCountryDisplay(c.code);
-            options.push(E('option', { 'value': c.code },
-                info.flag + ' ' + info.name + ' (' + c.count + ')'));
-        });
-
-        return E('select', {
-            'class': 'nym-select',
-            'name': name,
-            'change': onSelect
-        }, options);
+    // Copy `text` to the clipboard and call done(ok). Prefers the async
+    // clipboard API (HTTPS / localhost) and falls back to the legacy
+    // textarea + execCommand path for plain-HTTP LuCI.
+    copyText: function(text, done) {
+        var self = this;
+        if (navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) {
+            navigator.clipboard.writeText(text).then(function() { done(true); })
+                .catch(function() { done(self.legacyCopy(text)); });
+            return;
+        }
+        done(this.legacyCopy(text));
     },
 
-    createModalManager: function() {
-        var activeModal = null;
-        var E = dom.create.bind(dom);
-
-        var hide = function() {
-            if (activeModal && activeModal.parentNode) {
-                activeModal.parentNode.removeChild(activeModal);
-                activeModal = null;
-            }
-        };
-
-        var show = function(title, message, icon) {
-            hide();
-            activeModal = E('div', { 'class': 'nym-modal-overlay' }, [
-                E('div', { 'class': 'nym-modal' }, [
-                    E('div', { 'class': 'nym-modal-ring' }, [
-                        E('div', { 'class': 'nym-modal-ring-outer' }),
-                        E('div', { 'class': 'nym-modal-ring-inner' }, [
-                            E('div', { 'class': 'nym-modal-icon' }, icon || '◐')
-                        ])
-                    ]),
-                    E('div', { 'class': 'nym-modal-title' }, title),
-                    E('div', { 'class': 'nym-modal-message' }, message)
-                ])
-            ]);
-            document.body.appendChild(activeModal);
-        };
-
-        var fadeOut = function(callback) {
-            if (activeModal) {
-                activeModal.classList.add('fade-out');
-                setTimeout(function() {
-                    hide();
-                    if (callback) callback();
-                }, 500);
-            } else if (callback) {
-                callback();
-            }
-        };
-
-        var update = function(message) {
-            if (activeModal) {
-                var msgEl = activeModal.querySelector('.nym-modal-message');
-                if (msgEl) msgEl.textContent = message;
-            }
-        };
-
-        var setSuccess = function(title, message, icon) {
-            if (activeModal) {
-                activeModal.classList.add('success');
-                var titleEl = activeModal.querySelector('.nym-modal-title');
-                var msgEl = activeModal.querySelector('.nym-modal-message');
-                var iconEl = activeModal.querySelector('.nym-modal-icon');
-                if (titleEl && title) titleEl.textContent = title;
-                if (msgEl && message) msgEl.textContent = message;
-                if (iconEl && icon) iconEl.textContent = icon;
-            }
-        };
-
-        // cancelText relabels the safe (green) button; it defaults to
-        // 'Cancel' so existing callers are unchanged.
-        var confirm = function(title, message, icon, onConfirm, onCancel, confirmText, cancelText) {
-            hide();
-            activeModal = E('div', { 'class': 'nym-modal-overlay' }, [
-                E('div', { 'class': 'nym-modal' }, [
-                    E('div', { 'class': 'nym-modal-ring' }, [
-                        E('div', { 'class': 'nym-modal-ring-outer nym-modal-ring-static' }),
-                        E('div', { 'class': 'nym-modal-ring-inner' }, [
-                            E('div', { 'class': 'nym-modal-icon' }, icon || '⚠')
-                        ])
-                    ]),
-                    E('div', { 'class': 'nym-modal-title' }, title),
-                    E('div', { 'class': 'nym-modal-message' }, message),
-                    E('div', { 'class': 'nym-modal-buttons' }, [
-                        E('button', {
-                            'class': 'nym-btn nym-btn-primary',
-                            'click': function() { hide(); if (onCancel) onCancel(); }
-                        }, cancelText || 'Cancel'),
-                        E('button', {
-                            'class': 'nym-btn nym-btn-danger',
-                            'click': function() { if (onConfirm) onConfirm(); }
-                        }, confirmText || 'Confirm')
-                    ])
-                ])
-            ]);
-            document.body.appendChild(activeModal);
-        };
-
-        return { show: show, hide: hide, fadeOut: fadeOut, update: update, setSuccess: setSuccess, confirm: confirm };
-    },
-
-    createToastManager: function() {
-        var toastContainer = null;
-        var E = dom.create.bind(dom);
-
-        var ensureContainer = function() {
-            if (!toastContainer || !toastContainer.parentNode) {
-                toastContainer = E('div', { 'class': 'nym-toast-container' });
-                document.body.appendChild(toastContainer);
-            }
-            return toastContainer;
-        };
-
-        var removeToast = function(toast) {
-            if (toast && toast.parentNode) {
-                toast.style.animation = 'slideOut 0.3s ease forwards';
-                setTimeout(function() {
-                    if (toast.parentNode) toast.parentNode.removeChild(toast);
-                }, 300);
-            }
-        };
-
-        return {
-            show: function(message, type) {
-                var container = ensureContainer();
-                var icons = { success: '✓', error: '✕', warning: '⚠' };
-                var toast = E('div', { 'class': 'nym-toast ' + (type || 'success') }, [
-                    E('span', { 'class': 'nym-toast-icon' }, icons[type] || '✓'),
-                    E('span', { 'class': 'nym-toast-message' }, message),
-                    E('button', { 'class': 'nym-toast-close', 'click': function() { removeToast(toast); } }, '×')
-                ]);
-                container.appendChild(toast);
-                setTimeout(function() { removeToast(toast); }, 4000);
-            }
-        };
+    legacyCopy: function(text) {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.top = '0';
+        ta.style.left = '0';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        var ok = false;
+        try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+        document.body.removeChild(ta);
+        return ok;
     }
 });
