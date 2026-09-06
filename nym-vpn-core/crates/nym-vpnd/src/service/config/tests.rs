@@ -1082,8 +1082,9 @@ async fn test_stealth_api_persists_across_restart() {
     assert!(config_manager.config().stealth_api);
 }
 
-// A v8 file written before the field existed must load with it off and be
-// rewritten with the field present.
+// A v8 file written before the field existed must load with it off. The file is
+// already the latest version, so the loader leaves it alone; the field is
+// written out on the next save.
 #[tokio::test]
 async fn test_service_config_v8_without_stealth_api_loads_off() {
     let json_v8_content = r#"{
@@ -1127,47 +1128,18 @@ async fn test_service_config_v8_without_stealth_api_loads_off() {
   "inbound_exemptions": []
 }"#;
 
-    let json_latest_content = r#"{
-  "version": "v8",
-  "entry_point": {
-    "country": {
-      "two_letter_iso_country_code": "FR"
-    }
-  },
-  "exit_point": {
-    "country": {
-      "two_letter_iso_country_code": "BE"
-    }
-  },
-  "allow_lan": true,
-  "disable_ipv6": true,
-  "enable_two_hop": true,
-  "enable_bridges": false,
-  "enable_lewes_protocol": false,
-  "netstack": false,
-  "min_gateway_vpn_performance": null,
-  "residential_exit": false,
-  "enable_custom_dns": false,
-  "custom_dns": [],
-  "enable_ad_blocking": false,
-  "mixnet_traffic": {
-    "poisson_parameter_for_loop_cover_stream": null,
-    "average_packet_delay": null,
-    "message_sending_average_delay": null,
-    "disable_poisson_rate": false,
-    "disable_background_cover_traffic": false,
-    "min_mixnode_performance": null,
-    "min_gateway_mixnet_performance": null
-  },
-  "network_stats": {
-    "enabled": true,
-    "allow_disconnected": false
-  },
-  "killswitch": false,
-  "legacy_split_tunnel": false,
-  "inbound_exemptions": [],
-  "stealth_api": false
-}"#;
+    let temp_dir = tempdir().unwrap();
+    let network_config_path = temp_dir.path().join("tulips");
+    let _ = fs::create_dir_all(&network_config_path).await;
+    let json_path = network_config_path.join(DEFAULT_CONFIG_FILE_JSON);
+    fs::write(&json_path, json_v8_content).await.unwrap();
 
-    run_migrate_json_test(json_v8_content, json_latest_content).await;
+    let config_manager = VpnServiceConfigManager::new(&network_config_path, None)
+        .await
+        .unwrap();
+    assert!(!config_manager.config().stealth_api);
+
+    // No migration happened, so the file on disk is untouched.
+    let read_json_content = fs::read_to_string(&json_path).await.unwrap();
+    assert_eq!(json_v8_content, read_json_content);
 }
