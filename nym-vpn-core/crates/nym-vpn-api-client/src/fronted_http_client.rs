@@ -1,8 +1,41 @@
-use std::{collections::HashMap, net::IpAddr, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    net::IpAddr,
+    sync::{Arc, Once},
+    time::Duration,
+};
 
 use crate::{ResolverOverrides, error::VpnApiClientError};
-use nym_http_api_client::{Client, ClientBuilder, FrontPolicy, HickoryDnsResolver, Url, UserAgent};
+use nym_http_api_client::{Client, ClientBuilder, HickoryDnsResolver, Url, UserAgent};
 use nym_network_defaults::ApiUrl;
+
+pub use nym_http_api_client::FrontPolicy;
+
+/// Every client this crate builds for a fronting-capable URL follows the
+/// http-api-client's process-wide shared fronting policy, so a policy change
+/// reaches clients that already exist (account controller, gateway directory,
+/// discovery refresher) on their next request without rebuilding anything.
+///
+/// The library initialises that shared policy to `Off`; this crate has always
+/// fronted on retry. Seed the shared policy with `OnRetry` the first time
+/// anyone touches it, whichever side (builder or setter) gets there first.
+static SHARED_FRONT_POLICY_INIT: Once = Once::new();
+
+/// The policy in force when nobody has asked for anything else.
+pub const DEFAULT_FRONT_POLICY: FrontPolicy = FrontPolicy::OnRetry;
+
+fn init_shared_front_policy() {
+    SHARED_FRONT_POLICY_INIT.call_once(|| Client::set_shared_front_policy(DEFAULT_FRONT_POLICY));
+}
+
+/// Set the domain-fronting policy for every fronting-capable client built by
+/// this crate, existing and future. `Always` is what the apps call "Stealth API
+/// connect": route each API request via the cover domains instead of only
+/// falling back to them after a direct request fails.
+pub fn set_shared_front_policy(policy: FrontPolicy) {
+    init_shared_front_policy();
+    Client::set_shared_front_policy(policy);
+}
 
 pub async fn fronted_http_client(
     urls: Vec<Url>,
@@ -42,7 +75,9 @@ pub async fn fronted_http_client_builder(
     }
 
     if has_front {
-        builder = builder.with_fronting(Some(FrontPolicy::OnRetry));
+        // `None` selects the shared policy (see `set_shared_front_policy`).
+        init_shared_front_policy();
+        builder = builder.with_fronting(None);
     }
 
     // Add resolver overrides. venaco removed ClientBuilder::resolve_to_addrs; the

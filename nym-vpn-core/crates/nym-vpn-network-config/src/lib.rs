@@ -136,6 +136,26 @@ impl Network {
         self.nym_network.network.nym_vpn_api_urls.clone()
     }
 
+    /// Whether any Nym API URL in this environment carries cover domains.
+    /// Always-on fronting (Stealth API connect) can only route through those;
+    /// an environment without them leaves the setting with nothing to act on.
+    pub fn has_api_cover_domains(&self) -> bool {
+        let has_front = |api_url: &nym_network_defaults::ApiUrl| {
+            api_url
+                .front_hosts
+                .as_ref()
+                .is_some_and(|hosts| !hosts.is_empty())
+        };
+        self.nym_vpn_network.nym_vpn_api_urls.iter().any(has_front)
+            || self
+                .nym_network
+                .network
+                .nym_api_urls
+                .iter()
+                .flatten()
+                .any(has_front)
+    }
+
     pub fn nym_vpn_api_urls_as_urls(&self) -> Option<Vec<url::Url>> {
         self.nym_network
             .network

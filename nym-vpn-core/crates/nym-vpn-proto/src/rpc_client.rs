@@ -159,6 +159,15 @@ impl RpcClient {
         Ok(())
     }
 
+    pub async fn set_stealth_api(&mut self, stealth_api: bool) -> Result<()> {
+        self.0
+            .set_stealth_api(stealth_api)
+            .await
+            .map_err(Error::Rpc)?
+            .into_inner();
+        Ok(())
+    }
+
     pub async fn set_inbound_exemptions(
         &mut self,
         exemptions: Vec<nym_vpn_lib_types::InboundExemption>,

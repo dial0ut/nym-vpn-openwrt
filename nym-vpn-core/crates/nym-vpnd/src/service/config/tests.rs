@@ -190,7 +190,8 @@ location = "BE"
   },
   "killswitch": false,
   "legacy_split_tunnel": false,
-  "inbound_exemptions": []
+  "inbound_exemptions": [],
+  "stealth_api": false
 }"#;
 
     let entry_point = nym_vpn_lib_types::EntryPoint::Country {
@@ -252,7 +253,8 @@ identity = [ 99, 23, 98, 234, 66, 161, 195, 63, 155, 161, 250, 207, 17, 158, 136
   },
   "killswitch": false,
   "legacy_split_tunnel": false,
-  "inbound_exemptions": []
+  "inbound_exemptions": [],
+  "stealth_api": false
 }"#;
 
     let entry_point = nym_vpn_lib_types::EntryPoint::Gateway {
@@ -318,7 +320,8 @@ address = [5, 56, 84, 195, 94, 238, 210, 124, 65, 143, 209, 144, 22, 255, 91, 18
   },
   "killswitch": false,
   "legacy_split_tunnel": false,
-  "inbound_exemptions": []
+  "inbound_exemptions": [],
+  "stealth_api": false
 }"#;
 
     let entry_point = nym_vpn_lib_types::EntryPoint::Gateway {
@@ -374,7 +377,8 @@ exit_point = "Random"
   },
   "killswitch": false,
   "legacy_split_tunnel": false,
-  "inbound_exemptions": []
+  "inbound_exemptions": [],
+  "stealth_api": false
 }"#;
 
     let entry_point = nym_vpn_lib_types::EntryPoint::Random;
@@ -437,7 +441,8 @@ async fn test_service_config_migrate_from_v1() {
   },
   "killswitch": false,
   "legacy_split_tunnel": false,
-  "inbound_exemptions": []
+  "inbound_exemptions": [],
+  "stealth_api": false
 }"#;
 
     run_migrate_json_test(json_v1_content, json_latest_content).await;
@@ -509,7 +514,8 @@ async fn test_service_config_migrate_from_v2() {
   },
   "killswitch": true,
   "legacy_split_tunnel": false,
-  "inbound_exemptions": []
+  "inbound_exemptions": [],
+  "stealth_api": false
 }"#;
 
     run_migrate_json_test(json_v2_content, json_latest_content).await;
@@ -587,7 +593,8 @@ async fn test_service_config_migrate_from_v3() {
   },
   "killswitch": false,
   "legacy_split_tunnel": false,
-  "inbound_exemptions": []
+  "inbound_exemptions": [],
+  "stealth_api": false
 }"#;
 
     run_migrate_json_test(json_v3_content, json_latest_content).await;
@@ -670,7 +677,8 @@ async fn test_service_config_migrate_from_v4() {
   },
   "killswitch": false,
   "legacy_split_tunnel": false,
-  "inbound_exemptions": []
+  "inbound_exemptions": [],
+  "stealth_api": false
 }"#;
 
     run_migrate_json_test(json_v4_content, json_latest_content).await;
@@ -759,7 +767,8 @@ async fn test_service_config_migrate_from_v5() {
   },
   "killswitch": false,
   "legacy_split_tunnel": false,
-  "inbound_exemptions": []
+  "inbound_exemptions": [],
+  "stealth_api": false
 }"#;
 
     run_migrate_json_test(json_v5_content, json_latest_content).await;
@@ -842,7 +851,8 @@ async fn test_service_config_migrate_from_v6() {
   },
   "killswitch": false,
   "legacy_split_tunnel": false,
-  "inbound_exemptions": []
+  "inbound_exemptions": [],
+  "stealth_api": false
 }"#;
 
     run_migrate_json_test(json_v6_content, json_latest_content).await;
@@ -1047,6 +1057,117 @@ async fn test_service_config_serialize_full() {
             dport: 8096,
             label: Some("jellyfin".to_string()),
         }],
+        stealth_api: true,
     };
     run_serialize_test(config).await;
+}
+
+// Stealth API connect is a daemon-side API transport switch: persisted with
+// the rest of the service config, off by default, and restored on restart.
+#[tokio::test]
+async fn test_stealth_api_persists_across_restart() {
+    let temp_dir = tempdir().unwrap();
+    let network_config_path = temp_dir.path().join("tulips");
+
+    let mut config_manager = VpnServiceConfigManager::new(&network_config_path, None)
+        .await
+        .unwrap();
+    assert!(!config_manager.config().stealth_api);
+    config_manager.set_stealth_api(true).await.unwrap();
+    drop(config_manager);
+
+    let config_manager = VpnServiceConfigManager::new(&network_config_path, None)
+        .await
+        .unwrap();
+    assert!(config_manager.config().stealth_api);
+}
+
+// A v8 file written before the field existed must load with it off and be
+// rewritten with the field present.
+#[tokio::test]
+async fn test_service_config_v8_without_stealth_api_loads_off() {
+    let json_v8_content = r#"{
+  "version": "v8",
+  "entry_point": {
+    "country": {
+      "two_letter_iso_country_code": "FR"
+    }
+  },
+  "exit_point": {
+    "country": {
+      "two_letter_iso_country_code": "BE"
+    }
+  },
+  "allow_lan": true,
+  "disable_ipv6": true,
+  "enable_two_hop": true,
+  "enable_bridges": false,
+  "enable_lewes_protocol": false,
+  "netstack": false,
+  "min_gateway_vpn_performance": null,
+  "residential_exit": false,
+  "enable_custom_dns": false,
+  "custom_dns": [],
+  "enable_ad_blocking": false,
+  "mixnet_traffic": {
+    "poisson_parameter_for_loop_cover_stream": null,
+    "average_packet_delay": null,
+    "message_sending_average_delay": null,
+    "disable_poisson_rate": false,
+    "disable_background_cover_traffic": false,
+    "min_mixnode_performance": null,
+    "min_gateway_mixnet_performance": null
+  },
+  "network_stats": {
+    "enabled": true,
+    "allow_disconnected": false
+  },
+  "killswitch": false,
+  "legacy_split_tunnel": false,
+  "inbound_exemptions": []
+}"#;
+
+    let json_latest_content = r#"{
+  "version": "v8",
+  "entry_point": {
+    "country": {
+      "two_letter_iso_country_code": "FR"
+    }
+  },
+  "exit_point": {
+    "country": {
+      "two_letter_iso_country_code": "BE"
+    }
+  },
+  "allow_lan": true,
+  "disable_ipv6": true,
+  "enable_two_hop": true,
+  "enable_bridges": false,
+  "enable_lewes_protocol": false,
+  "netstack": false,
+  "min_gateway_vpn_performance": null,
+  "residential_exit": false,
+  "enable_custom_dns": false,
+  "custom_dns": [],
+  "enable_ad_blocking": false,
+  "mixnet_traffic": {
+    "poisson_parameter_for_loop_cover_stream": null,
+    "average_packet_delay": null,
+    "message_sending_average_delay": null,
+    "disable_poisson_rate": false,
+    "disable_background_cover_traffic": false,
+    "min_mixnode_performance": null,
+    "min_gateway_mixnet_performance": null
+  },
+  "network_stats": {
+    "enabled": true,
+    "allow_disconnected": false
+  },
+  "killswitch": false,
+  "legacy_split_tunnel": false,
+  "inbound_exemptions": [],
+  "stealth_api": false
+}"#;
+
+    run_migrate_json_test(json_v8_content, json_latest_content).await;
 }

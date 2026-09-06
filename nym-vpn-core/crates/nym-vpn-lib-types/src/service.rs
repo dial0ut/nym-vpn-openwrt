@@ -48,6 +48,11 @@ pub struct VpnServiceConfig {
     /// kill-switch (which is forced off in this mode).
     pub legacy_split_tunnel: bool,
     pub inbound_exemptions: Vec<InboundExemption>,
+    /// "Stealth API connect": send every Nym API request through the cover
+    /// domains (domain fronting) instead of only retrying through them after a
+    /// direct request fails. Slower, but works where the API hosts are blocked.
+    /// Applies to API traffic only, so a change needs no reconnect.
+    pub stealth_api: bool,
 }
 
 /// Whether the DNS servers in [`VpnServiceConfig`] actually reach the system
@@ -155,6 +160,7 @@ impl fmt::Display for VpnServiceConfig {
         writeln!(f, "enable_ad_blocking: {}", self.enable_ad_blocking)?;
         writeln!(f, "killswitch: {}", self.killswitch)?;
         writeln!(f, "legacy_split_tunnel: {}", self.legacy_split_tunnel)?;
+        writeln!(f, "stealth_api: {}", self.stealth_api)?;
         writeln!(f, "mixnet traffic config: {}", self.mixnet_traffic)?;
         writeln!(f, "networks stats config: {}", self.network_stats)?;
 
@@ -194,6 +200,7 @@ impl Default for VpnServiceConfig {
             killswitch: true,
             legacy_split_tunnel: false,
             inbound_exemptions: Vec::new(),
+            stealth_api: false,
         }
     }
 }
@@ -328,4 +335,25 @@ pub struct VpnServiceInfo {
     pub git_commit: String,
     pub nym_network: NymNetworkDetails,
     pub nym_vpn_network: NymVpnNetwork,
+}
+
+impl VpnServiceInfo {
+    /// Whether any Nym API URL in the active network environment carries cover
+    /// domains. Stealth API connect (always-on domain fronting) can only route
+    /// through those; without them the setting has nothing to act on.
+    pub fn has_api_cover_domains(&self) -> bool {
+        let has_front = |api_url: &crate::ApiUrl| {
+            api_url
+                .front_hosts
+                .as_ref()
+                .is_some_and(|hosts| !hosts.is_empty())
+        };
+        self.nym_vpn_network.nym_vpn_api_urls.iter().any(has_front)
+            || self
+                .nym_network
+                .nym_api_urls
+                .iter()
+                .flatten()
+                .any(has_front)
+    }
 }

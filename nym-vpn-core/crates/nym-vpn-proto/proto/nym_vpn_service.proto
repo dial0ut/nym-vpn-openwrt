@@ -289,6 +289,7 @@ message VpnServiceConfig {
   bool killswitch = 28;
   repeated InboundExemption inbound_exemptions = 29;
   bool legacy_split_tunnel = 30;
+  bool stealth_api = 31;
 }
 
 enum InboundExemptionProtocol {
@@ -997,6 +998,7 @@ service NymVpnService {
   rpc SetEnableAdBlocking (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
   rpc SetKillswitch (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
   rpc SetLegacySplitTunnel (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
+  rpc SetStealthApi (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
   rpc SetInboundExemptions (InboundExemptionList) returns (google.protobuf.Empty) {}
   rpc GetInboundExemptions (google.protobuf.Empty) returns (InboundExemptionList) {}
 

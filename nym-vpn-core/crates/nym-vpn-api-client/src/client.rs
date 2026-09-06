@@ -123,10 +123,10 @@ impl VpnApiClient {
         })
     }
 
-    /// Like [`Self::new`], but forces an explicit domain-fronting policy on the
-    /// inner client at build time. The pinned http-api-client has no runtime
-    /// `set_front_policy`, so the diagnostic uses this to build an
-    /// always-fronted client for reachability testing.
+    /// Like [`Self::new`], but pins an explicit, client-local domain-fronting
+    /// policy at build time. Such a client is detached from the shared policy
+    /// (see [`crate::set_shared_front_policy`]); the diagnostic uses this to
+    /// build an always-fronted client for reachability testing.
     pub async fn new_with_front_policy(
         urls: Vec<Url>,
         user_agent: UserAgent,

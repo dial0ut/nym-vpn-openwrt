@@ -11,6 +11,7 @@ use crate::service::{
 };
 use nym_common::trace_err_chain;
 use nym_registration_client::MixnetClientConfig;
+use nym_vpn_api_client::{DEFAULT_FRONT_POLICY, FrontPolicy, set_shared_front_policy};
 use nym_vpn_lib::{
     DEFAULT_MIN_GATEWAY_PERFORMANCE, DEFAULT_MIN_MIXNODE_PERFORMANCE,
     tunnel_state_machine::{
@@ -76,6 +77,11 @@ impl VpnServiceConfigManager {
             config,
             tunnel_event_tx,
         };
+
+        // The fronting policy is process-wide state, not something the tunnel
+        // settings carry: put the persisted choice in force before the daemon
+        // builds its API clients.
+        apply_front_policy(config_manager.config.stealth_api);
 
         // If we didn't read the latest version then write the config straight back to file
         if version != Some(VpnServiceConfigVersion::latest()) {
@@ -220,6 +226,19 @@ impl VpnServiceConfigManager {
     pub async fn set_legacy_split_tunnel(&mut self, legacy_split_tunnel: bool) -> Result<(), String> {
         if self.config.legacy_split_tunnel != legacy_split_tunnel {
             self.config.legacy_split_tunnel = legacy_split_tunnel;
+            self.save_config_and_send_event().await
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Stealth API connect: front every Nym API request through the cover
+    /// domains (on) or only after a direct request fails (off, the default).
+    /// Takes effect on the next API request; the tunnel is not touched.
+    pub async fn set_stealth_api(&mut self, stealth_api: bool) -> Result<(), String> {
+        if self.config.stealth_api != stealth_api {
+            self.config.stealth_api = stealth_api;
+            apply_front_policy(stealth_api);
             self.save_config_and_send_event().await
         } else {
             Ok(())
@@ -416,6 +435,10 @@ impl VpnServiceConfigManager {
     pub fn generate_tunnel_settings(&self) -> TunnelSettings {
         tracing::info!("Using config: {:?}", self.config);
 
+        // `stealth_api` is deliberately absent from TunnelSettings: it is an
+        // API-transport switch applied through the shared fronting policy, so
+        // changing it must not force a reconnect.
+
         let gateway_options = GatewayPerformanceOptions {
             mixnet_min_performance: self.config.mixnet_traffic.min_gateway_mixnet_performance,
             vpn_min_performance: self.config.min_gateway_vpn_performance,
@@ -517,4 +540,19 @@ impl VpnServiceConfigManager {
                 .collect(),
         }
     }
+}
+
+/// Map the Stealth API switch onto the shared domain-fronting policy that every
+/// fronting-capable API client in this process follows.
+fn apply_front_policy(stealth_api: bool) {
+    let policy = if stealth_api {
+        FrontPolicy::Always
+    } else {
+        DEFAULT_FRONT_POLICY
+    };
+    tracing::info!(
+        "API domain fronting policy: {policy:?} (stealth API {})",
+        if stealth_api { "on" } else { "off" }
+    );
+    set_shared_front_policy(policy);
 }
