@@ -96,7 +96,8 @@ if [ -z "${IPKG_INSTROOT:-}" ]; then
     uci -q delete nym-vpn.settings.watchdog_interval
     uci -q delete nym-vpn.settings.watchdog_max_retries
     uci -q commit nym-vpn
-    rm -f /etc/rc.d/S91nym-vpn-watchdog /etc/rc.d/K09nym-vpn-watchdog
+    # rc.common names the stop link K$((100-START)), so K9 here, not K09.
+    rm -f /etc/rc.d/*nym-vpn-watchdog
     pid=$(cat /var/run/nym-vpn-watchdog.pid 2>/dev/null)
     if [ -n "$pid" ] && grep -q nym-vpn-watchdog "/proc/$pid/cmdline" 2>/dev/null; then
         kill "$pid" 2>/dev/null
