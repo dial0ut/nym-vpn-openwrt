@@ -7,6 +7,7 @@ pub mod device;
 pub mod diagnostic;
 pub mod dns;
 pub mod gateway;
+pub mod gateway_test;
 pub mod inbound;
 pub mod lan;
 pub mod network;
