@@ -11,6 +11,20 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+### Added
+
+- `nym-vpnc gateway test` probes gateways with ICMP echo from the router and
+  prints RTT min/avg/max and packet loss per gateway, plus a summed pair RTT
+  for every entry/exit combination. Without options it tests the configured
+  (or, when connected, the active) pair; `--entry-country`/`--exit-country`
+  probe the best-scored gateways of a country (`--top N`), `--entry-id`,
+  `--exit-id` and `--id` name gateways directly, `--count` and `--timeout`
+  tune the probes and `--json` prints the raw report. The probes are sent by
+  the daemon over a socket carrying the tunnel fwmark, so the test works
+  while disconnected and while connected with the kill switch on; the
+  kill-switch policy gained a matching rate-limited, mark-scoped echo-request
+  accept in every state. Requested by a forum user (#8).
+
 ### Security
 
 - CI now runs the workspace test suite and a fast security job on every push

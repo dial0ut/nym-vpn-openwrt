@@ -3,6 +3,7 @@
 
 mod config;
 mod error;
+mod gateway_test;
 mod socks5;
 mod vpn_service;
 
@@ -11,7 +12,7 @@ pub use config::{
     DEFAULT_LOG_FILE, DEFAULT_OLD_LOG_FILE, config_dir, log_dir, read_json_config_file,
     read_toml_config_file, write_json_config_file,
 };
-pub use error::SetNetworkError;
+pub use error::{GatewayTestError, SetNetworkError};
 pub use socks5::{
     Socks5Error, Socks5Service, Socks5Status, socks5_idle_timeout, socks5_request_timeout,
 };

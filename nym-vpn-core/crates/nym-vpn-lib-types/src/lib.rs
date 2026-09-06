@@ -31,6 +31,7 @@ mod connection_data;
 mod device;
 mod diagnostic;
 mod gateway;
+mod gateway_test;
 mod log_path;
 mod network;
 mod network_stats;
@@ -68,6 +69,11 @@ pub use gateway::{
     Gateway, GatewayFilter, GatewayType, LewesProtocolDetails, LewesProtocolDetailsData, Location,
     LookupGatewayFilters, Lp, NodeIdentity, ParseRecipientError, Performance, Probe, ProbeOutcome,
     QuicClientOptions, Recipient, Score, Socks5,
+};
+pub use gateway_test::{
+    DEFAULT_PROBE_COUNT, DEFAULT_PROBE_TIMEOUT_MS, DEFAULT_TOP_CANDIDATES, GatewayPairResult,
+    GatewayTestParams, GatewayTestReport, GatewayTestResult, GatewayTestRole, GatewayTestSelector,
+    MAX_PROBE_COUNT, MAX_PROBE_TIMEOUT_MS, MAX_TOP_CANDIDATES, pair_results,
 };
 pub use log_path::LogPath;
 pub use network::{

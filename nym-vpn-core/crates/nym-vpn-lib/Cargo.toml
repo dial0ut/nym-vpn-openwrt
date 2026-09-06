@@ -29,6 +29,7 @@ itertools.workspace = true
 rand.workspace = true
 serial_test.workspace = true
 semver = { workspace = true }
+surge-ping.workspace = true
 thiserror.workspace = true
 time.workspace = true
 tokio = { workspace = true, features = [

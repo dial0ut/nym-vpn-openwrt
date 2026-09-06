@@ -21,6 +21,33 @@ nym-vpnc gateway set --exit-id <base58-gateway-id>
 nym-vpnc gateway set --entry-random --exit-random
 ```
 
+### Latency and packet loss
+
+`gateway test` pings gateways from the router and reports RTT and loss, so
+you can compare candidate pairs before committing to one. The probes are sent
+by the daemon, which means it works while disconnected and while connected
+with the kill switch on; while connected the gateways are still probed
+directly over the WAN, not through the tunnel.
+
+```bash
+nym-vpnc gateway test                          # the configured (or active) entry and exit
+nym-vpnc gateway test --exit-country CH        # best 5 exits in CH against the current entry
+nym-vpnc gateway test --entry-country DE --exit-country CH --top 3
+nym-vpnc gateway test --entry-id <ID> --exit-id <ID> --count 10 --timeout 1
+nym-vpnc gateway test --id <ID> --id <ID>      # specific gateways, no role
+nym-vpnc gateway test --json
+```
+
+Defaults: 5 probes per gateway, 2 s timeout per probe, top 5 gateways per
+country (by directory score). When both an entry and an exit were probed, a
+second table lists every pair with the summed average RTT, best first — a
+rough proxy for the round trip through that pair. Country selectors pick from
+the WireGuard gateway list in two-hop mode and from the mixnet entry/exit
+lists otherwise; `--top` caps at 20, `--count` at 20 and `--timeout` at 10 s.
+
+A gateway that answers the directory but not ICMP shows 100% loss; some
+operators filter echo requests, so treat loss as a hint, not a verdict.
+
 ## Account
 
 ```bash

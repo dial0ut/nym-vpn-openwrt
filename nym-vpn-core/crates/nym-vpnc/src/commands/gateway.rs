@@ -5,13 +5,14 @@ use anyhow::{Result, anyhow};
 use tabled::Table;
 
 use nym_vpn_lib_types::{
-    EntryPoint, ExitPoint, GatewayFilter, ListGatewaysOptions, LookupGatewayFilters, NodeIdentity,
-    Recipient,
+    EntryPoint, ExitPoint, GatewayFilter, GatewayTestParams, GatewayTestSelector,
+    ListGatewaysOptions, LookupGatewayFilters, NodeIdentity, Recipient,
 };
 use nym_vpn_proto::rpc_client::RpcClient;
 
 use crate::{
-    boolean_option::BooleanOption, display_helpers::display_on_off, table_style::TableStyle,
+    boolean_option::BooleanOption, commands::gateway_test, display_helpers::display_on_off,
+    table_style::TableStyle,
 };
 
 #[derive(Debug, Clone, clap::Args)]
@@ -58,6 +59,68 @@ pub enum Command {
         #[command(flatten)]
         filters: FilterArgs,
     },
+
+    /// Probe gateways with ICMP echo and report latency and packet loss
+    ///
+    /// The daemon sends the probes, so this works while disconnected and with
+    /// the kill switch on. Without options the configured (or, when connected,
+    /// the active) entry and exit gateways are tested.
+    ///
+    /// Examples:
+    ///
+    /// 1. Test the current pair
+    ///
+    /// nym-vpnc gateway test
+    ///
+    /// 2. Test the best five exits in Switzerland against the current entry
+    ///
+    /// nym-vpnc gateway test --exit-country CH
+    ///
+    /// 3. Test two specific gateways, 10 probes each
+    ///
+    /// nym-vpnc gateway test --id <ID> --id <ID> --count 10
+    Test(Box<TestArgs>),
+}
+
+#[derive(Debug, Clone, clap::Args)]
+#[command(group = clap::ArgGroup::new("test_entry").multiple(false))]
+#[command(group = clap::ArgGroup::new("test_exit").multiple(false))]
+pub struct TestArgs {
+    /// Probe this entry gateway (mixnet public ID).
+    #[arg(long, group = "test_entry")]
+    pub entry_id: Option<String>,
+
+    /// Probe the best-scored entry gateways in this country (ISO code).
+    #[arg(long, group = "test_entry")]
+    pub entry_country: Option<celes::Country>,
+
+    /// Probe this exit gateway (mixnet public ID).
+    #[arg(long, group = "test_exit")]
+    pub exit_id: Option<String>,
+
+    /// Probe the best-scored exit gateways in this country (ISO code).
+    #[arg(long, group = "test_exit")]
+    pub exit_country: Option<celes::Country>,
+
+    /// Probe this gateway regardless of role (repeatable).
+    #[arg(long = "id", value_name = "ID")]
+    pub ids: Vec<String>,
+
+    /// Gateways to probe per country, best score first.
+    #[arg(long, default_value_t = nym_vpn_lib_types::DEFAULT_TOP_CANDIDATES)]
+    pub top: u32,
+
+    /// Probes per gateway.
+    #[arg(long, default_value_t = nym_vpn_lib_types::DEFAULT_PROBE_COUNT)]
+    pub count: u32,
+
+    /// Per-probe timeout in seconds.
+    #[arg(long, default_value_t = 2.0)]
+    pub timeout: f64,
+
+    /// Print the report as JSON.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Clone, clap::Args)]
@@ -187,6 +250,16 @@ impl Args {
                     .await?;
                 Ok(())
             }
+            Command::Test(ref args) => {
+                let params = args.params()?;
+                let report = rpc_client.test_gateways(params).await?;
+                if args.json {
+                    println!("{}", serde_json::to_string_pretty(&report)?);
+                } else {
+                    gateway_test::print_report(&report, self.table_style);
+                }
+                Ok(())
+            }
         }
     }
 
@@ -313,6 +386,41 @@ impl SetArgs {
         } else {
             Ok(None)
         }
+    }
+}
+
+impl TestArgs {
+    pub fn params(&self) -> Result<GatewayTestParams> {
+        let gateway_id = |id: &String| -> Result<String> {
+            NodeIdentity::from_base58_string(id)
+                .map_err(|_| anyhow!("Failed to parse gateway id: {id}"))?;
+            Ok(id.clone())
+        };
+        let selector = |id: &Option<String>, country: &Option<celes::Country>| match (id, country) {
+            (Some(id), _) => gateway_id(id).map(|id| Some(GatewayTestSelector::Gateway(id))),
+            (None, Some(country)) => Ok(Some(GatewayTestSelector::Country(
+                country.alpha2.to_string(),
+            ))),
+            (None, None) => Ok(None),
+        };
+        if !(self.timeout > 0.0 && self.timeout.is_finite()) {
+            return Err(anyhow!("--timeout must be a positive number of seconds"));
+        }
+        let timeout_ms = u32::try_from((self.timeout * 1000.0).round() as u64)
+            .map_err(|_| anyhow!("--timeout is too large"))?;
+
+        Ok(GatewayTestParams {
+            entry: selector(&self.entry_id, &self.entry_country)?,
+            exit: selector(&self.exit_id, &self.exit_country)?,
+            gateways: self
+                .ids
+                .iter()
+                .map(gateway_id)
+                .collect::<Result<Vec<_>>>()?,
+            count: self.count,
+            timeout_ms,
+            top: self.top,
+        })
     }
 }
 

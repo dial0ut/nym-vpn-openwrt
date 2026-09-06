@@ -85,4 +85,22 @@ pub enum ListGatewaysError {
     },
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum GatewayTestError {
+    #[error("failed to get gateways ({gw_type:?})")]
+    GetGateways {
+        gw_type: nym_vpn_lib::gateway_directory::GatewayType,
+        source: nym_vpn_lib::gateway_directory::Error,
+    },
+
+    #[error("invalid gateway id: {0}")]
+    InvalidGatewayId(String),
+
+    #[error("no gateway to test: nothing selected and no entry or exit point configured")]
+    NoTargets,
+
+    #[error("failed to probe gateways")]
+    Probe(#[source] nym_vpn_lib::gateway_probe::ProbeError),
+}
+
 pub type Result<T, E = Error> = std::result::Result<T, E>;

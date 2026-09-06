@@ -8,6 +8,7 @@ pub mod cache_refresh;
 #[cfg(target_os = "linux")]
 pub(crate) mod clock_bootstrap;
 mod error;
+pub mod gateway_probe;
 pub mod login;
 mod mixnet;
 pub mod tunnel_state_machine;

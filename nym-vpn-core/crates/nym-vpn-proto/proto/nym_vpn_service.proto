@@ -957,6 +957,56 @@ message RegistrationReport {
   string json = 1;
 }
 
+// Gateway latency / packet-loss test (nym-vpnc gateway test). The daemon
+// resolves the gateways from the directory and sends the ICMP probes itself,
+// so the test works while disconnected and with the kill switch on.
+message GatewayTestSelector {
+  oneof selector {
+    GatewayId gateway = 1;
+    Country country = 2;
+  }
+}
+
+message GatewayTestParams {
+  // Entry/exit gateways to probe. Unset: the configured (or, when connected,
+  // the active) entry and exit points.
+  optional GatewayTestSelector entry = 1;
+  optional GatewayTestSelector exit = 2;
+  // Gateways probed without a role. When neither selector is set and this is
+  // non-empty, only these are probed.
+  repeated GatewayId gateways = 3;
+  // Probes per gateway, per-probe timeout and candidates per country.
+  // 0 selects the daemon default.
+  uint32 count = 4;
+  uint32 timeout_ms = 5;
+  uint32 top = 6;
+}
+
+enum GatewayTestRole {
+  GATEWAY_TEST_ROLE_ANY = 0;
+  GATEWAY_TEST_ROLE_ENTRY = 1;
+  GATEWAY_TEST_ROLE_EXIT = 2;
+}
+
+message GatewayTestResult {
+  string id = 1;
+  optional string name = 2;
+  optional string country_code = 3;
+  GatewayTestRole role = 4;
+  // Probed IP address; unset when the gateway could not be resolved.
+  optional string address = 5;
+  uint32 sent = 6;
+  uint32 received = 7;
+  optional double rtt_min_ms = 8;
+  optional double rtt_avg_ms = 9;
+  optional double rtt_max_ms = 10;
+  optional string error = 11;
+}
+
+message GatewayTestReport {
+  repeated GatewayTestResult results = 1;
+}
+
 message GetDeeplinkParams {
   DeeplinkClient client = 1;
   string locale = 2;
@@ -1039,6 +1089,9 @@ service NymVpnService {
 
   // Get a filtered list of gateways for the selected mode and filters
   rpc ListFilteredGateways (LookupGatewayFilters) returns (ListGatewaysResponse) {}
+
+  // Probe gateways for latency and packet loss
+  rpc TestGateways (GatewayTestParams) returns (GatewayTestReport) {}
 
   // Store the recovery phrase, which is also the account identity and authentication
   rpc StoreAccount (StoreAccountRequest) returns (AccountCommandResponse) {}
