@@ -58,7 +58,7 @@ nym-vpnc ──gRPC──▶ nym-vpnd
 | `htdocs/.../nym-vpn/assets.js` | SVG logos |
 | `root/usr/libexec/rpcd/nym-vpn` | rpcd backend — 21 RPC methods, input validation |
 | `root/etc/init.d/nym-vpnd` | procd service (respawn, graceful disconnect on stop) |
-| `root/etc/uci-defaults/luci-app-nym-vpn` | First-boot setup (enable service, restart rpcd, clear cache) |
+| `root/etc/uci-defaults/luci-app-nym-vpn` | First-boot setup (enable service, register the firewall include) |
 | `root/usr/share/luci/menu.d/luci-app-nym-vpn.json` | LuCI menu entry (VPN → Nym VPN) |
 | `root/usr/share/rpcd/acl.d/luci-app-nym-vpn.json` | ubus ACL (11 read + 10 write methods) |
 

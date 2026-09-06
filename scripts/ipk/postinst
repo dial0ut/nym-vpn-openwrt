@@ -79,12 +79,72 @@ if [ "$(uci -q get nym-vpn.settings.always_on)" = "1" ]; then
     /etc/init.d/nym-vpn-watchdog start
 fi
 
-# Restart rpcd to pick up new ACLs
-/etc/init.d/rpcd restart
+# LuCI plumbing. Clear the menu/module caches so the new menu entry and
+# views are picked up, then refresh rpcd: it scans /usr/libexec/rpcd only
+# at start-up and computes a session's ACL grants at login, so a fresh
+# install needs a restart before the NymVPN page can work.
+#
+# The refresh must not run inside this transaction. LuCI's Software page
+# drives opkg/apk through rpcd itself (ubus file exec), so restarting rpcd
+# here kills the request the page is waiting on and every login session:
+# the page never gets its reply and the user ends up logged out (#13).
+# The job below is detached — a subshell with every fd on /dev/null, so
+# neither opkg (waitpid on this script) nor apk (which also reads the
+# script's stdout/stderr pipes to EOF) waits for it — and delayed until
+# the package manager has committed its database and rpcd has delivered
+# the transaction's reply.
+#
+# Upgrades pick the least disruptive refresh from the checksums prerm
+# stashed: nothing when neither the rpcd plugin nor the ACL file changed,
+# a reload (SIGHUP: rpcd re-executes itself and keeps its sessions) when
+# only the plugin changed, and a restart — a forced re-login, which is
+# what makes new grants take effect — when the ACL file changed or the
+# stash is missing (fresh install, or an upgrade from a package whose
+# prerm predates it).
+rm -f /tmp/luci-indexcache* 2>/dev/null
+rm -rf /tmp/luci-modulecache/ 2>/dev/null
+
+nym_rpcd_state=/tmp/nym-vpn.rpcd-state
+nym_rpcd_action=restart
+if [ -f "$nym_rpcd_state" ]; then
+    old_plugin=$(sed -n 's/^plugin=//p' "$nym_rpcd_state")
+    old_acl=$(sed -n 's/^acl=//p' "$nym_rpcd_state")
+    new_plugin=$(md5sum /usr/libexec/rpcd/nym-vpn 2>/dev/null | cut -d' ' -f1)
+    new_acl=$(md5sum /usr/share/rpcd/acl.d/luci-app-nym-vpn.json 2>/dev/null | cut -d' ' -f1)
+    if [ -n "$old_acl" ] && [ "$old_acl" = "$new_acl" ]; then
+        if [ -n "$old_plugin" ] && [ "$old_plugin" = "$new_plugin" ]; then
+            nym_rpcd_action=""
+        else
+            nym_rpcd_action=reload
+        fi
+    fi
+fi
+rm -f "$nym_rpcd_state"
+# Image builds (IPKG_INSTROOT) have no rpcd to talk to and must not leave
+# background processes behind.
+[ -z "${IPKG_INSTROOT:-}" ] || nym_rpcd_action=""
+
+if [ -n "$nym_rpcd_action" ]; then
+    (
+        # Survive the caller's terminal going away (SSH session closed
+        # right after a CLI upgrade); INT is already ignored for the
+        # background jobs of a non-interactive shell.
+        trap '' HUP
+        sleep 5
+        /etc/init.d/rpcd "$nym_rpcd_action"
+        # rpcd builds without a SIGHUP handler exit on reload instead of
+        # re-executing. Whatever happened, leave LuCI with a running rpcd.
+        sleep 2
+        pidof rpcd >/dev/null || /etc/init.d/rpcd start
+    ) </dev/null >/dev/null 2>&1 &
+fi
 
 echo ""
 echo "=============================================="
 echo "NymVPN installed successfully!"
+if [ "$nym_rpcd_action" = "restart" ]; then
+    echo "LuCI will ask you to log in again in a few seconds."
+fi
 echo ""
 echo "Update with: opkg update && opkg upgrade nym-vpn"
 echo "         or: apk update && apk upgrade nym-vpn"

@@ -69,7 +69,30 @@ nym-vpnc status
 see [Troubleshooting](../troubleshooting.md#no-related-rpc-reply-on-glinet-devices) — GL.iNet
 routers need port 8080.
 
+If you installed from the LuCI Software page, LuCI asks you to log in again a few seconds after
+the install finishes — the package restarts rpcd so the new page and its permissions load. Log in
+and the menu entry is there.
+
 You need a Nym account before you can connect. [Quick Start](quickstart.md) covers that.
+
+## Upgrading
+
+=== "opkg (OpenWrt ≤24.10)"
+
+    ```bash
+    opkg update && opkg upgrade nym-vpn
+    ```
+
+=== "apk (OpenWrt 25.x+)"
+
+    ```bash
+    apk update && apk upgrade nym-vpn
+    ```
+
+The package registers its own feed at install time, so both commands find the new version. The
+LuCI Software page (*System → Software*, update lists, then upgrade `nym-vpn`) works as well.
+Either way the tunnel drops while the daemon is replaced. If the upgrade changed the web UI's
+permissions, LuCI asks you to log in again a few seconds after it finishes; that is expected.
 
 ## Dependencies
 

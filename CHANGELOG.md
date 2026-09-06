@@ -26,6 +26,16 @@ the GitHub release notes.
 
 ### Fixed
 
+- Installing or upgrading from LuCI's Software page reportedly never finished
+  while the same upgrade from a shell worked (#13). Likely cause: the
+  package's post-install step restarted rpcd — the service LuCI runs opkg/apk
+  through — inside the transaction, cutting off the reply the page was
+  waiting for and dropping every login session. The rpcd refresh is now
+  detached and runs a few seconds after the transaction has returned. On
+  upgrades it is also scaled down: skipped when neither the LuCI backend nor
+  its ACL file changed, a session-preserving reload when only the backend
+  changed, and a restart — which asks you to log in again — only when the ACL
+  file changed. Not reproduced here; the fix targets the most likely cause.
 - The kill-switch no longer has a fail-open window on a fresh install or an
   expired endpoint cache: with the kill-switch enabled, the firewall goes to
   the Blocked policy the moment the daemon starts and stays there through the
