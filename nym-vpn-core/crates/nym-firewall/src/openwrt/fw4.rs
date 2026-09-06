@@ -13,10 +13,16 @@
 //!
 //! Owning the chains means re-applies are atomic: flush + repopulate, no
 //! risk of stomping on user rules in fw4's own chains.
+//!
+//! A third table, `inet nym_boot`, is not ours to create: the fw4 include
+//! script installs it at firewall start to cover the window before this
+//! daemon's first policy (see [`FW4_BOOT_TABLE`]). Every apply and reset
+//! lifts it last, once the live state has converged.
 
 use std::io::Write as IoWrite;
 use std::process::{Command, Stdio};
 
+use super::common::FW4_BOOT_TABLE;
 use super::render_nft;
 use super::rules::RuleSet;
 use super::{Error, Result};
@@ -30,7 +36,8 @@ const FW4_SRCNAT: &str = "srcnat";
 const FW4_FORWARD_LAN: &str = "forward_lan";
 
 /// Apply the [`RuleSet`] to fw4. Order is deliberate: install the kill-switch
-/// table first (fail-closed) before touching fw4's chains for masquerade.
+/// table first (fail-closed) before touching fw4's chains for masquerade, and
+/// lift the boot-time block only once both are in place.
 pub fn apply(rs: &RuleSet) -> Result<()> {
     tracing::debug!("Applying firewall policy via fw4/nftables backend");
 
@@ -38,6 +45,8 @@ pub fn apply(rs: &RuleSet) -> Result<()> {
     run_nft_script(&script)?;
 
     integrate_with_fw4(&rs.tunnel_interfaces)?;
+
+    remove_boot_block()?;
 
     tracing::debug!("Firewall policy applied successfully");
     Ok(())
@@ -55,20 +64,62 @@ pub fn apply_forwarding_only(rs: &RuleSet) -> Result<()> {
 
     integrate_with_fw4(&rs.tunnel_interfaces)?;
 
+    // Kill-switch off means no boot-time block either; the include reads
+    // the same setting and would remove it on the next reload, but the user
+    // asked for an open firewall now.
+    remove_boot_block()?;
+
     tracing::debug!("Tunnel forwarding plane applied successfully");
     Ok(())
 }
 
 /// Remove our kill-switch table and integration chains. Best-effort: any
 /// step that fails because state is already absent is logged and ignored.
+/// The one exception is a boot-time block that exists and cannot be removed
+/// — that is reported, since it would leave WAN egress blackholed.
 pub fn reset() -> Result<()> {
     tracing::debug!("Resetting firewall policy via fw4/nftables backend");
 
     remove_integration();
     delete_nym_table();
+    remove_boot_block()?;
 
     tracing::debug!("Firewall policy reset successfully");
     Ok(())
+}
+
+/// Lift the boot-time kill-switch block the fw4 include installs at firewall
+/// start (`inet nym_boot`, see [`FW4_BOOT_TABLE`]). Called last in every
+/// apply and reset so it goes only once the live state has converged. Cheap
+/// when absent: one existence probe. A block that exists and cannot be
+/// removed fails the operation rather than reporting a working connection
+/// while WAN egress is still blackholed. The include may be lifting it
+/// concurrently (it re-checks after installing), so "gone by the time we
+/// delete it" is success.
+fn remove_boot_block() -> Result<()> {
+    if !table_exists(FW4_BOOT_TABLE)? {
+        return Ok(());
+    }
+    tracing::info!("Removing boot-time kill-switch block (inet {FW4_BOOT_TABLE})");
+    let output = Command::new("nft")
+        .args(["delete", "table", "inet", FW4_BOOT_TABLE])
+        .output()
+        .map_err(|e| Error::ApplyError(format!("spawn nft delete table: {e}")))?;
+    if output.status.success() || !table_exists(FW4_BOOT_TABLE)? {
+        return Ok(());
+    }
+    Err(Error::ApplyError(format!(
+        "nft delete table inet {FW4_BOOT_TABLE} failed: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    )))
+}
+
+fn table_exists(name: &str) -> Result<bool> {
+    Command::new("nft")
+        .args(["list", "table", "inet", name])
+        .output()
+        .map(|o| o.status.success())
+        .map_err(|e| Error::ApplyError(format!("spawn nft list table {name}: {e}")))
 }
 
 /// Delete the `inet nym` kill-switch table. Best-effort; ignores absence.
@@ -297,6 +348,74 @@ fn remove_jumps(parent: &str, target: &str) {
             tracing::debug!(
                 "nft delete jump rule (non-fatal): {}",
                 String::from_utf8_lossy(&o.stderr).trim()
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The include script that installs the boot-time block this backend
+    /// lifts. Scanned line by line so a rename on either side fails here
+    /// instead of leaving a table nobody deletes.
+    const INCLUDE: &str = include_str!("../../scripts/fw4-include.sh");
+
+    fn lines() -> impl Iterator<Item = &'static str> {
+        INCLUDE.lines().map(str::trim)
+    }
+
+    /// The nft heredoc between the boot table header and the closing EOF.
+    fn boot_block_body() -> Vec<&'static str> {
+        let start = INCLUDE
+            .find("table inet $BOOT_TABLE {")
+            .expect("include defines the boot table body");
+        let body = &INCLUDE[start..];
+        let end = body.find("\nEOF").expect("heredoc terminator");
+        body[..end].lines().map(str::trim).collect()
+    }
+
+    #[test]
+    fn include_script_names_the_same_tables() {
+        let boot = format!("BOOT_TABLE=\"{FW4_BOOT_TABLE}\"");
+        assert!(lines().any(|l| l == boot), "fw4-include.sh must define {boot}");
+        assert!(lines().any(|l| l == "NYM_TABLE=\"nym\""));
+    }
+
+    #[test]
+    fn boot_block_keeps_the_router_reachable_and_ends_in_drop() {
+        let body = boot_block_body();
+        for must in [
+            "oifname \"lo\" accept",
+            "ct state established,related ct direction reply accept",
+            "udp sport 68 udp dport 67 accept",
+            "udp sport 67 udp dport 68 accept",
+            "udp sport 546 udp dport 547 accept",
+            "udp sport 547 udp dport 546 accept",
+            "icmpv6 type { nd-router-solicit, nd-neighbor-solicit, nd-neighbor-advert } accept",
+            "ip6 daddr { fe80::/10, fc00::/7, ff00::/8 } accept",
+        ] {
+            assert!(body.contains(&must), "boot block must keep: {must}");
+        }
+        // LAN destinations pass in both egress chains; nothing else does.
+        let lan = "ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16";
+        assert_eq!(body.iter().filter(|l| l.starts_with(lan)).count(), 2);
+        assert_eq!(body.iter().filter(|l| **l == "drop").count(), 2);
+        // Only the two egress hooks, ahead of the daemon's own table.
+        assert_eq!(body.iter().filter(|l| l.contains("priority filter - 20")).count(), 2);
+        assert!(body.iter().any(|l| l.contains("hook output")));
+        assert!(body.iter().any(|l| l.contains("hook forward")));
+        assert!(!body.iter().any(|l| l.contains("hook input")));
+    }
+
+    #[test]
+    fn include_script_only_ever_deletes_the_boot_table() {
+        // `inet nym` is the daemon's; the include may probe it, never drop it.
+        for line in lines().filter(|l| l.contains("delete table inet")) {
+            assert!(
+                line.contains("$BOOT_TABLE"),
+                "include must not delete a table other than the boot block: {line}"
             );
         }
     }

@@ -3,9 +3,19 @@ START=90
 STOP=10
 USE_PROCD=1
 
+# Written on explicit stop, cleared on start (contract with fw-boot-guard.sh).
+# While present, a firewall reload must not re-install the boot-time
+# kill-switch block: the administrator asked for their network back and no
+# daemon is coming to lift it. /tmp is tmpfs, so a reboot re-arms the block.
+STOPPED_MARKER=/tmp/nym-vpnd.stopped
+
 start_service() {
+    rm -f "$STOPPED_MARKER"
+
     # Kill-switch firewall integration needs fw4's table present; if the
     # firewall service exists but its table isn't up yet, nudge it first.
+    # That reload also runs the include, which arms the boot-time block if
+    # the kill-switch is on — closing the gap until the daemon's first policy.
     if [ -x /etc/init.d/firewall ] && ! nft list table inet fw4 >/dev/null 2>&1; then
         /etc/init.d/firewall reload >/dev/null 2>&1 || true
     fi
@@ -25,6 +35,10 @@ start_service() {
 STOP_PID_STASH=/tmp/nym-vpnd.stop-pid
 
 stop_service() {
+    # First thing, before anything can fail or block: a reload racing this
+    # stop must already see the marker.
+    touch "$STOPPED_MARKER" 2>/dev/null
+
     # Stash the daemon pid before procd kills it: service_stopped() needs
     # it, and pidof is useless there — rc.common itself runs with comm
     # "nym-vpnd" and would match.
@@ -65,6 +79,10 @@ service_stopped() {
         i=$((i + 1))
     done
     nft delete table inet nym 2>/dev/null || true
+    # The boot-time block (fw4-include.sh) would otherwise outlive the daemon
+    # that was supposed to lift it; the stop marker keeps reloads from
+    # re-installing it until the next start.
+    nft delete table inet nym_boot 2>/dev/null || true
 
     # fw3 (iptables) routers: the kill-switch chains live in the shared
     # filter/mangle/nat tables and outlive the daemon just like the nft

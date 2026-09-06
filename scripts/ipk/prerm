@@ -26,6 +26,15 @@ if [ "$PKG_UPGRADE" != "1" ]; then
     /etc/init.d/nym-vpnd disable 2>/dev/null
 fi
 
+# The boot-time kill-switch block (fw4-include.sh, fw-boot-guard.sh) must not
+# outlive the package: with the daemon gone nothing else would ever lift it.
+# An nftables table filters on its own whether fw4 is the active backend or
+# not, so remove it wherever nft exists instead of trusting the backend guess
+# below. The fw3 counterpart shares the NYM_EMERGENCY_* chains removed there.
+if command -v nft >/dev/null 2>&1; then
+    nft delete table inet nym_boot 2>/dev/null
+fi
+
 # Clean up firewall rules (backend decided by the shared detector so this
 # cannot disagree with the include registration)
 if [ -x /usr/share/nym-vpn/fw-backend.sh ]; then

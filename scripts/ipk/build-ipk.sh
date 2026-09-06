@@ -167,6 +167,11 @@ if [ -f "$FW_SCRIPTS_DIR/fw-backend.sh" ]; then
     cp "$FW_SCRIPTS_DIR/fw-backend.sh" "$BUILD_DIR/data/usr/share/nym-vpn/"
     chmod 755 "$BUILD_DIR/data/usr/share/nym-vpn/fw-backend.sh"
 fi
+# Sourced by both includes (boot-time kill-switch decision), not executed.
+if [ -f "$FW_SCRIPTS_DIR/fw-boot-guard.sh" ]; then
+    cp "$FW_SCRIPTS_DIR/fw-boot-guard.sh" "$BUILD_DIR/data/usr/share/nym-vpn/"
+    chmod 644 "$BUILD_DIR/data/usr/share/nym-vpn/fw-boot-guard.sh"
+fi
 
 # === DATA: Feed signing public key ===
 echo "=== Adding feed signing key ==="

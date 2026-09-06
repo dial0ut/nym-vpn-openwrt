@@ -43,6 +43,20 @@ the GitHub release notes.
   let through until the API and gateway addresses are resolved and added to
   the allow-list. Previously "kill-switch on" could mean an open firewall
   until the first successful connect.
+- The kill-switch now also covers the boot window before the daemon starts.
+  `firewall` starts at S19 and `network` at S20, but `nym-vpnd` only at S90,
+  so until its first policy landed nothing fenced WAN egress (reported on the
+  forum during a reboot; unconfirmed by capture, closed defensively). The
+  firewall include now installs a boot-time emergency block when the
+  kill-switch is on in the daemon's saved settings, the daemon is enabled to
+  start at boot, it was not stopped explicitly, and no policy has been
+  applied since boot — fw4 in a separate `inet nym_boot` table, fw3 through
+  the existing emergency chains. It drops new router-originated and forwarded
+  traffic but always lets loopback, LAN/link-local, DHCP/DHCPv6, IPv6 ND and
+  reply traffic through, so SSH and LuCI from the LAN keep working even if
+  the daemon never comes up. The daemon lifts it with its first policy
+  (kill-switch on or off); `/etc/init.d/nym-vpnd stop` and package removal
+  remove it, and a setting that cannot be read counts as off.
 - fw3/iptables routers (OpenWrt 21.02 and older): the kill-switch now survives
   `/etc/init.d/firewall reload` — fw3 wipes every custom chain on reload — by
   persisting the applied ruleset under `/tmp` and re-applying it from the
