@@ -20,3 +20,8 @@ nym-vpn-core/crates/nym-vpn-lib-uniffi/NymVPNLib
 
 # mkdocs
 site/
+
+# Local AI tooling — never commit
+.claude/
+.mcp.json
+.tools/
