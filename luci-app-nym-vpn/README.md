@@ -7,8 +7,8 @@ LuCI web interface for NymVPN on OpenWrt. Wraps the `nym-vpnc` CLI to control th
 - Connect/disconnect with real-time status polling and animated indicators
 - Account management (mnemonic login, key rotation)
 - Gateway selection by country or specific node with performance indicators
-- Tunnel configuration (2-hop WireGuard / 5-hop mixnet, IPv6)
-- LAN access control policy
+- Tunnel settings grouped into Protection (kill-switch with inbound-service exceptions, gateway independence), Transport (2-hop / 5-hop mixnet, circumvention, stealth API, IPv6) and Resilience (always-on watchdog)
+- Split tunnelling: per-device / per-domain exclusions, or the legacy luci-app-pbr hand-off
 - Daemon monitoring and restart
 
 ## Requirements
@@ -59,14 +59,16 @@ resolves by dotted name, so `'require nym-vpn.cards.dns as dnsCard'` loads
 | `view/nym-vpn/config.js` | The page: `load()` fetches the init batch, `render()` seeds the store and appends the cards in order |
 | `nym-vpn/rpc.js` | Low-level `rpc.declare` wrappers, one per ubus method |
 | `nym-vpn/api.js` | Everything the page asks the bridge, plus normalisation of the replies (`'on'/'off'` vs booleans, `entry_family` vs `entry.family`, the bounded `tentative_gateways` check, gateway list caching) |
-| `nym-vpn/store.js` | Page state (init data, live status, daemon state, the settings other cards consult), the 5 s status / 10 s daemon polls, and an `on(event, fn)` bus (`status`, `daemon`, `account-recheck`) |
-| `nym-vpn/components/` | `card` (expandable shell), `toggle` (switch row + save-or-revert), `select`, `modal`, `toast`, `gateway-picker` (country dropdown, server list, saved-selection restore) |
-| `nym-vpn/flows/` | `connect` (selection guard → `gateway_set` → `tentative_gateways` → warn/relax → connect, plus disconnect/cancel and tunnel-error handling), `daemon` (start/stop/restart with the disconnect confirmation) |
-| `nym-vpn/cards/` | One module per card, each `render(store, api)` → element: `connection`, `tunnel-settings` (hosts `inbound-services` and `split-tunneling`), `mixnet-tuning`, `dns`, `account`, `service`, `diagnostics`, `logs` |
+| `nym-vpn/store.js` | Page state (init data, live status, daemon state, the settings other cards consult), the 5 s status / 10 s daemon polls, and an `on(event, fn)` bus (`status`, `daemon`, `account-recheck`, `tunnel-switch`) |
+| `nym-vpn/components/` | `card` (expandable shell, `group()` sub-headings), `toggle` (switch row with optional `reconnect` tag + save-or-revert), `select`, `modal`, `toast`, `gateway-picker` (country dropdown, server list, saved-selection restore) |
+| `nym-vpn/flows/` | `connect` (selection guard → `gateway_set` → `tentative_gateways` → warn/relax → connect, plus disconnect/cancel and tunnel-error handling), `daemon` (start/stop/restart with the disconnect confirmation), `tunnel` (saves the six `tunnel_set` switches as one payload from the store, so the two cards that own them stay in step) |
+| `nym-vpn/cards/` | One module per card, each `render(store, api)` → element: `connection`, `tunnel-settings` (Protection / Transport / Resilience groups; hosts `inbound-services` under the kill-switch), `split-tunneling` (exclusions plus the legacy PBR switch), `mixnet-tuning`, `dns`, `account`, `service`, `diagnostics`, `logs` |
 | `nym-vpn/theme.js`, `ui.js`, `countries.js`, `assets.js` | CSS-in-JS theme, small formatting/clipboard helpers, country names and flags, inline SVG |
 
 Cards never reach into each other's DOM: shared state goes through the store,
-shared behaviour through components and flows. `modal` and `toast` are module
+shared behaviour through components and flows. The legacy PBR switch in
+Split Tunneling greys the kill-switch in Tunnel Settings that way — both read
+`store.tunnelSwitches` and listen for its `tunnel-switch` event. `modal` and `toast` are module
 singletons (LuCI instantiates every module once), so any card can `require`
 them directly.
 
