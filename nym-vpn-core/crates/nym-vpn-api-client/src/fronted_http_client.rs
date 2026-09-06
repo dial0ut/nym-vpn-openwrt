@@ -1,12 +1,17 @@
 use std::{
     collections::HashMap,
     net::IpAddr,
-    sync::{Arc, Once},
+    sync::{
+        Arc, Once,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 
 use crate::{ResolverOverrides, error::VpnApiClientError};
-use nym_http_api_client::{Client, ClientBuilder, HickoryDnsResolver, Url, UserAgent};
+use nym_http_api_client::{
+    ApiClientCore, Client, ClientBuilder, HickoryDnsResolver, Url, UserAgent,
+};
 use nym_network_defaults::ApiUrl;
 
 pub use nym_http_api_client::FrontPolicy;
@@ -28,13 +33,42 @@ fn init_shared_front_policy() {
     SHARED_FRONT_POLICY_INIT.call_once(|| Client::set_shared_front_policy(DEFAULT_FRONT_POLICY));
 }
 
+/// Mirror of whether the shared policy is `Always`; the library keeps its
+/// policy private, and [`prefer_fronted_base_url`] needs to know.
+static FRONT_ALWAYS: AtomicBool = AtomicBool::new(false);
+
 /// Set the domain-fronting policy for every fronting-capable client built by
 /// this crate, existing and future. `Always` is what the apps call "Stealth API
 /// connect": route each API request via the cover domains instead of only
 /// falling back to them after a direct request fails.
 pub fn set_shared_front_policy(policy: FrontPolicy) {
     init_shared_front_policy();
+    FRONT_ALWAYS.store(policy == FrontPolicy::Always, Ordering::Relaxed);
     Client::set_shared_front_policy(policy);
+}
+
+/// Under an always-on policy, make sure `client` sends through a base URL that
+/// has cover domains.
+///
+/// The http-api-client fronts whatever its *current* base URL is and only
+/// moves to a base URL with fronts after a failed request. The discovery
+/// lists the plain host first (`nymvpn.com`, then the fronted
+/// `*-frontdoor.global.ssl.fastly.net`), so a fresh client under `Always`
+/// would still go direct until something failed. Step it onto the next base
+/// URL with fronts up front; under any other policy this is a no-op.
+pub fn prefer_fronted_base_url(client: &Client) {
+    if FRONT_ALWAYS.load(Ordering::Relaxed)
+        && !client.current_url().has_front()
+        && client.base_urls().iter().any(Url::has_front)
+    {
+        // With fronting enabled the library's rotation picks the next base URL
+        // that has fronts configured.
+        client.maybe_rotate_hosts(None);
+        tracing::debug!(
+            "Stealth API: using fronted base URL {}",
+            client.current_url()
+        );
+    }
 }
 
 pub async fn fronted_http_client(
@@ -50,6 +84,8 @@ pub async fn fronted_http_client(
         .build()
         .map_err(Box::new)
         .map_err(VpnApiClientError::CreateVpnApiClient)?;
+
+    prefer_fronted_base_url(&client);
 
     Ok(client)
 }
@@ -179,6 +215,85 @@ fn parse_url(s: &str) -> Result<url::Url, VpnApiClientError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nym_http_api_client::{ApiClient, NO_PARAMS, PathSegments};
+    use std::sync::Mutex;
+
+    // The tests below drive the process-wide policy; serialise them.
+    static POLICY_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Same shape as the mainnet discovery: plain host first, fronted
+    /// fallback second.
+    fn discovery_shaped_urls() -> Vec<Url> {
+        api_urls_to_urls(&[
+            ApiUrl {
+                url: "https://api.example.com/api/".to_string(),
+                front_hosts: None,
+            },
+            ApiUrl {
+                url: "https://frontdoor.example.net/api/".to_string(),
+                front_hosts: Some(vec!["cover.example.org".to_string()]),
+            },
+        ])
+        .unwrap()
+    }
+
+    /// (host the TLS connection goes to, HTTP Host header) of a request as
+    /// the client would send it.
+    fn first_request_target(client: &Client) -> (String, Option<String>) {
+        let path: PathSegments<'_> = &["v1", "ping"];
+        let req = client
+            .create_get_request(path, NO_PARAMS)
+            .unwrap()
+            .build()
+            .unwrap();
+        (
+            req.url().host_str().unwrap().to_owned(),
+            req.headers()
+                .get("host")
+                .map(|v| v.to_str().unwrap().to_owned()),
+        )
+    }
+
+    #[tokio::test]
+    async fn always_policy_fronts_from_the_first_request() {
+        let _guard = POLICY_LOCK.lock().unwrap();
+        set_shared_front_policy(FrontPolicy::Always);
+
+        // Built while the policy is on: fronted straight away.
+        let client = fronted_http_client(discovery_shaped_urls(), None, None, None)
+            .await
+            .unwrap();
+        let (connect_host, host_header) = first_request_target(&client);
+        assert_eq!(connect_host, "cover.example.org");
+        assert_eq!(host_header.as_deref(), Some("frontdoor.example.net"));
+
+        // Built before the policy was switched on: follows on its next request.
+        set_shared_front_policy(DEFAULT_FRONT_POLICY);
+        let client = fronted_http_client(discovery_shaped_urls(), None, None, None)
+            .await
+            .unwrap();
+        assert_eq!(first_request_target(&client).0, "api.example.com");
+        set_shared_front_policy(FrontPolicy::Always);
+        prefer_fronted_base_url(&client);
+        assert_eq!(first_request_target(&client).0, "cover.example.org");
+
+        set_shared_front_policy(DEFAULT_FRONT_POLICY);
+    }
+
+    #[tokio::test]
+    async fn default_policy_starts_direct() {
+        let _guard = POLICY_LOCK.lock().unwrap();
+        set_shared_front_policy(DEFAULT_FRONT_POLICY);
+
+        let client = fronted_http_client(discovery_shaped_urls(), None, None, None)
+            .await
+            .unwrap();
+        prefer_fronted_base_url(&client);
+        let (connect_host, host_header) = first_request_target(&client);
+        assert_eq!(connect_host, "api.example.com");
+        // No fronting, so no explicit Host header: reqwest derives it from the URL.
+        assert!(host_header.is_none());
+    }
 
     #[test]
     fn test_api_url_to_url_domain() {

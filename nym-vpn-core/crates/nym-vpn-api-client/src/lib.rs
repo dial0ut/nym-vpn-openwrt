@@ -17,7 +17,8 @@ mod routes;
 pub use client::VpnApiClient;
 pub use fronted_http_client::{
     DEFAULT_FRONT_POLICY, FrontPolicy, api_url_to_url, api_url_to_url_and_domain, api_urls_to_urls,
-    fronted_http_client, fronted_http_client_builder, set_shared_front_policy,
+    fronted_http_client, fronted_http_client_builder, prefer_fronted_base_url,
+    set_shared_front_policy,
 };
 pub use network_compatibility::NetworkCompatibility;
 pub use resolve_host::{str_to_socket_addr, url_to_socket_addr};

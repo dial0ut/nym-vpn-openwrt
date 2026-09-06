@@ -19,7 +19,7 @@ use tokio::sync::RwLock;
 use crate::{
     ResolverOverrides, api_urls_to_urls,
     error::{Result, VpnApiClientError},
-    fronted_http_client, fronted_http_client_builder,
+    fronted_http_client, fronted_http_client_builder, prefer_fronted_base_url,
     request::{
         ApplyFreepassRequestBody, CreateAndroidAccountRequestBody, CreateAppleAccountRequestBody,
         CreateSubscriptionKind, CreateSubscriptionRequestBody, RegisterDeviceRequestBody,
@@ -201,6 +201,16 @@ impl VpnApiClient {
     }
 
     pub fn api_client(&self) -> &impl ApiClient {
+        self.client()
+    }
+
+    /// The inner client, ready to send: under Stealth API (`Always`) it is
+    /// first moved onto a base URL with cover domains, because the
+    /// http-api-client fronts only through the current base URL and the
+    /// discovery lists the plain host first. Every request goes through here so
+    /// a policy switched on at runtime reaches long-lived clients too.
+    fn client(&self) -> &Client {
+        prefer_fronted_base_url(&self.inner);
         &self.inner
     }
 
@@ -307,7 +317,7 @@ impl VpnApiClient {
         T: DeserializeOwned,
     {
         let request = self
-            .inner
+            .client()
             .create_get_request(path, NO_PARAMS)?
             .bearer_auth(account.jwt(jwt).to_string());
 
@@ -378,7 +388,7 @@ impl VpnApiClient {
         T: DeserializeOwned,
     {
         let request = self
-            .inner
+            .client()
             .create_get_request(path, NO_PARAMS)?
             .bearer_auth(account.jwt(None).to_string());
 
@@ -437,7 +447,7 @@ impl VpnApiClient {
         K: AsRef<str> + Sync,
         V: AsRef<str> + Sync,
     {
-        let response = (|| async { self.inner.get_json(path, params).await })
+        let response = (|| async { self.client().get_json(path, params).await })
             .retry(backon::ConstantBuilder::default())
             .notify(|err: &HttpClientError, dur: Duration| {
                 tracing::warn!("Failed to get JSON: {}", err);
@@ -459,7 +469,7 @@ impl VpnApiClient {
         K: AsRef<str> + Sync,
         V: AsRef<str> + Sync,
     {
-        let response = (|| async { self.inner.post_json(path, params, json_body).await })
+        let response = (|| async { self.client().post_json(path, params, json_body).await })
             .retry(backon::ConstantBuilder::default())
             .notify(|err: &HttpClientError, dur: Duration| {
                 tracing::warn!("Failed to post JSON: {}", err);
@@ -482,7 +492,7 @@ impl VpnApiClient {
         B: Serialize,
     {
         let request = self
-            .inner
+            .client()
             .create_post_request(path, NO_PARAMS, json_body)?
             .bearer_auth(account.jwt(jwt).to_string());
 
@@ -560,7 +570,7 @@ impl VpnApiClient {
         T: DeserializeOwned,
     {
         let request = self
-            .inner
+            .client()
             .create_delete_request(path, NO_PARAMS)?
             .bearer_auth(account.jwt(jwt).to_string());
 
@@ -622,7 +632,7 @@ impl VpnApiClient {
         B: Serialize,
     {
         let request = self
-            .inner
+            .client()
             .create_patch_request(path, NO_PARAMS, json_body)?
             .bearer_auth(account.jwt(jwt).to_string());
 
@@ -760,7 +770,7 @@ impl VpnApiClient {
     }
 
     pub async fn get_wellknown_envs(&self) -> Result<crate::response::RegisteredNetworksResponse> {
-        self.inner
+        self.client()
             .get_json(
                 &[
                     routes::PUBLIC,
@@ -779,7 +789,7 @@ impl VpnApiClient {
         &self,
         network: &str,
     ) -> Result<crate::response::NymWellknownDiscoveryItemResponse> {
-        self.inner
+        self.client()
             .get_json(
                 &[
                     routes::PUBLIC,
@@ -1422,7 +1432,7 @@ impl VpnApiClient {
 
     pub async fn get_wellknown_current_env(&self) -> Result<NymWellknownDiscoveryItem> {
         tracing::debug!("Fetching nym vpn network details");
-        self.inner
+        self.client()
             .get_json(
                 &[
                     routes::PUBLIC,
