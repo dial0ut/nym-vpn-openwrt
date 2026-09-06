@@ -140,6 +140,10 @@ if [ -f "$FW_SCRIPTS_DIR/fw-backend.sh" ]; then
     cp "$FW_SCRIPTS_DIR/fw-backend.sh" "$DATA_DIR/usr/share/nym-vpn/"
     chmod 755 "$DATA_DIR/usr/share/nym-vpn/fw-backend.sh"
 fi
+if [ -f "$FW_SCRIPTS_DIR/fw-boot-guard.sh" ]; then
+    cp "$FW_SCRIPTS_DIR/fw-boot-guard.sh" "$DATA_DIR/usr/share/nym-vpn/"
+    chmod 644 "$DATA_DIR/usr/share/nym-vpn/fw-boot-guard.sh"
+fi
 
 # === DATA: Feed signing public key ===
 # apk verifies feed indexes with an ECDSA P-256 public key (PEM). apk looks
