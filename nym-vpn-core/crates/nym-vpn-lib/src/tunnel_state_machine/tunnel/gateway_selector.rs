@@ -144,6 +144,14 @@ impl PairSelection {
         exit_gateways: &GatewayList,
         criteria: GatewayIndependence,
     ) -> Result<(Gateway, Gateway), GatewayDirectoryError> {
+        // An entry point that matches nothing before any exit is excluded (a
+        // pinned identity missing from the directory, an unserved country)
+        // fails the same way for every exit; say so at once instead of
+        // walking the whole exit list.
+        entry_gateways
+            .find_best_entry_gateway(&self.entry_point, &self.entry_filters)
+            .map_err(GatewayDirectoryError::EntryGatewayUnavailable)?;
+
         let mut exit_candidates = exit_gateways.clone();
         let mut entry_error = None;
         loop {
@@ -604,6 +612,25 @@ mod tests {
         let err = selection(entry_point, exit_point)
             .select(&gateways, &gateways, GatewayIndependence::disabled())
             .unwrap_err();
+        assert!(
+            matches!(err, GatewayDirectoryError::EntryGatewayUnavailable(_)),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn unmatched_entry_point_fails_without_trying_every_exit() {
+        let gateways = two_operators();
+        let (_, exit_point) = country("DE");
+        // Gateway 3 is not in the list, so no exit choice can help.
+        let err = selection(
+            EntryPoint::Gateway {
+                identity: identity(3),
+            },
+            exit_point,
+        )
+        .select(&gateways, &gateways, GatewayIndependence::default())
+        .unwrap_err();
         assert!(
             matches!(err, GatewayDirectoryError::EntryGatewayUnavailable(_)),
             "got {err:?}"
