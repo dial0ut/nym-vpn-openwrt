@@ -8,10 +8,11 @@
 'require nym-vpn.cards.inbound-services as inboundServices';
 'require nym-vpn.cards.split-tunneling as splitTunneling';
 
-// Tunnel Settings — the daemon's tunnel switches (IPv6, two-hop,
-// circumvention transports, stealth API, gateway independence, family
-// reminders, always-on watchdog, legacy split tunnelling, kill-switch), with
-// the Inbound Services and Split Tunneling sections mounted underneath.
+// Tunnel Settings — the daemon's tunnel switches (kill-switch first, then
+// IPv6, two-hop, circumvention transports, stealth API, gateway
+// independence, family reminders, always-on watchdog, legacy split
+// tunnelling), with the Inbound Services and Split Tunneling sections
+// mounted underneath.
 
 var E = dom.create.bind(dom);
 
@@ -308,7 +309,10 @@ return baseclass.extend({
             icon: assets.iconTunnel,
             title: 'Tunnel Settings',
             body: [
+                // Kill-switch first: it is the switch that decides whether
+                // anything leaks, so it leads the card.
                 E('div', {}, [
+                    killswitchRow,
                     ipv6Row,
                     twoHopRow,
                     circumventionRow,
@@ -316,8 +320,7 @@ return baseclass.extend({
                     independenceRow,
                     remindersRow,
                     alwaysOnRow,
-                    legacyRow,
-                    killswitchRow
+                    legacyRow
                 ]),
                 inboundMount,
                 splitMount
