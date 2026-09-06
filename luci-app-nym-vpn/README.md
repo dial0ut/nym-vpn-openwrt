@@ -7,7 +7,7 @@ LuCI web interface for NymVPN on OpenWrt. Wraps the `nym-vpnc` CLI to control th
 - Connect/disconnect with real-time status polling and animated indicators
 - Account management (mnemonic login, key rotation)
 - Gateway selection by country or specific node with performance indicators
-- Tunnel settings grouped into Protection (kill-switch with inbound-service exceptions, gateway independence, always-on watchdog) and Transport (2-hop / 5-hop mixnet, circumvention, stealth API, IPv6)
+- Tunnel settings grouped into Protection (kill-switch with inbound-service exceptions, gateway independence, Always On with a live status line) and Transport (2-hop / 5-hop mixnet, circumvention, stealth API, IPv6)
 - Split tunnelling: per-device / per-domain exclusions, or the legacy luci-app-pbr hand-off
 - Daemon monitoring and restart
 

@@ -245,6 +245,18 @@ impl VpnServiceConfigManager {
         }
     }
 
+    /// Always On: connect on daemon start and keep retrying error states.
+    /// A policy switch consulted by the service loop, not a tunnel setting,
+    /// so flipping it never touches the running tunnel.
+    pub async fn set_always_on(&mut self, always_on: bool) -> Result<(), String> {
+        if self.config.always_on != always_on {
+            self.config.always_on = always_on;
+            self.save_config_and_send_event().await
+        } else {
+            Ok(())
+        }
+    }
+
     /// Gateway independence: every criterion (node family, ASN, subnet) on or
     /// off at once. The reminder switch is left alone.
     pub async fn set_gateway_independence_enabled(&mut self, enabled: bool) -> Result<(), String> {
@@ -450,7 +462,8 @@ impl VpnServiceConfigManager {
 
         // `stealth_api` is deliberately absent from TunnelSettings: it is an
         // API-transport switch applied through the shared fronting policy, so
-        // changing it must not force a reconnect.
+        // changing it must not force a reconnect. `always_on` is absent for
+        // the same reason: it drives the service loop, not the tunnel.
 
         let gateway_options = GatewayPerformanceOptions {
             mixnet_min_performance: self.config.mixnet_traffic.min_gateway_mixnet_performance,

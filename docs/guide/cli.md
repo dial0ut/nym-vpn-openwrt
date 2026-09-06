@@ -100,7 +100,21 @@ nym-vpnc tunnel set --stealth-api on       # API via cover domains on every requ
 nym-vpnc tunnel set --stealth-api off      # default: cover domains only after a direct request fails
 nym-vpnc tunnel set --gateway-independence off   # accept related entry/exit pairs (default: on)
 nym-vpnc tunnel set --family-reminders off       # stop reminding about related pairs (default: on)
+nym-vpnc tunnel set --always-on on               # connect at daemon start, keep retrying (default: off)
 ```
+
+**Always On** makes the daemon connect when it starts — once a default route exists — and keep
+the tunnel up on its own: reconnects after drops and WAN outages, error states retried with a
+growing backoff (5 s doubling to 5 min for firewall/routing/DNS/TUN failures, 60 s then 5 min for
+"no performant gateway", clock skew or exhausted bandwidth), and a fresh gateway selection after
+ten minutes of Connecting. Errors that need a change from you (account state, a pinned pair that
+fails the independence criteria) stop the retries until the configuration or the account changes
+or you connect. `nym-vpnc disconnect` pauses it for this session without turning the setting off;
+the next connect or daemon start resumes it. `nym-vpnc status` shows an `Always on:` line while
+the setting is on: `active`, `retrying in 42 s (attempt 3, last error SetRouting)`, `paused
+(disconnected by user)` or `stopped — NeedsRelaxedIndependenceCriteria`. Six consecutive
+infrastructure failures make the daemon exit (code 3) for procd to respawn, kill-switch intact;
+a service loop that stops answering for three minutes exits the same way (code 2).
 
 **Gateway independence** switches the three independence criteria (family, ASN, subnet) together;
 `tunnel get` prints `Gateway independence: on (family, ASN, subnet)` or `off`. Changing it while

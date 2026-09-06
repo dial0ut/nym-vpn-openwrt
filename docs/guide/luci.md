@@ -74,14 +74,22 @@ with the same two choices.
 
 #### Always On
 
-A watchdog that reconnects when the tunnel drops: soft reconnects first, then a daemon restart
-with growing backoff. It polls the tunnel at the chosen interval (**Check every**, 30 s by
-default) and is also woken by the router's WAN link events, so when the WAN comes back after an
-outage or a PPPoE re-dial the tunnel is checked immediately, followed by a few quick re-checks
-while the daemon catches up. A link change also resets the retry escalation, since a daemon
-restart cannot fix a WAN that is down. `wan` and `wan6` count as WAN, as does any interface in
-the `wan` firewall zone or carrying a default route. Its log lines are tagged `nym-watchdog` in
-`logread`.
+Keeps the tunnel up while the router is on. The daemon itself does the work, so there is no
+poller and no interval to pick: it connects when it starts, waiting for a default route rather
+than probing for one (the WAN may still be coming up, PPPoE may still be dialling), reconnects
+after drops and WAN outages the moment the route is back, retries error states with a growing
+backoff — moving off gateways that keep failing — and forces a fresh gateway selection if a
+connect drags on for ten minutes. Firewall, routing or DNS failures that repeat for about five
+minutes make the daemon hand over to procd, which restarts it with the kill-switch still in
+place.
+
+The line under the switch says what it is doing: *Active*, *Waiting for network*, *Retrying in
+N s (attempt K)*, *Paused — disconnected by you* after you press **Disconnect** (the setting stays
+on and the next connect or reboot resumes it), or *Stopped: …* for errors that need you to change
+something first — an account problem, or a pinned entry/exit pair that fails the independence
+criteria. Fixing the configuration, a renewed subscription or pressing **Connect** resumes it. Its
+log lines are prefixed `always-on:` in the daemon log (`logread -e nym-vpnd`). The same switch is
+`nym-vpnc tunnel set --always-on on|off`.
 
 ### Transport
 

@@ -89,7 +89,7 @@ return baseclass.extend({
     tunnelSet: rpc.declare({
         object: 'nym-vpn',
         method: 'tunnel_set',
-        params: ['ipv6', 'two_hop', 'killswitch', 'circumvention', 'legacy_split_tunnel', 'stealth_api']
+        params: ['ipv6', 'two_hop', 'killswitch', 'circumvention', 'legacy_split_tunnel', 'stealth_api', 'always_on']
     }),
 
     // Gateway independence also rides on tunnel_set. Pass 'on'/'off' for the
@@ -257,18 +257,6 @@ return baseclass.extend({
         object: 'nym-vpn',
         method: 'daemon_stop',
         params: []
-    }),
-
-    watchdogGet: rpc.declare({
-        object: 'nym-vpn',
-        method: 'watchdog_get',
-        params: []
-    }),
-
-    watchdogSet: rpc.declare({
-        object: 'nym-vpn',
-        method: 'watchdog_set',
-        params: ['always_on', 'interval']
     }),
 
     logsGet: rpc.declare({

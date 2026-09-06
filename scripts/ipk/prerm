@@ -11,8 +11,7 @@ if [ "$PKG_UPGRADE" = "1" ]; then
     } > /tmp/nym-vpn.rpcd-state
 fi
 
-# Stop the services: the binaries are about to be replaced either way.
-/etc/init.d/nym-vpn-watchdog stop 2>/dev/null
+# Stop the service: the binaries are about to be replaced either way.
 /etc/init.d/nym-vpnd stop 2>/dev/null
 
 # Disabling is for real removal only. On an upgrade the boot symlinks must
@@ -22,7 +21,6 @@ fi
 # after a reboot either, and the UI then shows an empty account, which reads as
 # lost credentials. Leaving /etc/rc.d alone makes that failure self-healing.
 if [ "$PKG_UPGRADE" != "1" ]; then
-    /etc/init.d/nym-vpn-watchdog disable 2>/dev/null
     /etc/init.d/nym-vpnd disable 2>/dev/null
 fi
 
@@ -111,7 +109,6 @@ rm -f /tmp/nym-firewall-v4.rules /tmp/nym-firewall-v6.rules /tmp/nym-firewall.nf
     /tmp/nym-firewall.ifaces /tmp/nym-firewall.transition 2>/dev/null
 rm -f /tmp/dnsmasq.d/nym-adblock.conf 2>/dev/null
 rm -f /tmp/nym-dns-backup /tmp/resolv.conf.nymbackup 2>/dev/null
-rm -f /tmp/nym-watchdog.state 2>/dev/null
 
 # DNS: on full removal, return dnsmasq to stock resolv handling. On upgrade,
 # leave everything in place — the new daemon reconverges without a restart

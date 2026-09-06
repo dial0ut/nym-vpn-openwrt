@@ -122,6 +122,22 @@ message DnsUpstreamOwnerResponse {
   Owner owner = 1;
 }
 
+// Snapshot of the daemon's Always On supervisor. Polled; no event carries it.
+message AlwaysOnStatus {
+  // The persisted setting.
+  bool enabled = 1;
+  // The daemon wants the tunnel up (target state Secured).
+  bool active = 2;
+  // The user disconnected for this session; the setting is untouched.
+  bool paused = 3;
+  // Retries scheduled in the current error series.
+  uint32 attempt = 4;
+  optional uint32 next_retry_in_secs = 5;
+  optional TunnelState.Error last_error = 6;
+  // Terminal error holding retries until the configuration or account changes.
+  optional string latched_reason = 7;
+}
+
 message ApiUrl {
   string url = 1;
   repeated string front_hosts = 2;
@@ -292,6 +308,8 @@ message VpnServiceConfig {
   bool legacy_split_tunnel = 30;
   bool stealth_api = 31;
   GatewayIndependence gateway_independence = 32;
+  // Connect on daemon start and keep retrying error states (see AlwaysOnStatus).
+  bool always_on = 33;
 }
 
 // Which relations between the entry and the exit gateway rule a pair out.
@@ -1075,6 +1093,9 @@ service NymVpnService {
   rpc SetKillswitch (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
   rpc SetLegacySplitTunnel (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
   rpc SetStealthApi (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
+  // Always On: connect on daemon start and keep the tunnel up until told otherwise
+  rpc SetAlwaysOn (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
+  rpc GetAlwaysOnStatus (google.protobuf.Empty) returns (AlwaysOnStatus) {}
   // Switch every gateway independence criterion on or off at once
   rpc SetEnableGatewayIndependence (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
   // Remind the user when the selected pair is not independent

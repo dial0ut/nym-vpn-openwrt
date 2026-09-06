@@ -192,7 +192,8 @@ location = "BE"
     "different_node_family": true,
     "different_asn": true,
     "different_subnet": true
-  }
+  },
+  "always_on": false
 }"#;
 
     let entry_point = nym_vpn_lib_types::EntryPoint::Country {
@@ -257,7 +258,8 @@ identity = [ 99, 23, 98, 234, 66, 161, 195, 63, 155, 161, 250, 207, 17, 158, 136
     "different_node_family": true,
     "different_asn": true,
     "different_subnet": true
-  }
+  },
+  "always_on": false
 }"#;
 
     let entry_point = nym_vpn_lib_types::EntryPoint::Gateway {
@@ -326,7 +328,8 @@ address = [5, 56, 84, 195, 94, 238, 210, 124, 65, 143, 209, 144, 22, 255, 91, 18
     "different_node_family": true,
     "different_asn": true,
     "different_subnet": true
-  }
+  },
+  "always_on": false
 }"#;
 
     let entry_point = nym_vpn_lib_types::EntryPoint::Gateway {
@@ -385,7 +388,8 @@ exit_point = "Random"
     "different_node_family": true,
     "different_asn": true,
     "different_subnet": true
-  }
+  },
+  "always_on": false
 }"#;
 
     let entry_point = nym_vpn_lib_types::EntryPoint::Random;
@@ -451,7 +455,8 @@ async fn test_service_config_migrate_from_v1() {
     "different_node_family": true,
     "different_asn": true,
     "different_subnet": true
-  }
+  },
+  "always_on": false
 }"#;
 
     run_migrate_json_test(json_v1_content, json_latest_content).await;
@@ -526,7 +531,8 @@ async fn test_service_config_migrate_from_v2() {
     "different_node_family": true,
     "different_asn": true,
     "different_subnet": true
-  }
+  },
+  "always_on": false
 }"#;
 
     run_migrate_json_test(json_v2_content, json_latest_content).await;
@@ -607,7 +613,8 @@ async fn test_service_config_migrate_from_v3() {
     "different_node_family": true,
     "different_asn": true,
     "different_subnet": true
-  }
+  },
+  "always_on": false
 }"#;
 
     run_migrate_json_test(json_v3_content, json_latest_content).await;
@@ -693,7 +700,8 @@ async fn test_service_config_migrate_from_v4() {
     "different_node_family": true,
     "different_asn": true,
     "different_subnet": true
-  }
+  },
+  "always_on": false
 }"#;
 
     run_migrate_json_test(json_v4_content, json_latest_content).await;
@@ -785,7 +793,8 @@ async fn test_service_config_migrate_from_v5() {
     "different_node_family": true,
     "different_asn": true,
     "different_subnet": true
-  }
+  },
+  "always_on": false
 }"#;
 
     run_migrate_json_test(json_v5_content, json_latest_content).await;
@@ -871,7 +880,8 @@ async fn test_service_config_migrate_from_v6() {
     "different_node_family": true,
     "different_asn": true,
     "different_subnet": true
-  }
+  },
+  "always_on": false
 }"#;
 
     run_migrate_json_test(json_v6_content, json_latest_content).await;
@@ -1079,6 +1089,7 @@ async fn test_service_config_serialize_full() {
             different_asn: false,
             different_subnet: true,
         },
+        always_on: true,
     };
     run_serialize_test(config).await;
 }
@@ -1280,6 +1291,151 @@ async fn test_service_config_v8_without_gateway_independence_loads_on() {
     // No migration happened, so the file on disk is untouched.
     let read_json_content = fs::read_to_string(&json_path).await.unwrap();
     assert_eq!(json_v8_content, read_json_content);
+}
+
+// Always On is a daemon policy switch: persisted with the service config, off
+// by default, restored on restart, and absent from the tunnel settings so a
+// toggle never reconnects.
+#[tokio::test]
+async fn test_always_on_persists_across_restart() {
+    let temp_dir = tempdir().unwrap();
+    let network_config_path = temp_dir.path().join("tulips");
+
+    let mut config_manager = VpnServiceConfigManager::new(&network_config_path, None)
+        .await
+        .unwrap();
+    assert!(!config_manager.config().always_on);
+    let before = config_manager.generate_tunnel_settings();
+    config_manager.set_always_on(true).await.unwrap();
+    assert!(
+        before
+            .diff(&config_manager.generate_tunnel_settings())
+            .is_none(),
+        "always_on must not change the tunnel settings"
+    );
+    drop(config_manager);
+
+    let config_manager = VpnServiceConfigManager::new(&network_config_path, None)
+        .await
+        .unwrap();
+    assert!(config_manager.config().always_on);
+}
+
+// A v8 file written before the key existed loads with Always On off, and the
+// loader leaves the file alone (no migration happened).
+#[tokio::test]
+async fn test_service_config_v8_without_always_on_loads_off() {
+    let json_v8_content = r#"{
+  "version": "v8",
+  "entry_point": {
+    "country": {
+      "two_letter_iso_country_code": "FR"
+    }
+  },
+  "exit_point": {
+    "country": {
+      "two_letter_iso_country_code": "BE"
+    }
+  },
+  "allow_lan": true,
+  "disable_ipv6": true,
+  "enable_two_hop": true,
+  "enable_bridges": false,
+  "enable_lewes_protocol": false,
+  "netstack": false,
+  "min_gateway_vpn_performance": null,
+  "residential_exit": false,
+  "enable_custom_dns": false,
+  "custom_dns": [],
+  "enable_ad_blocking": false,
+  "mixnet_traffic": {
+    "poisson_parameter_for_loop_cover_stream": null,
+    "average_packet_delay": null,
+    "message_sending_average_delay": null,
+    "disable_poisson_rate": false,
+    "disable_background_cover_traffic": false,
+    "min_mixnode_performance": null,
+    "min_gateway_mixnet_performance": null
+  },
+  "killswitch": true,
+  "legacy_split_tunnel": false,
+  "inbound_exemptions": [],
+  "stealth_api": false,
+  "gateway_independence": {
+    "enable_notifications": true,
+    "different_node_family": true,
+    "different_asn": true,
+    "different_subnet": true
+  }
+}"#;
+
+    let temp_dir = tempdir().unwrap();
+    let network_config_path = temp_dir.path().join("tulips");
+    let _ = fs::create_dir_all(&network_config_path).await;
+    let json_path = network_config_path.join(DEFAULT_CONFIG_FILE_JSON);
+    fs::write(&json_path, json_v8_content).await.unwrap();
+
+    let config_manager = VpnServiceConfigManager::new(&network_config_path, None)
+        .await
+        .unwrap();
+    assert!(!config_manager.config().always_on);
+
+    let read_json_content = fs::read_to_string(&json_path).await.unwrap();
+    assert_eq!(json_v8_content, read_json_content);
+}
+
+// The v8 loader reads the key back when it is present.
+#[tokio::test]
+async fn test_service_config_v8_with_always_on_loads_on() {
+    let json_v8_content = r#"{
+  "version": "v8",
+  "entry_point": {
+    "country": {
+      "two_letter_iso_country_code": "FR"
+    }
+  },
+  "exit_point": {
+    "country": {
+      "two_letter_iso_country_code": "BE"
+    }
+  },
+  "allow_lan": true,
+  "disable_ipv6": true,
+  "enable_two_hop": true,
+  "enable_bridges": false,
+  "enable_lewes_protocol": false,
+  "netstack": false,
+  "min_gateway_vpn_performance": null,
+  "residential_exit": false,
+  "enable_custom_dns": false,
+  "custom_dns": [],
+  "enable_ad_blocking": false,
+  "mixnet_traffic": {
+    "poisson_parameter_for_loop_cover_stream": null,
+    "average_packet_delay": null,
+    "message_sending_average_delay": null,
+    "disable_poisson_rate": false,
+    "disable_background_cover_traffic": false,
+    "min_mixnode_performance": null,
+    "min_gateway_mixnet_performance": null
+  },
+  "killswitch": true,
+  "legacy_split_tunnel": false,
+  "inbound_exemptions": [],
+  "stealth_api": false,
+  "always_on": true
+}"#;
+
+    let temp_dir = tempdir().unwrap();
+    let network_config_path = temp_dir.path().join("tulips");
+    let _ = fs::create_dir_all(&network_config_path).await;
+    let json_path = network_config_path.join(DEFAULT_CONFIG_FILE_JSON);
+    fs::write(&json_path, json_v8_content).await.unwrap();
+
+    let config_manager = VpnServiceConfigManager::new(&network_config_path, None)
+        .await
+        .unwrap();
+    assert!(config_manager.config().always_on);
 }
 
 // Configs written before telemetry was removed carry a `network_stats` block.

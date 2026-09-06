@@ -280,6 +280,12 @@ return baseclass.extend({
                 // Disconnecting; the error strip shows why, so the label
                 // switches to Halted to stop implying progress.
                 statusLabel.textContent = result.error_reason ? 'Halted' : 'Disconnecting';
+            } else if (state === 'offline') {
+                // No default route. With reconnect set (Always On, or a
+                // connect issued while offline) the daemon connects the
+                // moment one appears.
+                statusLabel.textContent = result.reconnect ? 'Waiting for network' : 'Offline';
+                stopUptimeTimer();
             } else if (result.tunnel_error) {
                 // Persistent cue once the toast has faded: the tunnel bounced
                 // to Error (e.g. gateway unavailable), not a clean user
@@ -295,6 +301,7 @@ return baseclass.extend({
             if (state === 'connected') setAction('disconnect');
             else if (state === 'disconnected') setAction('connect');
             else if (state === 'connecting') setAction('cancel');
+            else if (state === 'offline') setAction(result.reconnect ? 'cancel' : 'connect');
             else setAction('wait', 'Disconnecting');
 
             if (state === 'connected') {
@@ -322,7 +329,7 @@ return baseclass.extend({
                 // below re-syncs them from the daemon config regardless.
                 pickers.invalidate();
                 pickers.settle();
-            } else if (state === 'disconnected' || state === 'connecting') {
+            } else if (state === 'disconnected' || state === 'connecting' || state === 'offline') {
                 // Only clear gateway info when fully disconnected or
                 // connecting fresh; keep it visible during 'disconnecting'.
                 clearGatewayPanels();
@@ -343,7 +350,9 @@ return baseclass.extend({
         // --- initial state --------------------------------------------------
         if (status.state) {
             statusHero.className = 'nym-status-hero ' + status.state;
-            statusLabel.textContent = status.state.charAt(0).toUpperCase() + status.state.slice(1);
+            statusLabel.textContent = status.state === 'offline' && status.reconnect
+                ? 'Waiting for network'
+                : status.state.charAt(0).toUpperCase() + status.state.slice(1);
 
             if (status.state === 'connected') {
                 renderConnectedGateways(status);
@@ -373,7 +382,7 @@ return baseclass.extend({
         // Prefill the pickers from the saved daemon config on first render.
         // While connected/connecting they are hidden and reset anyway; the
         // poll's disconnected transition handles later drops.
-        if (!status.state || status.state === 'disconnected' || status.state === 'unknown') {
+        if (!status.state || status.state === 'disconnected' || status.state === 'unknown' || status.state === 'offline') {
             pickers.restore();
         }
 

@@ -6,6 +6,7 @@ mod cli;
 mod command_interface;
 mod config;
 mod environment;
+mod liveness;
 mod logging;
 mod service;
 mod shutdown_handler;
@@ -27,6 +28,13 @@ use crate::{
 };
 use service::{NymVpnService, NymVpnServiceParameters};
 
+/// Exit codes beyond the usual 0/1. Both are abrupt `process::exit`s that
+/// skip the shutdown path on purpose so the kill-switch table survives until
+/// procd (`respawn`) starts a fresh daemon:
+///
+/// * 2 — the service loop stopped answering (`liveness`)
+/// * 3 — Always On gave up after repeated infrastructure failures
+///   (`service::always_on::EXIT_CODE_INFRASTRUCTURE`)
 fn main() -> anyhow::Result<()> {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()

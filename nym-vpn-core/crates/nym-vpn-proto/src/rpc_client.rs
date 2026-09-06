@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use nym_vpn_lib_types::{
-    AccountBalanceResponse, AccountCommandResponse, AccountControllerState, AvailableTickets,
+    AccountBalanceResponse, AccountCommandResponse, AccountControllerState, AlwaysOnStatus,
+    AvailableTickets,
     DiagnosticReport, DnsUpstreamOwner, EntryPoint, ExitPoint, FeatureFlags, Gateway,
     GatewayTestParams, GatewayTestReport, GetDeeplinkParams, HttpRpcSettings, ListGatewaysOptions,
     LogPath, LookupGatewayFilters, NetworkCompatibility, NymVpnDevice,
@@ -162,6 +163,15 @@ impl RpcClient {
     pub async fn set_stealth_api(&mut self, stealth_api: bool) -> Result<()> {
         self.0
             .set_stealth_api(stealth_api)
+            .await
+            .map_err(Error::Rpc)?
+            .into_inner();
+        Ok(())
+    }
+
+    pub async fn set_always_on(&mut self, always_on: bool) -> Result<()> {
+        self.0
+            .set_always_on(always_on)
             .await
             .map_err(Error::Rpc)?
             .into_inner();
@@ -360,6 +370,16 @@ impl RpcClient {
             .into_inner();
         let ip_vec = response.try_into().map_err(Error::InvalidResponse)?;
         Ok(ip_vec)
+    }
+
+    pub async fn get_always_on_status(&mut self) -> Result<AlwaysOnStatus> {
+        let response = self
+            .0
+            .get_always_on_status(())
+            .await
+            .map_err(Error::Rpc)?
+            .into_inner();
+        Ok(AlwaysOnStatus::from(response))
     }
 
     pub async fn get_dns_upstream_owner(&mut self) -> Result<DnsUpstreamOwner> {

@@ -232,6 +232,28 @@ impl NymVpnService for CommandInterface {
         Ok(tonic::Response::new(()))
     }
 
+    async fn set_always_on(&self, request: tonic::Request<bool>) -> Result<tonic::Response<()>> {
+        let always_on = request.into_inner();
+
+        self
+            .send_and_wait(VpnServiceCommand::SetAlwaysOn, always_on)
+            .await
+            .map_err(|e| tonic::Status::internal(format!("Failed to set always on: {e}")))?
+            .map_err(tonic::Status::internal)?;
+
+        Ok(tonic::Response::new(()))
+    }
+
+    async fn get_always_on_status(
+        &self,
+        _request: tonic::Request<()>,
+    ) -> Result<tonic::Response<proto::AlwaysOnStatus>> {
+        let status = self
+            .send_and_wait(VpnServiceCommand::GetAlwaysOnStatus, ())
+            .await?;
+        Ok(tonic::Response::new(status.into()))
+    }
+
     async fn set_legacy_split_tunnel(
         &self,
         request: tonic::Request<bool>,
@@ -1098,6 +1120,10 @@ pub async fn start_command_interface(
 
     let socket_path = default_socket_path();
     let (vpn_command_tx, vpn_command_rx) = mpsc::unbounded_channel();
+
+    // Probe the service loop through the same channel the gRPC handlers use;
+    // a daemon that accepts connections but never answers exits for procd.
+    crate::liveness::spawn(vpn_command_tx.clone(), shutdown_token.child_token());
 
     // Remove previous socket file in case if the daemon crashed in the prior run and could not clean up the socket file.
     remove_previous_socket_file(&socket_path).await;

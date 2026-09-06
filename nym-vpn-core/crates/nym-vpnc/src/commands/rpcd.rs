@@ -28,7 +28,8 @@ use anyhow::Result;
 use serde_json::{Value, json};
 
 use nym_vpn_lib_types::{
-    AccountControllerErrorStateReason, AccountControllerState, DiagnosticRunParams,
+    AccountControllerErrorStateReason, AccountControllerState, AlwaysOnStatus,
+    DiagnosticRunParams,
     DnsUpstreamOwner, EntryPoint, ErrorStateReason, ExitPoint, Gateway, GatewayIndependence,
     GatewayType, InboundExemption, InboundExemptionProtocol, ListGatewaysOptions, NodeIdentity,
     StoreAccountRequest, TentativeGateways, TunnelConnectionData, TunnelState, VpnServiceConfig,
@@ -102,7 +103,7 @@ fn method_signatures() -> Value {
         "tunnel_set": {
             "ipv6": "str", "two_hop": "str", "killswitch": "str", "legacy_split_tunnel": "str",
             "circumvention": "str", "stealth_api": "str", "gateway_independence": "str",
-            "family_reminders": "str", "loop_cover_delay": "str", "packet_delay": "str",
+            "family_reminders": "str", "always_on": "str", "loop_cover_delay": "str", "packet_delay": "str",
             "message_delay": "str", "disable_poisson": "str", "disable_cover": "str"
         },
         "account_get": {},
@@ -132,8 +133,6 @@ fn method_signatures() -> Value {
         "daemon_restart": {},
         "daemon_start": {},
         "daemon_stop": {},
-        "watchdog_get": {},
-        "watchdog_set": { "always_on": "bool", "interval": "int" },
         "logs_get": { "lines": "int" },
     })
 }
@@ -164,7 +163,6 @@ fn method_takes_args(method: &str) -> bool {
             | "split_add"
             | "split_del"
             | "split_set_enabled"
-            | "watchdog_set"
     )
 }
 
@@ -220,8 +218,6 @@ async fn dispatch(method: &str, args: &Value) -> Value {
         "daemon_stop" => daemon_stop(),
         "daemon_restart" => daemon_restart(),
         "account_reset" => account_reset(),
-        "watchdog_get" => watchdog_get(),
-        "watchdog_set" => watchdog_set(args),
         "logs_get" => logs_get(args),
         other => fail(format!("Unknown method: {other}")),
     }
@@ -752,17 +748,44 @@ async fn status() -> Value {
             out.insert("tunnel_error".into(), json!(error_reason_ident(&reason)));
             emit_account_error(&mut client, &mut out).await;
         }
-        state @ TunnelState::Offline { .. } => {
-            // The shell bridge had no Offline mapping and reported "unknown";
-            // kept for frontend compatibility (treated as not-connected).
-            out.insert("state".into(), json!("unknown"));
-            out.insert("connected".into(), json!(false));
+        state @ TunnelState::Offline { reconnect } => {
+            // No default route. With Always On this is a state users see on
+            // every WAN drop, so it gets its own name; `reconnect` tells the
+            // card "waiting for network" from a plain offline.
+            insert_offline(&mut out, reconnect);
             out.insert("raw_state".into(), json!(format!("State: {state}")));
             emit_account_error(&mut client, &mut out).await;
         }
     }
 
+    // The Always On supervisor's view, for the Tunnel Settings status line.
+    // Absent when the daemon predates it.
+    if let Ok(status) = client.get_always_on_status().await {
+        out.insert("always_on".into(), always_on_json(&status));
+    }
+
     Value::Object(out)
+}
+
+fn insert_offline(out: &mut serde_json::Map<String, Value>, reconnect: bool) {
+    out.insert("state".into(), json!("offline"));
+    out.insert("connected".into(), json!(false));
+    out.insert("reconnect".into(), json!(reconnect));
+}
+
+/// {enabled, active, paused, attempt, next_retry_secs, last_error, latched}:
+/// the supervisor snapshot with error reasons as the idents the frontend's
+/// copy tables key on.
+fn always_on_json(status: &AlwaysOnStatus) -> Value {
+    json!({
+        "enabled": status.enabled,
+        "active": status.active,
+        "paused": status.paused,
+        "attempt": status.attempt,
+        "next_retry_secs": status.next_retry_in.map(|d| d.as_secs()),
+        "last_error": status.last_error.as_ref().map(error_reason_ident),
+        "latched": status.latched_reason,
+    })
 }
 
 //-------------------------------------------------------------------------------
@@ -1053,6 +1076,7 @@ fn tunnel_flags_json(config: &VpnServiceConfig) -> serde_json::Map<String, Value
         "gateway_independence".into(),
         gateway_independence_json(&config.gateway_independence),
     );
+    out.insert("always_on".into(), json!(display_on_off(config.always_on)));
     out
 }
 
@@ -1088,7 +1112,7 @@ fn degraded_tunnel_config(err: String) -> Value {
         "ipv6": "", "two_hop": "", "netstack": "", "lewes_protocol": "",
         "circumvention_transports": "", "killswitch": "", "legacy_split_tunnel": "",
         "stealth_api": "", "stealth_api_note": "", "gateway_independence": {},
-        "loop_cover_delay": "", "packet_delay": "", "message_delay": "",
+        "always_on": "", "loop_cover_delay": "", "packet_delay": "", "message_delay": "",
         "disable_poisson": "", "disable_cover": "",
         "raw_config": err,
     })
@@ -1135,7 +1159,7 @@ async fn tunnel_get() -> Value {
             .join(", ")
     };
     let raw_config = format!(
-        "IPv6: {}\nTwo-hop: {}\n{}\nNetstack: {}\nCircumvention transports: {}\nKill-switch: {}\nLegacy-split-tunnel: {}\nStealth API connect: {}{}\nGateway independence: {}\nFamily reminders: {}\nInbound exemptions: {}\nMixnet traffic configuration: {}",
+        "IPv6: {}\nTwo-hop: {}\n{}\nNetstack: {}\nCircumvention transports: {}\nKill-switch: {}\nLegacy-split-tunnel: {}\nStealth API connect: {}{}\nGateway independence: {}\nFamily reminders: {}\nAlways on: {}\nInbound exemptions: {}\nMixnet traffic configuration: {}",
         display_on_off(!config.disable_ipv6),
         display_on_off(config.enable_two_hop),
         LEWES_PROTOCOL_LINE,
@@ -1151,6 +1175,7 @@ async fn tunnel_get() -> Value {
         },
         gateway_independence_summary(&config.gateway_independence),
         display_on_off(config.gateway_independence.enable_notifications),
+        display_on_off(config.always_on),
         inbound,
         config.mixnet_traffic,
     );
@@ -1168,6 +1193,7 @@ async fn tunnel_set(args: &Value) -> Value {
     let stealth_api = arg_onoff(args, "stealth_api");
     let gateway_independence = arg_onoff(args, "gateway_independence");
     let family_reminders = arg_onoff(args, "family_reminders");
+    let always_on = arg_onoff(args, "always_on");
     // Numeric ranges mirror the shell (and daemon-side) validation.
     let loop_cover_delay = arg_u32(args, "loop_cover_delay").filter(|v| *v <= 200);
     let packet_delay = arg_u32(args, "packet_delay").filter(|v| *v <= 200);
@@ -1189,6 +1215,7 @@ async fn tunnel_set(args: &Value) -> Value {
         && stealth_api.is_none()
         && gateway_independence.is_none()
         && family_reminders.is_none()
+        && always_on.is_none()
         && !any_mixnet
     {
         return fail("No tunnel parameters specified");
@@ -1226,6 +1253,9 @@ async fn tunnel_set(args: &Value) -> Value {
         }
         if let Some(enabled) = family_reminders {
             client.set_gateway_independence_notifications(enabled).await?;
+        }
+        if let Some(enabled) = always_on {
+            client.set_always_on(enabled).await?;
         }
         if any_mixnet {
             let mut config = client.get_config().await?;
@@ -1855,89 +1885,6 @@ fn clients_list() -> Value {
     json!({ "clients": clients })
 }
 
-/// /tmp/nym-watchdog.state is a shell-sourceable KEY=value file.
-fn parse_state_file(content: &str) -> BTreeMap<String, String> {
-    content
-        .lines()
-        .filter_map(|line| {
-            let (key, value) = line.split_once('=')?;
-            Some((
-                key.trim().to_owned(),
-                value.trim().trim_matches(|c| c == '\'' || c == '"').to_owned(),
-            ))
-        })
-        .collect()
-}
-
-fn watchdog_json(include_details: bool) -> Value {
-    let mut out = serde_json::Map::new();
-    out.insert(
-        "always_on".into(),
-        json!(uci_get("nym-vpn.settings.always_on").as_deref() == Some("1")),
-    );
-    out.insert(
-        "interval".into(),
-        json!(
-            uci_get("nym-vpn.settings.watchdog_interval")
-                .and_then(|v| v.parse::<i64>().ok())
-                .unwrap_or(30)
-        ),
-    );
-    if include_details {
-        out.insert(
-            "max_retries".into(),
-            json!(
-                uci_get("nym-vpn.settings.watchdog_max_retries")
-                    .and_then(|v| v.parse::<i64>().ok())
-                    .unwrap_or(3)
-            ),
-        );
-    }
-    out.insert(
-        "service".into(),
-        json!(if initd_running("nym-vpn-watchdog") { "running" } else { "stopped" }),
-    );
-
-    match std::fs::read_to_string("/tmp/nym-watchdog.state") {
-        Ok(content) => {
-            let state = parse_state_file(&content);
-            let get = |k: &str| state.get(k).cloned();
-            out.insert(
-                "state".into(),
-                json!(get("state").unwrap_or_else(|| "unknown".into())),
-            );
-            out.insert(
-                "failures".into(),
-                json!(get("failures").and_then(|v| v.parse::<i64>().ok()).unwrap_or(0)),
-            );
-            if include_details {
-                out.insert(
-                    "last_action".into(),
-                    json!(get("last_action").unwrap_or_else(|| "none".into())),
-                );
-                out.insert(
-                    "timestamp".into(),
-                    json!(get("timestamp").and_then(|v| v.parse::<i64>().ok()).unwrap_or(0)),
-                );
-            }
-        }
-        Err(_) => {
-            out.insert("state".into(), json!("inactive"));
-            out.insert("failures".into(), json!(0));
-            if include_details {
-                out.insert("last_action".into(), json!("none"));
-                out.insert("timestamp".into(), json!(0));
-            }
-        }
-    }
-
-    Value::Object(out)
-}
-
-fn watchdog_get() -> Value {
-    watchdog_json(true)
-}
-
 fn strip_ansi(input: &str) -> String {
     // Strips CSI sequences (ESC '[' ... final byte) — the tracing crate's
     // color output; LuCI's RPC pipeline doesn't preserve raw 0x1b bytes.
@@ -2251,7 +2198,7 @@ fn split_set_enabled(args: &Value) -> Value {
 }
 
 //-------------------------------------------------------------------------------
-// Daemon lifecycle / watchdog / account hard-reset
+// Daemon lifecycle / account hard-reset
 //-------------------------------------------------------------------------------
 
 fn sleep_secs(secs: u64) {
@@ -2328,57 +2275,6 @@ fn account_reset() -> Value {
         "Account state reset; daemon restarted",
         "Account store wiped but daemon failed to restart",
     )
-}
-
-fn watchdog_set(args: &Value) -> Value {
-    let always_on = match args.get("always_on") {
-        Some(Value::Bool(b)) => Some(*b),
-        Some(Value::Number(n)) if n.as_i64() == Some(0) => Some(false),
-        Some(Value::Number(n)) if n.as_i64() == Some(1) => Some(true),
-        Some(Value::String(s)) if s == "0" => Some(false),
-        Some(Value::String(s)) if s == "1" => Some(true),
-        _ => None,
-    };
-    let Some(always_on) = always_on else {
-        return fail("Invalid value (must be 0 or 1)");
-    };
-
-    if let Some(interval) = args.get("interval").filter(|v| !v.is_null()) {
-        let interval = match interval {
-            Value::Number(n) => n.as_i64(),
-            Value::String(s) => s.parse().ok(),
-            _ => None,
-        };
-        match interval {
-            Some(1 | 5 | 15 | 30 | 60 | 120) => {
-                uci_run(&[
-                    "set",
-                    &format!("nym-vpn.settings.watchdog_interval={}", interval.unwrap()),
-                ]);
-            }
-            _ => return fail("Invalid interval (must be 1, 5, 15, 30, 60, or 120)"),
-        }
-    }
-
-    uci_run(&[
-        "set",
-        &format!("nym-vpn.settings.always_on={}", if always_on { 1 } else { 0 }),
-    ]);
-    uci_run(&["commit", "nym-vpn"]);
-
-    if always_on {
-        initd_run("nym-vpn-watchdog", "enable");
-        initd_run("nym-vpn-watchdog", "start");
-    } else {
-        initd_run("nym-vpn-watchdog", "stop");
-        initd_run("nym-vpn-watchdog", "disable");
-        let _ = std::fs::remove_file("/tmp/nym-watchdog.state");
-    }
-
-    ok_msg(format!(
-        "Always-on {}",
-        if always_on { "enabled" } else { "disabled" }
-    ))
 }
 
 //-------------------------------------------------------------------------------
@@ -2501,7 +2397,6 @@ async fn init_batch() -> Value {
     );
     out.insert("clients".into(), clients_list()["clients"].clone());
     out.insert("daemon".into(), daemon_status());
-    out.insert("watchdog".into(), watchdog_json(false));
 
     Value::Object(out)
 }
@@ -2821,11 +2716,70 @@ nym-vpn.broken.mac='11:22:33:44:55:66'
     }
 
     #[test]
-    fn state_file_parsing() {
-        let state = parse_state_file("state=connected\nfailures=2\nlast_action='restart'\n");
-        assert_eq!(state.get("state").map(String::as_str), Some("connected"));
-        assert_eq!(state.get("failures").map(String::as_str), Some("2"));
-        assert_eq!(state.get("last_action").map(String::as_str), Some("restart"));
+    fn always_on_status_shapes() {
+        let off = always_on_json(&AlwaysOnStatus::default());
+        assert_eq!(
+            off,
+            json!({ "enabled": false, "active": false, "paused": false, "attempt": 0,
+                    "next_retry_secs": null, "last_error": null, "latched": null })
+        );
+
+        let retrying = always_on_json(&AlwaysOnStatus {
+            enabled: true,
+            active: true,
+            paused: false,
+            attempt: 3,
+            next_retry_in: Some(Duration::from_secs(42)),
+            last_error: Some(ErrorStateReason::SetRouting),
+            latched_reason: None,
+        });
+        assert_eq!(retrying["attempt"], 3);
+        assert_eq!(retrying["next_retry_secs"], 42);
+        assert_eq!(retrying["last_error"], "SetRouting");
+        assert!(retrying["latched"].is_null());
+
+        let latched = always_on_json(&AlwaysOnStatus {
+            enabled: true,
+            active: true,
+            paused: false,
+            attempt: 0,
+            next_retry_in: None,
+            last_error: Some(ErrorStateReason::Internal("boom".into())),
+            latched_reason: Some("Internal".into()),
+        });
+        assert_eq!(latched["latched"], "Internal");
+        assert_eq!(latched["last_error"], "Internal");
+
+        let paused = always_on_json(&AlwaysOnStatus {
+            enabled: true,
+            active: false,
+            paused: true,
+            ..AlwaysOnStatus::default()
+        });
+        assert_eq!(paused["enabled"], true);
+        assert_eq!(paused["active"], false);
+        assert_eq!(paused["paused"], true);
+    }
+
+    #[test]
+    fn offline_state_mapping() {
+        let mut out = serde_json::Map::new();
+        insert_offline(&mut out, true);
+        assert_eq!(out["state"], "offline");
+        assert_eq!(out["connected"], false);
+        assert_eq!(out["reconnect"], true);
+        let mut out = serde_json::Map::new();
+        insert_offline(&mut out, false);
+        assert_eq!(out["reconnect"], false);
+    }
+
+    #[test]
+    fn tunnel_flags_carry_always_on() {
+        let mut config = VpnServiceConfig::default();
+        assert_eq!(tunnel_flags_json(&config)["always_on"], "off");
+        config.always_on = true;
+        assert_eq!(tunnel_flags_json(&config)["always_on"], "on");
+        assert!(degraded_tunnel_config("x".into())["always_on"].is_string());
     }
 
     #[test]
