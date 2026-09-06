@@ -28,12 +28,12 @@ return baseclass.extend({
         --label-spacing: 1.5px;\
     }\
     #view { background: var(--bg-primary) !important; min-height: 100vh; padding: 0 !important; }\
-    .nym-container { background: var(--bg-primary); color: var(--text-primary); font-family: var(--font-sans); padding: 24px; max-width: 900px; margin: 0 auto; }\
+    .nym-container { background: var(--bg-primary); color: var(--text-primary); font-family: var(--font-sans); padding: 24px; max-width: 960px; margin: 0 auto; }\
     .nym-header { text-align: center; padding: 12px 0 28px; border-bottom: 1px solid var(--border-color); margin-bottom: 28px; }\
     .nym-logo { display: flex; justify-content: center; margin-bottom: 0; }\
     .nym-logo svg { height: 120px; width: auto; }\
     .nym-subtitle { color: var(--text-muted); font-size: 13px; margin-top: 12px; font-weight: 400; }\
-    .nym-status-hero { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 16px; padding: 52px 32px; text-align: center; margin-bottom: 24px; position: relative; overflow: hidden; }\
+    .nym-status-hero { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 16px; padding: 36px 24px; text-align: center; margin-bottom: 24px; position: relative; overflow: hidden; }\
     .nym-status-hero::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--nym-green), transparent); opacity: 0; transition: opacity 0.5s; }\
     .nym-status-hero.connected::before { opacity: 1; }\
     .nym-status-ring { width: 160px; height: 160px; margin: 0 auto 32px; position: relative; }\
@@ -227,14 +227,17 @@ return baseclass.extend({
     .nym-gateway-option input[type="radio"] { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; pointer-events: none; }\
     .nym-gateway-option:focus-within { border-color: var(--nym-green); box-shadow: 0 0 0 3px var(--nym-green-dim); }\
     .nym-gateway-option.selected:focus-within { box-shadow: inset 3px 0 0 var(--nym-green), 0 0 0 3px var(--nym-green-dim); }\
-    .nym-gateway-option-name { grid-column: 1; min-width: 0; font-size: 13px; line-height: 1.35; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; transition: color 0.2s; }\
+    /* Fixed slots so every row in a list is one height: two lines for the\
+       name (min-height, still clamped at two), one each for telemetry and\
+       family, which are rendered even when empty. */\
+    .nym-gateway-option-name { grid-column: 1; min-width: 0; font-size: 13px; line-height: 1.35; min-height: 2.7em; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; transition: color 0.2s; }\
     /* Telemetry and family lines: mono, lower-case tokens separated by\
        middle dots, one line each across the full row width. */\
-    .nym-gateway-option-meta, .nym-gateway-option-family { grid-column: 1 / -1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); font-size: 10px; line-height: 1.4; letter-spacing: 0.2px; color: var(--text-muted); }\
+    .nym-gateway-option-meta, .nym-gateway-option-family { grid-column: 1 / -1; min-width: 0; min-height: 1.4em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); font-size: 10px; line-height: 1.4; letter-spacing: 0.2px; color: var(--text-muted); }\
     .nym-gateway-option-meta > span + span::before { content: "\\00b7"; margin: 0 6px; color: var(--border-accent); }\
     .nym-gateway-option-family { color: var(--text-secondary); }\
     .nym-gateway-option-note { font-style: italic; }\
-    .nym-gateway-option-status { grid-column: 2; grid-row: 1; justify-self: end; display: flex; flex-direction: column; align-items: flex-end; gap: 5px; padding-top: 2px; }\
+    .nym-gateway-option-status { grid-column: 2; grid-row: 1; justify-self: end; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; padding-top: 2px; }\
     /* Tier: tracked micro-label with a state dot, same family as the\
        Inbound Services status. Colour lives in the dot; the word stays\
        readable without it. */\
@@ -403,7 +406,13 @@ return baseclass.extend({
     .nym-container button.nym-btn, .nym-container button.nym-btn:hover, .nym-container button.nym-btn:focus, .nym-container button.nym-btn:active { background-image: none !important; box-shadow: none !important; outline: none !important; text-shadow: none !important; }\
     .nym-container button.nym-btn-danger, .nym-container button.nym-btn-danger:hover, .nym-container button.nym-btn-danger:focus, .nym-container button.nym-btn-danger:active { background: transparent !important; background-color: transparent !important; background-image: none !important; color: var(--danger) !important; border-color: var(--danger) !important; }\
     .nym-container button.nym-btn-danger:hover { background: var(--danger-dim) !important; background-color: var(--danger-dim) !important; }\
-    .nym-hero-gateway-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 24px; }\
+    /* Hero grid: the pickers get most of the width, the ring column only what\
+       the 160px ring, the uptime and the hop chain need (200px). Named areas\
+       let the same three children re-flow: ring above the two panels on a\
+       mid-width screen, one column on a phone. */\
+    .nym-hero-gateway-row { display: grid; grid-template-columns: minmax(0, 1fr) 200px minmax(0, 1fr); grid-template-areas: "entry center exit"; column-gap: 20px; row-gap: 20px; align-items: start; margin-bottom: 24px; }\
+    .nym-hero-gateway-row > .nym-hero-gateway-panel:first-child { grid-area: entry; }\
+    .nym-hero-gateway-row > .nym-hero-gateway-panel:last-child { grid-area: exit; }\
     /* Once connected, the entry/exit picker panels give way to the live\
        connection display. The center column (status ring + uptime) lives inside\
        this row, so hide only the panels and re-center the lone remaining child. */\
@@ -416,7 +425,7 @@ return baseclass.extend({
     .nym-status-hero.connected .nym-hero-gateway-panel, .nym-status-hero.disconnecting .nym-hero-gateway-panel { background: transparent; border-color: transparent; text-align: center; }\
     /* display:grid stacks .nym-panel-picker and .nym-panel-info in the same\
        cell (grid-area 1/1) for the dissolve swap — see the static-hero rules. */\
-    .nym-hero-gateway-panel { flex: 1 1 0; max-width: 280px; display: grid; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px; transition: background 0.4s ease, border-color 0.3s ease; text-align: left; }\
+    .nym-hero-gateway-panel { min-width: 0; display: grid; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 12px; padding: 18px; transition: background 0.4s ease, border-color 0.3s ease; text-align: left; }\
     .nym-hero-gateway-panel:hover { border-color: var(--border-accent); }\
     .nym-hero-gateway-panel .nym-gateway-box-title { margin-bottom: 14px; font-size: 11px; }\
     .nym-hero-gateway-panel .nym-select { font-size: 13px; padding: 0 16px; height: 44px; line-height: 44px; background-position: right 14px center; text-align: center; text-align-last: center; }\
@@ -425,13 +434,18 @@ return baseclass.extend({
     .nym-hero-gateway-panel .nym-gateway-option-name { font-size: 12px; }\
     .nym-hero-gateway-panel .nym-gateway-loading { font-size: 12px; padding: 10px 0; text-align: center; }\
     .nym-hero-gateway-panel .nym-form-label { font-size: 10px; text-align: center; margin-top: 8px; margin-bottom: 10px; }\
-    .nym-hero-center { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 16px; }\
+    .nym-hero-center { grid-area: center; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0; }\
     .nym-hero-center .nym-status-ring { margin-bottom: 24px; }\
     .nym-hero-center .nym-uptime { margin-top: 8px; }\
+    /* Mid width: the ring alone on top, the two pickers side by side under it,\
+       so each keeps a usable width down to the phone breakpoint. */\
+    @media (max-width: 960px) {\
+        .nym-hero-gateway-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "center center" "entry exit"; }\
+    }\
     @media (max-width: 700px) {\
-        .nym-hero-gateway-row { flex-direction: column; align-items: center; gap: 16px; }\
-        .nym-hero-gateway-panel { flex: 0 0 auto; max-width: 360px; width: 100%; }\
-        .nym-hero-center { order: -1; margin-bottom: 24px; }\
+        .nym-hero-gateway-row { grid-template-columns: minmax(0, 1fr); grid-template-areas: "center" "entry" "exit"; row-gap: 16px; }\
+        .nym-hero-gateway-panel { width: 100%; max-width: 420px; justify-self: center; }\
+        .nym-hero-center { margin-bottom: 8px; }\
         .nym-container { padding: 16px; }\
         .nym-header { padding: 20px 0 24px; margin-bottom: 24px; }\
         .nym-status-hero { padding: 28px 18px; }\
