@@ -2532,6 +2532,7 @@ mod tests {
             exit_ipv6s: vec![],
             build_version: None,
             lewes_protocol_details: None,
+            node_family_name: None,
         }
     }
 

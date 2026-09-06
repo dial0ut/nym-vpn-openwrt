@@ -4,12 +4,13 @@
 #[cfg(test)]
 mod tests;
 
+use ipnetwork::IpNetwork;
 use itertools::Itertools;
 use nym_sdk::mixnet::NodeIdentity;
 use nym_topology::{NodeId, RoutingNode};
 use nym_validator_client::models::{KeyRotationId, LewesProtocolDetailsV1, NymNodeDescriptionV2};
 use nym_vpn_api_client::{
-    response::{BridgeInformation, BridgeParameters},
+    response::{BridgeInformation, BridgeParameters, NodeFamily, NodeStaking},
     types::Percent,
 };
 use rand::seq::IteratorRandom;
@@ -66,6 +67,10 @@ pub struct Gateway {
     pub version: Option<String>,
     #[builder(default)]
     pub lewes_protocol_details: Option<LewesProtocolDetailsV1>,
+    #[builder(default)]
+    pub staking_data: Option<NodeStaking>,
+    #[builder(default)]
+    pub family_data: Option<NodeFamily>,
 }
 
 impl Gateway {
@@ -151,6 +156,8 @@ impl Gateway {
             performance: None,
             version,
             lewes_protocol_details,
+            staking_data: None,
+            family_data: None,
         })
     }
 
@@ -318,6 +325,9 @@ pub enum AsnKind {
 pub struct Asn {
     pub asn: String,
     pub name: String,
+    /// Announced prefix the node's address belongs to, when the directory
+    /// reported one that parses. Used by the gateway independence subnet check.
+    pub route: Option<IpNetwork>,
     pub kind: AsnKind,
 }
 
@@ -460,9 +470,20 @@ impl From<nym_vpn_api_client::response::AsnKind> for AsnKind {
 
 impl From<nym_vpn_api_client::response::Asn> for Asn {
     fn from(location: nym_vpn_api_client::response::Asn) -> Self {
+        // Lenient: a missing or malformed route must not drop the gateway from
+        // the directory, it only disqualifies it from the subnet check.
+        let route = location.route.as_deref().and_then(|route| {
+            route
+                .parse::<IpNetwork>()
+                .inspect_err(|err| {
+                    tracing::debug!("Ignoring unparsable ASN route {route:?}: {err}")
+                })
+                .ok()
+        });
         Asn {
             asn: location.asn,
             name: location.name,
+            route,
             kind: location.kind.into(),
         }
     }
@@ -672,6 +693,8 @@ impl TryFrom<nym_vpn_api_client::response::NymDirectoryGateway> for Gateway {
             performance,
             version: gateway.build_information.map(|info| info.build_version),
             lewes_protocol_details: gateway.lewes_protocol_details,
+            staking_data: gateway.staking_data,
+            family_data: gateway.family_data,
         })
     }
 }

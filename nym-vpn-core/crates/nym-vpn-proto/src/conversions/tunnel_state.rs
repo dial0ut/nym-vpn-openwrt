@@ -552,7 +552,7 @@ impl From<proto::GatewayId> for GatewayId {
 
 impl From<proto::GatewayLightInfo> for GatewayLightInfo {
     fn from(value: proto::GatewayLightInfo) -> Self {
-        Self::new(value.id, value.country_code)
+        Self::new(value.id, value.country_code, value.family_name)
     }
 }
 
@@ -561,6 +561,7 @@ impl From<GatewayLightInfo> for proto::GatewayLightInfo {
         Self {
             id: value.id,
             country_code: value.country_code,
+            family_name: value.family_name,
         }
     }
 }

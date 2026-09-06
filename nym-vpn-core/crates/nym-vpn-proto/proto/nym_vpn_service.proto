@@ -60,6 +60,7 @@ message Location {
 message GatewayLightInfo {
   string id = 1;
   optional string country_code = 2;
+  optional string family_name = 3;
 }
 
 message EntryNode {
@@ -366,6 +367,7 @@ message GatewayResponse {
   repeated string exit_ipv6s = 8;
   optional string build_version = 9;
   optional LewesProtocolDetails lp_details = 13;
+  optional string node_family_name = 14;
 }
 
 message KemKeyDigests {
