@@ -13,6 +13,14 @@ exit demonstrably carries IPv6.
 
 **Two-Hop Mode** — 2-hop (faster) versus 5-hop mixnet routing.
 
+**Stealth API Connect** — the same switch as in the NymVPN apps. The daemon normally reaches
+the Nym API (account, gateway directory, discovery) directly and only falls back to *cover
+domains* (domain fronting through a CDN) when a direct request fails. On, every API request goes
+through the cover domains from the start. Use it where the API hosts are blocked; API calls —
+gateway lists, account sync, the setup phase of a connect — get slower. API traffic only, so it
+applies immediately with no reconnect. If the network environment publishes no cover domains the
+card says so and the toggle has no effect.
+
 **Kill-Switch** — blocks all non-tunnel WAN egress. It is *only* a firewall block: traffic is
 routed into the tunnel whenever connected regardless of this setting. Turn it off to allow WAN
 fallback. You do **not** need to turn it off for

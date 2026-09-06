@@ -75,7 +75,7 @@ return baseclass.extend({
     tunnelSet: rpc.declare({
         object: 'nym-vpn',
         method: 'tunnel_set',
-        params: ['ipv6', 'two_hop', 'killswitch', 'circumvention', 'legacy_split_tunnel']
+        params: ['ipv6', 'two_hop', 'killswitch', 'circumvention', 'legacy_split_tunnel', 'stealth_api']
     }),
 
     // Mixnet tuning shares the tunnel_set ubus method (no new ACL surface);

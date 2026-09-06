@@ -905,6 +905,7 @@ return view.extend({
             var killswitchEl = document.getElementById('killswitch-toggle');
             var circumventionEl = document.getElementById('circumvention-toggle');
             var legacySplitEl = document.getElementById('legacy-split-toggle');
+            var stealthApiEl = document.getElementById('stealth-api-toggle');
             if (!ipv6El || !twoHopEl || !killswitchEl || !circumventionEl) return;
 
             var ipv6 = ipv6El.checked ? 'on' : 'off';
@@ -915,8 +916,9 @@ return view.extend({
             // but send 'off' so the stored value and the (greyed) toggle agree.
             var killswitch = (legacy_split_tunnel === 'on') ? 'off' : (killswitchEl.checked ? 'on' : 'off');
             var circumvention = circumventionEl.checked ? 'on' : 'off';
+            var stealth_api = stealthApiEl && stealthApiEl.checked ? 'on' : 'off';
 
-            rpc.tunnelSet(ipv6, two_hop, killswitch, circumvention, legacy_split_tunnel).then(function(result) {
+            rpc.tunnelSet(ipv6, two_hop, killswitch, circumvention, legacy_split_tunnel, stealth_api).then(function(result) {
                 if (result && result.success) {
                     isTwoHopMode = (two_hop === 'on');
                     showToast('Tunnel settings saved', 'success');
@@ -1490,6 +1492,28 @@ return view.extend({
                                 'type': 'checkbox',
                                 'id': 'circumvention-toggle',
                                 'checked': tunnel_config.circumvention_transports === 'on' ? 'checked' : null,
+                                'change': saveTunnelSettings
+                            }),
+                            E('span', { 'class': 'nym-toggle-slider' })
+                        ])
+                    ]),
+                    E('div', { 'class': 'nym-toggle-row' }, [
+                        E('div', { 'class': 'nym-toggle-info' }, [
+                            E('div', { 'class': 'nym-toggle-title' }, 'Stealth API Connect'),
+                            E('div', { 'class': 'nym-toggle-desc' }, 'Reach the Nym API through cover domains on every request, not only after a direct request fails. Helps where the API is blocked; API calls get slower. Applies immediately, no reconnect.'),
+                            // The daemon reports whether the network environment
+                            // publishes cover domains at all; without them the
+                            // toggle has nothing to route through.
+                            E('div', {
+                                'class': 'nym-toggle-warning',
+                                'style': 'color: #e67e22; font-size: 11px; margin-top: 4px; display: ' + (tunnel_config.stealth_api_note ? 'block' : 'none')
+                            }, 'The current network environment publishes no cover domains, so this setting has no effect right now.')
+                        ]),
+                        E('label', { 'class': 'nym-toggle' }, [
+                            E('input', {
+                                'type': 'checkbox',
+                                'id': 'stealth-api-toggle',
+                                'checked': tunnel_config.stealth_api === 'on' ? 'checked' : null,
                                 'change': saveTunnelSettings
                             }),
                             E('span', { 'class': 'nym-toggle-slider' })
