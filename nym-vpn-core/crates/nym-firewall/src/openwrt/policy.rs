@@ -48,6 +48,13 @@ const NTP_BURST: u32 = 8;
 const DNS_RATE_PER_MIN: u32 = 30;
 const DNS_BURST: u32 = 20;
 
+/// Rate limit for the gateway probe hatch. `nym-vpnc gateway test` probes at
+/// most 8 gateways at a time, 5 packets/s each (see `gateway_probe` in
+/// nym-vpn-lib), so a well-behaved daemon stays under 2400/minute; the cap
+/// only bites if something loops.
+const PROBE_RATE_PER_MIN: u32 = 3000;
+const PROBE_BURST: u32 = 100;
+
 /// Explicitly describes which principals may use a DNS exception. Keeping this
 /// at the policy boundary prevents a destination-only accept from accidentally
 /// becoming a LAN relay bypass.
@@ -111,6 +118,7 @@ pub fn compile(policy: &FirewallPolicy) -> RuleSet {
             // daemon's SNTP bootstrap goes out through this hatch; it's the
             // same rate-limited hatch as the Blocked state.
             ntp_escape_hatch(&mut rs);
+            probe_escape_hatch(&mut rs);
             if *allow_lan {
                 allow_lan_traffic(&mut rs);
             }
@@ -151,6 +159,9 @@ pub fn compile(policy: &FirewallPolicy) -> RuleSet {
             exemption_filter_accepts(&mut rs, inbound_exemptions);
             bypass_mark_forward_accept(&mut rs);
             block_dns(&mut rs);
+            // Gateway probes must reach the gateways directly, not through
+            // the tunnel, so they need a WAN-side accept here too.
+            probe_escape_hatch(&mut rs);
             if *allow_lan {
                 allow_lan_traffic(&mut rs);
             }
@@ -188,6 +199,7 @@ pub fn compile(policy: &FirewallPolicy) -> RuleSet {
             dns_escape_hatch(&mut rs);
             block_dns(&mut rs);
             ntp_escape_hatch(&mut rs);
+            probe_escape_hatch(&mut rs);
             if *allow_lan {
                 allow_lan_traffic(&mut rs);
             }
@@ -568,6 +580,34 @@ fn dns_escape_hatch(rs: &mut RuleSet) {
                 .skuid(crate::ROOT_UID),
         );
     }
+}
+
+/// ICMP echo hatch for the daemon's gateway latency probes (`nym-vpnc gateway
+/// test`). The probes have to leave via the real WAN whether or not a tunnel
+/// is up, so the daemon puts the tunnel fwmark on the probe socket — the same
+/// mark the WireGuard transport carries — and the routing layer sends marked
+/// packets to the main table. This accepts those marked echo requests; the
+/// replies come back through the established/related INPUT accept.
+///
+/// Keyed on the mark, not uid 0: on OpenWrt nearly every process is root, so
+/// a uid-scoped ICMP accept would let any router-local `ping` (mwan3,
+/// watchdog scripts, an admin shell) out past the kill switch, whereas only a
+/// CAP_NET_ADMIN process that deliberately sets `0x14d` ever carries the
+/// mark. Echo-request only and rate-limited, so it cannot turn into a general
+/// egress path.
+fn probe_escape_hatch(rs: &mut RuleSet) {
+    rs.filter.output.push(
+        Rule::accept(Family::V4)
+            .icmpv4_type(IcmpV4Type::EchoRequest)
+            .mark_eq(crate::TUNNEL_FWMARK)
+            .rate_limit(PROBE_RATE_PER_MIN, PROBE_BURST),
+    );
+    rs.filter.output.push(
+        Rule::accept(Family::V6)
+            .icmpv6_type(IcmpV6Type::EchoRequest)
+            .mark_eq(crate::TUNNEL_FWMARK)
+            .rate_limit(PROBE_RATE_PER_MIN, PROBE_BURST),
+    );
 }
 
 fn allow_lan_traffic(rs: &mut RuleSet) {
@@ -956,13 +996,15 @@ mod tests {
         };
         let rs = compile(&policy);
         assert!(rs.mangle.is_empty(), "no mangle rules expected without exemptions");
+        // The probe hatch matches the tunnel fwmark in every state; only the
+        // exemption mark must be absent here.
         let has_mark_accept = rs
             .filter
             .output
             .rules
             .iter()
-            .any(|r| r.matches.mark.is_some());
-        assert!(!has_mark_accept, "no mark accepts expected without exemptions");
+            .any(|r| r.matches.mark == Some(common::EXEMPT_FWMARK));
+        assert!(!has_mark_accept, "no exemption mark accepts expected without exemptions");
     }
 
     #[test]
@@ -1283,6 +1325,75 @@ mod tests {
                     !(r.verdict == Verdict::Accept && r.matches.dport == Some(DNS_PORT)),
                     "{name}: FORWARD accept on port 53: {r:?}"
                 );
+            }
+        }
+    }
+
+    /// The gateway probe hatch (`nym-vpnc gateway test`) must exist in every
+    /// kill-switch state, be keyed on the daemon's tunnel fwmark rather than
+    /// uid 0, admit echo requests only, be rate limited, and precede the
+    /// terminal reject.
+    #[test]
+    fn probe_hatch_in_every_state_is_mark_scoped_echo_request_only() {
+        for (name, policy) in killswitch_states_without_exemptions() {
+            let rs = compile(&policy);
+            let rules = &rs.filter.output.rules;
+            let hatch: Vec<_> = rules
+                .iter()
+                .filter(|r| r.matches.mark == Some(crate::TUNNEL_FWMARK))
+                .collect();
+            assert_eq!(hatch.len(), 2, "{name}: expected a v4 and a v6 probe hatch");
+            for r in &hatch {
+                assert_eq!(r.verdict, Verdict::Accept, "{name}: {r:?}");
+                assert!(
+                    r.matches.rate_limit.is_some(),
+                    "{name}: hatch must be rate limited: {r:?}"
+                );
+                assert_eq!(
+                    r.matches.skuid, None,
+                    "{name}: hatch is mark-scoped, not uid-scoped: {r:?}"
+                );
+                let echo_request = match r.family {
+                    Family::V4 => r.matches.icmpv4_type == Some(IcmpV4Type::EchoRequest),
+                    Family::V6 => r.matches.icmpv6_type == Some(IcmpV6Type::EchoRequest),
+                    Family::Inet => false,
+                };
+                assert!(
+                    echo_request,
+                    "{name}: hatch must match echo-request only: {r:?}"
+                );
+            }
+            let last_hatch = rules
+                .iter()
+                .rposition(|r| r.matches.mark == Some(crate::TUNNEL_FWMARK))
+                .expect("hatch present");
+            let final_reject = rules
+                .iter()
+                .position(|r| r.verdict == Verdict::Reject && r.matches == Match::default())
+                .expect("final reject present");
+            assert!(
+                last_hatch < final_reject,
+                "{name}: probe hatch must precede the final reject"
+            );
+        }
+    }
+
+    /// No kill-switch state may accept an unscoped echo request in OUTPUT:
+    /// every echo-request accept is either the mark-scoped probe hatch or an
+    /// mwan3 tracking rule pinned to a destination.
+    #[test]
+    fn no_unscoped_icmp_echo_output_accept() {
+        for (name, policy) in killswitch_states_without_exemptions() {
+            let rs = compile(&policy);
+            for r in &rs.filter.output.rules {
+                let is_echo_request = r.matches.icmpv4_type == Some(IcmpV4Type::EchoRequest)
+                    || r.matches.icmpv6_type == Some(IcmpV6Type::EchoRequest);
+                if r.verdict == Verdict::Accept && is_echo_request {
+                    assert!(
+                        r.matches.mark.is_some() || r.matches.daddr.is_some(),
+                        "{name}: unscoped echo-request accept: {r:?}"
+                    );
+                }
             }
         }
     }

@@ -258,6 +258,18 @@ mod tests {
     }
 
     #[test]
+    fn renders_mark_scoped_probe_hatch() {
+        let rule = Rule::accept(Family::V4)
+            .icmpv4_type(IcmpV4Type::EchoRequest)
+            .mark_eq(0x14d)
+            .rate_limit(3000, 100);
+        assert_eq!(
+            render_rule(&rule),
+            "meta mark 0x14d icmp type echo-request limit rate 3000/minute burst 100 packets accept"
+        );
+    }
+
+    #[test]
     fn renders_endpoint_output() {
         let rule = Rule::accept(Family::V4)
             .proto(Proto::Udp)

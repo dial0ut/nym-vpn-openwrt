@@ -47,6 +47,12 @@ const DHCPV6_CLIENT_PORT: u16 = 546;
 
 const ROOT_UID: u32 = 0;
 
+/// Firewall mark the daemon sets (`SO_MARK`) on sockets whose traffic must
+/// bypass the tunnel: the WireGuard transport, gateway control connections
+/// and the gateway latency probes. Must equal `nym_vpn_lib::TUNNEL_FWMARK`,
+/// which nym-vpn-lib asserts at compile time.
+pub const TUNNEL_FWMARK: u32 = 0x14d;
+
 /// Allowed TCP ports to DNS servers when connecting.
 const DNS_TCP_PORTS: [u16; 2] = [443, 853];
 

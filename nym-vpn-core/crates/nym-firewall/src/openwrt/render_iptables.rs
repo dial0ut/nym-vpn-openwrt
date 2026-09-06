@@ -243,6 +243,19 @@ mod tests {
     }
 
     #[test]
+    fn renders_mark_scoped_probe_hatch() {
+        let rule = Rule::accept(Family::V6)
+            .icmpv6_type(IcmpV6Type::EchoRequest)
+            .mark_eq(0x14d)
+            .rate_limit(3000, 100);
+        assert_eq!(
+            render_rule(&rule, AddrFamily::V6),
+            "-p icmpv6 --icmpv6-type echo-request -m mark --mark 0x14d \
+             -m limit --limit 3000/minute --limit-burst 100 -j ACCEPT"
+        );
+    }
+
+    #[test]
     fn renders_dhcpv4_client() {
         let rule = Rule::accept(Family::V4).proto(Proto::Udp).sport(68).dport(67);
         assert_eq!(
