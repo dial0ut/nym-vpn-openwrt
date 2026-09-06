@@ -116,7 +116,6 @@ impl SyncingState {
         }
         let Some(device) = shared_state.device.clone() else {
             return ErrorState::enter(
-                shared_state,
                 SyncError::Internal("Logged in, but no device keys".into()).into(),
             );
         };
@@ -279,7 +278,7 @@ impl<C: ConnectivityMonitor> AccountControllerStateHandler<C> for SyncingState {
                             Err(e) if e.is_retryable() => {
                                 if self.attempts > MAX_SYNCING_ATTEMPTS {
                                     tracing::debug!("Error trying to get account summary, exhausted retries : {}", e.to_string());
-                                    NextAccountControllerState::NewState(ErrorState::enter(shared_state, e.into()))
+                                    NextAccountControllerState::NewState(ErrorState::enter(e.into()))
                                 } else {
                                     tracing::debug!("Error trying to get account summary, retrying : {}", e.to_string());
                                     NextAccountControllerState::NewState(SyncingState::enter(shared_state, self.attempts + 1))
@@ -287,14 +286,14 @@ impl<C: ConnectivityMonitor> AccountControllerStateHandler<C> for SyncingState {
                             },
                             Err(e) => {
                                 tracing::debug!("Error trying to get account summary, not retrying : {}", e.to_string());
-                                NextAccountControllerState::NewState(ErrorState::enter(shared_state, e.into()))
+                                NextAccountControllerState::NewState(ErrorState::enter(e.into()))
                             },
                         }
                     }
                     Err(e) => {
                         tracing::error!("Failed to join on the syncing task : {e}");
                         if self.attempts > MAX_SYNCING_ATTEMPTS {
-                            NextAccountControllerState::NewState(ErrorState::enter(shared_state, SyncError::Internal("Failed to join on the syncing task".into()).into()))
+                            NextAccountControllerState::NewState(ErrorState::enter(SyncError::Internal("Failed to join on the syncing task".into()).into()))
                         } else {
                             NextAccountControllerState::NewState(SyncingState::enter(shared_state, self.attempts + 1))
                         }

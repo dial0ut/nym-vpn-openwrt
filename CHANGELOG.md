@@ -84,7 +84,9 @@ the GitHub release notes.
   is re-synced immediately if it is more than 2 minutes old and discovery
   re-checks if its last run is more than an hour old, before the tunnel is
   brought up. The sync on daemon start and the manual refresh from the
-  account card / `nym-vpnc account get` are unchanged.
+  account card / `nym-vpnc account get` are unchanged, and so is error
+  recovery: while the account is in an error state (API unreachable, clock
+  not yet synced at boot) retries stay at the 2-minute cadence.
 - The firewall include is registered for the *active* backend (fw4 vs fw3 —
   live state, then the firewall init script, then binary presence, so
   boot-time runs on images shipping both stacks pick correctly) and applied

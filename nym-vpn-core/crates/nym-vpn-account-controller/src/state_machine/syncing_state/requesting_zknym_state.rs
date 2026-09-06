@@ -69,22 +69,16 @@ impl RequestingZkNymsState {
             return LoggedOutState::enter();
         };
         let Some(device) = shared_state.device.clone() else {
-            return ErrorState::enter(
-                shared_state,
-                AccountControllerErrorStateReason::Internal {
-                    context: ZK_NYM_STATE_CONTEXT.to_string(),
-                    details: "Logged in, but no device keys".into(),
-                },
-            );
+            return ErrorState::enter(AccountControllerErrorStateReason::Internal {
+                context: ZK_NYM_STATE_CONTEXT.to_string(),
+                details: "Logged in, but no device keys".into(),
+            });
         };
         let Some(ref vpn_account_summary) = shared_state.vpn_account_summary else {
-            return ErrorState::enter(
-                shared_state,
-                AccountControllerErrorStateReason::Internal {
-                    context: ZK_NYM_STATE_CONTEXT.to_string(),
-                    details: "Logged in, but no account summary".into(),
-                },
-            );
+            return ErrorState::enter(AccountControllerErrorStateReason::Internal {
+                context: ZK_NYM_STATE_CONTEXT.to_string(),
+                details: "Logged in, but no account summary".into(),
+            });
         };
 
         let vpn_api_client = shared_state.vpn_api_client.clone();
@@ -252,7 +246,6 @@ impl RequestingZkNymsState {
             Err(zk_nym_error) => {
                 if self.attempts > ZK_NYM_MAX_FAILS {
                     return NextAccountControllerState::NewState(ErrorState::enter(
-                        shared_state,
                         zk_nym_error.into(),
                     ));
                 }
@@ -294,7 +287,6 @@ impl RequestingZkNymsState {
                             NextAccountControllerState::NewState(ReadyState::enter(shared_state))
                         } else {
                             NextAccountControllerState::NewState(ErrorState::enter(
-                                shared_state,
                                 ZkNymError::BandwidthExceeded.into(),
                             ))
                         }

@@ -120,8 +120,9 @@ impl From<PrivateAccountControllerState> for AccountControllerState {
     }
 }
 
-/// How often the account controller re-syncs with the VPN API on its own, in the states that
-/// wait on a timer (`ReadyState`, `ErrorState`). Set by the daemon from the tunnel state.
+/// How often the account controller re-syncs with the VPN API on its own while it is
+/// `ReadyState`. Set by the daemon from the tunnel state. `ErrorState` ignores it and keeps
+/// retrying on the normal cadence, so idle backoff never slows error recovery.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AccountRefreshMode {
     /// Tunnel is up or a connect has been requested: keep the account state fresh.
@@ -140,7 +141,8 @@ impl AccountRefreshMode {
     }
 }
 
-/// Timer driving the periodic re-sync of `ReadyState` and `ErrorState`.
+/// Timer driving the periodic re-sync of `ReadyState` (mode-dependent) and `ErrorState` (always
+/// `Active`).
 ///
 /// The deadline is always `entered_at + interval(mode)`, where `entered_at` is when the state was
 /// entered, i.e. when the last sync attempt concluded. Changing the mode re-targets that deadline

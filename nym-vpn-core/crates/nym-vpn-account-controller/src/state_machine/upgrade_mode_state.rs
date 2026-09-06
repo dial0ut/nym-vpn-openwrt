@@ -48,22 +48,19 @@ impl UpgradeModeState {
             .await
         {
             Err(err) => {
-                return ErrorState::enter(
-                    shared_state,
-                    AccountControllerErrorStateReason::storage_err(UM_STATE_CONTEXT, err),
-                );
+                return ErrorState::enter(AccountControllerErrorStateReason::storage_err(
+                    UM_STATE_CONTEXT,
+                    err,
+                ));
             }
             // we should only ever enter UpgradeModeState after we have just retrieved and saved
             // an upgrade mode credential, so this branch **theoretically** should be unreachable
             Ok(None) => {
-                return ErrorState::enter(
-                    shared_state,
-                    AccountControllerErrorStateReason::Internal {
-                        context: "UpgradeModeState".to_string(),
-                        details: "entered 'UpgradeModeState' with no upgrade mode credentials"
-                            .to_string(),
-                    },
-                );
+                return ErrorState::enter(AccountControllerErrorStateReason::Internal {
+                    context: "UpgradeModeState".to_string(),
+                    details: "entered 'UpgradeModeState' with no upgrade mode credentials"
+                        .to_string(),
+                });
             }
             Ok(Some((_, Some(expiration)))) => {
                 let until_expiration = expiration - OffsetDateTime::now_utc();
@@ -111,7 +108,6 @@ impl UpgradeModeState {
             .await
         {
             return Err(ErrorState::enter(
-                shared_state,
                 AccountControllerErrorStateReason::storage_err(UM_STATE_CONTEXT, err),
             ));
         }
