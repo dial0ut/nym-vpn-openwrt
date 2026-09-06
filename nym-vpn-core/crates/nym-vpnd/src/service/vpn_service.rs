@@ -40,9 +40,13 @@ use nym_vpn_account_controller::{
 };
 use nym_vpn_api_client::api_urls_to_urls;
 use nym_vpn_lib::{
-    DEFAULT_DNS_SERVERS, NodeIdentity, UserAgent, VpnTopologyService,
-    gateway_directory::{self, GatewayCache, GatewayCacheHandle, GatewayClient},
-    tunnel_state_machine::{NymConfig, TunnelCommand, TunnelConstants, TunnelStateMachine},
+    DEFAULT_DNS_SERVERS, GatewayDirectoryError, NodeIdentity, UserAgent, VpnTopologyService,
+    gateway_directory::{
+        self, BlacklistedGateways, GatewayCache, GatewayCacheHandle, GatewayClient,
+    },
+    tunnel_state_machine::{
+        NymConfig, TunnelCommand, TunnelConstants, TunnelStateMachine, tunnel::select_gateway_pair,
+    },
 };
 use nym_vpn_lib_types::{
     AccountBalanceResponse, AccountCommandError, AccountControllerState,
@@ -52,7 +56,8 @@ use nym_vpn_lib_types::{
     ListGatewaysOptions, LogPath, LookupGatewayFilters, MixnetTrafficConfig, NetworkCompatibility,
     NetworkStatisticsIdentity, NymNetworkDetails, NymVpnDevice, NymVpnNetwork, NymVpnUsage,
     ParsedAccountLinks, RegistrationReport, StoreAccountRequest, SystemMessage, TargetState,
-    TunnelEvent, TunnelState, VpnAccountSummary, VpnServiceConfig, VpnServiceInfo,
+    TentativeGateways, TunnelEvent, TunnelState, VpnAccountSummary, VpnServiceConfig,
+    VpnServiceInfo,
 };
 use nym_vpn_network_config::{
     DiscoveryRefresher, DiscoveryRefresherCommand, DiscoveryRefresherEvent, Network,
@@ -61,6 +66,10 @@ use nym_vpn_store::types::{StorableAccount, StoredAccountMode};
 
 // Seed used to generate device identity keys
 type Seed = [u8; 32];
+
+/// Upper bound on a tentative gateway lookup, so a stalled directory refresh
+/// turns into "no gateways available" instead of a hung RPC.
+const TENTATIVE_GATEWAYS_TIMEOUT: Duration = Duration::from_secs(5);
 
 type Locale = String;
 
@@ -79,6 +88,9 @@ pub enum VpnServiceCommand {
     SetKillswitch(oneshot::Sender<Result<(), String>>, bool),
     SetLegacySplitTunnel(oneshot::Sender<Result<(), String>>, bool),
     SetStealthApi(oneshot::Sender<Result<(), String>>, bool),
+    SetEnableGatewayIndependence(oneshot::Sender<Result<(), String>>, bool),
+    SetGatewayIndependenceNotifications(oneshot::Sender<Result<(), String>>, bool),
+    GetTentativeGateways(oneshot::Sender<TentativeGateways>, ()),
     SetInboundExemptions(
         oneshot::Sender<Result<(), String>>,
         Vec<nym_vpn_lib_types::InboundExemption>,
@@ -114,6 +126,9 @@ pub enum VpnServiceCommand {
     DisableSocks5(oneshot::Sender<Result<(), Socks5Error>>, ()),
     GetSocks5Status(oneshot::Sender<Result<Socks5Status, Socks5Error>>, ()),
     SetTargetState(oneshot::Sender<bool>, TargetState),
+    /// Connect; the flag relaxes the gateway independence criteria for this
+    /// connect session only.
+    ConnectTunnel(oneshot::Sender<bool>, bool),
     Reconnect(oneshot::Sender<bool>, ()),
     GetTunnelState(oneshot::Sender<TunnelState>, ()),
     StoreAccount(
@@ -280,6 +295,15 @@ pub struct NymVpnService {
 
     // Gateway cache join handle
     gateway_cache_join_handle: JoinHandle<()>,
+
+    // Entry gateways the state machine has given up on for a while. Shared
+    // with it so a preview of the probable pair skips them as a connect would.
+    blacklisted_entry_gateways: BlacklistedGateways,
+
+    // Whether the current connect session runs with the gateway independence
+    // criteria relaxed ("connect anyway"); a reconnect keeps it, a disconnect
+    // ends it. The persisted setting is never touched.
+    relax_independence: bool,
 
     // Gateway cache handle
     gateway_cache_handle: GatewayCacheHandle,
@@ -537,6 +561,8 @@ impl NymVpnService {
         .await
         .map_err(Error::StartDiscoveryRefresh)?;
 
+        let blacklisted_entry_gateways = BlacklistedGateways::new();
+
         let state_machine_handle = TunnelStateMachine::spawn(
             command_receiver,
             event_sender,
@@ -551,6 +577,7 @@ impl NymVpnService {
             connectivity_handle,
             discovery_refresher_command_tx.clone(),
             wireguard_keys_db,
+            blacklisted_entry_gateways.clone(),
             route_handler,
             parameters.user_agent.clone(),
             state_machine_shutdown_token.child_token(),
@@ -584,6 +611,8 @@ impl NymVpnService {
             state_machine_shutdown_token,
             gateway_cache_handle,
             gateway_cache_join_handle,
+            blacklisted_entry_gateways,
+            relax_independence: false,
             discovery_refresher_event_rx,
             discovery_refresher_join_handle,
             discovery_refresher_command_tx,
@@ -688,10 +717,16 @@ impl NymVpnService {
         Ok(())
     }
 
-    async fn set_target_state(&mut self, new_state: TargetState) -> bool {
+    async fn set_target_state(&mut self, new_state: TargetState, relax_independence: bool) -> bool {
         if self.target_state != new_state || self.tunnel_state.read().await.is_error_state() {
             tracing::debug!("Set target state {} => {}", self.target_state, new_state);
             self.target_state = new_state;
+            self.relax_independence = relax_independence && new_state == TargetState::Secured;
+            if self.relax_independence {
+                tracing::info!(
+                    "Connecting with the gateway independence criteria relaxed for this session"
+                );
+            }
 
             // Before the tunnel state machine is told to connect, so the account controller can
             // leave its idle cadence (and re-sync a stale account state) ahead of the tunnel
@@ -702,9 +737,9 @@ impl NymVpnService {
             match new_state {
                 TargetState::Secured => {
                     self.statistics_event_sender.report_connection_request();
-                    let _ = self.command_sender.send(TunnelCommand::Connect {
-                        relax_independence: false,
-                    });
+                    let _ = self
+                        .command_sender
+                        .send(TunnelCommand::Connect { relax_independence });
                 }
                 TargetState::Unsecured => {
                     self.statistics_event_sender.report_disconnection_request();
@@ -731,7 +766,7 @@ impl NymVpnService {
                 }
                 self.statistics_event_sender.report_connection_request();
                 let _ = self.command_sender.send(TunnelCommand::Connect {
-                    relax_independence: false,
+                    relax_independence: self.relax_independence,
                 });
                 true
             }
@@ -916,6 +951,20 @@ impl NymVpnService {
                 let result = self.handle_set_stealth_api(stealth_api).await;
                 let _ = tx.send(result);
             }
+            VpnServiceCommand::SetEnableGatewayIndependence(tx, enabled) => {
+                let result = self.handle_set_enable_gateway_independence(enabled).await;
+                let _ = tx.send(result);
+            }
+            VpnServiceCommand::SetGatewayIndependenceNotifications(tx, enabled) => {
+                let result = self
+                    .config_manager
+                    .set_gateway_independence_notifications(enabled)
+                    .await;
+                let _ = tx.send(result);
+            }
+            VpnServiceCommand::GetTentativeGateways(tx, ()) => {
+                self.handle_get_tentative_gateways(tx).await;
+            }
             VpnServiceCommand::SetInboundExemptions(tx, exemptions) => {
                 let result = self.handle_set_inbound_exemptions(exemptions).await;
                 let _ = tx.send(result);
@@ -980,7 +1029,13 @@ impl NymVpnService {
                 self.handle_list_filtered_gateways(filters, tx).await;
             }
             VpnServiceCommand::SetTargetState(tx, target_state) => {
-                let accepted = self.set_target_state(target_state).await;
+                let accepted = self.set_target_state(target_state, false).await;
+                let _ = tx.send(accepted);
+            }
+            VpnServiceCommand::ConnectTunnel(tx, relax_independence) => {
+                let accepted = self
+                    .set_target_state(TargetState::Secured, relax_independence)
+                    .await;
                 let _ = tx.send(accepted);
             }
             VpnServiceCommand::Reconnect(tx, ()) => {
@@ -1205,6 +1260,66 @@ impl NymVpnService {
             warn_if_no_cover_domains(&self.network_tx.borrow());
         }
         self.config_manager.set_stealth_api(stealth_api).await
+    }
+
+    async fn handle_set_enable_gateway_independence(
+        &mut self,
+        enabled: bool,
+    ) -> Result<(), String> {
+        // The criteria decide which pairs are acceptable, so the state machine
+        // gets new settings and re-selects if needed. The reminder switch is
+        // persisted only.
+        let result = self
+            .config_manager
+            .set_gateway_independence_enabled(enabled)
+            .await;
+        self.update_tunnel_settings_with_throttle();
+        result
+    }
+
+    /// Preview the pair a connect would pick from the live settings and the
+    /// state machine's entry blacklist. Identity selection only: no key
+    /// material is created and the tunnel is untouched. Bounded so a slow
+    /// directory cannot hang the caller; any failure reads as "no gateways".
+    async fn handle_get_tentative_gateways(
+        &self,
+        completion_tx: oneshot::Sender<TentativeGateways>,
+    ) {
+        let gateway_cache = self.gateway_cache_handle.clone();
+        let blacklisted_entry_gateways = self.blacklisted_entry_gateways.clone();
+        let tunnel_settings = self.config_manager.generate_tunnel_settings();
+
+        tokio::spawn(async move {
+            let criteria = tunnel_settings.gateway_independence;
+            let selection = tokio::time::timeout(
+                TENTATIVE_GATEWAYS_TIMEOUT,
+                select_gateway_pair(
+                    &gateway_cache,
+                    &blacklisted_entry_gateways,
+                    &tunnel_settings,
+                    criteria,
+                ),
+            )
+            .await;
+            let result = match selection {
+                Ok(Ok((entry, exit))) => TentativeGateways::Selected {
+                    entry: Box::new(Gateway::from(entry)),
+                    exit: Box::new(Gateway::from(exit)),
+                },
+                Ok(Err(GatewayDirectoryError::NeedsRelaxedIndependenceCriteria { .. })) => {
+                    TentativeGateways::NeedsRelaxedIndependenceCriteria
+                }
+                Ok(Err(err)) => {
+                    tracing::info!("No tentative gateway pair: {err}");
+                    TentativeGateways::NoGatewaysAvailable
+                }
+                Err(_) => {
+                    tracing::warn!("Tentative gateway selection timed out");
+                    TentativeGateways::NoGatewaysAvailable
+                }
+            };
+            completion_tx.send(result).ok();
+        });
     }
 
     async fn handle_set_inbound_exemptions(

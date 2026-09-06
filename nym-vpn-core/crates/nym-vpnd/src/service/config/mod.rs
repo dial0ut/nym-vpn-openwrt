@@ -225,6 +225,7 @@ impl TryFrom<&nym_vpn_lib_types::VpnServiceConfig> for VpnServiceConfigExt {
             legacy_split_tunnel: value.legacy_split_tunnel,
             inbound_exemptions,
             stealth_api: value.stealth_api,
+            gateway_independence: v8::GatewayIndependence::from(&value.gateway_independence),
         };
 
         Ok(VpnServiceConfigExt::V8(v8))

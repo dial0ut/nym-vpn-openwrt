@@ -80,6 +80,11 @@ impl TryFrom<proto::VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
             network_stats,
             inbound_exemptions,
             stealth_api: value.stealth_api,
+            // A daemon predating the field leaves it unset; the feature defaults on.
+            gateway_independence: value
+                .gateway_independence
+                .map(nym_vpn_lib_types::GatewayIndependence::from)
+                .unwrap_or_default(),
         };
         Ok(config)
     }
@@ -134,6 +139,9 @@ impl From<nym_vpn_lib_types::VpnServiceConfig> for proto::VpnServiceConfig {
             network_stats,
             inbound_exemptions,
             stealth_api: value.stealth_api,
+            gateway_independence: Some(proto::GatewayIndependence::from(
+                value.gateway_independence,
+            )),
         }
     }
 }

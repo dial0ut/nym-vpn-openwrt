@@ -191,7 +191,13 @@ location = "BE"
   "killswitch": false,
   "legacy_split_tunnel": false,
   "inbound_exemptions": [],
-  "stealth_api": false
+  "stealth_api": false,
+  "gateway_independence": {
+    "enable_notifications": true,
+    "different_node_family": true,
+    "different_asn": true,
+    "different_subnet": true
+  }
 }"#;
 
     let entry_point = nym_vpn_lib_types::EntryPoint::Country {
@@ -254,7 +260,13 @@ identity = [ 99, 23, 98, 234, 66, 161, 195, 63, 155, 161, 250, 207, 17, 158, 136
   "killswitch": false,
   "legacy_split_tunnel": false,
   "inbound_exemptions": [],
-  "stealth_api": false
+  "stealth_api": false,
+  "gateway_independence": {
+    "enable_notifications": true,
+    "different_node_family": true,
+    "different_asn": true,
+    "different_subnet": true
+  }
 }"#;
 
     let entry_point = nym_vpn_lib_types::EntryPoint::Gateway {
@@ -321,7 +333,13 @@ address = [5, 56, 84, 195, 94, 238, 210, 124, 65, 143, 209, 144, 22, 255, 91, 18
   "killswitch": false,
   "legacy_split_tunnel": false,
   "inbound_exemptions": [],
-  "stealth_api": false
+  "stealth_api": false,
+  "gateway_independence": {
+    "enable_notifications": true,
+    "different_node_family": true,
+    "different_asn": true,
+    "different_subnet": true
+  }
 }"#;
 
     let entry_point = nym_vpn_lib_types::EntryPoint::Gateway {
@@ -378,7 +396,13 @@ exit_point = "Random"
   "killswitch": false,
   "legacy_split_tunnel": false,
   "inbound_exemptions": [],
-  "stealth_api": false
+  "stealth_api": false,
+  "gateway_independence": {
+    "enable_notifications": true,
+    "different_node_family": true,
+    "different_asn": true,
+    "different_subnet": true
+  }
 }"#;
 
     let entry_point = nym_vpn_lib_types::EntryPoint::Random;
@@ -442,7 +466,13 @@ async fn test_service_config_migrate_from_v1() {
   "killswitch": false,
   "legacy_split_tunnel": false,
   "inbound_exemptions": [],
-  "stealth_api": false
+  "stealth_api": false,
+  "gateway_independence": {
+    "enable_notifications": true,
+    "different_node_family": true,
+    "different_asn": true,
+    "different_subnet": true
+  }
 }"#;
 
     run_migrate_json_test(json_v1_content, json_latest_content).await;
@@ -515,7 +545,13 @@ async fn test_service_config_migrate_from_v2() {
   "killswitch": true,
   "legacy_split_tunnel": false,
   "inbound_exemptions": [],
-  "stealth_api": false
+  "stealth_api": false,
+  "gateway_independence": {
+    "enable_notifications": true,
+    "different_node_family": true,
+    "different_asn": true,
+    "different_subnet": true
+  }
 }"#;
 
     run_migrate_json_test(json_v2_content, json_latest_content).await;
@@ -594,7 +630,13 @@ async fn test_service_config_migrate_from_v3() {
   "killswitch": false,
   "legacy_split_tunnel": false,
   "inbound_exemptions": [],
-  "stealth_api": false
+  "stealth_api": false,
+  "gateway_independence": {
+    "enable_notifications": true,
+    "different_node_family": true,
+    "different_asn": true,
+    "different_subnet": true
+  }
 }"#;
 
     run_migrate_json_test(json_v3_content, json_latest_content).await;
@@ -678,7 +720,13 @@ async fn test_service_config_migrate_from_v4() {
   "killswitch": false,
   "legacy_split_tunnel": false,
   "inbound_exemptions": [],
-  "stealth_api": false
+  "stealth_api": false,
+  "gateway_independence": {
+    "enable_notifications": true,
+    "different_node_family": true,
+    "different_asn": true,
+    "different_subnet": true
+  }
 }"#;
 
     run_migrate_json_test(json_v4_content, json_latest_content).await;
@@ -768,7 +816,13 @@ async fn test_service_config_migrate_from_v5() {
   "killswitch": false,
   "legacy_split_tunnel": false,
   "inbound_exemptions": [],
-  "stealth_api": false
+  "stealth_api": false,
+  "gateway_independence": {
+    "enable_notifications": true,
+    "different_node_family": true,
+    "different_asn": true,
+    "different_subnet": true
+  }
 }"#;
 
     run_migrate_json_test(json_v5_content, json_latest_content).await;
@@ -852,7 +906,13 @@ async fn test_service_config_migrate_from_v6() {
   "killswitch": false,
   "legacy_split_tunnel": false,
   "inbound_exemptions": [],
-  "stealth_api": false
+  "stealth_api": false,
+  "gateway_independence": {
+    "enable_notifications": true,
+    "different_node_family": true,
+    "different_asn": true,
+    "different_subnet": true
+  }
 }"#;
 
     run_migrate_json_test(json_v6_content, json_latest_content).await;
@@ -1058,6 +1118,12 @@ async fn test_service_config_serialize_full() {
             label: Some("jellyfin".to_string()),
         }],
         stealth_api: true,
+        gateway_independence: nym_vpn_lib_types::GatewayIndependence {
+            enable_notifications: false,
+            different_node_family: true,
+            different_asn: false,
+            different_subnet: true,
+        },
     };
     run_serialize_test(config).await;
 }
@@ -1138,6 +1204,123 @@ async fn test_service_config_v8_without_stealth_api_loads_off() {
         .await
         .unwrap();
     assert!(!config_manager.config().stealth_api);
+
+    // No migration happened, so the file on disk is untouched.
+    let read_json_content = fs::read_to_string(&json_path).await.unwrap();
+    assert_eq!(json_v8_content, read_json_content);
+}
+
+// Gateway independence is on by default, both switches persist, and only the
+// criteria reach the tunnel settings the selector reads.
+#[tokio::test]
+async fn test_gateway_independence_defaults_on_and_persists() {
+    let temp_dir = tempdir().unwrap();
+    let network_config_path = temp_dir.path().join("tulips");
+
+    let mut config_manager = VpnServiceConfigManager::new(&network_config_path, None)
+        .await
+        .unwrap();
+    assert!(config_manager.config().gateway_independence.full_enabled());
+    assert!(config_manager.config().gateway_independence.enable_notifications);
+    assert!(
+        config_manager
+            .generate_tunnel_settings()
+            .gateway_independence
+            .full_enabled()
+    );
+
+    config_manager
+        .set_gateway_independence_enabled(false)
+        .await
+        .unwrap();
+    config_manager
+        .set_gateway_independence_notifications(false)
+        .await
+        .unwrap();
+    assert!(
+        config_manager
+            .generate_tunnel_settings()
+            .gateway_independence
+            .full_disabled()
+    );
+    drop(config_manager);
+
+    let mut config_manager = VpnServiceConfigManager::new(&network_config_path, None)
+        .await
+        .unwrap();
+    assert!(config_manager.config().gateway_independence.full_disabled());
+    assert!(!config_manager.config().gateway_independence.enable_notifications);
+
+    // Re-enabling the criteria leaves the reminder switch alone.
+    config_manager
+        .set_gateway_independence_enabled(true)
+        .await
+        .unwrap();
+    assert!(config_manager.config().gateway_independence.full_enabled());
+    assert!(!config_manager.config().gateway_independence.enable_notifications);
+}
+
+// A v8 file written before gateway independence existed must load with every
+// criterion on, so existing installs get the feature without a migration. The
+// file is already the latest version, so the loader leaves it alone.
+#[tokio::test]
+async fn test_service_config_v8_without_gateway_independence_loads_on() {
+    let json_v8_content = r#"{
+  "version": "v8",
+  "entry_point": {
+    "country": {
+      "two_letter_iso_country_code": "FR"
+    }
+  },
+  "exit_point": {
+    "country": {
+      "two_letter_iso_country_code": "BE"
+    }
+  },
+  "allow_lan": true,
+  "disable_ipv6": true,
+  "enable_two_hop": true,
+  "enable_bridges": false,
+  "enable_lewes_protocol": false,
+  "netstack": false,
+  "min_gateway_vpn_performance": null,
+  "residential_exit": false,
+  "enable_custom_dns": false,
+  "custom_dns": [],
+  "enable_ad_blocking": false,
+  "mixnet_traffic": {
+    "poisson_parameter_for_loop_cover_stream": null,
+    "average_packet_delay": null,
+    "message_sending_average_delay": null,
+    "disable_poisson_rate": false,
+    "disable_background_cover_traffic": false,
+    "min_mixnode_performance": null,
+    "min_gateway_mixnet_performance": null
+  },
+  "network_stats": {
+    "enabled": true,
+    "allow_disconnected": false
+  },
+  "killswitch": false,
+  "legacy_split_tunnel": false,
+  "inbound_exemptions": [],
+  "stealth_api": true
+}"#;
+
+    let temp_dir = tempdir().unwrap();
+    let network_config_path = temp_dir.path().join("tulips");
+    let _ = fs::create_dir_all(&network_config_path).await;
+    let json_path = network_config_path.join(DEFAULT_CONFIG_FILE_JSON);
+    fs::write(&json_path, json_v8_content).await.unwrap();
+
+    let config_manager = VpnServiceConfigManager::new(&network_config_path, None)
+        .await
+        .unwrap();
+    assert!(config_manager.config().stealth_api);
+    assert_eq!(
+        config_manager.config().gateway_independence,
+        nym_vpn_lib_types::GatewayIndependence::default()
+    );
 
     // No migration happened, so the file on disk is untouched.
     let read_json_content = fs::read_to_string(&json_path).await.unwrap();

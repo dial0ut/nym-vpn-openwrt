@@ -245,6 +245,33 @@ impl VpnServiceConfigManager {
         }
     }
 
+    /// Gateway independence: every criterion (node family, ASN, subnet) on or
+    /// off at once. The reminder switch is left alone.
+    pub async fn set_gateway_independence_enabled(&mut self, enabled: bool) -> Result<(), String> {
+        let mut gateway_independence = self.config.gateway_independence;
+        gateway_independence.set_enabled(enabled);
+        if self.config.gateway_independence != gateway_independence {
+            self.config.gateway_independence = gateway_independence;
+            self.save_config_and_send_event().await
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Whether to remind the user when the selected pair is not independent.
+    /// A UI hint only: never touches the tunnel.
+    pub async fn set_gateway_independence_notifications(
+        &mut self,
+        enabled: bool,
+    ) -> Result<(), String> {
+        if self.config.gateway_independence.enable_notifications != enabled {
+            self.config.gateway_independence.enable_notifications = enabled;
+            self.save_config_and_send_event().await
+        } else {
+            Ok(())
+        }
+    }
+
     pub async fn set_inbound_exemptions(
         &mut self,
         exemptions: Vec<nym_vpn_lib_types::InboundExemption>,
@@ -538,7 +565,7 @@ impl VpnServiceConfigManager {
                     ex
                 })
                 .collect(),
-            gateway_independence: nym_vpn_lib_types::GatewayIndependence::default(),
+            gateway_independence: self.config.gateway_independence,
         }
     }
 }

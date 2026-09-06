@@ -187,7 +187,7 @@ impl Command {
     }
 
     async fn connect(mut rpc_client: RpcClient, wait: bool) -> Result<()> {
-        rpc_client.connect_tunnel().await?;
+        rpc_client.connect_tunnel(false).await?;
 
         if wait {
             println!("Waiting until connected or failed");

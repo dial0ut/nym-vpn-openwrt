@@ -843,7 +843,7 @@ async fn connect() -> Value {
         Ok(client) => client,
         Err(err) => return fail(format!("{err:#}")),
     };
-    match client.connect_tunnel().await {
+    match client.connect_tunnel(false).await {
         Ok(_) => ok_msg("Connection initiated"),
         Err(err) => fail(format!("{err:#}")),
     }

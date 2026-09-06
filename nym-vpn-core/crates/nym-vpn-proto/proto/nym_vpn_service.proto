@@ -291,6 +291,44 @@ message VpnServiceConfig {
   repeated InboundExemption inbound_exemptions = 29;
   bool legacy_split_tunnel = 30;
   bool stealth_api = 31;
+  GatewayIndependence gateway_independence = 32;
+}
+
+// Which relations between the entry and the exit gateway rule a pair out.
+// Every criterion is on by default; enable_notifications is a hint for user
+// interfaces and does not affect selection.
+message GatewayIndependence {
+  bool different_node_family = 1;
+  bool different_asn = 2;
+  bool different_subnet = 3;
+  bool enable_notifications = 4;
+}
+
+// Connect request. An empty message (older clients) connects with the
+// persisted settings.
+message ConnectRequest {
+  // Select gateways with the independence criteria switched off for this
+  // connect session only (until the next disconnect). The persisted
+  // setting is untouched.
+  bool relax_independence = 1;
+}
+
+// The entry and exit gateways a connect would most likely pick right now.
+message TentativeGateways {
+  message Selected {
+    GatewayResponse entry = 1;
+    GatewayResponse exit = 2;
+  }
+  // A pair exists only once the independence criteria are relaxed.
+  message NeedsRelaxedIndependenceCriteria {}
+  // No pair satisfies the settings even with the criteria relaxed.
+  message NoGatewaysAvailable {}
+
+  oneof tentative_gateways {
+    Selected selected = 1;
+    NeedsRelaxedIndependenceCriteria needs_relaxed_independence_criteria = 2;
+    NoGatewaysAvailable no_gateways_available = 3;
+  }
 }
 
 enum InboundExemptionProtocol {
@@ -1052,6 +1090,10 @@ service NymVpnService {
   rpc SetKillswitch (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
   rpc SetLegacySplitTunnel (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
   rpc SetStealthApi (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
+  // Switch every gateway independence criterion on or off at once
+  rpc SetEnableGatewayIndependence (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
+  // Remind the user when the selected pair is not independent
+  rpc SetGatewayIndependenceNotifications (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
   rpc SetInboundExemptions (InboundExemptionList) returns (google.protobuf.Empty) {}
   rpc GetInboundExemptions (google.protobuf.Empty) returns (InboundExemptionList) {}
 
@@ -1075,7 +1117,7 @@ service NymVpnService {
   rpc GetDnsUpstreamOwner (google.protobuf.Empty) returns (DnsUpstreamOwnerResponse) {}
 
   // Connect the tunnel
-  rpc ConnectTunnel (google.protobuf.Empty) returns (google.protobuf.BoolValue) {}
+  rpc ConnectTunnel (ConnectRequest) returns (google.protobuf.BoolValue) {}
 
   // Reconnect the tunnel if it had been established.
   rpc ReconnectTunnel (google.protobuf.Empty) returns (google.protobuf.BoolValue) {}
@@ -1097,6 +1139,10 @@ service NymVpnService {
 
   // Probe gateways for latency and packet loss
   rpc TestGateways (GatewayTestParams) returns (GatewayTestReport) {}
+
+  // Preview the entry and exit gateways a connect would most likely pick,
+  // from the live settings, without creating key material
+  rpc GetTentativeGateways (google.protobuf.Empty) returns (TentativeGateways) {}
 
   // Store the recovery phrase, which is also the account identity and authentication
   rpc StoreAccount (StoreAccountRequest) returns (AccountCommandResponse) {}
