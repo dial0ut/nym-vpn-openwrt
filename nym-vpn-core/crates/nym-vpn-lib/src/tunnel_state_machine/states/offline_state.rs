@@ -116,9 +116,14 @@ impl TunnelStateHandler for OfflineState {
                         if self.reconnect {
                             NextTunnelState::SameState(self)
                         } else {
-                            self.reconnect = true;
-                            let new_state = PrivateTunnelState::Offline { reconnect: self.reconnect };
-                            NextTunnelState::NewState((self, new_state))
+                            // Re-enter rather than flip the flag so the blocked
+                            // policy is applied afresh with the live settings:
+                            // with Always On this is the normal boot sequence
+                            // on a router whose WAN is still coming up
+                            // (upstream #6265).
+                            NextTunnelState::NewState(
+                                Self::enter(true, self.selected_gateways, shared_state).await,
+                            )
                         }
                     },
                     TunnelCommand::Disconnect => {
