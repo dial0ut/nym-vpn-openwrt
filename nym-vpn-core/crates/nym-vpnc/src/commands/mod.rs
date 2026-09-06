@@ -11,8 +11,6 @@ pub mod gateway_test;
 pub mod inbound;
 pub mod lan;
 pub mod network;
-pub mod network_stats;
 pub mod rpcd;
-pub mod sentry;
 pub mod socks5;
 pub mod tunnel;
