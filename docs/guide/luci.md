@@ -4,6 +4,11 @@ Your router's IP (usually `http://192.168.1.1`), then **NymVPN** in the navigati
 
 The main view shows a connection status ring (green connected, pulsing connecting, grey
 disconnected), uptime since the tunnel came up, and the hop chain through entry and exit gateways.
+While connected, each gateway also shows its operator family when the directory knows one; if
+entry and exit turn out to share a family, both are marked **Same operator family** in amber.
+
+The gateway pickers show the operator family as a small chip on each server row, so you can
+avoid picking two servers from the same operator by hand.
 
 ## Tunnel Settings
 
@@ -20,6 +25,21 @@ through the cover domains from the start. Use it where the API hosts are blocked
 gateway lists, account sync, the setup phase of a connect — get slower. API traffic only, so it
 applies immediately with no reconnect. If the network environment publishes no cover domains the
 card says so and the toggle has no effect.
+
+**Gateway Independence** — on by default. Entry and exit must be run by different operators
+(*node families* in the NymVPN apps), sit in different networks (ASNs) and in different subnets.
+One operator seeing both ends of the tunnel could link your traffic going in and coming out,
+which is what the two hops are there to prevent; with this on, the daemon refuses such a pair.
+Turn it off to allow any combination. Takes effect on reconnect.
+
+**Server Family Reminders** — on by default. When you press **Connect**, the page first asks
+the daemon which entry/exit pair it would pick for your selection. If that pair fails the
+independence criteria, a warning — *The selected servers are in the same operator family!* —
+offers **Connect anyway**, which connects with the criteria relaxed for that connection only
+(the setting above is untouched), or **Change servers**, which returns you to the pickers. With
+reminders off the connection goes ahead relaxed and a notice says so. The check is bounded to a
+few seconds and never blocks connecting: if the daemon cannot answer, the connect proceeds as
+usual and any refusal shows up as a status error with the same two choices. Applies immediately.
 
 **Kill-Switch** — blocks all non-tunnel WAN egress. It is *only* a firewall block: traffic is
 routed into the tunnel whenever connected regardless of this setting. Turn it off to allow WAN
@@ -105,4 +125,4 @@ The footer shows the daemon version and current network (mainnet or canary).
 ## Notifications
 
 Toasts for status updates, modals to confirm anything destructive — disconnecting, forgetting an
-account.
+account — or risky, such as connecting through two gateways of the same operator family.

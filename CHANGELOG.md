@@ -37,6 +37,19 @@ the GitHub release notes.
 - LuCI **Privacy** card with the anonymous statistics switch, previously
   reachable only through `nym-vpnc network-stats`. The rpcd bridge gained
   `stats_get`/`stats_set` for it.
+- Gateway independence in LuCI (the NymVPN apps' *node families*): a
+  **Gateway Independence** switch and a **Server Family Reminders** switch in
+  the Tunnel Settings card, the operator family as a chip on every gateway
+  picker row and under the connected entry and exit (both marked in amber
+  when they share one), and a pre-connect check that asks the daemon which
+  pair it would pick. A same-family pair brings up "The selected servers are
+  in the same operator family!" with **Connect anyway** — relaxing the
+  criteria for that connection only — and **Change servers**; with reminders
+  off the connect goes ahead relaxed and a notice says so. The check is
+  bounded to a few seconds and falls back to a plain connect on an older
+  daemon, and the `NEEDS_RELAXED_INDEPENDENCE_CRITERIA` error state offers
+  the same two choices. The bridge's `tentative_gateways` method is now in
+  the LuCI ACL.
 
 ### Security
 

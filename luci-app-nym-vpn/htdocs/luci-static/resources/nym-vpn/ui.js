@@ -148,7 +148,9 @@ return baseclass.extend({
             }
         };
 
-        var confirm = function(title, message, icon, onConfirm, onCancel, confirmText) {
+        // cancelText relabels the safe (green) button; it defaults to
+        // 'Cancel' so existing callers are unchanged.
+        var confirm = function(title, message, icon, onConfirm, onCancel, confirmText, cancelText) {
             hide();
             activeModal = E('div', { 'class': 'nym-modal-overlay' }, [
                 E('div', { 'class': 'nym-modal' }, [
@@ -164,7 +166,7 @@ return baseclass.extend({
                         E('button', {
                             'class': 'nym-btn nym-btn-primary',
                             'click': function() { hide(); if (onCancel) onCancel(); }
-                        }, 'Cancel'),
+                        }, cancelText || 'Cancel'),
                         E('button', {
                             'class': 'nym-btn nym-btn-danger',
                             'click': function() { if (onConfirm) onConfirm(); }

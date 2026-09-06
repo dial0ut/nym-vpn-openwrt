@@ -89,6 +89,10 @@ return baseclass.extend({
     .nym-gateway-id { font-size: 9px; color: var(--text-secondary); font-family: var(--font-mono); max-width: 100%; word-break: break-all; }\
     .nym-gateway-ip { font-size: 10px; color: var(--text-muted); font-family: monospace; }\
     .nym-gateway-empty { font-size: 24px; color: var(--text-muted); }\
+    /* Operator family under the connected entry/exit; .same flags a shared family. */\
+    .nym-gateway-family { font-size: 10px; color: var(--text-muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\
+    .nym-gateway-family.same { color: var(--warning); }\
+    .nym-gateway-family-warn { font-size: 10px; color: var(--warning); text-transform: uppercase; letter-spacing: var(--label-spacing); }\
     .nym-action-buttons { display: flex; justify-content: center; gap: 16px; margin-top: 32px; }\
     .nym-action-buttons .nym-btn { flex: 1; max-width: 200px; text-align: center; }\
     .nym-btn { padding: 14px 40px; font-size: 14px; font-weight: 600; letter-spacing: 0.3px; border: none; border-radius: 8px; cursor: pointer; transition: all 0.2s ease; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; outline: none !important; box-shadow: none; }\
@@ -189,6 +193,8 @@ return baseclass.extend({
     .nym-gateway-option-info { flex: 1; min-width: 0; }\
     .nym-gateway-option-name { font-size: 13px; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }\
     .nym-gateway-option-perf { font-size: 11px; color: var(--text-muted); }\
+    .nym-gateway-option-family { margin-top: 3px; min-width: 0; }\
+    .nym-family-chip { display: inline-block; max-width: 100%; padding: 1px 7px; border-radius: 8px; font-size: 10px; line-height: 1.5; color: var(--text-secondary); background: var(--bg-card); border: 1px solid var(--border-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }\
     .nym-gateway-list { max-height: 200px; overflow-y: auto; }\
     .nym-gateway-list::-webkit-scrollbar { width: 4px; }\
     .nym-gateway-list::-webkit-scrollbar-track { background: var(--bg-input); }\
