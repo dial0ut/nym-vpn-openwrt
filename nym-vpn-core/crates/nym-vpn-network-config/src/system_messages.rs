@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use nym_vpn_api_client::response::{SystemConfigurationResponse, SystemMessageResponse};
-use url::Url;
 
 use crate::system_configuration::{ScoreThresholds, SystemConfiguration};
 
@@ -191,12 +190,6 @@ impl From<SystemMessageResponse> for SystemMessage {
 
 impl From<SystemConfigurationResponse> for SystemConfiguration {
     fn from(value: SystemConfigurationResponse) -> Self {
-        let statistics_api = value.statistics_api.and_then(|url| {
-            Url::parse(&url)
-                .inspect_err(|err| tracing::warn!("Failed to parse statistics API url: {err}"))
-                .ok()
-        });
-
         let min_supported_app_versions = value.min_supported_app_versions;
 
         SystemConfiguration {
@@ -210,7 +203,6 @@ impl From<SystemConfigurationResponse> for SystemConfiguration {
                 medium: value.wg_thresholds.medium,
                 low: value.wg_thresholds.low,
             },
-            statistics_api,
             min_supported_app_versions,
         }
     }

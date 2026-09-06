@@ -4,13 +4,11 @@
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
-use url::Url;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SystemConfiguration {
     pub mix_thresholds: ScoreThresholds,
     pub wg_thresholds: ScoreThresholds,
-    pub statistics_api: Option<Url>,
     pub min_supported_app_versions: Option<nym_vpn_api_client::NetworkCompatibility>,
 }
 
@@ -18,8 +16,8 @@ impl fmt::Display for SystemConfiguration {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "mixnet score thresholds: {:?}\nwireguard score thresholds: {:?}\nstatistics api: {:?}",
-            self.mix_thresholds, self.wg_thresholds, self.statistics_api
+            "mixnet score thresholds: {:?}\nwireguard score thresholds: {:?}",
+            self.mix_thresholds, self.wg_thresholds
         )
     }
 }

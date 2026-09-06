@@ -9,14 +9,12 @@ use std::path::Path;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GlobalConfig {
     pub network_name: String,
-    pub sentry_monitoring: bool,
 }
 
 impl Default for GlobalConfig {
     fn default() -> Self {
         Self {
             network_name: NymNetworkDetails::default().network_name,
-            sentry_monitoring: false,
         }
     }
 }
@@ -104,14 +102,6 @@ impl GlobalConfig {
                 json_config_path.display()
             ))
     }
-
-    // Calling this means the global configuration file is read twice 😒
-    pub async fn sentry_enabled() -> bool {
-        let config = Self::read_from_default_config_dir()
-            .await
-            .unwrap_or_default();
-        config.sentry_monitoring
-    }
 }
 
 //
@@ -152,17 +142,16 @@ impl TryFrom<&GlobalConfig> for GlobalConfigExt {
 //
 // v2
 //
+// Older files also carry `sentry_monitoring`; it is ignored and dropped on the next write.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct GlobalConfigExtV2 {
     network_name: String,
-    sentry_monitoring: bool,
 }
 
 impl Default for GlobalConfigExtV2 {
     fn default() -> Self {
         Self {
             network_name: NymNetworkDetails::default().network_name,
-            sentry_monitoring: false,
         }
     }
 }
@@ -179,7 +168,6 @@ impl TryFrom<GlobalConfigExtV2> for GlobalConfig {
     fn try_from(value: GlobalConfigExtV2) -> Result<Self, Self::Error> {
         Ok(GlobalConfig {
             network_name: value.network_name,
-            sentry_monitoring: value.sentry_monitoring,
         })
     }
 }
@@ -190,7 +178,6 @@ impl TryFrom<&GlobalConfig> for GlobalConfigExtLatest {
     fn try_from(value: &GlobalConfig) -> Result<Self, Self::Error> {
         Ok(GlobalConfigExtLatest {
             network_name: value.network_name.clone(),
-            sentry_monitoring: value.sentry_monitoring,
         })
     }
 }
@@ -198,19 +185,16 @@ impl TryFrom<&GlobalConfig> for GlobalConfigExtLatest {
 //
 // v1
 //
+// v1 files also carry `sentry_monitoring` and `collect_network_statistics`; both are ignored.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct GlobalConfigExtV1 {
     network_name: String,
-    sentry_monitoring: bool,
-    collect_network_statistics: bool,
 }
 
 impl Default for GlobalConfigExtV1 {
     fn default() -> Self {
         Self {
             network_name: NymNetworkDetails::default().network_name,
-            sentry_monitoring: false,
-            collect_network_statistics: true,
         }
     }
 }
@@ -227,7 +211,6 @@ impl TryFrom<GlobalConfigExtV1> for GlobalConfig {
     fn try_from(value: GlobalConfigExtV1) -> Result<Self, Self::Error> {
         Ok(GlobalConfig {
             network_name: value.network_name,
-            sentry_monitoring: value.sentry_monitoring,
         })
     }
 }
@@ -235,15 +218,10 @@ impl TryFrom<GlobalConfigExtV1> for GlobalConfig {
 //
 // Legacy TOML version of the config file
 //
+// Legacy files may carry `sentry_monitoring` and `collect_network_statistics`; both are ignored.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct LegacyGlobalConfig {
     network_name: String,
-
-    #[serde(default)]
-    sentry_monitoring: bool,
-
-    #[serde(default = "default_true")]
-    collect_network_statistics: bool,
 }
 
 impl TryFrom<LegacyGlobalConfig> for GlobalConfig {
@@ -252,13 +230,8 @@ impl TryFrom<LegacyGlobalConfig> for GlobalConfig {
     fn try_from(value: LegacyGlobalConfig) -> Result<Self, Self::Error> {
         Ok(Self {
             network_name: value.network_name,
-            sentry_monitoring: value.sentry_monitoring,
         })
     }
-}
-
-fn default_true() -> bool {
-    true
 }
 
 #[cfg(test)]
@@ -294,8 +267,7 @@ collect_network_statistics = true
 
         let json_content = r#"{
   "version": "v2",
-  "network_name": "tulips",
-  "sentry_monitoring": false
+  "network_name": "tulips"
 }"#;
 
         // Write the TOML config file
@@ -306,7 +278,6 @@ collect_network_statistics = true
             .await
             .unwrap();
         assert_eq!(config.network_name, "tulips");
-        assert!(!config.sentry_monitoring);
 
         // The TOML file should be deleted and replaced with a JSON version
         assert!(!toml_path.exists());
@@ -317,11 +288,31 @@ collect_network_statistics = true
             .await
             .unwrap();
         assert_eq!(config.network_name, "tulips");
-        assert!(!config.sentry_monitoring);
 
         // Check the JSON is the right version and all snake-case
         let read_json_content = fs::read_to_string(&json_path).await.unwrap();
         assert_eq!(json_content, read_json_content);
+    }
+
+    #[tokio::test]
+    async fn test_global_config_ignores_removed_telemetry_fields() {
+        let (temp_dir, _toml_path, json_path) = setup().await;
+
+        let json_content = r#"{
+  "version": "v2",
+  "network_name": "tulips",
+  "sentry_monitoring": true
+}"#;
+        fs::write(&json_path, json_content).await.unwrap();
+
+        let config = GlobalConfig::read_from_config_dir(temp_dir.path())
+            .await
+            .unwrap();
+        assert_eq!(config.network_name, "tulips");
+
+        // The field is dropped when the file is written back.
+        let read_json_content = fs::read_to_string(&json_path).await.unwrap();
+        assert!(!read_json_content.contains("sentry_monitoring"));
     }
 
     #[tokio::test]
@@ -336,8 +327,8 @@ collect_network_statistics = true
 
         let broken_json_content = r#"{
   "version": "v2",
-  "network_name": "tulips",
-  "sentry_mXonitoring": false
+  "netwoXrk_name": "tulips",
+  "sentry_monitoring": false
 }"#;
 
         // Write the (broken) TOML config file

@@ -34,9 +34,6 @@ the GitHub release notes.
   without a reconnect, and it is persisted in the daemon config. CLI and web
   UI both say so when the network environment publishes no cover domains, in
   which case the setting has nothing to route through.
-- LuCI **Privacy** card with the anonymous statistics switch, previously
-  reachable only through `nym-vpnc network-stats`. The rpcd bridge gained
-  `stats_get`/`stats_set` for it.
 - Gateway independence, the same guarantee upstream calls node families: the
   entry and exit gateway of a two-hop tunnel must be run by unrelated
   parties. The daemon now picks the exit first and only accepts an entry in
@@ -71,6 +68,17 @@ the GitHub release notes.
   daemon, and the `NEEDS_RELAXED_INDEPENDENCE_CRITERIA` error state offers
   the same two choices. The bridge's `tentative_gateways` method is now in
   the LuCI ACL.
+
+### Removed
+
+- All telemetry. The daemon no longer collects or reports anonymous network
+  statistics and no longer carries Sentry crash reporting; neither can be
+  turned on. `nym-vpnc network-stats`, `nym-vpnc sentry`, the matching gRPC
+  calls and the rpcd `stats_get`/`stats_set` methods behind the web UI's
+  Privacy switch are gone, as is the local `stats.db`. Existing daemon
+  configs that still contain the old `network_stats`, `sentry_monitoring`
+  or `collect_network_statistics` fields load unchanged; the fields are
+  ignored and dropped on the next save.
 
 ### Security
 

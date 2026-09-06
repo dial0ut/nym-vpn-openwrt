@@ -1,7 +1,6 @@
 // Copyright 2025 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
-use nym_vpn_lib_types::NetworkStatisticsConfig;
 use std::{net::IpAddr, str::FromStr};
 
 use pretty_assertions::assert_eq;
@@ -184,10 +183,6 @@ location = "BE"
     "min_mixnode_performance": null,
     "min_gateway_mixnet_performance": null
   },
-  "network_stats": {
-    "enabled": true,
-    "allow_disconnected": false
-  },
   "killswitch": false,
   "legacy_split_tunnel": false,
   "inbound_exemptions": [],
@@ -252,10 +247,6 @@ identity = [ 99, 23, 98, 234, 66, 161, 195, 63, 155, 161, 250, 207, 17, 158, 136
     "disable_background_cover_traffic": false,
     "min_mixnode_performance": null,
     "min_gateway_mixnet_performance": null
-  },
-  "network_stats": {
-    "enabled": true,
-    "allow_disconnected": false
   },
   "killswitch": false,
   "legacy_split_tunnel": false,
@@ -326,10 +317,6 @@ address = [5, 56, 84, 195, 94, 238, 210, 124, 65, 143, 209, 144, 22, 255, 91, 18
     "min_mixnode_performance": null,
     "min_gateway_mixnet_performance": null
   },
-  "network_stats": {
-    "enabled": true,
-    "allow_disconnected": false
-  },
   "killswitch": false,
   "legacy_split_tunnel": false,
   "inbound_exemptions": [],
@@ -388,10 +375,6 @@ exit_point = "Random"
     "disable_background_cover_traffic": false,
     "min_mixnode_performance": null,
     "min_gateway_mixnet_performance": null
-  },
-  "network_stats": {
-    "enabled": true,
-    "allow_disconnected": false
   },
   "killswitch": false,
   "legacy_split_tunnel": false,
@@ -458,10 +441,6 @@ async fn test_service_config_migrate_from_v1() {
     "disable_background_cover_traffic": false,
     "min_mixnode_performance": null,
     "min_gateway_mixnet_performance": null
-  },
-  "network_stats": {
-    "enabled": true,
-    "allow_disconnected": false
   },
   "killswitch": false,
   "legacy_split_tunnel": false,
@@ -537,10 +516,6 @@ async fn test_service_config_migrate_from_v2() {
     "disable_background_cover_traffic": false,
     "min_mixnode_performance": null,
     "min_gateway_mixnet_performance": null
-  },
-  "network_stats": {
-    "enabled": true,
-    "allow_disconnected": false
   },
   "killswitch": true,
   "legacy_split_tunnel": false,
@@ -622,10 +597,6 @@ async fn test_service_config_migrate_from_v3() {
     "disable_background_cover_traffic": false,
     "min_mixnode_performance": null,
     "min_gateway_mixnet_performance": null
-  },
-  "network_stats": {
-    "enabled": true,
-    "allow_disconnected": false
   },
   "killswitch": false,
   "legacy_split_tunnel": false,
@@ -712,10 +683,6 @@ async fn test_service_config_migrate_from_v4() {
     "disable_background_cover_traffic": true,
     "min_mixnode_performance": 56,
     "min_gateway_mixnet_performance": 78
-  },
-  "network_stats": {
-    "enabled": true,
-    "allow_disconnected": false
   },
   "killswitch": false,
   "legacy_split_tunnel": false,
@@ -809,10 +776,6 @@ async fn test_service_config_migrate_from_v5() {
     "min_mixnode_performance": 78,
     "min_gateway_mixnet_performance": 90
   },
-  "network_stats": {
-    "enabled": true,
-    "allow_disconnected": false
-  },
   "killswitch": false,
   "legacy_split_tunnel": false,
   "inbound_exemptions": [],
@@ -898,10 +861,6 @@ async fn test_service_config_migrate_from_v6() {
     "disable_background_cover_traffic": false,
     "min_mixnode_performance": null,
     "min_gateway_mixnet_performance": null
-  },
-  "network_stats": {
-    "enabled": true,
-    "allow_disconnected": false
   },
   "killswitch": false,
   "legacy_split_tunnel": false,
@@ -1105,10 +1064,6 @@ async fn test_service_config_serialize_full() {
             disable_background_cover_traffic: false,
             min_mixnode_performance: Some(65),
             min_gateway_mixnet_performance: Some(75),
-        },
-        network_stats: NetworkStatisticsConfig {
-            enabled: true,
-            allow_disconnected: false,
         },
         killswitch: true,
         legacy_split_tunnel: true,
@@ -1325,4 +1280,73 @@ async fn test_service_config_v8_without_gateway_independence_loads_on() {
     // No migration happened, so the file on disk is untouched.
     let read_json_content = fs::read_to_string(&json_path).await.unwrap();
     assert_eq!(json_v8_content, read_json_content);
+}
+
+// Configs written before telemetry was removed carry a `network_stats` block.
+// It must be ignored on load and dropped on the next save.
+#[tokio::test]
+async fn test_service_config_v8_with_network_stats_loads_and_drops_it() {
+    let json_v8_content = r#"{
+  "version": "v8",
+  "entry_point": {
+    "country": {
+      "two_letter_iso_country_code": "FR"
+    }
+  },
+  "exit_point": {
+    "country": {
+      "two_letter_iso_country_code": "BE"
+    }
+  },
+  "allow_lan": true,
+  "disable_ipv6": true,
+  "enable_two_hop": true,
+  "enable_bridges": false,
+  "enable_lewes_protocol": false,
+  "netstack": false,
+  "min_gateway_vpn_performance": null,
+  "residential_exit": false,
+  "enable_custom_dns": false,
+  "custom_dns": [],
+  "enable_ad_blocking": false,
+  "mixnet_traffic": {
+    "poisson_parameter_for_loop_cover_stream": null,
+    "average_packet_delay": null,
+    "message_sending_average_delay": null,
+    "disable_poisson_rate": false,
+    "disable_background_cover_traffic": false,
+    "min_mixnode_performance": null,
+    "min_gateway_mixnet_performance": null
+  },
+  "network_stats": {
+    "enabled": false,
+    "allow_disconnected": true
+  },
+  "killswitch": true,
+  "legacy_split_tunnel": false,
+  "inbound_exemptions": [],
+  "stealth_api": false
+}"#;
+
+    let temp_dir = tempdir().unwrap();
+    let network_config_path = temp_dir.path().join("tulips");
+    let _ = fs::create_dir_all(&network_config_path).await;
+    let json_path = network_config_path.join(DEFAULT_CONFIG_FILE_JSON);
+    fs::write(&json_path, json_v8_content).await.unwrap();
+
+    let config_manager = VpnServiceConfigManager::new(&network_config_path, None)
+        .await
+        .unwrap();
+    let config = config_manager.config();
+    assert_eq!(
+        config.entry_point,
+        nym_vpn_lib_types::EntryPoint::Country {
+            two_letter_iso_country_code: "FR".to_string(),
+        }
+    );
+    assert!(config.killswitch);
+
+    assert!(config_manager.write_to_file().await.is_ok());
+    let read_json_content = fs::read_to_string(&json_path).await.unwrap();
+    assert!(!read_json_content.contains("network_stats"));
 }

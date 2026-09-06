@@ -5,7 +5,7 @@ use nym_vpn_lib_types::{
     AccountBalanceResponse, AccountCommandResponse, AccountControllerState, AvailableTickets,
     DiagnosticReport, DnsUpstreamOwner, EntryPoint, ExitPoint, FeatureFlags, Gateway,
     GatewayTestParams, GatewayTestReport, GetDeeplinkParams, HttpRpcSettings, ListGatewaysOptions,
-    LogPath, LookupGatewayFilters, NetworkCompatibility, NetworkStatisticsIdentity, NymVpnDevice,
+    LogPath, LookupGatewayFilters, NetworkCompatibility, NymVpnDevice,
     NymVpnUsage, ParsedAccountLinks, PrivyDerivationMessage, RegistrationReport, Socks5Settings,
     Socks5Status, StoreAccountRequest, SystemMessage, TentativeGateways, TunnelEvent, TunnelState,
     VpnAccountSummary, VpnServiceConfig, VpnServiceInfo,
@@ -729,58 +729,6 @@ impl RpcClient {
             .map_err(Error::Rpc)
     }
 
-    pub async fn is_sentry_enabled(&mut self) -> Result<bool> {
-        self.0
-            .is_sentry_enabled(())
-            .await
-            .map(|v| v.into_inner())
-            .map_err(Error::Rpc)
-    }
-
-    pub async fn enable_sentry(&mut self) -> Result<()> {
-        self.0
-            .enable_sentry(())
-            .await
-            .map(|v| v.into_inner())
-            .map_err(Error::Rpc)
-    }
-
-    pub async fn disable_sentry(&mut self) -> Result<()> {
-        self.0
-            .disable_sentry(())
-            .await
-            .map(|v| v.into_inner())
-            .map_err(Error::Rpc)
-    }
-
-    pub async fn network_stats_set_enabled(&mut self, enabled: bool) -> Result<()> {
-        self.0
-            .network_stats_set_enabled(enabled)
-            .await
-            .map(|v| v.into_inner())
-            .map_err(Error::Rpc)
-    }
-
-    pub async fn network_stats_allow_disconnected(
-        &mut self,
-        allow_disconnected: bool,
-    ) -> Result<()> {
-        self.0
-            .network_stats_allow_disconnected(allow_disconnected)
-            .await
-            .map(|v| v.into_inner())
-            .map_err(Error::Rpc)
-    }
-
-    pub async fn network_stats_reset_seed(&mut self, seed: Option<String>) -> Result<()> {
-        let request = proto::NetworkStatsResetSeedRequest { seed };
-        self.0
-            .network_stats_reset_seed(request)
-            .await
-            .map(|v| v.into_inner())
-            .map_err(Error::Rpc)
-    }
-
     pub async fn enable_socks5(
         &mut self,
         socks5_settings: Socks5Settings,
@@ -827,16 +775,6 @@ impl RpcClient {
             .into_inner();
 
         Socks5Status::try_from(response).map_err(Error::InvalidResponse)
-    }
-
-    pub async fn network_stats_get_seed(&mut self) -> Result<NetworkStatisticsIdentity> {
-        let response = self
-            .0
-            .network_stats_get_seed(())
-            .await
-            .map(|v| v.into_inner())
-            .map_err(Error::Rpc)?;
-        Ok(NetworkStatisticsIdentity::from(response))
     }
 
     pub async fn get_privy_derivation_message(&mut self) -> Result<PrivyDerivationMessage> {

@@ -137,22 +137,10 @@ pub enum Command {
         subcommand: commands::network::Command,
     },
 
-    /// Sentry integration
-    Sentry {
-        #[command(subcommand)]
-        subcommand: commands::sentry::Command,
-    },
-
     /// SOCKS5 proxy
     Socks5 {
         #[command(subcommand)]
         subcommand: commands::socks5::Command,
-    },
-
-    /// Anonymous network statistics collection
-    NetworkStats {
-        #[command(subcommand)]
-        subcommand: commands::network_stats::Command,
     },
 
     /// Diagnostic tool
@@ -199,9 +187,7 @@ impl Command {
             Command::Network { subcommand } => subcommand.execute(rpc_client).await,
             Command::Account { subcommand } => subcommand.execute(rpc_client).await,
             Command::Device(args) => args.execute(rpc_client).await,
-            Command::Sentry { subcommand } => subcommand.execute(rpc_client).await,
             Command::Socks5 { subcommand } => subcommand.execute(rpc_client).await,
-            Command::NetworkStats { subcommand } => subcommand.execute(rpc_client).await,
             Command::Diagnostic { subcommand } => {
                 commands::diagnostic::execute(subcommand, rpc_client).await
             }

@@ -792,7 +792,6 @@ pub struct SystemMessageResponse {
 pub struct SystemConfigurationResponse {
     pub mix_thresholds: ScoreThresholdsResponse,
     pub wg_thresholds: ScoreThresholdsResponse,
-    pub statistics_api: Option<String>,
     pub min_supported_app_versions: Option<NetworkCompatibility>,
 }
 

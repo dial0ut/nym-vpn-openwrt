@@ -284,7 +284,7 @@ message VpnServiceConfig {
   bool enable_custom_dns = 17;
   IpAddrList custom_dns = 16;
   optional uint32 min_gateway_vpn_performance = 10;
-  NetworkStatsConfig network_stats = 18;
+  reserved 18;
   MixnetTrafficConfig mixnet_traffic = 25;
   bool enable_ad_blocking = 27;
   bool killswitch = 28;
@@ -345,11 +345,6 @@ message InboundExemption {
 
 message InboundExemptionList {
   repeated InboundExemption exemptions = 1;
-}
-
-message NetworkStatsConfig {
-  bool enabled = 1;
-  bool allow_disconnected = 2;
 }
 
 message AsEntry {
@@ -962,16 +957,6 @@ message HttpRpcSettings {
   string listen_address = 1;  // e.g., "127.0.0.1:8545"
 }
 
-message NetworkStatsResetSeedRequest {
-  // this doesn't need to be cryptographically secure, so anything will do
-  optional string seed = 1;
-}
-
-message NetworkStatisticsIdentity {
-  string seed = 1;
-  string id = 2;
-}
-
 message PrivyDerivationMessage {
   string message = 1;
 }
@@ -1209,27 +1194,6 @@ service NymVpnService {
 
   // Delete the log file
   rpc DeleteLogFile (google.protobuf.Empty) returns (google.protobuf.Empty) {}
-
-  // Check if Sentry error monitoring is enabled
-  rpc IsSentryEnabled (google.protobuf.Empty) returns (google.protobuf.BoolValue) {}
-
-  // Enable Sentry error monitoring (requires daemon restart)
-  rpc EnableSentry (google.protobuf.Empty) returns (google.protobuf.Empty) {}
-
-  // Disable Sentry error monitoring (requires daemon restart)
-  rpc DisableSentry (google.protobuf.Empty) returns (google.protobuf.Empty) {}
-
-  // Enable/disable network statistics collection
-  rpc NetworkStatsSetEnabled (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
-
-  // Allow/disallow disconnected network statistics collection sending
-  rpc NetworkStatsAllowDisconnected (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
-
-  // Reset seed used for network statistics id
-  rpc NetworkStatsResetSeed (NetworkStatsResetSeedRequest) returns (google.protobuf.Empty) {}
-
-  // Get seed and Id used for network statistics
-  rpc NetworkStatsGetSeed (google.protobuf.Empty) returns (NetworkStatisticsIdentity) {}
 
   // Enable socks5 proxy
   rpc EnableSocks5 (EnableSocks5Request) returns (google.protobuf.Empty) {}

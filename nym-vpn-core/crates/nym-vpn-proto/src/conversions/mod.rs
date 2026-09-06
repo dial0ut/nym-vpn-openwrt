@@ -9,7 +9,7 @@ pub mod gateway_directory;
 pub mod gateway_independence;
 pub mod gateway_test;
 pub mod network_config;
-pub mod network_stats;
+pub mod privy;
 pub mod prost;
 pub mod service;
 pub mod socket_addr;
