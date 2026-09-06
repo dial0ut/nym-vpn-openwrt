@@ -45,7 +45,7 @@ return baseclass.extend({
             listEl.innerHTML = '';
             if (state.length === 0) {
                 listEl.appendChild(E('div', { 'class': 'nym-exemption-empty' },
-                    'No exemptions configured. Add one below.'));
+                    'No exemptions configured.'));
                 return;
             }
             listEl.appendChild(E('div', { 'class': 'nym-exemption-header' }, [
@@ -172,19 +172,42 @@ return baseclass.extend({
             'click': add
         }, 'Add');
 
+        // The add form is on demand once there is a list to look at: a small
+        // opener in the group head reveals it (and hands focus to the port
+        // field). With no exemptions yet the form is open from the start, so
+        // the feature never looks inert. The form is in the DOM either way.
+        var addPanel = E('div', { 'class': 'nym-exemption-add', 'id': 'nym-inbound-add' }, [
+            E('div', { 'class': 'nym-form-label' }, 'Add Exemption'),
+            E('div', { 'class': 'nym-exemption-addrow' }, [protoSel, portInp, labelInp, saveBtn])
+        ]);
+        var opener = E('button', {
+            'type': 'button',
+            'class': 'nym-add-open',
+            'id': 'nym-inbound-add-open',
+            'aria-controls': 'nym-inbound-add',
+            'aria-expanded': 'false',
+            'click': function() {
+                addPanel.hidden = false;
+                opener.hidden = true;
+                opener.setAttribute('aria-expanded', 'true');
+                try { portInp.focus(); } catch (e) {}
+            }
+        }, '+ Add exemption');
+        if (state.length > 0) {
+            addPanel.hidden = true;
+        } else {
+            opener.hidden = true;
+            opener.setAttribute('aria-expanded', 'true');
+        }
+
         var section = E('div', { 'class': 'nym-inbound-section' }, [
             card.group({
                 title: 'Inbound Services',
-                desc: 'Ports that stay reachable from the WAN while the kill-switch is on ' +
-                    '(hosted HTTPS, WireGuard, SSH). For a LAN service, add the ' +
-                    'Network → Firewall port forward first, then the same WAN-side port here.',
-                body: [
-                    listEl,
-                    E('div', { 'class': 'nym-exemption-add' }, [
-                        E('div', { 'class': 'nym-form-label' }, 'Add Exemption'),
-                        E('div', { 'class': 'nym-exemption-addrow' }, [protoSel, portInp, labelInp, saveBtn])
-                    ])
-                ]
+                moreId: 'inbound-services',
+                more: 'Ports whose reply traffic bypasses the tunnel, so a service on the router (LuCI, SSH) or on the LAN stays reachable from the WAN with the kill-switch on. Rows read Active while the kill-switch is on and Inert when it is off. For a LAN service, add the port forward under Network → Firewall first, then the same WAN-side port here.',
+                docs: 'inbound-services',
+                action: opener,
+                body: [listEl, addPanel]
             })
         ]);
         redraw();

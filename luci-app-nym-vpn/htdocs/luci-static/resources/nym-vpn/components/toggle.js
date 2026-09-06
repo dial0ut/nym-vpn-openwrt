@@ -2,26 +2,47 @@
 'require baseclass';
 'require dom';
 'require nym-vpn.components.toast as toast';
+'require nym-vpn.components.details as details';
 
 // Labelled switch row (title, description, optional notes under it, the
 // switch) and the save-or-revert behaviour most switches on the page share.
 
 var E = dom.create.bind(dom);
 
+var TAG_TITLES = { reconnect: 'Takes effect on the next connect' };
+
 return baseclass.extend({
     // opts: {id, title, desc, tag, checked, disabled, onChange(ev), extra
     // (children after the description), after (children after the switch),
-    // rowId, rowStyle}. `tag` is a short marker beside the title
-    // ('reconnect' for switches that apply on the next connect); it sits
-    // next to the title element, not inside it, so the title text stays
-    // the bare name.
+    // rowId, rowStyle, more, docs, moreId}. `tag` is a short marker beside
+    // the title ('reconnect' for switches that apply on the next connect);
+    // it sits next to the title element, not inside it, so the title text
+    // stays the bare name. `desc` is one short clause; the full explanation
+    // goes in `more` (string or children) behind an (i) button, with `docs`
+    // naming the LuCI-guide anchor its Learn more link points at.
     row: function(opts) {
         var head = [E('div', { 'class': 'nym-toggle-title' }, opts.title)];
-        if (opts.tag) head.push(E('span', { 'class': 'nym-toggle-tag' }, opts.tag));
+        if (opts.tag) {
+            var tagAttrs = { 'class': 'nym-toggle-tag' };
+            if (TAG_TITLES[opts.tag]) tagAttrs.title = TAG_TITLES[opts.tag];
+            head.push(E('span', tagAttrs, opts.tag));
+        }
+        var more = null;
+        if (opts.more) {
+            more = details.create({
+                id: opts.moreId || opts.id,
+                label: opts.title,
+                text: opts.more,
+                docs: opts.docs
+            });
+            head.push(more.button);
+        }
         var info = [
             E('div', { 'class': 'nym-toggle-head' }, head),
             E('div', { 'class': 'nym-toggle-desc' }, opts.desc)
-        ].concat(opts.extra || []);
+        ];
+        if (more) info.push(more.panel);
+        info = info.concat(opts.extra || []);
         var rowAttrs = { 'class': 'nym-toggle-row' };
         if (opts.rowId) rowAttrs.id = opts.rowId;
         if (opts.rowStyle) rowAttrs.style = opts.rowStyle;

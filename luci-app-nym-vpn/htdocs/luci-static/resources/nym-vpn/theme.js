@@ -117,7 +117,7 @@ return baseclass.extend({
     .nym-card-icon svg { width: 16px; height: 16px; }\
     .nym-card-chevron { color: var(--text-muted); transition: transform 0.3s ease; font-size: 12px; }\
     .nym-card.expanded .nym-card-chevron { transform: rotate(180deg); }\
-    .nym-card-body { padding: 0 20px 20px; display: none; }\
+    .nym-card-body { padding: 0 20px 16px; display: none; }\
     .nym-card.expanded .nym-card-body { display: block; animation: slideDown 0.3s ease; }\
     @keyframes slideDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }\
     .nym-modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.85); display: flex; align-items: center; justify-content: center; z-index: 10000; backdrop-filter: blur(4px); animation: modalFadeIn 0.3s ease; }\
@@ -155,7 +155,25 @@ return baseclass.extend({
     .nym-toast-close:hover { color: var(--text-primary); }\
     @keyframes slideIn { from { opacity: 0; transform: translateX(100px); } to { opacity: 1; transform: translateX(0); } }\
     @keyframes slideOut { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(100px); } }\
-    .nym-card-description { color: var(--text-muted); font-size: 13px; margin-bottom: 20px; line-height: 1.6; }\
+    /* Account-card state text (service down, stale account): live state, not\
+       a lead sentence — the cards no longer carry leads. */\
+    .nym-state-note { color: var(--text-muted); font-size: 13px; margin-bottom: 20px; line-height: 1.6; }\
+    /* Progressive disclosure: an (i) button after a row or group title that\
+       unfolds the full explanation under the one-clause description. */\
+    .nym-info-btn { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; margin: 0; border: none; border-radius: 50%; background: transparent; color: var(--text-muted); cursor: pointer; flex-shrink: 0; transition: color 0.15s, background 0.15s, box-shadow 0.15s; }\
+    .nym-info-btn svg { display: block; }\
+    .nym-info-btn:hover { color: var(--text-primary); background: var(--bg-card-hover); }\
+    .nym-info-btn:focus { outline: none; }\
+    .nym-info-btn:focus-visible { box-shadow: 0 0 0 3px var(--nym-green-dim); color: var(--nym-green); }\
+    .nym-info-btn.open { color: var(--nym-green); }\
+    .nym-more { margin: 10px 0 2px; padding: 8px 0 8px 12px; border-left: 2px solid var(--nym-green-dim); animation: moreIn 0.18s ease both; }\
+    .nym-more[hidden] { display: none; }\
+    @keyframes moreIn { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }\
+    .nym-more-text { font-size: 12.5px; line-height: 1.6; color: var(--text-secondary); }\
+    .nym-more-text code { font-family: var(--font-mono); font-size: 11px; color: var(--text-primary); }\
+    .nym-learn-more { display: inline-block; margin-top: 6px; font-size: 10px; text-transform: uppercase; letter-spacing: var(--label-spacing); color: var(--nym-green); text-decoration: none; opacity: 0.85; }\
+    .nym-learn-more:hover { opacity: 1; text-decoration: underline; }\
+    .nym-group-title .nym-info-btn { margin-left: -2px; }\
     .nym-form-group { margin-bottom: 20px; }\
     .nym-form-label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: var(--label-spacing); color: var(--text-secondary); margin-bottom: 8px; }\
     .nym-select, .nym-input { box-sizing: border-box; }\
@@ -165,10 +183,10 @@ return baseclass.extend({
     .nym-input { width: 100%; padding: 12px 16px; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); font-size: 14px; font-family: inherit; transition: border-color 0.2s, box-shadow 0.2s; }\
     .nym-input::placeholder { color: var(--text-muted); }\
     .nym-input:focus { outline: none; border-color: var(--nym-green); box-shadow: 0 0 0 3px var(--nym-green-dim); }\
-    .nym-toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 16px 0; border-bottom: 1px solid var(--border-color); }\
+    .nym-toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--border-color); }\
     .nym-toggle-row:last-child { border-bottom: none; }\
     .nym-toggle-info { flex: 1; }\
-    .nym-toggle-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }\
+    .nym-toggle-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 2px; }\
     .nym-toggle-title { font-size: 14px; color: var(--text-primary); }\
     /* Row marker for switches that apply on the next connect; explained once\
        in the card lead so no row has to spell it out. */\
@@ -180,9 +198,11 @@ return baseclass.extend({
     .nym-toggle-status.active { color: var(--nym-green); }\
     /* Groups: a muted micro-label over a run of rows. The first group in a\
        card body sits flush; later ones get a rule and breathing room. */\
-    .nym-group { padding-top: 4px; margin-top: 20px; }\
-    .nym-card-body > .nym-group:first-child, .nym-card-description + .nym-group, .nym-subpanel > .nym-group, .nym-split-section > .nym-group { margin-top: 0; }\
+    .nym-group { padding-top: 4px; margin-top: 14px; }\
+    .nym-card-body > .nym-group:first-child, .nym-subpanel > .nym-group, .nym-split-section > .nym-group { margin-top: 0; }\
     .nym-group-head { padding: 0 0 4px; }\
+    .nym-group-titlebar { display: flex; align-items: center; gap: 12px; }\
+    .nym-group-titlebar > .nym-group-title { flex: 1 1 auto; min-width: 0; }\
     .nym-group-title { font-size: 10px; text-transform: uppercase; letter-spacing: var(--label-spacing); color: var(--nym-green); opacity: 0.85; font-weight: 500; display: flex; align-items: center; gap: 8px; }\
     .nym-group-title::after { content: ""; flex: 1; height: 1px; background: var(--border-color); }\
     .nym-group-desc { font-size: 12px; color: var(--text-muted); line-height: 1.5; margin-top: 8px; }\
@@ -192,7 +212,13 @@ return baseclass.extend({
     .nym-row-with-sub { border-bottom: 1px solid var(--border-color); }\
     .nym-row-with-sub:last-child { border-bottom: none; }\
     .nym-row-with-sub > .nym-toggle-row { border-bottom: none; }\
-    .nym-subpanel { margin: 0 0 16px 12px; padding: 4px 0 4px 16px; border-left: 2px solid var(--nym-green-dim); }\
+    .nym-subpanel { margin: 0 0 10px 12px; padding: 2px 0 2px 16px; border-left: 2px solid var(--nym-green-dim); }\
+    /* On-demand add forms: a quiet text button in the group head opens the\
+       form; the form is in the DOM from the start (ids, Enter-to-add and\
+       the harness are unchanged), just hidden until asked for. */\
+    .nym-add-open { flex-shrink: 0; padding: 2px 8px; border: 1px solid var(--border-color); border-radius: 4px; background: transparent; color: var(--text-secondary); font-family: inherit; font-size: 11px; line-height: 1.4; letter-spacing: 0.2px; cursor: pointer; transition: color 0.15s, border-color 0.15s; }\
+    .nym-add-open:hover, .nym-add-open:focus-visible { color: var(--nym-green); border-color: var(--nym-green); outline: none; }\
+    .nym-exemption-add[hidden] { display: none; }\
     /* Advisory lines: a plain sentence in the warning colour, no box. */\
     .nym-note { font-size: 12px; line-height: 1.5; color: var(--text-muted); margin-bottom: 16px; }\
     .nym-note-warn { color: var(--warning); }\
@@ -203,7 +229,6 @@ return baseclass.extend({
     .nym-toggle-slider::before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background: var(--text-muted); border-radius: 50%; transition: all 0.3s ease; }\
     .nym-toggle input:checked + .nym-toggle-slider { background: var(--nym-green-dim); border-color: var(--nym-green); }\
     .nym-toggle input:checked + .nym-toggle-slider::before { transform: translateX(22px); background: var(--nym-green); }\
-    .nym-tuning-warning { font-size: 12px; opacity: 0.75; margin-bottom: 12px; line-height: 1.5; }\
     .nym-tuning-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 12px 0; }\
     .nym-tuning-num { width: 100%; height: 44px; padding-top: 0; padding-bottom: 0; }\
     .nym-gateway-section { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }\
@@ -320,9 +345,9 @@ return baseclass.extend({
     .nym-tooltip:hover::after { opacity: 1; visibility: visible; }\
     .nym-pill-group { display: flex; gap: 6px; flex-wrap: wrap; }\
     /* Always-on check interval: a full-width row under the switch. */\
-    .nym-interval-row { width: 100%; align-items: center; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color); }\
+    .nym-interval-row { width: 100%; align-items: center; gap: 10px; margin-top: 8px; }\
     .nym-interval-label { font-size: 12px; color: var(--text-muted); white-space: nowrap; }\
-    .nym-pill { padding: 5px 12px; font-size: 12px; font-weight: 500; border: 1px solid var(--border-color); border-radius: 16px; background: transparent; color: var(--text-secondary); cursor: pointer; transition: all 0.2s ease; font-family: inherit; }\
+    .nym-pill { padding: 3px 10px; font-size: 12px; font-weight: 500; border: 1px solid var(--border-color); border-radius: 16px; background: transparent; color: var(--text-secondary); cursor: pointer; transition: all 0.2s ease; font-family: inherit; }\
     .nym-pill:hover { border-color: var(--text-secondary); color: var(--text-primary); }\
     .nym-pill.active { background: var(--nym-green-dim); border-color: var(--nym-green); color: var(--nym-green); }\
     .nym-divider { height: 1px; background: var(--border-color); margin: 20px 0; }\
@@ -362,7 +387,7 @@ return baseclass.extend({
     .nym-inline-note { font-size: 13px; line-height: 1.5; color: var(--text-muted); margin-bottom: 16px; }\
     /* Grouped Add-Exemption panel: a subtle inset card so the input row reads\
        as one deliberate form area instead of loose controls on the page. */\
-    .nym-exemption-add, .nym-form-panel { margin-top: 18px; padding: 16px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 10px; }\
+    .nym-exemption-add, .nym-form-panel { margin-top: 12px; padding: 14px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 10px; }\
     .nym-exemption-add .nym-form-label, .nym-form-panel .nym-form-label { margin-bottom: 12px; }\
     .nym-exemption-addrow { display: grid; grid-template-columns: 96px 120px 1fr auto; gap: 10px; align-items: center; }\
     .nym-exemption-addrow .nym-select { height: 44px; line-height: 44px; padding: 0 28px 0 16px; text-align: center; text-align-last: center; background-position: right 12px center; }\

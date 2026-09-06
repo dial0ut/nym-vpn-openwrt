@@ -209,8 +209,9 @@ return baseclass.extend({
         var section = E('div', { 'class': 'nym-split-section' }, [
             card.group({
                 title: 'Exclusions',
-                desc: 'Devices are matched by MAC address, so they survive an IP change. ' +
-                    'Domain rules need clients to use this router for DNS.',
+                moreId: 'exclusions',
+                more: 'Chosen devices or domains go straight to the WAN; everything else stays in the tunnel and the kill-switch keeps covering it. Devices are matched by MAC address, so they survive an IP change. Domain rules need clients to use this router for DNS, and an excluded device\'s own DNS still goes through the tunnel.',
+                docs: 'exclusions',
                 body: [
                     listEl,
                     E('div', { 'class': 'nym-exemption-add' }, [
@@ -243,7 +244,9 @@ return baseclass.extend({
             id: 'legacy-split-toggle',
             title: 'Legacy Split Tunneling (PBR)',
             tag: 'reconnect',
-            desc: 'Hand routing to luci-app-pbr: only the traffic PBR selects goes through the VPN, everything else uses the WAN in the clear. Turns the kill-switch and the exclusion list off.',
+            desc: 'Hands routing to luci-app-pbr.',
+            more: 'Only the traffic PBR selects goes through the VPN; everything else uses the WAN in the clear. Mutually exclusive with the kill-switch and the exclusion list: both are off while this is on, and the kill-switch stays off until you turn it back on yourself.',
+            docs: 'legacy-split-tunneling-pbr',
             checked: legacyOn,
             onChange: function(ev) {
                 var on = ev.target.checked;
@@ -257,9 +260,6 @@ return baseclass.extend({
             icon: assets.iconSplit,
             title: 'Split Tunneling',
             body: [
-                E('div', { 'class': 'nym-card-description' },
-                    'Send chosen devices or domains straight to the WAN instead of through the VPN. ' +
-                    'Everything else stays in the tunnel, and the kill-switch keeps covering it.'),
                 legacyNote,
                 splitMount,
                 card.group({
