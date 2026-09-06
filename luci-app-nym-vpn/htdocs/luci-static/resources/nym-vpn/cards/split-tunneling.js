@@ -1,20 +1,33 @@
 'use strict';
 'require baseclass';
 'require dom';
+'require nym-vpn.assets as assets';
+'require nym-vpn.components.card as card';
+'require nym-vpn.components.toggle as toggle';
 'require nym-vpn.components.toast as toast';
+'require nym-vpn.flows.tunnel as tunnelFlow';
 
-// Split Tunneling — carve specific devices/domains out of the tunnel,
-// straight to the WAN. Renders inside the Tunnel Settings card beneath
-// inbound services. Exclusions are marked with fwmark 0x14e and stored in
-// UCI independently of the kill-switch. See docs/guide/split-tunneling.md
-// and handle_split_* in the rpcd bridge.
+// Split Tunneling — the two ways of sending some traffic around the VPN.
+//
+// Exclusions (the built-in way): specific devices or domains go straight to
+// the WAN, everything else stays in the tunnel and the kill-switch keeps
+// covering it. Marked with fwmark 0x14e and stored in UCI independently of
+// the kill-switch. See docs/guide/split-tunneling.md and handle_split_* in
+// the rpcd bridge.
+//
+// Policy-based routing (legacy): routing is handed to luci-app-pbr; only
+// the traffic PBR selects goes through the VPN. It is mutually exclusive
+// with the kill-switch and the exclusion list, so switching it on greys the
+// kill-switch in Tunnel Settings (through the store's 'tunnel-switch'
+// event) and hides the exclusions here.
 
 var E = dom.create.bind(dom);
 
 return baseclass.extend({
-    // Returns the section element (.nym-split-section); the caller controls
-    // its visibility.
-    render: function(store, api) {
+    // The exclusion list plus the add-device / add-domain forms. Returns the
+    // section element (.nym-split-section); the card controls its
+    // visibility.
+    renderExclusions: function(store, api) {
         var state = store.data.split_exclusions.slice();
         var clients = store.data.clients;
         var nftsetSupported = !!store.data.split_status.nftset_supported;
@@ -58,7 +71,7 @@ return baseclass.extend({
             listEl.innerHTML = '';
             if (state.length === 0) {
                 listEl.appendChild(E('div', { 'class': 'nym-exemption-empty' },
-                    'No exclusions configured. Add a device or domain below.'));
+                    'No exclusions yet. Add a device or domain below.'));
                 return;
             }
             listEl.appendChild(E('div', { 'class': 'nym-split-header' }, [
@@ -170,7 +183,7 @@ return baseclass.extend({
             'click': function() { add('client'); }
         }, 'Add');
 
-        // Domain add row — disabled with a hint when dnsmasq lacks nftset
+        // Domain add row — replaced by a hint when dnsmasq lacks nftset
         // support.
         var domainAddRow;
         if (nftsetSupported) {
@@ -188,26 +201,72 @@ return baseclass.extend({
             }, 'Add');
             domainAddRow = E('div', { 'class': 'nym-exemption-addrow' }, [domainInp, domainLabel, domainSave]);
         } else {
-            domainAddRow = E('div', { 'class': 'nym-card-description', 'style': 'color: #e67e22' },
-                'Domain exclusions require dnsmasq-full (built with nftset support). ' +
-                'Install it with: opkg install dnsmasq-full');
+            domainAddRow = E('div', { 'class': 'nym-note nym-note-warn' },
+                'Domain exclusions need dnsmasq-full (built with nftset support): ' +
+                'opkg install dnsmasq-full');
         }
 
         var section = E('div', { 'class': 'nym-split-section' }, [
-            E('div', { 'class': 'nym-divider' }),
-            E('div', { 'class': 'nym-toggle-title', 'style': 'margin-bottom: 6px' }, 'Split Tunneling'),
-            E('div', { 'class': 'nym-card-description' },
-                'Send specific devices or domains straight to the WAN, bypassing the VPN. ' +
-                'Clients must use this router for DNS for domain rules.'),
-            listEl,
-            E('div', { 'class': 'nym-exemption-add' }, [
-                E('div', { 'class': 'nym-form-label' }, 'Exclude a Device'),
-                E('div', { 'class': 'nym-exemption-addrow' }, [clientSel, clientLabel, clientSave]),
-                E('div', { 'class': 'nym-form-label', 'style': 'margin-top: 10px' }, 'Exclude a Domain'),
-                domainAddRow
-            ])
+            card.group({
+                title: 'Exclusions',
+                desc: 'Devices are matched by MAC address, so they survive an IP change. ' +
+                    'Domain rules need clients to use this router for DNS.',
+                body: [
+                    listEl,
+                    E('div', { 'class': 'nym-exemption-add' }, [
+                        E('div', { 'class': 'nym-form-label' }, 'Exclude a Device'),
+                        E('div', { 'class': 'nym-exemption-addrow' }, [clientSel, clientLabel, clientSave]),
+                        E('div', { 'class': 'nym-form-label', 'style': 'margin-top: 14px' }, 'Exclude a Domain'),
+                        domainAddRow
+                    ])
+                ]
+            })
         ]);
         redraw();
         return section;
+    },
+
+    render: function(store, api) {
+        var legacyOn = store.tunnelSwitches.legacy_split_tunnel;
+
+        var splitMount = this.renderExclusions(store, api);
+        splitMount.style.display = legacyOn ? 'none' : 'block';
+
+        // Stands in for the exclusion list while PBR owns the routing.
+        var legacyNote = E('div', {
+            'class': 'nym-note nym-note-warn',
+            'id': 'legacy-split-note',
+            'style': 'display: ' + (legacyOn ? 'block' : 'none')
+        }, 'Routing is handled by luci-app-pbr. The exclusion list and the kill-switch are off until this is switched back.');
+
+        var legacyRow = toggle.row({
+            id: 'legacy-split-toggle',
+            title: 'Legacy Split Tunneling (PBR)',
+            tag: 'reconnect',
+            desc: 'Hand routing to luci-app-pbr: only the traffic PBR selects goes through the VPN, everything else uses the WAN in the clear. Turns the kill-switch and the exclusion list off.',
+            checked: legacyOn,
+            onChange: function(ev) {
+                var on = ev.target.checked;
+                splitMount.style.display = on ? 'none' : 'block';
+                legacyNote.style.display = on ? 'block' : 'none';
+                tunnelFlow.setSwitch(store, api, 'legacy_split_tunnel', on);
+            }
+        });
+
+        return card.create({
+            icon: assets.iconSplit,
+            title: 'Split Tunneling',
+            body: [
+                E('div', { 'class': 'nym-card-description' },
+                    'Send chosen devices or domains straight to the WAN instead of through the VPN. ' +
+                    'Everything else stays in the tunnel, and the kill-switch keeps covering it.'),
+                legacyNote,
+                splitMount,
+                card.group({
+                    title: 'Policy-based routing',
+                    body: [legacyRow]
+                })
+            ]
+        }).el;
     }
 });

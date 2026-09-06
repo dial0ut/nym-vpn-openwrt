@@ -5,14 +5,15 @@
 'require nym-vpn.components.card as card';
 'require nym-vpn.components.toggle as toggle';
 'require nym-vpn.components.toast as toast';
+'require nym-vpn.flows.tunnel as tunnelFlow';
 'require nym-vpn.cards.inbound-services as inboundServices';
-'require nym-vpn.cards.split-tunneling as splitTunneling';
 
 // Tunnel Settings — the daemon's tunnel switches (kill-switch first, then
 // IPv6, two-hop, circumvention transports, stealth API, gateway
-// independence, family reminders, always-on watchdog, legacy split
-// tunnelling), with the Inbound Services and Split Tunneling sections
-// mounted underneath.
+// independence, family reminders, always-on watchdog), with the Inbound
+// Services section mounted underneath. The legacy PBR switch lives in the
+// Split Tunneling card; its effect on the kill-switch arrives through the
+// store's 'tunnel-switch' event.
 
 var E = dom.create.bind(dom);
 
@@ -30,37 +31,12 @@ return baseclass.extend({
         var tunnel_config = store.data.tunnel_config;
         var watchdog = store.data.watchdog;
 
-        var ipv6El, twoHopEl, killswitchEl, circumventionEl, legacySplitEl, stealthApiEl;
-        var killswitchRow, killswitchWarn, inboundMount, splitMount;
+        var switches = store.tunnelSwitches;
+        var killswitchEl, killswitchRow, killswitchWarn, inboundMount;
 
-        // Save all tunnel toggles immediately.
-        var saveTunnelSettings = function() {
-            if (!ipv6El || !twoHopEl || !killswitchEl || !circumventionEl) return;
-
-            var ipv6 = ipv6El.checked ? 'on' : 'off';
-            var two_hop = twoHopEl.checked ? 'on' : 'off';
-            var legacy_split_tunnel = legacySplitEl && legacySplitEl.checked ? 'on' : 'off';
-            // Legacy split tunneling and the kill-switch are mutually
-            // exclusive. When legacy mode is on the daemon forces the
-            // kill-switch off anyway, but send 'off' so the stored value and
-            // the (greyed) toggle agree.
-            var killswitch = (legacy_split_tunnel === 'on') ? 'off' : (killswitchEl.checked ? 'on' : 'off');
-            var circumvention = circumventionEl.checked ? 'on' : 'off';
-            var stealth_api = stealthApiEl && stealthApiEl.checked ? 'on' : 'off';
-
-            api.tunnelSet({
-                ipv6: ipv6, two_hop: two_hop, killswitch: killswitch,
-                circumvention: circumvention, legacy_split_tunnel: legacy_split_tunnel, stealth_api: stealth_api
-            }).then(function(result) {
-                if (result && result.success) {
-                    store.setTwoHop(two_hop === 'on');
-                    toast.show('Tunnel settings saved', 'success');
-                } else {
-                    toast.show('Failed: ' + (result.error || 'Unknown'), 'error');
-                }
-            }).catch(function(err) {
-                toast.show('Error: ' + err.message, 'error');
-            });
+        // Every switch saves at once; the flow re-sends the full set.
+        var saveSwitch = function(key) {
+            return function(ev) { tunnelFlow.setSwitch(store, api, key, ev.target.checked); };
         };
 
         // --- plain daemon switches ---------------------------------------
@@ -68,33 +44,25 @@ return baseclass.extend({
             id: 'ipv6-toggle',
             title: 'IPv6',
             desc: 'Enable IPv6 connectivity through the tunnel',
-            checked: tunnel_config.ipv6 === 'on',
-            onChange: saveTunnelSettings
+            checked: switches.ipv6,
+            onChange: saveSwitch('ipv6')
         });
-        ipv6El = ipv6Row.querySelector('input');
 
         var twoHopRow = toggle.row({
             id: 'two-hop-toggle',
             title: 'Two-Hop Mode',
             desc: 'Use faster 2-hop routing instead of full mixnet (less private)',
-            checked: tunnel_config.two_hop === 'on',
-            onChange: saveTunnelSettings
+            checked: switches.two_hop,
+            onChange: saveSwitch('two_hop')
         });
-        twoHopEl = twoHopRow.querySelector('input');
 
         var circumventionRow = toggle.row({
             id: 'circumvention-toggle',
             title: 'Circumvention Transports',
             desc: 'Wrap the entry gateway connection in a QUIC transport to evade censorship. Applies to two-hop mode.',
-            checked: tunnel_config.circumvention_transports === 'on',
-            onChange: function(ev) {
-                // The gateway picker gates entry gateways on this while the
-                // list is built, so it follows the switch, saved or not.
-                store.setCircumvention(ev.target.checked);
-                saveTunnelSettings();
-            }
+            checked: switches.circumvention,
+            onChange: saveSwitch('circumvention')
         });
-        circumventionEl = circumventionRow.querySelector('input');
 
         var stealthRow = toggle.row({
             id: 'stealth-api-toggle',
@@ -107,10 +75,9 @@ return baseclass.extend({
                 'class': 'nym-toggle-warning',
                 'style': 'color: #e67e22; font-size: 11px; margin-top: 4px; display: ' + (tunnel_config.stealth_api_note ? 'block' : 'none')
             }, 'The current network environment publishes no cover domains, so this setting has no effect right now.')],
-            checked: tunnel_config.stealth_api === 'on',
-            onChange: saveTunnelSettings
+            checked: switches.stealth_api,
+            onChange: saveSwitch('stealth_api')
         });
-        stealthApiEl = stealthRow.querySelector('input');
 
         // --- gateway independence ----------------------------------------
         // Both switches ride on tunnel_set with only the changed key
@@ -251,33 +218,13 @@ return baseclass.extend({
         });
         alwaysOnEl = alwaysOnRow.querySelector('input');
 
-        // --- legacy split tunnelling / kill-switch ------------------------
-        var legacyOn = tunnel_config.legacy_split_tunnel === 'on';
-        var killswitchOn = tunnel_config.killswitch !== 'off';
-
-        var legacyRow = toggle.row({
-            id: 'legacy-split-toggle',
-            title: 'Legacy Split Tunneling (PBR)',
-            desc: 'Hand routing to luci-app-pbr: only the traffic you select in PBR is sent through the VPN, everything else uses the normal WAN in the clear. Mutually exclusive with the kill-switch and the exclusion list below. Requires reconnect.',
-            checked: legacyOn,
-            onChange: function(ev) {
-                var on = ev.target.checked;
-                if (killswitchEl) {
-                    killswitchEl.disabled = on;
-                    if (on) killswitchEl.checked = false;
-                    if (killswitchWarn) killswitchWarn.style.display = (on || killswitchEl.checked) ? 'none' : 'block';
-                }
-                if (killswitchRow) killswitchRow.style.opacity = on ? '0.5' : '';
-                if (inboundMount) inboundMount.style.display = (!on && killswitchEl && killswitchEl.checked) ? 'block' : 'none';
-                if (splitMount) splitMount.style.display = on ? 'none' : 'block';
-                saveTunnelSettings();
-            }
-        });
-        legacySplitEl = legacyRow.querySelector('input');
+        // --- kill-switch ---------------------------------------------------
+        var legacyOn = switches.legacy_split_tunnel;
+        var killswitchOn = switches.killswitch;
 
         killswitchWarn = E('div', {
             'class': 'nym-toggle-warning',
-            'style': 'color: #e67e22; font-size: 11px; margin-top: 4px; display: ' + (tunnel_config.killswitch === 'on' ? 'none' : 'block')
+            'style': 'color: #e67e22; font-size: 11px; margin-top: 4px; display: ' + (killswitchOn ? 'none' : 'block')
         }, 'Warning: Traffic may leak outside the VPN when disabled. Requires reconnect.');
 
         killswitchRow = toggle.row({
@@ -289,21 +236,28 @@ return baseclass.extend({
             extra: [killswitchWarn],
             checked: killswitchOn,
             disabled: legacyOn,
-            onChange: function(ev) {
-                if (killswitchWarn) killswitchWarn.style.display = ev.target.checked ? 'none' : 'block';
-                if (inboundMount) inboundMount.style.display = ev.target.checked ? 'block' : 'none';
-                saveTunnelSettings();
-            }
+            onChange: saveSwitch('killswitch')
         });
         killswitchEl = killswitchRow.querySelector('input');
 
-        // --- sections under the switches ----------------------------------
-        // Inbound exemptions only matter while the kill-switch is on; the
-        // exclusion list is replaced by PBR under legacy split tunnelling.
+        // Inbound exemptions only matter while the kill-switch is on.
         inboundMount = inboundServices.render(store, api);
-        inboundMount.style.display = (killswitchOn && !legacyOn) ? 'block' : 'none';
-        splitMount = splitTunneling.render(store, api);
-        splitMount.style.display = legacyOn ? 'none' : 'block';
+
+        // Reflect the store: the kill-switch is greyed and forced off while
+        // legacy split tunnelling (Split Tunneling card) owns the routing,
+        // and the inbound section shows only while there is a block to be
+        // exempt from.
+        var syncProtection = function() {
+            var legacy = switches.legacy_split_tunnel;
+            var ks = switches.killswitch && !legacy;
+            killswitchEl.disabled = legacy;
+            killswitchEl.checked = ks;
+            killswitchRow.style.opacity = legacy ? '0.5' : '';
+            killswitchWarn.style.display = (legacy || ks) ? 'none' : 'block';
+            inboundMount.style.display = ks ? 'block' : 'none';
+        };
+        syncProtection();
+        store.on('tunnel-switch', syncProtection);
 
         var el = card.create({
             icon: assets.iconTunnel,
@@ -319,11 +273,9 @@ return baseclass.extend({
                     stealthRow,
                     independenceRow,
                     remindersRow,
-                    alwaysOnRow,
-                    legacyRow
+                    alwaysOnRow
                 ]),
-                inboundMount,
-                splitMount
+                inboundMount
             ]
         }).el;
 

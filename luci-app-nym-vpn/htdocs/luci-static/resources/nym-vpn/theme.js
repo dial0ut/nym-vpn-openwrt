@@ -167,8 +167,33 @@ return baseclass.extend({
     .nym-toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 16px 0; border-bottom: 1px solid var(--border-color); }\
     .nym-toggle-row:last-child { border-bottom: none; }\
     .nym-toggle-info { flex: 1; }\
-    .nym-toggle-title { font-size: 14px; color: var(--text-primary); margin-bottom: 4px; }\
-    .nym-toggle-desc { font-size: 13px; color: var(--text-muted); }\
+    .nym-toggle-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }\
+    .nym-toggle-title { font-size: 14px; color: var(--text-primary); }\
+    /* Row marker for switches that apply on the next connect; explained once\
+       in the card lead so no row has to spell it out. */\
+    .nym-toggle-tag { font-size: 9px; line-height: 1; text-transform: uppercase; letter-spacing: var(--label-spacing); color: var(--text-muted); border: 1px solid var(--border-accent); border-radius: 4px; padding: 3px 5px 2px; white-space: nowrap; }\
+    .nym-toggle-desc { font-size: 13px; color: var(--text-muted); line-height: 1.5; }\
+    .nym-toggle-warning, .nym-toggle-status { font-size: 11px; margin-top: 6px; line-height: 1.4; }\
+    .nym-toggle-warning { color: var(--warning); }\
+    .nym-toggle-status { color: var(--text-muted); }\
+    .nym-toggle-status.active { color: var(--nym-green); }\
+    /* Groups: a muted micro-label over a run of rows. The first group in a\
+       card body sits flush; later ones get a rule and breathing room. */\
+    .nym-group { padding-top: 4px; }\
+    .nym-group + .nym-group, .nym-group + .nym-subpanel, .nym-subpanel + .nym-group { margin-top: 20px; }\
+    .nym-group-head { padding: 0 0 4px; }\
+    .nym-group-title { font-size: 10px; text-transform: uppercase; letter-spacing: var(--label-spacing); color: var(--nym-green); opacity: 0.85; font-weight: 500; display: flex; align-items: center; gap: 8px; }\
+    .nym-group-title::after { content: ""; flex: 1; height: 1px; background: var(--border-color); }\
+    .nym-group-desc { font-size: 12px; color: var(--text-muted); line-height: 1.5; margin-top: 8px; }\
+    .nym-group .nym-toggle-row:first-of-type { padding-top: 12px; }\
+    .nym-group .nym-toggle-row:last-of-type { border-bottom: none; }\
+    /* A block that belongs to the row above it (the inbound\
+       exceptions of the kill-switch): a hairline on the left ties it to that row. */\
+    .nym-subpanel { margin: 4px 0 8px 12px; padding: 4px 0 4px 16px; border-left: 2px solid var(--nym-green-dim); }\
+    /* Advisory lines: a plain sentence in the warning colour, no box. */\
+    .nym-note { font-size: 12px; line-height: 1.5; color: var(--text-muted); margin-bottom: 16px; }\
+    .nym-note-warn { color: var(--warning); }\
+    .nym-note code { font-family: var(--font-mono); font-size: 11px; }\
     .nym-toggle { position: relative; width: 48px; height: 26px; flex-shrink: 0; margin-left: 16px; }\
     .nym-toggle input { opacity: 0; width: 0; height: 0; }\
     .nym-toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 26px; transition: all 0.3s ease; }\
