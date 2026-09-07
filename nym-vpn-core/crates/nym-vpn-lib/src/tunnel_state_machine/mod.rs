@@ -706,6 +706,22 @@ impl SharedState {
             self.firewall.reset_policy()
         }
     }
+
+    /// Shutdown counterpart of [`Self::apply_killswitch_policy`]. With the
+    /// kill-switch on, the Blocked policy stays in place after the daemon
+    /// exits: a restart or package upgrade must not open WAN egress for the
+    /// seconds until the next daemon's first apply, and a crash-looping or
+    /// missing daemon must not either. Only an explicit `/etc/init.d/nym-vpnd
+    /// stop` opens the router, from the init script, once the process is
+    /// gone. With the kill-switch off there is nothing to keep.
+    fn release_firewall_on_shutdown(&mut self) -> Result<(), nym_firewall::Error> {
+        if self.tunnel_settings.killswitch {
+            tracing::info!("Kill-switch on: leaving the firewall policy in place on shutdown");
+            Ok(())
+        } else {
+            self.firewall.reset_policy()
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
