@@ -1156,6 +1156,29 @@ mod tests {
         let lock_at = lines.iter().position(|l| l.starts_with("flock 9")).unwrap();
         let main_at = lines.iter().position(|l| *l == "main \"$@\"").unwrap();
         assert!(lock_at < main_at);
+        // Stop intent wins over persisted state: main consults the stop
+        // marker before it would restore a rules file, so a stop whose
+        // teardown could not take the lock is completed by the next run.
+        let stop_at = lines
+            .iter()
+            .position(|l| *l == "if have_state \"$NYM_VPND_STOPPED\"; then")
+            .expect("main must check the stop marker");
+        let restore_at = lines
+            .iter()
+            .position(|l| *l == "if have_state \"$RULES_V4\"; then")
+            .expect("main must restore from the rules file");
+        assert!(stop_at < restore_at);
+        // The unlocked fallback re-checks after installing its block and
+        // lifts it if the daemon hooked a policy meanwhile.
+        let install_at = lines
+            .iter()
+            .position(|l| l.contains("installing the boot-time emergency block"))
+            .unwrap();
+        let recheck_at = lines
+            .iter()
+            .position(|l| l.contains("lifting the emergency block"))
+            .expect("fallback must re-check and lift");
+        assert!(install_at < recheck_at);
         // No lock means no reconciliation: the fallback is fail-closed and
         // loud, never a silent unlocked run.
         assert!(

@@ -504,6 +504,21 @@ handle_no_policy() {
 main() {
     local failed=0
 
+    # An explicit administrative stop is authorisation to open, and it must
+    # win over everything persisted: the init script writes the marker
+    # first, then tears down under the lock — but if it could not take the
+    # lock it leaves the teardown to this run. Drop the persisted state so a
+    # stale policy cannot be restored, then take the no-policy path, which
+    # cleans the chains and (marker present) installs no block.
+    if have_state "$NYM_VPND_STOPPED"; then
+        logger -t nym-vpn "nym-vpnd was stopped by the administrator; discarding persisted fw3 state"
+        rm -f "$RULES_V4" "$RULES_V6" "$IFACES_FILE" "$TRANSITION_FILE" 2>/dev/null
+        handle_no_policy || failed=1
+        restore_masquerade
+        restore_forwarding
+        return "$failed"
+    fi
+
     # Rust creates this marker before touching live or persisted fw3 state
     # and holds the state lock until it has removed the marker again, so
     # finding it here means a daemon died mid-transition. Never interpret
@@ -562,6 +577,17 @@ run_without_lock() {
     emergency_block "iptables" boot
     if kernel_ipv6_enabled; then
         emergency_block "ip6tables" boot
+    fi
+    # Without the lock the daemon may have hooked its policy between the
+    # check above and the install; re-check and lift so its live policy is
+    # not shadowed by a block nobody removes. A daemon apply that lands
+    # after this re-check still lifts the emergency chains itself as its last
+    # step, so the residual window is that of a single apply, not "until the
+    # next transition".
+    if policy_hooked; then
+        logger -t nym-vpn "daemon policy went live during the unlocked fallback; lifting the emergency block"
+        cleanup_emergency "iptables" || true
+        cleanup_emergency "ip6tables" 2>/dev/null || true
     fi
     return 1
 }
