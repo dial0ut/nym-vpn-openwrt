@@ -152,12 +152,23 @@ boot_block_present() {
 # forwarded traffic except what the router needs to come up and stay
 # manageable from the LAN. Same allowances as the base of the daemon's Blocked
 # policy — loopback, DHCP/DHCPv6 as client and server, IPv6 ND — plus LAN,
-# link-local, ULA and multicast destinations unconditionally. Reply-direction
-# packets leave so SSH/LuCI sessions to the router keep working; flows the
-# router itself opened stay blocked. INPUT is left to fw4. The chains run
-# ahead of both `inet nym` (filter -10) and fw4 (filter); accept here only
-# means "let the next table decide". The create/delete/create dance makes the
-# load an atomic replace, exactly like the daemon's own table.
+# link-local, ULA and multicast destinations. Reply-direction packets leave
+# so SSH/LuCI sessions to the router keep working; flows the router itself
+# opened stay blocked. INPUT is left to fw4.
+#
+# Rule order matters as it does in the daemon's policy (block_dns before
+# allow_lan_traffic): DNS is rejected BEFORE the LAN-destination accepts. A
+# private address is not a LAN interface — behind another router the
+# upstream resolver is 192.168.x.1 — so without that, dnsmasq's forwarded
+# lookups and LAN clients' direct queries would leave in plaintext during the
+# boot window. Replies from the router's own dnsmasq are unaffected: LAN
+# queries arrive via INPUT and the answers match the reply-direction accept,
+# which stays ahead of the reject.
+#
+# The chains run ahead of both `inet nym` (filter -10) and fw4 (filter);
+# accept here only means "let the next table decide". The create/delete/
+# create dance makes the load an atomic replace, exactly like the daemon's
+# own table.
 install_boot_block() {
     nft -f - <<EOF
 table inet $BOOT_TABLE
@@ -172,12 +183,16 @@ table inet $BOOT_TABLE {
         udp sport 546 udp dport 547 accept
         udp sport 547 udp dport 546 accept
         icmpv6 type { nd-router-solicit, nd-neighbor-solicit, nd-neighbor-advert } accept
+        udp dport 53 reject
+        tcp dport 53 reject
         ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 224.0.0.0/4 } accept
         ip6 daddr { fe80::/10, fc00::/7, ff00::/8 } accept
         drop
     }
     chain forward {
         type filter hook forward priority filter - 20; policy accept;
+        udp dport 53 reject
+        tcp dport 53 reject
         ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } accept
         ip6 daddr { fe80::/10, fc00::/7 } accept
         drop

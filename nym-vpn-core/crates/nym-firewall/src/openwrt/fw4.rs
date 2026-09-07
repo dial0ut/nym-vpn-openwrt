@@ -409,6 +409,59 @@ mod tests {
         assert!(!body.iter().any(|l| l.contains("hook input")));
     }
 
+    /// Same ordering rule as the daemon's policy (`block_dns` before
+    /// `allow_lan_traffic`): a private destination is not a LAN interface,
+    /// so DNS must be rejected before the LAN accepts in both egress chains
+    /// or a double-NAT router leaks plaintext lookups to its upstream during
+    /// the boot window. The reject must still follow the loopback and
+    /// reply-direction accepts so the router's own dnsmasq keeps answering.
+    #[test]
+    fn boot_block_rejects_dns_before_the_lan_accepts() {
+        let body = boot_block_body();
+        let chain_starts: Vec<usize> = body
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| l.starts_with("chain "))
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(chain_starts.len(), 2, "output and forward chains");
+
+        for (n, &start) in chain_starts.iter().enumerate() {
+            let end = chain_starts.get(n + 1).copied().unwrap_or(body.len());
+            let chain = &body[start..end];
+            let pos = |needle: &str| {
+                chain
+                    .iter()
+                    .position(|l| l.starts_with(needle))
+                    .unwrap_or_else(|| panic!("{}: missing {needle}", chain[0]))
+            };
+            let udp = pos("udp dport 53 reject");
+            let tcp = pos("tcp dport 53 reject");
+            let lan = pos("ip daddr {");
+            let lan6 = pos("ip6 daddr {");
+            assert!(
+                udp < lan && tcp < lan,
+                "{}: DNS reject must precede the LAN accept",
+                chain[0]
+            );
+            assert!(
+                udp < lan6 && tcp < lan6,
+                "{}: DNS reject must precede the ULA accept",
+                chain[0]
+            );
+            if chain[0].starts_with("chain output") {
+                assert!(
+                    pos("oifname \"lo\" accept") < udp,
+                    "loopback must stay ahead of the DNS reject"
+                );
+                assert!(
+                    pos("ct state established,related ct direction reply accept") < udp,
+                    "reply-direction accept must stay ahead of the DNS reject"
+                );
+            }
+        }
+    }
+
     #[test]
     fn include_script_only_ever_deletes_the_boot_table() {
         // `inet nym` is the daemon's; the include may probe it, never drop it.
