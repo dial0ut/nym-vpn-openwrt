@@ -41,6 +41,19 @@ iptables -t nat -D postrouting_rule -j NYM_NAT 2>/dev/null
 /etc/init.d/firewall restart
 ```
 
+## Kill-switch stays on after `nym-vpnd stop`
+
+`/etc/init.d/nym-vpnd stop` opens the network by writing a stop marker into
+`/var/run/nym-firewall/` and removing the kill-switch tables. The firewall
+includes honour that marker only while the directory is what the daemon
+created: owned by root, mode `0700`, not a symlink. If the directory has been
+altered (for example `chmod 0755`), the includes ignore the marker, log
+`ignoring /var/run/nym-firewall/stopped: … is not a private root-owned
+directory`, and keep the boot-time block. Restore the mode
+(`chmod 0700 /var/run/nym-firewall`) or remove the directory, then run
+`/etc/init.d/firewall reload`. Reproduced on OpenWrt 25.12 (recovery suite,
+scenario 5).
+
 ## "No related RPC reply" on GL.iNet devices
 
 GL.iNet routers serve their admin panel through nginx on port 80, and nginx does not proxy
