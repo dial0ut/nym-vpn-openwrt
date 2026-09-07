@@ -12,6 +12,7 @@ mod tun_ipv6;
 pub mod tunnel;
 mod tunnel_monitor;
 
+use futures::{FutureExt, future::BoxFuture};
 use nym_config::defaults::{WG_METADATA_PORT, WG_TUN_DEVICE_IP_ADDRESS_V4};
 use nym_dns::ResolvedDnsConfig;
 use nym_offline_monitor::ConnectivityHandle;
@@ -25,6 +26,7 @@ use std::{
     collections::HashSet,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::PathBuf,
+    time::{Duration, Instant},
 };
 use tokio::{
     sync::{mpsc, watch},
@@ -39,6 +41,7 @@ use nym_firewall::{
 };
 use nym_gateway_directory::{
     BlacklistedGateways, Config as GatewayDirectoryConfig, GatewayCacheHandle, NodeIdentity,
+    ResolvedConfig,
 };
 use nym_vpn_lib_types::{
     AccountControllerErrorStateReason, ActionAfterDisconnect, ConnectionData, EntryPoint,
@@ -604,11 +607,103 @@ pub struct SharedState {
     /// gateway (blacklist + re-selection) would switch the user's server on
     /// every WAN blip.
     entry_gateway_grace: Option<(NodeIdentity, std::time::Instant)>,
-    /// Nym VPN API socket addresses resolved during the most recent Connecting
-    /// state. Used by DisconnectedState to build a kill-switch Blocked policy
-    /// that still permits traffic to the API so the account controller can
-    /// sync between tunnel sessions.
+    /// Nym VPN API socket addresses (nyxd, nym-api, nym-vpn-api and their
+    /// cover domains) from the most recent resolution, whether that happened
+    /// in Connecting or in an idle state. The kill-switch Blocked policy
+    /// admits exactly these, root-scoped, so the account controller, the
+    /// gateway directory and discovery keep working between tunnel sessions.
     api_endpoints: Vec<SocketAddr>,
+    /// When `api_endpoints` was last resolved live. `None` after a cold start
+    /// (the on-disk cache carries addresses but not the resolver overrides
+    /// the HTTP clients need), so idle states resolve again as soon as they
+    /// are entered.
+    api_endpoints_resolved_at: Option<Instant>,
+}
+
+/// How long a live API endpoint resolution stays trusted while the daemon is
+/// idle with the kill-switch on. Well inside the cache's seven-day bound, so a
+/// router that stays disconnected for weeks keeps its allow-list current.
+pub(crate) const API_ENDPOINT_REFRESH_INTERVAL: Duration = Duration::from_secs(60 * 60);
+/// Retry cadence after a failed idle resolution (no upstream, cold clock).
+pub(crate) const API_ENDPOINT_RETRY_DELAY: Duration = Duration::from_secs(60);
+/// Upper bound on one resolution: the DNS hatch is open, but nothing else is,
+/// and a state must not sit on this forever.
+pub(crate) const API_ENDPOINT_RESOLVE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Resolve every API hostname the daemon talks to (nyxd, nym-api, nym-vpn-api
+/// and, when discovery lists them, the cover domains) through the daemon's own
+/// root-scoped DNS hatch. The one resolver for both Connecting and the idle
+/// states: any change to what the kill-switch admits goes through here.
+pub(crate) fn resolve_api_endpoints(
+    gateway_config: GatewayDirectoryConfig,
+) -> BoxFuture<'static, Result<ResolvedConfig>> {
+    async move {
+        // With the kill switch up nothing else on the router can fix a cold
+        // clock (sysntpd's pool lookup dies with the rest of dnsmasq's
+        // upstream traffic), and a clock that predates this binary fails
+        // every TLS handshake that follows. Daemon-owned bootstrap; no-op
+        // when the clock is sane.
+        #[cfg(target_os = "linux")]
+        crate::clock_bootstrap::ensure_sane_clock().await;
+
+        match tokio::time::timeout(
+            API_ENDPOINT_RESOLVE_TIMEOUT,
+            nym_gateway_directory::resolve_config(&gateway_config),
+        )
+        .await
+        {
+            Ok(result) => result.map_err(|err| Error::ResolveApiHostnames(Box::new(err))),
+            Err(_elapsed) => Err(Error::ResolveApiHostnamesTimeout(
+                API_ENDPOINT_RESOLVE_TIMEOUT,
+            )),
+        }
+    }
+    .boxed()
+}
+
+/// Whether the idle allow-list must be (re)resolved: the kill-switch is on
+/// and either nothing is known, the addresses came from the on-disk cache
+/// rather than a live resolution, or the last resolution is older than
+/// [`API_ENDPOINT_REFRESH_INTERVAL`].
+pub(crate) fn api_endpoints_need_refresh(
+    killswitch: bool,
+    endpoints_known: bool,
+    resolved_at: Option<Instant>,
+    now: Instant,
+) -> bool {
+    if !killswitch {
+        return false;
+    }
+    match resolved_at {
+        None => true,
+        Some(at) => !endpoints_known || now.duration_since(at) >= API_ENDPOINT_REFRESH_INTERVAL,
+    }
+}
+
+/// The between-sessions Blocked policy: LAN per settings, the daemon's default
+/// resolvers through the root-scoped DNS hatch, and the resolved API endpoints
+/// admitted for the daemon only. With no endpoints it is Blocked with none —
+/// never anything wider.
+pub(crate) fn idle_blocked_policy(
+    tunnel_settings: &TunnelSettings,
+    api_endpoints: &[SocketAddr],
+) -> FirewallPolicy {
+    let enable_ipv6 = tunnel_settings.enable_ipv6;
+    let allowed_endpoints = api_endpoints
+        .iter()
+        .filter(|addr| addr.is_ipv4() || (enable_ipv6 && addr.is_ipv6()))
+        .map(|addr| {
+            AllowedEndpoint::new(
+                Endpoint::from_socket_address(*addr, TransportProtocol::Tcp),
+                AllowedClients::Root,
+            )
+        })
+        .collect();
+    FirewallPolicy::Blocked {
+        allow_lan: tunnel_settings.allow_lan,
+        allowed_endpoints,
+        dns_servers: tunnel_settings.default_dns_ips(),
+    }
 }
 
 impl SharedState {
@@ -684,27 +779,59 @@ impl SharedState {
         // daemon restart.
         self.firewall.set_killswitch(self.tunnel_settings.killswitch);
         if self.tunnel_settings.killswitch {
-            let enable_ipv6 = self.tunnel_settings.enable_ipv6;
-            let allowed_endpoints = self
-                .api_endpoints
-                .iter()
-                .filter(|addr| addr.is_ipv4() || (enable_ipv6 && addr.is_ipv6()))
-                .map(|addr| {
-                    AllowedEndpoint::new(
-                        Endpoint::from_socket_address(*addr, TransportProtocol::Tcp),
-                        AllowedClients::Root,
-                    )
-                })
-                .collect();
-            let policy = FirewallPolicy::Blocked {
-                allow_lan: self.tunnel_settings.allow_lan,
-                allowed_endpoints,
-                dns_servers: self.tunnel_settings.default_dns_ips(),
-            };
+            let policy = idle_blocked_policy(&self.tunnel_settings, &self.api_endpoints);
             self.firewall.apply_policy(policy)
         } else {
             self.firewall.reset_policy()
         }
+    }
+
+    /// Whether an idle state should (re)resolve the API endpoints now.
+    fn api_endpoints_need_refresh(&self) -> bool {
+        api_endpoints_need_refresh(
+            self.tunnel_settings.killswitch,
+            !self.api_endpoints.is_empty(),
+            self.api_endpoints_resolved_at,
+            Instant::now(),
+        )
+    }
+
+    /// When the current allow-list is due for a refresh, for the idle timer.
+    fn api_endpoints_refresh_due(&self) -> Instant {
+        match self.api_endpoints_resolved_at {
+            Some(at) if !self.api_endpoints.is_empty() => at + API_ENDPOINT_REFRESH_INTERVAL,
+            _ => Instant::now(),
+        }
+    }
+
+    /// Take a live resolution as the current allow-list and persist it. Both
+    /// Connecting and the idle states funnel through here, so the on-disk
+    /// cache and the in-memory set never disagree.
+    fn adopt_resolved_api_endpoints(&mut self, resolved: &ResolvedConfig) {
+        self.api_endpoints = resolved.all_socket_addrs();
+        self.api_endpoints_resolved_at = Some(Instant::now());
+        api_endpoints_cache::save(self.nym_config.data_path.as_deref(), &self.api_endpoints);
+    }
+
+    /// Idle counterpart of Connecting's `handle_resolved_gateway_config`:
+    /// adopt the resolution, re-apply Blocked with the endpoints admitted, and
+    /// pin the HTTP clients to those same addresses so what they connect to is
+    /// what the firewall lets through.
+    async fn install_idle_api_access(
+        &mut self,
+        resolved: &ResolvedConfig,
+    ) -> Result<(), nym_firewall::Error> {
+        self.adopt_resolved_api_endpoints(resolved);
+        self.apply_killswitch_policy()?;
+        if resolved.has_resolver_overrides() {
+            self.set_resolver_overrides(resolved.nym_vpn_api_resolver_overrides.clone())
+                .await;
+        }
+        tracing::info!(
+            "Kill-switch: admitted {} API endpoint(s) while idle",
+            self.api_endpoints.len()
+        );
+        Ok(())
     }
 
     /// Shutdown counterpart of [`Self::apply_killswitch_policy`]. With the
@@ -806,6 +933,7 @@ impl TunnelStateMachine {
             blacklisted_entry_gateways: BlacklistedGateways::new(),
             entry_gateway_grace: None,
             api_endpoints,
+            api_endpoints_resolved_at: None,
         };
 
         let (current_state_handler, _) = if shared_state
@@ -888,6 +1016,9 @@ pub enum Error {
     #[error("failed to resolve API hostnames")]
     ResolveApiHostnames(#[source] Box<nym_gateway_directory::Error>),
 
+    #[error("resolving API hostnames took longer than {0:?}")]
+    ResolveApiHostnamesTimeout(Duration),
+
     #[error("failed to create tunnel device")]
     CreateTunDevice(#[source] tun::Error),
 
@@ -947,7 +1078,7 @@ impl Error {
             Self::SetTunDeviceIpv6Addr(_) => ErrorStateReason::TunDevice,
             Self::GetTunDeviceName(_) => ErrorStateReason::TunDevice,
             Self::GetInterfaceIpSender => ErrorStateReason::Internal(self.to_string()),
-            Self::ResolveApiHostnames(_) => None?,
+            Self::ResolveApiHostnames(_) | Self::ResolveApiHostnamesTimeout(_) => None?,
             Self::Tunnel(e) => e.error_state_reason()?,
             Self::GetRouteHandle(e) => ErrorStateReason::Internal(e.to_string()),
             Self::Account(e) => e.error_state_reason()?,
@@ -1132,6 +1263,83 @@ mod tests {
     /// used to re-run gateway selection — moving a `Country`/`Random` user to
     /// a different server pair. IPv6 is not an input to selection, so the
     /// running pair must survive it.
+    fn ep(a: [u8; 4], port: u16) -> SocketAddr {
+        SocketAddr::from((a, port))
+    }
+
+    #[test]
+    fn idle_refresh_is_needed_when_nothing_is_known_or_only_cached() {
+        let now = Instant::now();
+        // Kill-switch off: nothing to admit, never resolve.
+        assert!(!api_endpoints_need_refresh(false, false, None, now));
+        // Fresh install: no endpoints, no live resolution.
+        assert!(api_endpoints_need_refresh(true, false, None, now));
+        // Cold start from the on-disk cache: addresses known, but never
+        // resolved live in this process.
+        assert!(api_endpoints_need_refresh(true, true, None, now));
+        // A live resolution that produced nothing usable must be retried.
+        assert!(api_endpoints_need_refresh(true, false, Some(now), now));
+    }
+
+    #[test]
+    fn idle_refresh_follows_the_interval() {
+        let at = Instant::now();
+        assert!(!api_endpoints_need_refresh(true, true, Some(at), at));
+        assert!(!api_endpoints_need_refresh(
+            true,
+            true,
+            Some(at),
+            at + API_ENDPOINT_REFRESH_INTERVAL - Duration::from_secs(1)
+        ));
+        assert!(api_endpoints_need_refresh(
+            true,
+            true,
+            Some(at),
+            at + API_ENDPOINT_REFRESH_INTERVAL
+        ));
+    }
+
+    #[test]
+    fn idle_policy_without_endpoints_is_blocked_with_none() {
+        // A failed or pending resolution leaves nothing admitted: Blocked, no
+        // endpoints, never anything wider.
+        let mut s = settings();
+        s.killswitch = true;
+        match idle_blocked_policy(&s, &[]) {
+            FirewallPolicy::Blocked {
+                allowed_endpoints,
+                allow_lan,
+                ..
+            } => {
+                assert!(allowed_endpoints.is_empty());
+                assert!(allow_lan);
+            }
+            other => panic!("expected Blocked, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn idle_policy_admits_resolved_endpoints_for_the_daemon_only() {
+        let mut s = settings();
+        s.killswitch = true;
+        s.enable_ipv6 = false;
+        let v6: SocketAddr = "[2001:db8::1]:443".parse().unwrap();
+        let endpoints = [ep([76, 76, 21, 21], 443), ep([151, 101, 1, 194], 443), v6];
+        match idle_blocked_policy(&s, &endpoints) {
+            FirewallPolicy::Blocked {
+                allowed_endpoints, ..
+            } => {
+                // IPv6 is filtered out while disabled; the rest are root-scoped TCP.
+                assert_eq!(allowed_endpoints.len(), 2);
+                for ep in &allowed_endpoints {
+                    assert_eq!(ep.clients, AllowedClients::Root);
+                    assert_eq!(ep.endpoint.protocol, TransportProtocol::Tcp);
+                }
+            }
+            other => panic!("expected Blocked, got {other:?}"),
+        }
+    }
+
     #[test]
     fn ipv6_toggle_does_not_affect_gateway_selection() {
         assert!(!diff_of(|s| s.enable_ipv6 = true).affects_gateway_selection());
