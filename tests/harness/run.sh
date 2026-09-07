@@ -28,6 +28,17 @@ set +a
 : "${NYM_MNEMONIC:?NYM_MNEMONIC is empty in .env}"
 : "${PROXMOX_HOST:=proxmox}"
 export NYM_MNEMONIC PROXMOX_HOST
+# Package selection (see run-slot.sh). Fail early on a typo'd path rather
+# than after provisioning three containers.
+for v in NYM_PKG_FILE NYM_PKG_APK NYM_PKG_IPK NYM_PKG_APK_PREV NYM_PKG_IPK_PREV; do
+    f="${!v:-}"
+    if [ -n "$f" ] && [ ! -r "$f" ]; then
+        echo "error: $v=$f is not a readable file" >&2
+        exit 2
+    fi
+    export "$v"="${f}"
+done
+export NYM_FEED_INSTALL_URL="${NYM_FEED_INSTALL_URL:-}"
 
 # ---- arg parse ----
 SERIAL=0
@@ -76,6 +87,13 @@ for version in "${RUN_VERSIONS[@]}"; do
     echo "prefetch: openwrt $version template"
     template_ensure_openwrt "$version" >/dev/null
 done
+# Bridges are created here, one at a time: ifupdown2 refuses to run two
+# `ifup`s at once, which is exactly what three slots provisioning in parallel
+# would do.
+for slot in "${RUN_SLOTS[@]}"; do
+    echo "prefetch: bridge vmbr-test$slot"
+    bridge_ensure "vmbr-test$slot"
+done
 
 # ---- launch slots ----
 # Every slot's exit code is kept: a slot that dies before writing results is
@@ -93,6 +111,9 @@ for i in "${!RUN_SLOTS[@]}"; do
     else
         "$HARNESS_DIR/run-slot.sh" "$slot" "$version" "$RESULTS_DIR" &
         PIDS[$slot]=$!
+        # Stagger the launches: three containers being created and their
+        # packages fetched at once make the host too slow to answer ssh.
+        sleep "${SLOT_STAGGER:-45}"
     fi
 done
 
@@ -116,11 +137,12 @@ REPORT="$RESULTS_DIR/report.md"
     echo ""
     echo "## Summary"
     echo ""
-    echo "| Slot | Version | Total | Pass | Fail | Skip |"
-    echo "|-----:|:--------|------:|-----:|-----:|-----:|"
+    echo "| Slot | Version | Total | Pass | Fail | Skip | Missing | Slot rc |"
+    echo "|-----:|:--------|------:|-----:|-----:|-----:|--------:|--------:|"
     total_pass=0
     total_fail=0
     total_skip=0
+    total_missing=0
     slot_failures=0
     for i in "${!RUN_SLOTS[@]}"; do
         slot="${RUN_SLOTS[$i]}"
@@ -130,27 +152,28 @@ REPORT="$RESULTS_DIR/report.md"
         if [ ! -s "$rf" ]; then
             # No results at all: the slot never got as far as a case. Count
             # it as a failure so an aborted run cannot look like a clean one.
-            echo "| $slot | $version | (no results, slot rc=$rc) | - | 1 | - |"
-            total_fail=$((total_fail + 1))
+            echo "| $slot | $version | 0 | 0 | 0 | 0 | all | $rc (no results) |"
+            total_missing=$((total_missing + 1))
             slot_failures=$((slot_failures + 1))
             continue
         fi
         p=$(grep -c '^PASS|' "$rf" || true)
         f=$(grep -c '^FAIL|' "$rf" || true)
         s=$(grep -c '^SKIP|' "$rf" || true)
-        t=$((p + f + s))
+        m=$(grep -c '^MISSING|' "$rf" || true)
+        t=$((p + f + s + m))
         total_pass=$((total_pass + p))
         total_fail=$((total_fail + f))
         total_skip=$((total_skip + s))
-        if [ "$rc" -ne 0 ]; then
-            slot_failures=$((slot_failures + 1))
-            echo "| $slot | $version | $t | $p | $f | $s | slot rc=$rc |"
-        else
-            echo "| $slot | $version | $t | $p | $f | $s |"
-        fi
+        total_missing=$((total_missing + m))
+        [ "$rc" -ne 0 ] && slot_failures=$((slot_failures + 1))
+        echo "| $slot | $version | $t | $p | $f | $s | $m | $rc |"
     done
     echo ""
-    echo "**Overall:** $total_pass passed, $total_fail failed, $total_skip skipped, $slot_failures slot(s) exited non-zero"
+    echo "**Overall:** $total_pass passed, $total_fail failed, $total_skip skipped, $total_missing missing, $slot_failures slot(s) exited non-zero"
+    echo ""
+    echo "A run is green only when Fail and Missing are 0 and every slot exited 0."
+    echo "Skips are prerequisites the harness could not meet here, listed with the reason."
     echo ""
     echo "## Per-case results"
     echo ""
@@ -182,8 +205,8 @@ cat "$REPORT"
 echo "================"
 echo "full report: $REPORT"
 
-# Exit nonzero if any case failed, any slot produced no results, or any slot
-# runner exited non-zero.
-if [ "$total_fail" -gt 0 ] || [ "$slot_failures" -gt 0 ]; then
+# Exit nonzero if any case failed or went missing, any slot produced no
+# results, or any slot runner exited non-zero. Skips do not fail the run.
+if [ "$total_fail" -gt 0 ] || [ "$total_missing" -gt 0 ] || [ "$slot_failures" -gt 0 ]; then
     exit 1
 fi
