@@ -1,0 +1,87 @@
+# Kill-switch failure-injection run — 2026-09-07
+
+Bed: OpenWrt 21.02.7 x86_64 with fw3/iptables (Proxmox VM 902), LAN client
+Alpine LXC 903 behind it, WAN captured on the Proxmox host at the VM's tap.
+Package under test: `nym-vpn 1.34.0_p12` (develop `f82ea1871`), upgraded in
+place to p13/p14/p15 builds of the same binaries during scenario 08. Results
+directory: `results/20260907T194910Z/` (verdicts kept, pcaps and logs local).
+
+Leak signals are SYNs from the router's WAN address to the LAN probe target
+(pinned, so the client attempts the connection even with DNS blocked) and any
+plain DNS from the router to the upstream resolver. "Unattributed" counts
+packets to destinations that are not the tunnel gateways, the daemon's own
+API/DoT/DoH hatches, DHCP/NTP or the operator's ssh.
+
+| Scenario | Verdict | Evidence |
+|---|---|---|
+| 01 positive control (`nym-vpnd stop`) | PASS | leak visible: 11 probe SYNs on the real WAN address, DNS to upstream; the capture is proven able to detect a leak |
+| 02 daemon SIGKILL mid-connect | PASS | syn=0 dns=0; killed in `Connecting`; procd respawned; policy hooked throughout; 58 unattributed pkts to 172.104.178.252:443 from the router while Connecting (daemon-owned, see below) |
+| 03 daemon SIGKILL while connected | PASS | syn=0 dns=0 unattributed=0; policy hooked on every 1 s sample across the 5 s respawn gap |
+| 04 iptables-restore fails on a policy change | PASS | syn=0 dns=0; daemon → `Error state: SetFirewallPolicy`, previous rules kept hooked, transition marker held while in error; binary restored + setting toggled back → policy re-applied and hooked |
+| 05 lock lost (`flock` hidden) + firewall reload | PASS | syn=0 dns=0; `CRITICAL: fw3 include ran without the state lock`; live policy untouched |
+| 06a firewall reload, connected | PASS | syn=0 dns=0 unattributed=0; hooked on every sample; include reconciled (masquerade and v6 restore lines) |
+| 06b firewall restart, connected | PASS | syn=0 dns=0 unattributed=0; hooked on every 1 s sample; the fw3 rebuild window produced no packet |
+| 06c firewall reload, disconnected | PASS | syn=0 dns=0 unattributed=0; Blocked policy hooked throughout |
+| 06d firewall restart, disconnected | PASS | syn=0 dns=0 unattributed=0; hooked on every sample; 223 packets in the capture, none egress |
+| 07 IPv6 | SKIP | no global IPv6 on the bed's WAN; the v6 path was not exercised and is not claimed |
+| 08 interrupted upgrade (opkg and post-upgrade SIGKILLed as post-upgrade starts) | PASS | syn=0 dns=0 unattributed=0; old daemon kept running, policy hooked; `opkg configure` was a no-op (status still read p14 while the files were p15); re-running the install completed it, daemon restarted with "leaving the kill-switch armed" |
+| 09 reboot | PASS | syn=0 dns=0 unattributed=0; boot-time block installed at firewall start (three include runs on the ifup reloads), lifted by the daemon's first policy; runtime dir root 0700; LAN probe blocked for the whole reboot |
+
+Overall: 11 PASS, 1 SKIP, 0 FAIL, 0 INCONCLUSIVE.
+
+## Environment events during the run
+
+The upstream router (192.168.1.1, WAN gateway of the whole bed) rebooted
+twice during the session (about 20:14–20:22 and 20:39–20:44 router time).
+One scenario-08 attempt overlapped the first outage; its verdict was discarded
+and the scenario re-run after the WAN was back. Scenarios 02–07 and 09 ran with
+the WAN up (the LAN probe reached the VPN exit before each injection). The
+positive control ran before the first outage.
+
+## Findings against the product
+
+1. **A downgrade wipes the account.** `opkg install --force-downgrade` (used
+   once while setting up scenario 08) runs `prerm` without `PKG_UPGRADE=1`, so
+   the removal branch executes and deletes `/etc/nym`, including the
+   registered device and mnemonic (`scripts/ipk/prerm`, the
+   `PKG_UPGRADE != 1` block that removes `/etc/nym`). The daemon came up
+   `DeviceLoggedOut` and had to be re-registered. opkg offers no flag to tell
+   a downgrade from a removal; at minimum the docs should warn.
+2. **Error state does not clear after a successful re-apply.** In scenario 04
+   the daemon entered `Error state: SetFirewallPolicy` (correctly). After the
+   binary was restored and a settings change re-applied the policy
+   successfully (rules hooked, marker cleared), the state stayed `Error` until
+   the next `connect`
+   (`nym-vpn-lib/src/tunnel_state_machine/states/error_state.rs`, the
+   settings-change branch re-applies but does not leave the state).
+3. **Interrupted upgrade leaves opkg's status at the old version.** With
+   post-upgrade killed, `/usr/lib/opkg/status` still says the old version is
+   `installed` while `/usr/lib/opkg/info/nym-vpn.control` and the files are
+   the new version; `opkg configure` therefore does nothing. The working
+   recovery is to run the install again, which the running daemon survives
+   with the kill-switch armed. `docs/troubleshooting.md` should say so.
+4. **`nym-vpnc` aborts on a closed pipe.** `nym-vpnc tunnel get | grep -q …`
+   ends with `failed printing to stdout: Broken pipe … Aborted` (Rust
+   `println!` panic on EPIPE). Harmless, ugly in scripts.
+5. **Transition marker outlives a failed apply.** While the daemon sits in the
+   `SetFirewallPolicy` error the marker stays (15 s observed in scenario 04),
+   so a firewall reload in that state installs the emergency block. That is
+   the documented fail-closed behaviour; noted because it is the state a
+   router stays in until an operator intervenes.
+
+## Unattributed traffic
+
+Scenario 02 recorded 58 packets from the router to 172.104.178.252:443 while
+the daemon was in `Connecting`; router-originated, only during connect
+attempts, allowed by the daemon's own uid-0 hatch. It is listed rather than
+allow-listed because the suite does not know the host; resolve it and add it
+to `LEAK_DAEMON_HOSTS` once identified.
+
+## What this run does not show
+
+- IPv6 (no v6 upstream on the bed).
+- fw4/nftables: this bed is fw3 only.
+- The fw3 `firewall restart` window: no packet left in either restart
+  scenario at 1 s state sampling with full packet capture, but the window
+  exists by construction; a tighter measurement needs a traffic generator on
+  the LAN client during the restart.
