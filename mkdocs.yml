@@ -78,6 +78,7 @@ nav:
       - Firewall Backends: architecture/firewall.md
       - Kill-Switch Contract: architecture/killswitch-contract.md
       - fw3 Restart Exposure: architecture/fw3-restart.md
+      - Firewall State Ownership: architecture/firewall-state.md
   - Development:
       - Building from Source: development/building.md
       - Packaging: development/packaging.md

@@ -140,14 +140,14 @@ service_stopped() {
 
     # fw3 (iptables) routers: the kill-switch chains live in the shared
     # filter/mangle/nat tables and outlive the daemon just like the nft
-    # table does. Remove the daemon's persisted ruleset, then let the
-    # include script's cleanup branch tear the chains down — the same code
-    # path a firewall reload takes, so stop and reload can't diverge.
-    # Removing the transition marker is explicit-stop authorization to open;
-    # a crash leaves it intact so fw3 reloads stay emergency-blocked.
-    # Done under the fw3 state lock the daemon and the include share, so a
-    # firewall reload cannot observe the files half-removed; the include is
-    # told the lock is already held (re-taking it would deadlock).
+    # table does. The include script owns their teardown: with the stop
+    # marker present it discards the daemon's persisted rules files and the
+    # transition marker, then removes chains, jumps, masquerade and LAN
+    # forwarding — the same code path a firewall reload takes, so stop and
+    # reload cannot diverge, and this script never touches those files
+    # itself. Done under the fw3 state lock the daemon and the include
+    # share; the include is told the lock is already held (re-taking it
+    # would deadlock).
     (
         # Same rule as the include: no lock, no fw3 mutation. The daemon is
         # already gone and the stop marker is written; the include honours
@@ -163,8 +163,6 @@ service_stopped() {
             exit 0
         }
         export NYM_FW_LOCKED=1
-        rm -f "$NYM_RUNTIME_DIR/v4.rules" "$NYM_RUNTIME_DIR/v6.rules" \
-            "$NYM_RUNTIME_DIR/ifaces" "$NYM_RUNTIME_DIR/transition" 2>/dev/null
         # Files a pre-runtime-directory daemon left under /tmp. Never read
         # any more; removed on explicit stop so they do not linger until the
         # next reboot.

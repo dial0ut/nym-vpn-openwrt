@@ -377,99 +377,46 @@ mod tests {
         INCLUDE.lines().map(str::trim)
     }
 
-    /// The nft heredoc between the boot table header and the closing EOF.
-    fn boot_block_body() -> Vec<&'static str> {
-        let start = INCLUDE
-            .find("table inet $BOOT_TABLE {")
-            .expect("include defines the boot table body");
-        let body = &INCLUDE[start..];
-        let end = body.find("\nEOF").expect("heredoc terminator");
-        body[..end].lines().map(str::trim).collect()
-    }
-
     #[test]
     fn include_script_names_the_same_tables() {
-        let boot = format!("BOOT_TABLE=\"{FW4_BOOT_TABLE}\"");
-        assert!(lines().any(|l| l == boot), "fw4-include.sh must define {boot}");
+        // The boot table name comes from the generated fragment, which
+        // boot_rules renders from FW4_BOOT_TABLE.
+        assert!(
+            lines().any(|l| l == "BOOT_TABLE=\"$NYM_BOOT_TABLE\""),
+            "fw4-include.sh must take the boot table name from fw-rules.sh"
+        );
+        assert!(
+            super::super::boot_rules::shell_fragment()
+                .contains(&format!("NYM_BOOT_TABLE=\"{FW4_BOOT_TABLE}\"")),
+        );
         assert!(lines().any(|l| l == "NYM_TABLE=\"nym\""));
     }
 
+    /// The include installs the boot block from the generated fragment,
+    /// never from nft text of its own. Rule content is tested in
+    /// `boot_rules`.
     #[test]
-    fn boot_block_keeps_the_router_reachable_and_ends_in_drop() {
-        let body = boot_block_body();
-        for must in [
-            "oifname \"lo\" accept",
-            "ct state established,related ct direction reply accept",
-            "udp sport 68 udp dport 67 accept",
-            "udp sport 67 udp dport 68 accept",
-            "udp sport 546 udp dport 547 accept",
-            "udp sport 547 udp dport 546 accept",
-            "icmpv6 type { nd-router-solicit, nd-neighbor-solicit, nd-neighbor-advert } accept",
-            "ip6 daddr { fe80::/10, fc00::/7, ff00::/8 } accept",
-        ] {
-            assert!(body.contains(&must), "boot block must keep: {must}");
-        }
-        // LAN destinations pass in both egress chains; nothing else does.
-        let lan = "ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16";
-        assert_eq!(body.iter().filter(|l| l.starts_with(lan)).count(), 2);
-        assert_eq!(body.iter().filter(|l| **l == "drop").count(), 2);
-        // Only the two egress hooks, ahead of the daemon's own table.
-        assert_eq!(body.iter().filter(|l| l.contains("priority filter - 20")).count(), 2);
-        assert!(body.iter().any(|l| l.contains("hook output")));
-        assert!(body.iter().any(|l| l.contains("hook forward")));
-        assert!(!body.iter().any(|l| l.contains("hook input")));
-    }
-
-    /// Same ordering rule as the daemon's policy (`block_dns` before
-    /// `allow_lan_traffic`): a private destination is not a LAN interface,
-    /// so DNS must be rejected before the LAN accepts in both egress chains
-    /// or a double-NAT router leaks plaintext lookups to its upstream during
-    /// the boot window. The reject must still follow the loopback and
-    /// reply-direction accepts so the router's own dnsmasq keeps answering.
-    #[test]
-    fn boot_block_rejects_dns_before_the_lan_accepts() {
-        let body = boot_block_body();
-        let chain_starts: Vec<usize> = body
-            .iter()
-            .enumerate()
-            .filter(|(_, l)| l.starts_with("chain "))
-            .map(|(i, _)| i)
-            .collect();
-        assert_eq!(chain_starts.len(), 2, "output and forward chains");
-
-        for (n, &start) in chain_starts.iter().enumerate() {
-            let end = chain_starts.get(n + 1).copied().unwrap_or(body.len());
-            let chain = &body[start..end];
-            let pos = |needle: &str| {
-                chain
-                    .iter()
-                    .position(|l| l.starts_with(needle))
-                    .unwrap_or_else(|| panic!("{}: missing {needle}", chain[0]))
-            };
-            let udp = pos("udp dport 53 reject");
-            let tcp = pos("tcp dport 53 reject");
-            let lan = pos("ip daddr {");
-            let lan6 = pos("ip6 daddr {");
-            assert!(
-                udp < lan && tcp < lan,
-                "{}: DNS reject must precede the LAN accept",
-                chain[0]
-            );
-            assert!(
-                udp < lan6 && tcp < lan6,
-                "{}: DNS reject must precede the ULA accept",
-                chain[0]
-            );
-            if chain[0].starts_with("chain output") {
-                assert!(
-                    pos("oifname \"lo\" accept") < udp,
-                    "loopback must stay ahead of the DNS reject"
-                );
-                assert!(
-                    pos("ct state established,related ct direction reply accept") < udp,
-                    "reply-direction accept must stay ahead of the DNS reject"
-                );
+    fn include_script_installs_the_generated_boot_block() {
+        assert!(
+            lines().any(|l| l == ". \"$NYM_SHARE_DIR/fw-rules.sh\""),
+            "must source fw-rules.sh"
+        );
+        assert!(
+            lines().any(|l| l == "nym_boot_block_nft | nft -f -"),
+            "install_boot_block must pipe the generated table into nft"
+        );
+        for line in lines() {
+            if line.starts_with('#') {
+                continue;
             }
+            assert!(
+                !line.contains("hook output") && !line.contains("hook forward"),
+                "fw4-include.sh must not carry boot block rule text: {line}"
+            );
+            assert!(
+                !line.contains("10.0.0.0/8") && !line.contains("fe80::/10"),
+                "fw4-include.sh must not carry LAN network lists: {line}"
+            );
         }
     }
 

@@ -16,7 +16,11 @@
 //! - [`fw3`] and [`fw4`] are thin backends that apply the rendered script
 //!   and manage the small amount of backend-specific integration
 //!   (masquerade, jumps from fw3/fw4's own chains).
+//! - [`boot_rules`] is the single definition of the emergency and boot-time
+//!   rule sets the backends and the shell includes share; `build.rs` renders
+//!   it into `scripts/fw-rules.sh`.
 
+mod boot_rules;
 mod common;
 mod detect;
 mod fw3;

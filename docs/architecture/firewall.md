@@ -5,6 +5,9 @@ reload, restart, shutdown, IPv6, exemptions — and how each guarantee was verif
 [kill-switch contract](killswitch-contract.md); read that first when changing anything here. The
 one known hole, the fw3 restart window, has its own [decision record](fw3-restart.md).
 
+> Who writes which runtime file, chain and table, and under which lock, is tabulated in
+> [Firewall State Ownership](firewall-state.md).
+
 ## Two backends
 
 OpenWrt moved from iptables to nftables in 22.03. Older firmware runs fw3 (iptables), current
