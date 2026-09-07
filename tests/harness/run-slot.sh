@@ -4,21 +4,33 @@
 # Usage: run-slot.sh <slot> <openwrt_version> <results_dir>
 #
 # Behavior:
-#   1. provision.sh brings up bridge + 3 CTs.
-#   2. Install nym-vpn inside the OpenWrt CT: from NYM_PKG_FILE (a local
-#      .apk/.ipk built from the revision under test) when set, otherwise
-#      from the public feed's install script (NYM_FEED_INSTALL_URL).
-#   3. Register the account on the OpenWrt CT (NYM_MNEMONIC env).
-#   4. Source each cases/*.sh in lexical order. Each case appends one
-#      "STATUS|name|elapsed|note" line to results.txt and may print to
-#      slot-<N>.log.
-#   5. EXIT trap forgets the account (server-side device slot freed) and
-#      tears down the slot. Exits non-zero if any case recorded FAIL.
+#   1. provision.sh brings up bridge + 3 CTs (OpenWrt router, LAN client,
+#      DNS logger). The OpenWrt CT runs procd as init.
+#   2. Install nym-vpn inside the OpenWrt CT from the package under test
+#      (see "Package selection" below). The package's postinst enables and
+#      starts the daemon through /etc/init.d/nym-vpnd, i.e. under procd —
+#      nothing here launches the daemon by hand.
+#   3. Wait for the daemon and assert procd owns it (`ubus call service list`).
+#   4. Register the account on the OpenWrt CT (NYM_MNEMONIC env).
+#   5. Source each cases/*.sh in lexical order. Each case records exactly
+#      one "STATUS|name|elapsed|note" line (STATUS: PASS, FAIL or SKIP) and
+#      may print to slot-<N>.log. A case that exits before recording is a
+#      FAIL; a selected case that recorded nothing is MISSING. Both make the
+#      slot exit non-zero.
+#   6. EXIT trap forgets the account (server-side device slot freed) and
+#      tears down the slot.
 #
-# Known limit: the daemon is started directly (vpn_daemon_start), not through
-# procd, because ubus is only half-functional in these LXCs. Init-script,
-# upgrade and boot behaviour are therefore NOT covered here; test those on a
-# real device or the QEMU runner (tests/run-tests.sh).
+# Package selection (env, all optional; see .env.example):
+#   NYM_PKG_FILE            one file for every slot (overrides the rest)
+#   NYM_PKG_APK / NYM_PKG_IPK
+#                           chosen by OpenWrt version: 25.x and later use apk,
+#                           older releases use ipk
+#   NYM_PKG_APK_PREV / NYM_PKG_IPK_PREV
+#                           when set, the slot installs this OLDER package
+#                           first and cases/10-upgrade.sh upgrades it to the
+#                           package under test while polling the kill-switch
+#   NYM_FEED_INSTALL_URL    fallback when no package is given: the public
+#                           feed's install script (not the revision under test)
 
 set -uo pipefail
 
@@ -43,12 +55,33 @@ source "$HARNESS_DIR/lib/vpn.sh"
 export RESULTS_FILE
 # shellcheck disable=SC1091
 source "$HARNESS_DIR/lib/assert.sh"
+# The sourced helpers turn on set -e; this runner must keep going after a
+# failing step so that it can record the failure.
+set +e
+
+# ---------- package selection ----------
+pkg_for_version() {
+    # $1 = "current" or "prev"; prints the package path or nothing.
+    local which="$1" major="${VERSION%%.*}"
+    if [ "$which" = current ] && [ -n "${NYM_PKG_FILE:-}" ]; then
+        echo "$NYM_PKG_FILE"; return
+    fi
+    local fmt=ipk
+    [ "$major" -ge 25 ] && fmt=apk
+    local var="NYM_PKG_${fmt^^}"
+    [ "$which" = prev ] && var="${var}_PREV"
+    echo "${!var:-}"
+}
+PKG_CURRENT="$(pkg_for_version current)"
+PKG_PREV="$(pkg_for_version prev)"
+export PKG_CURRENT PKG_PREV
 
 # ---------- 1. provision ----------
 echo "==> provisioning"
 SUMMARY=$("$HARNESS_DIR/provision.sh" "$SLOT" "$VERSION") || {
     echo "provision failed; aborting slot"
     printf 'FAIL|provision|0|provision.sh exited nonzero\n' >> "$RESULTS_FILE"
+    "$HARNESS_DIR/teardown.sh" "$SLOT" || true
     exit 1
 }
 echo "$SUMMARY"
@@ -69,41 +102,39 @@ trap cleanup EXIT INT TERM
 
 # ---------- 2. install nym-vpn ----------
 case_begin install
-if [ -n "${NYM_PKG_FILE:-}" ]; then
-    echo "==> installing nym-vpn from $NYM_PKG_FILE"
-    pkg_name=$(basename "$NYM_PKG_FILE")
-    if ! ssh -o BatchMode=yes "$PROXMOX_HOST" "pct exec $OPENWRT_CTID -- sh -c 'cat > /tmp/$pkg_name'" < "$NYM_PKG_FILE"; then
-        case_fail "could not copy $pkg_name into the container"
-        exit 1
-    fi
-    case "$pkg_name" in
-        *.apk) install_cmd="apk add --allow-untrusted /tmp/$pkg_name" ;;
-        *.ipk) install_cmd="opkg install /tmp/$pkg_name" ;;
-        *) case_fail "NYM_PKG_FILE must end in .apk or .ipk"; exit 1 ;;
-    esac
-    if pct_sh "$OPENWRT_CTID" "$install_cmd >/dev/null 2>&1"; then
-        case_pass "$(pct_sh "$OPENWRT_CTID" 'nym-vpnc --version 2>&1' | head -1) from $pkg_name"
+initial_pkg="${PKG_PREV:-$PKG_CURRENT}"
+if [ -n "$initial_pkg" ]; then
+    echo "==> installing nym-vpn from $initial_pkg"
+    if vpn_pkg_install "$OPENWRT_CTID" "$initial_pkg"; then
+        case_pass "$(vpn_version "$OPENWRT_CTID") from $(basename "$initial_pkg")"
     else
-        case_fail "package install failed"
+        case_fail "package install failed: $(basename "$initial_pkg")"
         exit 1
     fi
 else
-    echo "==> installing nym-vpn (feed install script)"
+    echo "==> installing nym-vpn (feed install script — NOT the revision under test)"
     if pct_sh "$OPENWRT_CTID" "wget -qO- '${NYM_FEED_INSTALL_URL:-https://packages.dial0ut.org/install.sh}' | sh >/dev/null 2>&1"; then
-        case_pass "$(pct_sh "$OPENWRT_CTID" 'nym-vpnc --version 2>&1' | head -1)"
+        case_pass "$(vpn_version "$OPENWRT_CTID") from public feed"
     else
         case_fail "install script failed"
         exit 1
     fi
 fi
 
-# ---------- 3. start daemon ----------
-echo "==> starting daemon"
+# ---------- 3. daemon under procd ----------
+echo "==> waiting for the daemon procd started"
 case_begin daemon-up
-if vpn_daemon_start "$OPENWRT_CTID"; then
-    case_pass
+if vpn_daemon_wait "$OPENWRT_CTID" 30; then
+    if vpn_daemon_under_procd "$OPENWRT_CTID"; then
+        case_pass "procd instance running, pid $(pct_sh "$OPENWRT_CTID" 'pidof nym-vpnd')"
+    else
+        case_fail "daemon answers but procd does not list it as running"
+        vpn_dump "$OPENWRT_CTID"
+        exit 1
+    fi
 else
-    case_fail "daemon did not come up"
+    case_fail "daemon did not come up under procd within 30s"
+    vpn_dump "$OPENWRT_CTID"
     exit 1
 fi
 
@@ -131,8 +162,6 @@ for case_file in "$HARNESS_DIR"/cases/*.sh; do
     result_name="${case_name#[0-9]*-}"
     echo "---- $case_name ----"
     lines_before=$(grep -c . "$RESULTS_FILE" || true)
-    # The sourced helpers enable set -e in this shell too, so guard the call
-    # with || or a failing case would exit the runner before rc is recorded.
     rc=0
     # shellcheck disable=SC1090
     ( source "$case_file" ) || rc=$?
@@ -144,18 +173,20 @@ for case_file in "$HARNESS_DIR"/cases/*.sh; do
     fi
 done
 
-# Second net: one result line per case, whatever path it took.
+# Second net: one result line per selected case, whatever path it took. A
+# case that left nothing is MISSING (not run, not skipped, not failed — the
+# harness cannot say what happened), which fails the run like a FAIL does.
 for case_file in "$HARNESS_DIR"/cases/*.sh; do
     result_name="$(basename "$case_file" .sh)"; result_name="${result_name#[0-9]*-}"
     n=$(grep -c "^[A-Z]*|${result_name}|" "$RESULTS_FILE" || true)
     if [ "$n" -eq 0 ]; then
-        printf 'FAIL|%s|0|case recorded no result\n' "$result_name" >> "$RESULTS_FILE"
+        printf 'MISSING|%s|0|selected case recorded no result\n' "$result_name" >> "$RESULTS_FILE"
     elif [ "$n" -gt 1 ]; then
         printf 'FAIL|%s|0|case recorded %d results, expected one\n' "$result_name" "$n" >> "$RESULTS_FILE"
     fi
 done
 
 echo "==> slot $SLOT finished at $(date -u +%FT%TZ)"
-if grep -q '^FAIL|' "$RESULTS_FILE"; then
+if grep -qE '^(FAIL|MISSING)\|' "$RESULTS_FILE"; then
     exit 1
 fi

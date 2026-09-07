@@ -15,7 +15,7 @@ case_begin killswitch-connected
 # Baseline: what does traffic look like when it bypasses the tunnel?
 vpn_killswitch "$OPENWRT_CTID" off
 sleep 1
-router_public_ip=$(pct_sh "$OPENWRT_CTID" 'curl -s --max-time 10 https://api.ipify.org' || true)
+router_public_ip=$(pct_sh "$OPENWRT_CTID" 'wget -qO- -T 10 https://api.ipify.org 2>/dev/null' || true)
 if [ -z "$router_public_ip" ]; then
     case_fail "could not learn the router's public IP while disconnected; bypass check impossible"
     return 0 2>/dev/null || exit 0

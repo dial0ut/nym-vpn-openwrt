@@ -7,9 +7,25 @@ set -euo pipefail
 
 : "${PROXMOX_HOST:?PROXMOX_HOST must be set (load .env first)}"
 
+# ssh to the host with retries on transport failure (exit 255). Three
+# slots provisioning at once make the host slow to accept connections; a
+# transient connect timeout must not turn into a failed provision or a
+# skipped teardown. Command failures (any other exit code) are returned as is.
+_ssh_host() {
+    local attempt=1 rc
+    while :; do
+        ssh -o BatchMode=yes -o ConnectTimeout=15 "$PROXMOX_HOST" "$@"
+        rc=$?
+        [ "$rc" -ne 255 ] && return "$rc"
+        [ "$attempt" -ge 4 ] && { echo "[ctl] ssh to $PROXMOX_HOST failed $attempt times" >&2; return 255; }
+        sleep $((attempt * 5))
+        attempt=$((attempt + 1))
+    done
+}
+
 # Run an arbitrary command on the Proxmox host. Stdout/stderr pass through.
 pmx() {
-    ssh -o BatchMode=yes -o ConnectTimeout=5 "$PROXMOX_HOST" "$@"
+    _ssh_host "$@"
 }
 
 # Run a command inside a container. Errors propagate.
@@ -23,7 +39,7 @@ pct_exec() {
 pct_sh() {
     local ctid="$1"; shift
     # shellcheck disable=SC2087  # the snippet is meant to expand here, not on the host
-    ssh -o BatchMode=yes "$PROXMOX_HOST" "pct exec $ctid -- sh -s" <<EOF
+    _ssh_host "pct exec $ctid -- sh -s" <<EOF
 $*
 EOF
 }
@@ -34,7 +50,9 @@ ctid_in_use() {
 }
 
 # Idempotent bridge creation. Writes /etc/network/interfaces.d/<name>
-# on the host and reloads ifupdown2.
+# on the host and brings up just that interface. (`ifreload -a` would
+# re-evaluate every interface and fails outright when ifupdown2 still
+# remembers a bridge that was deleted behind its back.)
 bridge_ensure() {
     local name="$1"
     if pmx "ip -br link show $name >/dev/null 2>&1"; then
@@ -47,13 +65,16 @@ iface $name inet manual
 	bridge-stp off
 	bridge-fd 0
 EOF
-ifreload -a"
+for i in 1 2 3 4 5 6; do ifup $name && exit 0; sleep 3; done; echo '[ctl] ifup $name kept failing' >&2; exit 1"
 }
 
-# Best-effort destroy. Does not fail if the bridge is already gone.
+# Best-effort destroy. Does not fail if the bridge is already gone. The
+# bridge is taken down through ifupdown2 while its stanza still exists, so
+# the tool forgets it; deleting the link directly would leave stale state
+# that breaks every later ifreload on the host.
 bridge_destroy() {
     local name="$1"
-    pmx "rm -f /etc/network/interfaces.d/$name; ip link set $name down 2>/dev/null || true; brctl delbr $name 2>/dev/null || ip link del $name 2>/dev/null || true"
+    pmx "if [ -f /etc/network/interfaces.d/$name ]; then ifdown --force $name >/dev/null 2>&1 || true; fi; rm -f /etc/network/interfaces.d/$name; ip link set $name down 2>/dev/null || true; ip link del $name 2>/dev/null || true"
 }
 
 # Ensure an OpenWrt rootfs template is on the host. Downloads on demand.
