@@ -91,12 +91,22 @@ service_stopped() {
     # path a firewall reload takes, so stop and reload can't diverge.
     # Removing the transition marker is explicit-stop authorization to open;
     # a crash leaves it intact so fw3 reloads stay emergency-blocked.
-    rm -f /tmp/nym-firewall-v4.rules /tmp/nym-firewall-v6.rules \
-        /tmp/nym-firewall.ifaces /tmp/nym-firewall.transition 2>/dev/null
-    if [ -x /usr/share/nym-vpn/fw-backend.sh ] \
-        && [ "$(/usr/share/nym-vpn/fw-backend.sh)" = "fw3" ] \
-        && iptables -L input_rule -n >/dev/null 2>&1 \
-        && [ -x /usr/share/nym-vpn/fw3-include.sh ]; then
-        /usr/share/nym-vpn/fw3-include.sh 2>/dev/null || true
-    fi
+    # Done under the fw3 state lock the daemon and the include share, so a
+    # firewall reload cannot observe the files half-removed; the include is
+    # told the lock is already held (re-taking it would deadlock).
+    (
+        if command -v flock >/dev/null 2>&1; then
+            exec 9>/tmp/nym-firewall.lock
+            flock 9 || true
+            export NYM_FW_LOCKED=1
+        fi
+        rm -f /tmp/nym-firewall-v4.rules /tmp/nym-firewall-v6.rules \
+            /tmp/nym-firewall.ifaces /tmp/nym-firewall.transition 2>/dev/null
+        if [ -x /usr/share/nym-vpn/fw-backend.sh ] \
+            && [ "$(/usr/share/nym-vpn/fw-backend.sh)" = "fw3" ] \
+            && iptables -L input_rule -n >/dev/null 2>&1 \
+            && [ -x /usr/share/nym-vpn/fw3-include.sh ]; then
+            /usr/share/nym-vpn/fw3-include.sh 2>/dev/null || true
+        fi
+    )
 }

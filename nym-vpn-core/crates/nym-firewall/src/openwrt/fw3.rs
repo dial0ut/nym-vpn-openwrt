@@ -10,12 +10,17 @@
 //! its own chain (`NYM_POSTROUTING` in the `nat` table) so re-applies
 //! flush + repopulate without touching anyone else's NAT rules.
 
+use std::fs::File;
 use std::io::Write as IoWrite;
 use std::process::{Command, Stdio};
+use std::time::Instant;
+
+use nix::errno::Errno;
+use nix::fcntl::{Flock, FlockArg};
 
 use super::common::{
-    FW3_HOOK_FORWARD, FW3_HOOK_INPUT, FW3_HOOK_OUTPUT, FW3_RULES_V4_PATH, FW3_RULES_V6_PATH,
-    FW3_TRANSITION_PATH, IFACES_PATH, Ipv6Status, ipv6_status,
+    FW3_HOOK_FORWARD, FW3_HOOK_INPUT, FW3_HOOK_OUTPUT, FW3_LOCK_PATH, FW3_RULES_V4_PATH,
+    FW3_RULES_V6_PATH, FW3_TRANSITION_PATH, IFACES_PATH, Ipv6Status, ipv6_status,
 };
 use super::render_iptables::{
     self, AddrFamily, CHAIN_FORWARD, CHAIN_INPUT, CHAIN_MANGLE_OUTPUT, CHAIN_MANGLE_PREROUTING,
@@ -52,6 +57,9 @@ const EMERGENCY_FORWARD_CHAIN: &str = "NYM_EMERGENCY_FWD";
 
 /// Apply the [`RuleSet`] to fw3 using a fail-closed transition protocol:
 ///
+/// 0. take the fw3 state lock ([`FW3_LOCK_PATH`]) for the whole function.
+///    The include script and the init script's teardown take the same lock,
+///    so they observe fw3 state only between complete transitions;
 /// 1. publish the transition marker; for each family whose hook jumps are
 ///    not in place yet (first activation, or IPv6 newly enabled) also
 ///    install that family's emergency block so a crash between chain
@@ -62,16 +70,20 @@ const EMERGENCY_FORWARD_CHAIN: &str = "NYM_EMERGENCY_FWD";
 ///    complete v4/v6/interface state;
 /// 3. remove the marker (the persisted v4 file is now the reload activation
 ///    marker);
-/// 4. if a firewall reload raced the transition — it wiped our chains and
-///    the include installed the emergency block instead of reading
-///    half-written state — re-activate from the same scripts the include
-///    would now read, then lift the block.
+/// 4. if a firewall reload ran just before the lock was taken — it wiped
+///    our chains and, seeing the marker of a crashed earlier transition,
+///    installed the emergency block instead of reading half-written state —
+///    re-activate from the same scripts the include would now read, then
+///    lift the block.
 ///
-/// Any error or daemon crash before completion deliberately leaves the
-/// marker behind, so reloads stay fail-closed until a later successful
-/// apply/reset or an explicit service stop.
+/// The marker covers crashes, not concurrency: any error or daemon crash
+/// before completion deliberately leaves it behind, so reloads stay
+/// fail-closed until a later successful apply/reset or an explicit service
+/// stop. The lock is what keeps a reload from interleaving with a live
+/// transition.
 pub fn apply(rs: &RuleSet) -> Result<()> {
     tracing::debug!("Applying firewall policy via fw3/iptables backend");
+    let _lock = lock_fw3_state()?;
 
     // Fail closed on a half-firewallable host: if the kernel routes IPv6 but
     // ip6tables can't filter it, an IPv4-only ruleset would just be a
@@ -152,6 +164,43 @@ pub fn apply(rs: &RuleSet) -> Result<()> {
 
     tracing::debug!("Firewall policy applied successfully");
     Ok(())
+}
+
+/// Take the exclusive fw3 state lock, blocking until the include script or
+/// the init script's teardown has finished its own mutation. Released when
+/// the returned guard drops, on every return path. Callers are synchronous
+/// and must stay so: the guard must never be held across an `.await`.
+fn lock_fw3_state() -> Result<Flock<File>> {
+    lock_state_file(FW3_LOCK_PATH)
+}
+
+fn lock_state_file(path: &str) -> Result<Flock<File>> {
+    let file = File::options()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(path)
+        .map_err(|e| {
+            Error::ApplyError(format!(
+                "open fw3 state lock {path}: {e}; refusing to change live firewall state"
+            ))
+        })?;
+    let file = match Flock::lock(file, FlockArg::LockExclusiveNonblock) {
+        Ok(lock) => return Ok(lock),
+        Err((file, Errno::EWOULDBLOCK)) => file,
+        Err((_, e)) => {
+            return Err(Error::ApplyError(format!("lock fw3 state {path}: {e}")));
+        }
+    };
+    tracing::debug!("fw3 state lock {path} is held by another writer; waiting");
+    let waited = Instant::now();
+    let lock = Flock::lock(file, FlockArg::LockExclusive)
+        .map_err(|(_, e)| Error::ApplyError(format!("lock fw3 state {path}: {e}")))?;
+    tracing::debug!(
+        "fw3 state lock {path} acquired after {:?}",
+        waited.elapsed()
+    );
+    Ok(lock)
 }
 
 fn begin_transition() -> Result<()> {
@@ -426,6 +475,7 @@ fn clear_persisted_state() -> Result<()> {
 /// the tunnel source address, but nothing is fenced off from the WAN.
 pub fn apply_forwarding_only(rs: &RuleSet) -> Result<()> {
     tracing::debug!("Applying tunnel forwarding plane (kill-switch off) via fw3/iptables");
+    let _lock = lock_fw3_state()?;
 
     let with_v6 = ipv6_status() == Ipv6Status::Enabled;
     begin_transition()?;
@@ -464,6 +514,7 @@ pub fn apply_forwarding_only(rs: &RuleSet) -> Result<()> {
 /// Tear down the jumps and our chains. Best-effort throughout.
 pub fn reset() -> Result<()> {
     tracing::debug!("Resetting firewall policy via fw3/iptables backend");
+    let _lock = lock_fw3_state()?;
 
     let with_v6 = ipv6_status() == Ipv6Status::Enabled;
     begin_transition()?;
@@ -970,6 +1021,55 @@ mod tests {
         assert!(!lines.iter().any(|l| {
             !l.starts_with('#') && l.contains("EMERGENCY") && l.contains("HOOK_INPUT")
         }));
+    }
+
+    /// The include serializes with this backend on the same lock file, and
+    /// honours a caller that already holds it (the init script's teardown).
+    #[test]
+    fn include_script_takes_the_shared_state_lock() {
+        const INCLUDE: &str = include_str!("../../scripts/fw3-include.sh");
+        let lines: Vec<&str> = INCLUDE.lines().map(str::trim).collect();
+
+        let lock = format!("LOCK_FILE=\"{FW3_LOCK_PATH}\"");
+        assert!(
+            lines.contains(&lock.as_str()),
+            "fw3-include.sh must define {lock}"
+        );
+        assert!(lines.contains(&"exec 9>\"$LOCK_FILE\""));
+        assert!(lines.iter().any(|l| l.starts_with("flock 9")));
+        assert!(lines.iter().any(|l| l.contains("NYM_FW_LOCKED")));
+        // The lock is taken before main runs, not inside a branch of it.
+        let lock_at = lines.iter().position(|l| l.starts_with("flock 9")).unwrap();
+        let main_at = lines.iter().position(|l| *l == "main \"$@\"").unwrap();
+        assert!(lock_at < main_at);
+    }
+
+    /// The guard excludes a second opener while held and releases on drop.
+    #[test]
+    fn state_lock_excludes_while_held_and_releases_on_drop() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "nym-firewall-lock-test-{}-{nonce}",
+            std::process::id()
+        ));
+        let path = path.to_str().unwrap();
+
+        let held = lock_state_file(path).unwrap();
+        let other = File::options().write(true).open(path).unwrap();
+        let contended = Flock::lock(other, FlockArg::LockExclusiveNonblock);
+        assert!(matches!(contended, Err((_, Errno::EWOULDBLOCK))));
+
+        drop(held);
+        let reacquired = lock_state_file(path);
+        assert!(
+            reacquired.is_ok(),
+            "lock must be free once the guard is dropped"
+        );
+        drop(reacquired);
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]
