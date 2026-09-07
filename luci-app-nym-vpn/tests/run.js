@@ -163,7 +163,7 @@ async function scenarioDisclosure() {
 
   const rowsWithMore = qa(t, '.nym-toggle-row').filter((r) => r.querySelector('.nym-more'));
   const titles = rowsWithMore.map((r) => r.querySelector('.nym-toggle-title').textContent);
-  check(eq(titles, ['Kill-Switch', 'Gateway Independence', 'Server Family Reminders', 'Always On', 'Two-Hop Mode', 'Circumvention Transports', 'Stealth API Connect', 'IPv6', 'Legacy Split Tunneling (PBR)', 'Disable Poisson Delays', 'Disable Background Cover Traffic', 'Custom DNS', 'Ad Blocking']), 'long-form text behind an expander on every switch row: ' + JSON.stringify(titles));
+  check(eq(titles, ['Always On', 'Kill-Switch', 'Gateway Independence', 'Server Family Reminders', 'Two-Hop Mode', 'Circumvention Transports', 'Stealth API Connect', 'IPv6', 'Legacy Split Tunneling (PBR)', 'Disable Poisson Delays', 'Disable Background Cover Traffic', 'Custom DNS', 'Ad Blocking']), 'long-form text behind an expander on every switch row: ' + JSON.stringify(titles));
   check(rowsWithMore.every((r) => {
     const b = r.querySelector('.nym-toggle-head .nym-info-btn');
     const p = r.querySelector('.nym-more');
