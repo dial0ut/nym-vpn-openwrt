@@ -131,9 +131,11 @@ for case_file in "$HARNESS_DIR"/cases/*.sh; do
     result_name="${case_name#[0-9]*-}"
     echo "---- $case_name ----"
     lines_before=$(grep -c . "$RESULTS_FILE" || true)
+    # The sourced helpers enable set -e in this shell too, so guard the call
+    # with || or a failing case would exit the runner before rc is recorded.
+    rc=0
     # shellcheck disable=SC1090
-    ( source "$case_file" )
-    rc=$?
+    ( source "$case_file" ) || rc=$?
     if [ "$rc" -ne 0 ]; then
         echo "($case_name) exited $rc"
         if [ "$(grep -c . "$RESULTS_FILE" || true)" -eq "$lines_before" ]; then

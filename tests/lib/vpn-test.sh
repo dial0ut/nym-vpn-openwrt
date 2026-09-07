@@ -57,9 +57,10 @@ verify_vpn_connection() {
         return 1
     fi
     if [[ -z "$wan_public_ip" ]]; then
-        log_warn "[$arch]   No pre-connect public IP known; cannot prove egress moved"
+        log_error "[$arch]   No pre-connect public IP known; cannot prove egress moved into the tunnel"
+        return 1
     fi
-    log_info "[$arch]   Egress IP: $ext_ip (before connect: ${wan_public_ip:-unknown})"
+    log_info "[$arch]   Egress IP: $ext_ip (before connect: $wan_public_ip)"
     return 0
 }
 
@@ -126,13 +127,21 @@ run_vpn_test() {
     done
 
     # Baseline for the egress check: the router's public address with no
-    # tunnel up. Captured once, before the first connect.
+    # tunnel up. The kill-switch is on by default and blocks this lookup
+    # while disconnected, so switch it off for the probe and back on again.
+    # Without a baseline the egress check cannot prove anything, so it is
+    # required.
     local wan_public_ip
+    vm_ssh "$arch" "nym-vpnc tunnel set --killswitch off" >/dev/null 2>&1 || true
+    sleep 2
     wan_public_ip=$(vm_ssh "$arch" "wget -qO- -T 15 https://api.ipify.org 2>/dev/null" || true)
+    vm_ssh "$arch" "nym-vpnc tunnel set --killswitch on" >/dev/null 2>&1 || true
     if [[ -n "$wan_public_ip" ]]; then
         log_info "[$arch] Public IP while disconnected: $wan_public_ip"
     else
-        log_warn "[$arch] Could not learn the public IP while disconnected"
+        log_error "[$arch] Could not learn the public IP while disconnected (kill-switch off); egress check impossible"
+        cleanup_account "$arch"
+        return 1
     fi
 
     # --- Step 3: Two-hop test ---
