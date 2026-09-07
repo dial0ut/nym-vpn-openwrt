@@ -108,8 +108,12 @@ the GitHub release notes.
   the init script tears the firewall down only on an explicit `stop`, and an
   upgrade leaves the old daemon running through the file swap and restarts it
   through the newly installed init script, so the old package's stop hooks
-  never run. Measured on OpenWrt 25.12: the kill-switch table never
-  disappeared across an upgrade and a LAN client saw no leak.
+  never run. A system shutdown or reboot keeps the block as well: the
+  K-script stop used to open the firewall for the last seconds of a reboot,
+  and a capture on the WAN showed a LAN client's DNS and HTTPS leaving in
+  that window. Measured on OpenWrt 25.12 (fw4) and 21.02 (fw3): the
+  kill-switch never opened across upgrade, daemon restart, firewall reload
+  and restart, and a LAN client saw no leak.
 - fw3: the daemon, the firewall include and the init script now serialize
   their changes to the kill-switch chains with a lock. Before, a `firewall
   reload` that observed the daemon mid-change could install its emergency

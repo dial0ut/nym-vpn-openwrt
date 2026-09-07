@@ -169,8 +169,10 @@ shutdown, the init script writes no stop marker and tears nothing down (rc.commo
 in one process, so the stop hooks see `action=restart`), and the new daemon replaces the stale
 policy atomically on its first apply. A package upgrade rides on the same path: `prerm` leaves the
 old daemon running through the file swap and `postinst` restarts it through the newly installed
-init script, so the old package's stop hooks never run. If the new daemon never comes up, `stop`
-is what opens the network again.
+init script, so the old package's stop hooks never run. A system shutdown or reboot takes the same
+keep path (`action=shutdown`): the firewall stays closed while the box goes down, and the boot-time
+block covers the way back up. If the new daemon never comes up, `stop` is what opens the network
+again.
 
 Two orderings make the racy cases converge instead of leaving a block nobody removes. The daemon
 applies its table before it deletes the boot block and persists a kill-switch toggle before it

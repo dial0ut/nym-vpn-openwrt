@@ -33,10 +33,14 @@ STOPPED_MARKER="$NYM_VPND_STOPPED"
 # Blocked policy in place on shutdown while the kill-switch is on, and the
 # next daemon replaces it atomically on its first apply. rc.common runs
 # `restart` as the stop and start functions of one process, so $action is
-# still "restart" in the stop hooks.
+# still "restart" in the stop hooks. A system shutdown or reboot runs the
+# K-script with action "shutdown", which rc.common maps onto stop: opening
+# the firewall for the last seconds of a reboot let a LAN client's DNS and
+# HTTPS leave on the WAN (captured), so shutdown keeps the block too.
+# tmpfs is cleared by the reboot, and the boot-time block takes over.
 keep_killswitch() {
     # shellcheck disable=SC2154  # action is set by rc.common
-    [ "$action" = "restart" ]
+    [ "$action" = "restart" ] || [ "$action" = "shutdown" ]
 }
 
 start_service() {
