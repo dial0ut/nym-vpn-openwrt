@@ -41,6 +41,18 @@ iptables -t nat -D postrouting_rule -j NYM_NAT 2>/dev/null
 /etc/init.d/firewall restart
 ```
 
+## Upgrade interrupted half-way
+
+If the package manager is killed during an upgrade (power loss, a closed
+SSH session without `nohup`, an OOM kill), the new files may already be on
+disk while the package database still records the old version, and
+`opkg configure` does nothing because no package is in the "unpacked" state.
+The running daemon is untouched and the kill-switch stays armed. Recovery is
+to run the same install command again (`opkg install <file>.ipk` or
+`apk add --allow-untrusted <file>.apk`): it completes the transaction and
+restarts the daemon through the new init script. Reproduced on OpenWrt 21.02
+and 25.12 (failure-injection and recovery suites, scenario 8).
+
 ## Kill-switch stays on after `nym-vpnd stop`
 
 `/etc/init.d/nym-vpnd stop` opens the network by writing a stop marker into
