@@ -149,6 +149,14 @@ the daemon's own fallback to defaults for an unreadable config. A `firewall relo
 daemon is up never touches a live policy: the include sees `inet nym` (or the fw3 rules file) and
 at most removes a stale boot block.
 
+Only an explicit `stop` opens the router. `/etc/init.d/nym-vpnd restart` and a package upgrade
+(`prerm` stops, `postinst` starts the new daemon seconds later) leave the kill-switch armed for the
+gap: with the kill-switch on the daemon keeps its Blocked policy in place on shutdown, the init
+script writes no stop marker and tears nothing down (rc.common runs `restart` in one process, so the
+stop hooks see `action=restart`; `prerm` sets `NYM_VPND_KEEP_KILLSWITCH=1`), and the new daemon
+replaces the stale policy atomically on its first apply. If the new daemon never comes up, `stop`
+is what opens the network again.
+
 Two orderings make the racy cases converge instead of leaving a block nobody removes. The daemon
 applies its table before it deletes the boot block and persists a kill-switch toggle before it
 opens the firewall; the include installs first and then re-checks both the daemon's table and the

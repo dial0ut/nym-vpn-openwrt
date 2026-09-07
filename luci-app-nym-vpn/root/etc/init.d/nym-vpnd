@@ -9,6 +9,18 @@ USE_PROCD=1
 # daemon is coming to lift it. /tmp is tmpfs, so a reboot re-arms the block.
 STOPPED_MARKER=/tmp/nym-vpnd.stopped
 
+# Only an explicit `stop` opens the network. A `restart` and a package
+# upgrade (prerm stops, postinst starts seconds later) must leave the
+# kill-switch armed for the gap: the daemon keeps its Blocked policy in
+# place on shutdown while the kill-switch is on, and the next daemon
+# replaces it atomically on its first apply. rc.common runs `restart` as
+# the stop and start functions of one process, so $action is still
+# "restart" in the stop hooks; prerm exports NYM_VPND_KEEP_KILLSWITCH=1.
+keep_killswitch() {
+    # shellcheck disable=SC2154  # action is set by rc.common
+    [ "$action" = "restart" ] || [ "${NYM_VPND_KEEP_KILLSWITCH:-0}" = "1" ]
+}
+
 start_service() {
     rm -f "$STOPPED_MARKER"
 
@@ -37,7 +49,7 @@ STOP_PID_STASH=/tmp/nym-vpnd.stop-pid
 stop_service() {
     # First thing, before anything can fail or block: a reload racing this
     # stop must already see the marker.
-    touch "$STOPPED_MARKER" 2>/dev/null
+    keep_killswitch || touch "$STOPPED_MARKER" 2>/dev/null
 
     # Stash the daemon pid before procd kills it: service_stopped() needs
     # it, and pidof is useless there — rc.common itself runs with comm
@@ -78,6 +90,17 @@ service_stopped() {
         sleep 1
         i=$((i + 1))
     done
+
+    # Restart or upgrade: the kill-switch stays armed. The daemon left its
+    # policy (fw4: inet nym; fw3: chains plus the persisted rules files), a
+    # boot block that may exist is lifted by the next daemon's first apply,
+    # and a reload meanwhile finds no stop marker and keeps the block. If
+    # the new daemon never comes up, `stop` is what opens the router.
+    if keep_killswitch; then
+        logger -t nym-vpn "nym-vpnd $action: leaving the kill-switch armed"
+        return 0
+    fi
+
     nft delete table inet nym 2>/dev/null || true
     # The boot-time block (fw4-include.sh) would otherwise outlive the daemon
     # that was supposed to lift it; the stop marker keeps reloads from

@@ -11,9 +11,16 @@ if [ "$PKG_UPGRADE" = "1" ]; then
     } > /tmp/nym-vpn.rpcd-state
 fi
 
-# Stop the services: the binaries are about to be replaced either way.
+# Stop the services: the binaries are about to be replaced either way. On an
+# upgrade the kill-switch stays armed across the gap until postinst starts the
+# new daemon: the init script skips the stop marker and the firewall teardown
+# (see keep_killswitch there), and the firewall cleanup below is removal-only.
 /etc/init.d/nym-vpn-watchdog stop 2>/dev/null
-/etc/init.d/nym-vpnd stop 2>/dev/null
+if [ "$PKG_UPGRADE" = "1" ]; then
+    NYM_VPND_KEEP_KILLSWITCH=1 /etc/init.d/nym-vpnd stop 2>/dev/null
+else
+    /etc/init.d/nym-vpnd stop 2>/dev/null
+fi
 
 # Disabling is for real removal only. On an upgrade the boot symlinks must
 # survive: postinst re-creates them, but if postinst never runs (a failed or
@@ -25,6 +32,13 @@ if [ "$PKG_UPGRADE" != "1" ]; then
     /etc/init.d/nym-vpn-watchdog disable 2>/dev/null
     /etc/init.d/nym-vpnd disable 2>/dev/null
 fi
+
+# Firewall teardown is for real removal only. On an upgrade the daemon's
+# policy, the boot block and the fw3 rules files stay: the new daemon
+# replaces them atomically on its first apply (fw4 re-creates its table and
+# adds jumps only when absent; fw3 restores over existing chains), and
+# tearing them down here would open WAN egress for the whole transaction.
+if [ "$PKG_UPGRADE" != "1" ]; then
 
 # The boot-time kill-switch block (fw4-include.sh, fw-boot-guard.sh) must not
 # outlive the package: with the daemon gone nothing else would ever lift it.
@@ -87,6 +101,13 @@ else
     done
 fi
 
+# The persisted fw3 policy and transition marker are the include's reload
+# state; the fw4 script is the daemon's. Removal only, for the same reason.
+rm -f /tmp/nym-firewall-v4.rules /tmp/nym-firewall-v6.rules /tmp/nym-firewall.nft \
+    /tmp/nym-firewall.ifaces /tmp/nym-firewall.transition 2>/dev/null
+
+fi # PKG_UPGRADE != 1
+
 # Defensive: flush any stray ip rule entries our daemon may have installed.
 # These are normally cleared by the daemon's clear_routing_rules() on stop,
 # but a crashed daemon can leave them behind. Match by our specific fwmark
@@ -107,8 +128,6 @@ if [ "$PKG_UPGRADE" != "1" ]; then
 fi
 
 # Clean up temporary files (safe on both upgrade and removal)
-rm -f /tmp/nym-firewall-v4.rules /tmp/nym-firewall-v6.rules /tmp/nym-firewall.nft \
-    /tmp/nym-firewall.ifaces /tmp/nym-firewall.transition 2>/dev/null
 rm -f /tmp/dnsmasq.d/nym-adblock.conf 2>/dev/null
 rm -f /tmp/nym-dns-backup /tmp/resolv.conf.nymbackup 2>/dev/null
 rm -f /tmp/nym-watchdog.state 2>/dev/null
