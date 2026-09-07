@@ -5,7 +5,8 @@
 # prior case has Connected at least once), the firewall should be in Blocked
 # mode with API + DNS exemptions. Concretely:
 #   - LAN client cannot reach the open internet
-#   - The router itself CAN reach validator.nymtech.net (API whitelist)
+#   - The daemon CAN reach the Nym API (resolved endpoints, root-scoped;
+#     the router shell cannot resolve names — only the daemon DNS hatch is open)
 #
 # When KS=off, the firewall should be reset (no table inet nym), and the LAN
 # client should have unrestricted forwarding through WAN.
