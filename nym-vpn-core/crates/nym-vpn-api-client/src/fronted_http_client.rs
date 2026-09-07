@@ -17,9 +17,14 @@ use nym_network_defaults::ApiUrl;
 pub use nym_http_api_client::FrontPolicy;
 
 /// Every client this crate builds for a fronting-capable URL follows the
-/// http-api-client's process-wide shared fronting policy, so a policy change
-/// reaches clients that already exist (account controller, gateway directory,
-/// discovery refresher) on their next request without rebuilding anything.
+/// http-api-client's process-wide shared fronting policy. A policy change
+/// therefore reaches clients that already exist without rebuilding anything,
+/// on one condition: a long-lived client must call [`prefer_fronted_base_url`]
+/// before each request (`VpnApiClient::client` and the gateway directory's
+/// nym-api accessor do), because the library only fronts through the current
+/// base URL and never moves off a plain host on its own until a request
+/// fails. Clients built per request (discovery, topology, diagnostics) get the
+/// same treatment from [`fronted_http_client`] at construction.
 ///
 /// The library initialises that shared policy to `Off`; this crate has always
 /// fronted on retry. Seed the shared policy with `OnRetry` the first time
@@ -35,6 +40,10 @@ fn init_shared_front_policy() {
 
 /// Mirror of whether the shared policy is `Always`; the library keeps its
 /// policy private, and [`prefer_fronted_base_url`] needs to know.
+///
+/// Hazard: this is only correct while every policy change in the process goes
+/// through [`set_shared_front_policy`]. A direct `Client::set_shared_front_policy`
+/// call desynchronises the two and silently disables the base-URL step.
 static FRONT_ALWAYS: AtomicBool = AtomicBool::new(false);
 
 /// Set the domain-fronting policy for every fronting-capable client built by
@@ -216,10 +225,12 @@ fn parse_url(s: &str) -> Result<url::Url, VpnApiClientError> {
 mod tests {
     use super::*;
     use nym_http_api_client::{ApiClient, NO_PARAMS, PathSegments};
-    use std::sync::Mutex;
+    use tokio::sync::Mutex;
 
-    // The tests below drive the process-wide policy; serialise them.
-    static POLICY_LOCK: Mutex<()> = Mutex::new(());
+    // The tests below drive the process-wide policy; serialise them. An async
+    // lock: it is held across awaits, and a failing test must not poison it
+    // for the others.
+    static POLICY_LOCK: Mutex<()> = Mutex::const_new(());
 
     /// Same shape as the mainnet discovery: plain host first, fronted
     /// fallback second.
@@ -256,7 +267,7 @@ mod tests {
 
     #[tokio::test]
     async fn always_policy_fronts_from_the_first_request() {
-        let _guard = POLICY_LOCK.lock().unwrap();
+        let _guard = POLICY_LOCK.lock().await;
         set_shared_front_policy(FrontPolicy::Always);
 
         // Built while the policy is on: fronted straight away.
@@ -280,9 +291,33 @@ mod tests {
         set_shared_front_policy(DEFAULT_FRONT_POLICY);
     }
 
+    /// A client that outlives a policy change: built direct, then Stealth API
+    /// switched on. The per-request step (what `VpnApiClient::client` and the
+    /// gateway directory accessor do) is what moves it onto the cover domain.
+    #[tokio::test]
+    async fn runtime_toggle_reaches_an_existing_client_before_its_next_request() {
+        let _guard = POLICY_LOCK.lock().await;
+        set_shared_front_policy(DEFAULT_FRONT_POLICY);
+
+        let client = fronted_http_client(discovery_shaped_urls(), None, None, None)
+            .await
+            .unwrap();
+        assert_eq!(first_request_target(&client).0, "api.example.com");
+
+        set_shared_front_policy(FrontPolicy::Always);
+        // Without the step the client would still send direct.
+        assert_eq!(first_request_target(&client).0, "api.example.com");
+        prefer_fronted_base_url(&client);
+        let (connect_host, host_header) = first_request_target(&client);
+        assert_eq!(connect_host, "cover.example.org");
+        assert_eq!(host_header.as_deref(), Some("frontdoor.example.net"));
+
+        set_shared_front_policy(DEFAULT_FRONT_POLICY);
+    }
+
     #[tokio::test]
     async fn default_policy_starts_direct() {
-        let _guard = POLICY_LOCK.lock().unwrap();
+        let _guard = POLICY_LOCK.lock().await;
         set_shared_front_policy(DEFAULT_FRONT_POLICY);
 
         let client = fronted_http_client(discovery_shaped_urls(), None, None, None)

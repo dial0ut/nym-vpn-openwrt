@@ -18,7 +18,7 @@ mod v8;
 #[cfg(test)]
 mod tests;
 
-pub use config_manager::VpnServiceConfigManager;
+pub use config_manager::{VpnServiceConfigManager, install_persisted_front_policy};
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
