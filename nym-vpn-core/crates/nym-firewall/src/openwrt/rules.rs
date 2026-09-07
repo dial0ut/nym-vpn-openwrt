@@ -99,6 +99,9 @@ pub struct Match {
     pub oif: Option<String>,
     /// `iifname != "X"` / `! -i X` — used for CVE-2019-14899 protection.
     pub iif_not: Option<String>,
+    /// `oifname != "X"` / `! -o X` — used to admit private custom DNS
+    /// servers on every interface except the WAN.
+    pub oif_not: Option<String>,
     pub saddr: Option<AddrMatch>,
     pub daddr: Option<AddrMatch>,
     pub proto: Option<Proto>,
@@ -160,6 +163,10 @@ impl Rule {
     }
     pub fn iif_not(mut self, iface: impl Into<String>) -> Self {
         self.matches.iif_not = Some(iface.into());
+        self
+    }
+    pub fn oif_not(mut self, iface: impl Into<String>) -> Self {
+        self.matches.oif_not = Some(iface.into());
         self
     }
     pub fn saddr(mut self, addr: impl Into<AddrMatch>) -> Self {

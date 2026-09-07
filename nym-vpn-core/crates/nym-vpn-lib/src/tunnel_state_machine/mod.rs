@@ -180,6 +180,23 @@ impl TunnelSettings {
             .collect()
     }
 
+    /// The daemon's own resolvers plus any *private* custom DNS server the
+    /// user configured (a LAN Pi-hole). The idle and connecting policies
+    /// admit the former to the daemon only and the latter on every
+    /// interface but the WAN, so a LAN resolver keeps working while the
+    /// tunnel is down.
+    pub fn idle_dns_ips(&self) -> Vec<IpAddr> {
+        let mut ips = self.default_dns_ips();
+        if let DnsOptions::Custom(_) = self.dns {
+            ips.extend(
+                self.dns_ips()
+                    .into_iter()
+                    .filter(|ip| nym_firewall_config::is_local_address(ip) && !ip.is_loopback()),
+            );
+        }
+        ips
+    }
+
     pub fn bridges_enabled(&self) -> bool {
         matches!(self.tunnel_type, TunnelType::Wireguard)
             && self.wireguard_tunnel_options.enable_bridges
@@ -702,7 +719,7 @@ pub(crate) fn idle_blocked_policy(
     FirewallPolicy::Blocked {
         allow_lan: tunnel_settings.allow_lan,
         allowed_endpoints,
-        dns_servers: tunnel_settings.default_dns_ips(),
+        dns_servers: tunnel_settings.idle_dns_ips(),
     }
 }
 

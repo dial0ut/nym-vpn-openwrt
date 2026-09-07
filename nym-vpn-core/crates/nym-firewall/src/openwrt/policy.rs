@@ -66,7 +66,47 @@ enum DnsAccess {
 }
 
 /// Compile a [`FirewallPolicy`] into a backend-neutral [`RuleSet`].
+///
+/// The WAN interface is looked up only when the policy carries a private
+/// custom DNS server, which is the one rule that needs it (see
+/// [`allow_private_dns_server`]).
 pub fn compile(policy: &FirewallPolicy) -> RuleSet {
+    let wan = if policy_has_private_dns(policy) {
+        let wan = common::detect_wan_iface();
+        if wan.is_none() {
+            tracing::warn!(
+                "A private custom DNS server is configured but the WAN interface could not be \
+                 detected; admitting it through the tunnel only (fail closed)"
+            );
+        }
+        wan
+    } else {
+        None
+    };
+    compile_with_wan(policy, wan.as_deref())
+}
+
+/// A private (RFC1918, link-local, ULA) address as a DNS server. Loopback is
+/// not "private" here: a resolver on the router itself is reached over `lo`,
+/// which the base rules accept unconditionally.
+fn is_private_dns(ip: &IpAddr) -> bool {
+    nym_firewall_config::is_local_address(ip) && !ip.is_loopback()
+}
+
+fn policy_has_private_dns(policy: &FirewallPolicy) -> bool {
+    match policy {
+        FirewallPolicy::Connecting { dns_config, .. }
+        | FirewallPolicy::Connected { dns_config, .. } => {
+            dns_config.non_tunnel_config().iter().any(is_private_dns)
+        }
+        FirewallPolicy::Blocked { dns_servers, .. } => dns_servers.iter().any(is_private_dns),
+    }
+}
+
+/// [`compile`] with the WAN interface supplied by the caller (`None` when it
+/// is unknown, which makes private custom DNS servers fall back to today's
+/// tunnel-only treatment).
+pub(crate) fn compile_with_wan(policy: &FirewallPolicy, wan: Option<&str>) -> RuleSet {
     let mut rs = RuleSet::default();
 
     base_rules(&mut rs);
@@ -89,9 +129,13 @@ pub fn compile(policy: &FirewallPolicy) -> RuleSet {
             }
             // Daemon-only, like Blocked: the daemon resolves in-process as
             // root, and mid-connect is precisely when dnsmasq must not relay
-            // LAN queries out the WAN.
+            // LAN queries out the WAN. A private custom resolver (a LAN
+            // Pi-hole) is the exception: admitted on every interface but the
+            // WAN, for the router and LAN clients alike.
             for dns in dns_config.non_tunnel_config() {
-                allow_dns_server_daemon_only(&mut rs, *dns);
+                if !allow_private_dns_server(&mut rs, *dns, wan) {
+                    allow_dns_server_daemon_only(&mut rs, *dns);
+                }
             }
             // Tunnel interface rules must come before the DNS block so that
             // DNS routed through the tunnel isn't caught by the kill-switch.
@@ -144,9 +188,22 @@ pub fn compile(policy: &FirewallPolicy) -> RuleSet {
                     allow_dns_server(&mut rs, *dns, Some(&m.interface));
                 }
             }
-            // Non-tunnel DNS: any interface (typically WAN-side resolvers).
+            // Non-tunnel DNS. Private custom resolvers (a LAN Pi-hole) are
+            // admitted on every interface but the WAN; when the WAN is unknown
+            // they get the tunnel-only treatment of the public ones — fail
+            // closed rather than any-interface. Public non-tunnel resolvers
+            // keep their historical any-interface accept.
             for dns in dns_config.non_tunnel_config() {
-                allow_dns_server(&mut rs, *dns, None);
+                if allow_private_dns_server(&mut rs, *dns, wan) {
+                    continue;
+                }
+                if is_private_dns(dns) {
+                    for m in tunnel.inner_metadatas() {
+                        allow_dns_server(&mut rs, *dns, Some(&m.interface));
+                    }
+                } else {
+                    allow_dns_server(&mut rs, *dns, None);
+                }
             }
             for m in tunnel.inner_metadatas() {
                 allow_tunnel(&mut rs, &m.interface);
@@ -184,8 +241,13 @@ pub fn compile(policy: &FirewallPolicy) -> RuleSet {
             // the kill switch claimed to block DNS (packet-capture confirmed).
             // dnsmasq runs as user `dnsmasq`, so uid-0 scoping fails it closed
             // while the daemon's reconnect bootstrap still passes.
+            // A private custom resolver (a LAN Pi-hole) stays reachable for
+            // the router and the LAN while disconnected, on every interface
+            // but the WAN.
             for dns in dns_servers {
-                allow_dns_server_daemon_only(&mut rs, *dns);
+                if !allow_private_dns_server(&mut rs, *dns, wan) {
+                    allow_dns_server_daemon_only(&mut rs, *dns);
+                }
             }
             // Must precede block_dns: an excluded client with hardcoded DNS
             // (Chromecasts, consoles) forwards port 53, and the reject is
@@ -455,6 +517,65 @@ fn allow_dns_server_daemon_only(rs: &mut RuleSet, dns: IpAddr) {
 /// to reach it too when not iface-restricted.
 fn allow_dns_server(rs: &mut RuleSet, dns: IpAddr, iface: Option<&str>) {
     allow_dns_server_inner(rs, dns, iface, DnsAccess::RouterAndLan);
+}
+
+/// Admit a **private** custom DNS server on every interface except the WAN,
+/// for the router and forwarded LAN clients, in every kill-switch state.
+///
+/// "Private" is not "LAN": behind another router the upstream is
+/// 192.168.x.1, so admitting a private resolver on *any* interface would
+/// hand every lookup to the ISP path. Excluding the WAN interface keeps a LAN
+/// Pi-hole working while a WAN-side private resolver stays rejected like any
+/// public one. The Pi-hole's own upstream lookups are LAN-to-WAN forwards and
+/// still hit the forward rules. Same port set as every other DNS accept
+/// (53/udp+tcp, DoT 853, DoH 443), unscoped by uid on purpose: dnsmasq runs
+/// as its own user and LAN clients' queries to the router are INPUT.
+///
+/// Returns `false` — and emits nothing — when the address is not private or
+/// the WAN interface is unknown; the caller then applies its usual treatment
+/// (fail closed).
+fn allow_private_dns_server(rs: &mut RuleSet, dns: IpAddr, wan: Option<&str>) -> bool {
+    if !is_private_dns(&dns) {
+        return false;
+    }
+    let Some(wan) = wan else {
+        return false;
+    };
+    let family = family_of(&dns);
+    let pairs = [
+        (Proto::Udp, DNS_PORT),
+        (Proto::Tcp, DNS_PORT),
+        (Proto::Tcp, DOT_PORT),
+        (Proto::Tcp, DOH_PORT),
+    ];
+    for (proto, port) in pairs {
+        rs.filter.output.push(
+            Rule::accept(family)
+                .proto(proto)
+                .daddr(dns)
+                .dport(port)
+                .oif_not(wan),
+        );
+        rs.filter.input.push(
+            Rule::accept(family)
+                .proto(proto)
+                .saddr(dns)
+                .sport(port)
+                .iif_not(wan),
+        );
+    }
+    // Forwarded LAN clients asking the resolver directly (multi-LAN setups;
+    // same-segment clients never traverse the router).
+    for proto in [Proto::Udp, Proto::Tcp] {
+        rs.filter.forward.push(
+            Rule::accept(family)
+                .proto(proto)
+                .daddr(dns)
+                .dport(DNS_PORT)
+                .oif_not(wan),
+        );
+    }
+    true
 }
 
 fn allow_dns_server_inner(
@@ -1422,6 +1543,213 @@ mod tests {
                     assert_eq!(r.matches.skuid, None, "Connected must have no skuid rules: {r:?}");
                 }
             }
+        }
+    }
+
+    // ---------- private custom DNS off the WAN ----------
+
+    fn accepts_to(rs: &RuleSet, dns: IpAddr) -> Vec<&Rule> {
+        rs.filter
+            .output
+            .rules
+            .iter()
+            .filter(|r| {
+                r.verdict == Verdict::Accept
+                    && matches!(&r.matches.daddr, Some(AddrMatch::Ip(ip)) if *ip == dns)
+            })
+            .collect()
+    }
+
+    fn block_dns_at(rs: &RuleSet) -> usize {
+        rs.filter
+            .output
+            .rules
+            .iter()
+            .position(|r| {
+                r.verdict == Verdict::Reject
+                    && r.matches.dport == Some(DNS_PORT)
+                    && r.matches.daddr.is_none()
+            })
+            .expect("block_dns present")
+    }
+
+    fn states_with_private_dns(pihole: IpAddr) -> Vec<(&'static str, FirewallPolicy)> {
+        vec![
+            (
+                "blocked",
+                FirewallPolicy::Blocked {
+                    allow_lan: true,
+                    allowed_endpoints: vec![],
+                    dns_servers: vec!["9.9.9.9".parse().unwrap(), pihole],
+                },
+            ),
+            (
+                "connecting",
+                FirewallPolicy::Connecting {
+                    peer_endpoints: vec![ep([1, 2, 3, 4], 443)],
+                    tunnel: None,
+                    allow_lan: true,
+                    dns_config: dns_config(&[], &["9.9.9.9".parse().unwrap(), pihole]),
+                    allowed_endpoints: vec![],
+                    allowed_entry_tunnel_traffic: AllowedTunnelTraffic::All,
+                    allowed_exit_tunnel_traffic: AllowedTunnelTraffic::All,
+                    inbound_exemptions: vec![],
+                },
+            ),
+            (
+                "connected",
+                FirewallPolicy::Connected {
+                    peer_endpoints: vec![ep([1, 2, 3, 4], 51820)],
+                    tunnel: tunnel_iface("nym0", [10, 64, 0, 2]),
+                    allow_lan: true,
+                    dns_config: dns_config(&["9.9.9.9".parse().unwrap()], &[pihole]),
+                    allowed_endpoints: vec![],
+                    inbound_exemptions: vec![],
+                },
+            ),
+        ]
+    }
+
+    /// A private custom resolver (a LAN Pi-hole) is admitted for the router
+    /// and forwarded LAN clients on every interface except the WAN, in every
+    /// kill-switch state, ahead of `block_dns`, and renders on both backends.
+    #[test]
+    fn private_custom_dns_is_admitted_off_wan_in_every_state() {
+        let pihole: IpAddr = "10.0.0.2".parse().unwrap();
+        for (name, policy) in states_with_private_dns(pihole) {
+            let rs = compile_with_wan(&policy, Some("eth1"));
+
+            let out = accepts_to(&rs, pihole);
+            assert_eq!(out.len(), 4, "{name}: udp/53, tcp/53, DoT, DoH");
+            for r in &out {
+                assert_eq!(r.matches.oif_not.as_deref(), Some("eth1"), "{name}");
+                assert!(
+                    r.matches.oif.is_none(),
+                    "{name}: not pinned to an interface"
+                );
+                assert!(r.matches.skuid.is_none(), "{name}: dnsmasq is not root");
+            }
+            let first = rs
+                .filter
+                .output
+                .rules
+                .iter()
+                .position(|r| matches!(&r.matches.daddr, Some(AddrMatch::Ip(ip)) if *ip == pihole))
+                .unwrap();
+            assert!(
+                first < block_dns_at(&rs),
+                "{name}: accept precedes block_dns"
+            );
+
+            let fwd = rs.filter.forward.rules.iter().any(|r| {
+                r.verdict == Verdict::Accept
+                    && matches!(&r.matches.daddr, Some(AddrMatch::Ip(ip)) if *ip == pihole)
+                    && r.matches.oif_not.as_deref() == Some("eth1")
+            });
+            assert!(fwd, "{name}: LAN clients may reach it, not via the WAN");
+
+            let nft = super::super::render_nft::render(&rs);
+            assert!(
+                nft.lines().any(|l| {
+                    l.contains("oifname != \"eth1\"")
+                        && l.contains("ip daddr 10.0.0.2")
+                        && l.contains("udp dport 53")
+                        && l.trim_end().ends_with("accept")
+                }),
+                "{name}: nft render\n{nft}"
+            );
+            let v4 = super::super::render_iptables::render(
+                &rs,
+                super::super::render_iptables::AddrFamily::V4,
+            );
+            assert!(
+                v4.lines().any(|l| {
+                    l.contains("! -o eth1")
+                        && l.contains("-d 10.0.0.2")
+                        && l.contains("--dport 53")
+                        && l.contains("-j ACCEPT")
+                }),
+                "{name}: iptables render\n{v4}"
+            );
+
+            // The public resolver in the same policy is unchanged: daemon-only
+            // while the tunnel is down, tunnel-only while connected.
+            let quad9: IpAddr = "9.9.9.9".parse().unwrap();
+            for r in accepts_to(&rs, quad9) {
+                assert!(
+                    r.matches.oif_not.is_none(),
+                    "{name}: public resolver untouched"
+                );
+                match name {
+                    "connected" => assert_eq!(r.matches.oif.as_deref(), Some("nym0")),
+                    _ => assert_eq!(r.matches.skuid, Some(crate::ROOT_UID)),
+                }
+            }
+        }
+    }
+
+    /// Without a known WAN interface the private resolver gets the fail-closed
+    /// treatment of its state: tunnel-only when connected, daemon-only when
+    /// not, and never an any-interface accept.
+    #[test]
+    fn private_custom_dns_falls_back_to_tunnel_only_without_a_wan() {
+        let pihole: IpAddr = "10.0.0.2".parse().unwrap();
+        for (name, policy) in states_with_private_dns(pihole) {
+            let rs = compile_with_wan(&policy, None);
+            let out = accepts_to(&rs, pihole);
+            assert!(!out.is_empty(), "{name}");
+            for r in &out {
+                assert!(r.matches.oif_not.is_none(), "{name}");
+                match name {
+                    "connected" => assert_eq!(r.matches.oif.as_deref(), Some("nym0"), "{name}"),
+                    _ => assert_eq!(r.matches.skuid, Some(crate::ROOT_UID), "{name}"),
+                }
+            }
+            assert!(
+                !rs.filter.forward.rules.iter().any(|r| {
+                    r.verdict == Verdict::Accept
+                        && matches!(&r.matches.daddr, Some(AddrMatch::Ip(ip)) if *ip == pihole)
+                }),
+                "{name}: no forward accept without a WAN"
+            );
+        }
+    }
+
+    #[test]
+    fn private_custom_dns_ipv6_ula_is_admitted_off_wan() {
+        let ula: IpAddr = "fd00::53".parse().unwrap();
+        let policy = FirewallPolicy::Blocked {
+            allow_lan: true,
+            allowed_endpoints: vec![],
+            dns_servers: vec![ula],
+        };
+        let rs = compile_with_wan(&policy, Some("eth1"));
+        let out = accepts_to(&rs, ula);
+        assert_eq!(out.len(), 4);
+        for r in &out {
+            assert_eq!(r.family, Family::V6);
+            assert_eq!(r.matches.oif_not.as_deref(), Some("eth1"));
+        }
+        let nft = super::super::render_nft::render(&rs);
+        assert!(nft.contains("oifname != \"eth1\" ip6 daddr fd00::53 udp dport 53 accept"));
+    }
+
+    #[test]
+    fn private_dns_classification() {
+        let yes = [
+            "10.0.0.2",
+            "172.16.5.5",
+            "192.168.1.1",
+            "169.254.1.1",
+            "fd00::1",
+            "fe80::1",
+        ];
+        let no = ["100.64.0.1", "8.8.8.8", "127.0.0.1", "::1", "2620:fe::fe"];
+        for ip in yes {
+            assert!(is_private_dns(&ip.parse().unwrap()), "{ip} is private");
+        }
+        for ip in no {
+            assert!(!is_private_dns(&ip.parse().unwrap()), "{ip} is not private");
         }
     }
 }

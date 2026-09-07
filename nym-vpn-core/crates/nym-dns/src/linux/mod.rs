@@ -68,12 +68,22 @@ impl super::DnsMonitorT for DnsMonitor {
     }
 
     async fn set(&mut self, interface: &str, config: ResolvedDnsConfig) -> Result<()> {
-        let servers = config.tunnel_config();
+        // Tunnel resolvers first, then the non-tunnel ones: a custom resolver
+        // on a private address (a LAN Pi-hole) is deliberately not routed
+        // through the tunnel, but it is still the resolver the user asked
+        // for, so dnsmasq must be pointed at it; the firewall admits it on
+        // every interface but the WAN.
+        let servers: Vec<IpAddr> = config
+            .tunnel_config()
+            .iter()
+            .chain(config.non_tunnel_config())
+            .copied()
+            .collect();
         self.reset().await?;
         // Creating a new DNS monitor for each set, in case the system changed how it manages DNS.
         let mut inner = DnsMonitorHolder::new()?;
         if !servers.is_empty() {
-            inner.set(&self.route_manager, interface, servers).await?;
+            inner.set(&self.route_manager, interface, &servers).await?;
             self.inner = Some(inner);
         }
         Ok(())

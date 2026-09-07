@@ -113,8 +113,10 @@ impl ConnectingState {
                     .map(|v| v.entry_gateway().lp_endpoints())
                     .unwrap_or_default(),
                 api_endpoints: Vec::new(),
-                // Allow default DNS servers since hickory does not rely on custom DNS
-                dns_servers: shared_state.tunnel_settings.default_dns_ips(),
+                // The daemon's own resolvers (hickory does not rely on custom
+                // DNS) plus a private custom resolver, which the policy admits
+                // off-WAN for the LAN while connecting.
+                dns_servers: shared_state.tunnel_settings.idle_dns_ips(),
                 tunnel_interface: None,
                 inbound_exemptions: shared_state.tunnel_settings.inbound_exemptions.clone(),
             };

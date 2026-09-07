@@ -90,6 +90,9 @@ fn render_rule(rule: &Rule) -> String {
     if let Some(iface) = &m.iif_not {
         parts.push(format!("iifname != \"{iface}\""));
     }
+    if let Some(iface) = &m.oif_not {
+        parts.push(format!("oifname != \"{iface}\""));
+    }
     if let Some(ct) = m.ct_state {
         match ct {
             CtState::EstablishedRelated => parts.push("ct state established,related".into()),
@@ -230,6 +233,19 @@ mod tests {
         assert_eq!(
             render_rule(&rule),
             "iifname != \"wg0\" ip daddr 10.64.0.2 drop"
+        );
+    }
+
+    #[test]
+    fn renders_output_interface_negation() {
+        let rule = Rule::accept(Family::V4)
+            .oif_not("eth1")
+            .proto(Proto::Udp)
+            .daddr(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)))
+            .dport(53);
+        assert_eq!(
+            render_rule(&rule),
+            "oifname != \"eth1\" ip daddr 10.0.0.2 udp dport 53 accept"
         );
     }
 
