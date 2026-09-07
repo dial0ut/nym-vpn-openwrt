@@ -11,14 +11,14 @@ if [ "$PKG_UPGRADE" = "1" ]; then
     } > /tmp/nym-vpn.rpcd-state
 fi
 
-# Stop the services: the binaries are about to be replaced either way. On an
-# upgrade the kill-switch stays armed across the gap until postinst starts the
-# new daemon: the init script skips the stop marker and the firewall teardown
-# (see keep_killswitch there), and the firewall cleanup below is removal-only.
+# Stop the watchdog: it would fight the restart postinst does. On an upgrade
+# the daemon itself keeps running through the file swap (Linux keeps the old
+# binary alive on its unlinked inode) and postinst restarts it through the
+# newly installed init script, whose restart path keeps the kill-switch
+# armed. The init script on disk at this point is the old package's, so
+# nothing here relies on what its stop would do. Real removal stops both.
 /etc/init.d/nym-vpn-watchdog stop 2>/dev/null
-if [ "$PKG_UPGRADE" = "1" ]; then
-    NYM_VPND_KEEP_KILLSWITCH=1 /etc/init.d/nym-vpnd stop 2>/dev/null
-else
+if [ "$PKG_UPGRADE" != "1" ]; then
     /etc/init.d/nym-vpnd stop 2>/dev/null
 fi
 

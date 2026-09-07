@@ -9,16 +9,16 @@ USE_PROCD=1
 # daemon is coming to lift it. /tmp is tmpfs, so a reboot re-arms the block.
 STOPPED_MARKER=/tmp/nym-vpnd.stopped
 
-# Only an explicit `stop` opens the network. A `restart` and a package
-# upgrade (prerm stops, postinst starts seconds later) must leave the
-# kill-switch armed for the gap: the daemon keeps its Blocked policy in
-# place on shutdown while the kill-switch is on, and the next daemon
-# replaces it atomically on its first apply. rc.common runs `restart` as
-# the stop and start functions of one process, so $action is still
-# "restart" in the stop hooks; prerm exports NYM_VPND_KEEP_KILLSWITCH=1.
+# Only an explicit `stop` opens the network. A `restart` — which is also
+# how a package upgrade swaps the daemon (postinst restarts through this
+# script) — leaves the kill-switch armed for the gap: the daemon keeps its
+# Blocked policy in place on shutdown while the kill-switch is on, and the
+# next daemon replaces it atomically on its first apply. rc.common runs
+# `restart` as the stop and start functions of one process, so $action is
+# still "restart" in the stop hooks.
 keep_killswitch() {
     # shellcheck disable=SC2154  # action is set by rc.common
-    [ "$action" = "restart" ] || [ "${NYM_VPND_KEEP_KILLSWITCH:-0}" = "1" ]
+    [ "$action" = "restart" ]
 }
 
 start_service() {

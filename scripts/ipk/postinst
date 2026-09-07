@@ -71,7 +71,12 @@ if [ -z "${IPKG_INSTROOT:-}" ] && [ -x /etc/uci-defaults/luci-app-nym-vpn ]; the
 fi
 
 /etc/init.d/nym-vpnd enable
-/etc/init.d/nym-vpnd start
+# restart, not start: on an upgrade the previous daemon is still running
+# (prerm leaves it up) and procd's start is a no-op for a running instance.
+# This is the freshly installed init script, so its restart path keeps the
+# kill-switch armed while the binary is swapped. On a fresh install restart
+# is just a start.
+/etc/init.d/nym-vpnd restart
 
 # Enable watchdog if always_on was previously set (e.g. upgrade)
 if [ "$(uci -q get nym-vpn.settings.always_on)" = "1" ]; then
