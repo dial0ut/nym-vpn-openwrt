@@ -209,12 +209,14 @@ pct_create_alpine() {
         netcfg="$netcfg,ip=dhcp"
     fi
 
+    # Errors are the one thing worth seeing here (a CTID collision, a full
+    # storage, a template that failed to download), so stderr stays.
     pmx "pct create $ctid local:vztmpl/$tmpl \
         --hostname $hostname \
         --memory 128 --swap 64 --rootfs local-lvm:1 \
         --net0 $netcfg \
         --features nesting=1 --unprivileged 1 --onboot 0" \
-        >/dev/null 2>&1
+        >/dev/null
 
     pmx "pct start $ctid"
     sleep 3

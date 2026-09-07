@@ -29,6 +29,9 @@ DNS_IP="10.9${SLOT}.0.2"
 DNS_CIDR="10.9${SLOT}.0.2/24"
 
 log() { printf '[slot%s] %s\n' "$SLOT" "$*" >&2; }
+# set -e aborts silently otherwise; name the step so a failed provision is
+# diagnosable from the slot log alone.
+trap 'log "provision failed at line $LINENO: $BASH_COMMAND"' ERR
 
 log "ensuring bridge $BRIDGE"
 bridge_ensure "$BRIDGE"
