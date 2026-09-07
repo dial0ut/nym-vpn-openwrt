@@ -9,10 +9,32 @@
 //! Atomic application via `iptables-restore --noflush`. Masquerade lives in
 //! its own chain (`NYM_POSTROUTING` in the `nat` table) so re-applies
 //! flush + repopulate without touching anyone else's NAT rules.
+//!
+//! # What fw3 does to our rules, and what this backend can promise
+//!
+//! `fw3 reload` (`fw3_flush_rules(..., reload=true)` in firewall3) deletes
+//! only fw3's own tagged rules from the built-in chains and explicitly
+//! skips the user `*_rule` chains; chains fw3 did not create are never on
+//! its list. Our `NYM_*` chains and our jumps in `output_rule` /
+//! `forwarding_rule` therefore survive a reload untouched, and the include
+//! fw3 runs afterwards only reconciles: re-hooks a jump a foreign rule got
+//! ahead of, lifts a stale emergency block, converges on the persisted
+//! state (idempotent).
+//!
+//! `fw3 restart` and `fw3 stop` are different: they flush every table,
+//! built-in policies included, `start` rebuilds fw3's own rules and runs
+//! the includes *last*. The persisted restore scripts exist so the include
+//! can rebuild our policy at that point. Between the flush and the include
+//! there is a window with no kill-switch and an ACCEPT policy; it is fw3's
+//! own, no include or lock can close it, and this backend does not claim to.
+//! The transition marker and the lock cover crashes and concurrency of
+//! *our* writers, not fw3's restart.
 
 use std::fs::File;
 use std::io::Write as IoWrite;
+use std::os::unix::fs::OpenOptionsExt;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use nix::errno::Errno;
@@ -20,7 +42,8 @@ use nix::fcntl::{Flock, FlockArg};
 
 use super::common::{
     FW3_HOOK_FORWARD, FW3_HOOK_INPUT, FW3_HOOK_OUTPUT, FW3_LOCK_PATH, FW3_RULES_V4_PATH,
-    FW3_RULES_V6_PATH, FW3_TRANSITION_PATH, IFACES_PATH, Ipv6Status, ipv6_status,
+    FW3_RULES_V6_PATH, FW3_TRANSITION_PATH, IFACES_PATH, Ipv6Status, ensure_runtime_dir,
+    ipv6_status,
 };
 use super::render_iptables::{
     self, AddrFamily, CHAIN_FORWARD, CHAIN_INPUT, CHAIN_MANGLE_OUTPUT, CHAIN_MANGLE_PREROUTING,
@@ -57,9 +80,11 @@ const EMERGENCY_FORWARD_CHAIN: &str = "NYM_EMERGENCY_FWD";
 
 /// Apply the [`RuleSet`] to fw3 using a fail-closed transition protocol:
 ///
-/// 0. take the fw3 state lock ([`FW3_LOCK_PATH`]) for the whole function.
-///    The include script and the init script's teardown take the same lock,
-///    so they observe fw3 state only between complete transitions;
+/// 0. make sure the runtime directory ([`RUNTIME_DIR`](super::common::RUNTIME_DIR)) exists and is a
+///    private root-owned directory, then take the fw3 state lock
+///    ([`FW3_LOCK_PATH`]) for the whole function. The include script and the
+///    init script's teardown take the same lock, so they observe fw3 state
+///    only between complete transitions;
 /// 1. publish the transition marker; for each family whose hook jumps are
 ///    not in place yet (first activation, or IPv6 newly enabled) also
 ///    install that family's emergency block so a crash between chain
@@ -70,19 +95,21 @@ const EMERGENCY_FORWARD_CHAIN: &str = "NYM_EMERGENCY_FWD";
 ///    complete v4/v6/interface state;
 /// 3. remove the marker (the persisted v4 file is now the reload activation
 ///    marker);
-/// 4. if a firewall reload ran just before the lock was taken — it wiped
-///    our chains and, seeing the marker of a crashed earlier transition,
-///    installed the emergency block instead of reading half-written state —
-///    re-activate from the same scripts the include would now read, then
-///    lift the block.
+/// 4. if our hook jumps are gone — an fw3 restart (or anything else that
+///    flushed the tables) ran before the lock was taken and the include,
+///    seeing the marker of a crashed earlier transition, installed the
+///    emergency block instead of reading half-written state — re-activate
+///    from the same scripts the include would now read, then lift the
+///    block. An fw3 reload does not remove our jumps (see the module doc).
 ///
 /// The marker covers crashes, not concurrency: any error or daemon crash
-/// before completion deliberately leaves it behind, so reloads stay
+/// before completion deliberately leaves it behind, so include runs stay
 /// fail-closed until a later successful apply/reset or an explicit service
-/// stop. The lock is what keeps a reload from interleaving with a live
-/// transition.
+/// stop. The lock is what keeps an include run from interleaving with a
+/// live transition. Neither covers the window inside an fw3 restart itself.
 pub fn apply(rs: &RuleSet) -> Result<()> {
     tracing::debug!("Applying firewall policy via fw3/iptables backend");
+    ensure_runtime_dir()?;
     let _lock = lock_fw3_state()?;
 
     // Fail closed on a half-firewallable host: if the kernel routes IPv6 but
@@ -138,17 +165,22 @@ pub fn apply(rs: &RuleSet) -> Result<()> {
     persist_state(&v4_script, v6_script.as_deref(), &rs.tunnel_interfaces)?;
     finish_transition()?;
 
-    // A reload that ran while the marker existed recreated fw3's hook chains
-    // empty, which is how we detect it. Re-activate from the persisted
+    // An fw3 restart (or another flush) that ran while the marker existed
+    // recreated fw3's hook chains empty, which is how we detect it — a plain
+    // reload leaves our jumps in place. Re-activate from the persisted
     // scripts so both paths converge on the same state.
     if !jumps_present(AddrFamily::V4) {
-        tracing::info!("Firewall reload raced the policy apply; re-activating IPv4 rules");
+        tracing::info!(
+            "Firewall tables were flushed during the policy apply; re-activating IPv4 rules"
+        );
         activate_family_script(&v4_script, AddrFamily::V4)?;
     }
     if let Some(script) = &v6_script
         && !jumps_present(AddrFamily::V6)
     {
-        tracing::info!("Firewall reload raced the policy apply; re-activating IPv6 rules");
+        tracing::info!(
+            "Firewall tables were flushed during the policy apply; re-activating IPv6 rules"
+        );
         activate_family_script(script, AddrFamily::V6)?;
     }
 
@@ -175,10 +207,14 @@ fn lock_fw3_state() -> Result<Flock<File>> {
 }
 
 fn lock_state_file(path: &str) -> Result<Flock<File>> {
+    // O_NOFOLLOW: a symlink planted at the lock path is an error, not a
+    // file we would open (and possibly create) somewhere else as root.
     let file = File::options()
         .create(true)
         .truncate(false)
         .write(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
         .open(path)
         .map_err(|e| {
             Error::ApplyError(format!(
@@ -212,9 +248,9 @@ fn finish_transition() -> Result<()> {
 }
 
 fn write_transition_marker(path: &str) -> Result<()> {
-    std::fs::write(path, b"fw3 state transition in progress\n").map_err(|e| {
+    write_state_file(path, "fw3 state transition in progress\n").map_err(|e| {
         Error::ApplyError(format!(
-            "create fw3 transition marker {path}: {e}; refusing to change live firewall state"
+            "create fw3 transition marker: {e}; refusing to change live firewall state"
         ))
     })
 }
@@ -254,9 +290,10 @@ fn emergency_script(family: AddrFamily) -> String {
     )
 }
 
-/// Whether every hook jump into our filter chains is in place. fw3 recreates
-/// its `*_rule` hook chains empty on every reload, so a missing jump after
-/// the transition marker was removed means a reload raced the apply.
+/// Whether every hook jump into our filter chains is in place. An fw3
+/// restart recreates the `*_rule` hook chains empty (a reload preserves
+/// them), so a missing jump after the transition marker was removed means
+/// the tables were flushed underneath the apply.
 fn jumps_present(family: AddrFamily) -> bool {
     let ipt = ipt_cmd(family);
     JUMPS.iter().all(|(hook, target)| {
@@ -269,7 +306,7 @@ fn jumps_present(family: AddrFamily) -> bool {
 }
 
 /// Activate a previously-rendered family script and reconcile its hook
-/// jumps. Used to converge with a firewall reload that raced the apply.
+/// jumps. Used to converge after a table flush raced the apply.
 fn activate_family_script(script: &str, family: AddrFamily) -> Result<()> {
     run_restore(script, family)?;
     setup_jumps(family)?;
@@ -409,13 +446,13 @@ fn connmark_target_available(family: AddrFamily) -> bool {
     ok
 }
 
-/// Persist the applied ruleset for `fw3-include.sh`. Unlike fw4 — whose
-/// `inet nym` table survives a firewall reload untouched — fw3 wipes the
-/// shared iptables tables on every reload, chains and all. The include
-/// script re-applies these files afterwards, so a reload is transparent
-/// exactly like it is on fw4. Persistence is part of successful policy
-/// application: reporting success without it would create a known leak on
-/// the next firewall reload.
+/// Persist the applied ruleset for `fw3-include.sh`. An fw3 reload leaves
+/// our chains alone, but an fw3 restart flushes the shared iptables tables,
+/// chains and all, and runs the include last; the include rebuilds our
+/// policy from these files, so the kill-switch comes back with the firewall
+/// instead of waiting for the daemon's next state change. Persistence is
+/// part of successful policy application: reporting success without it
+/// would leave a known hole after the next firewall restart.
 fn persist_state(v4_script: &str, v6_script: Option<&str>, interfaces: &[String]) -> Result<()> {
     write_state_file(FW3_RULES_V4_PATH, v4_script)?;
     match v6_script {
@@ -437,18 +474,41 @@ fn persist_ifaces(interfaces: &[String]) -> Result<()> {
 }
 
 /// Write via temp file + rename so a firewall reload racing this apply never
-/// sees a half-written restore script.
+/// sees a half-written restore script. The temp file is created `O_EXCL |
+/// O_NOFOLLOW` with mode 0600 under a name unique to this process and
+/// write, so a file or symlink planted at the destination or at the temp
+/// name is never followed or overwritten: the open fails and so does the
+/// policy application. The rename then replaces whatever sits at `path`
+/// without dereferencing it.
 fn write_state_file(path: &str, contents: &str) -> Result<()> {
-    let tmp = format!("{path}.tmp");
-    std::fs::write(&tmp, contents)
-        .and_then(|()| std::fs::rename(&tmp, path))
-        .map_err(|e| {
-            let _ = std::fs::remove_file(&tmp);
-            Error::ApplyError(format!(
-                "persist firewall state to {path}: {e}; refusing to report a policy \
-                 that would disappear on firewall reload"
-            ))
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let tmp = format!(
+        "{path}.{}.{}.tmp",
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::Relaxed)
+    );
+    write_state_file_via(path, &tmp, contents)
+}
+
+fn write_state_file_via(path: &str, tmp: &str, contents: &str) -> Result<()> {
+    let written = File::options()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(tmp)
+        .and_then(|mut f| {
+            f.write_all(contents.as_bytes())?;
+            f.sync_all()
         })
+        .and_then(|()| std::fs::rename(tmp, path));
+    written.map_err(|e| {
+        let _ = std::fs::remove_file(tmp);
+        Error::ApplyError(format!(
+            "persist firewall state to {path}: {e}; refusing to report a policy \
+             that would disappear on firewall restart"
+        ))
+    })
 }
 
 fn remove_state_file(path: &str) -> Result<()> {
@@ -475,6 +535,7 @@ fn clear_persisted_state() -> Result<()> {
 /// the tunnel source address, but nothing is fenced off from the WAN.
 pub fn apply_forwarding_only(rs: &RuleSet) -> Result<()> {
     tracing::debug!("Applying tunnel forwarding plane (kill-switch off) via fw3/iptables");
+    ensure_runtime_dir()?;
     let _lock = lock_fw3_state()?;
 
     let with_v6 = ipv6_status() == Ipv6Status::Enabled;
@@ -514,6 +575,7 @@ pub fn apply_forwarding_only(rs: &RuleSet) -> Result<()> {
 /// Tear down the jumps and our chains. Best-effort throughout.
 pub fn reset() -> Result<()> {
     tracing::debug!("Resetting firewall policy via fw3/iptables backend");
+    ensure_runtime_dir()?;
     let _lock = lock_fw3_state()?;
 
     let with_v6 = ipv6_status() == Ipv6Status::Enabled;
@@ -954,6 +1016,7 @@ fn remove_masquerade_rules() {
 mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    use super::super::common::{RUNTIME_DIR, STOP_MARKER_PATH};
     use super::*;
 
     #[test]
@@ -1078,7 +1141,10 @@ mod tests {
         const INCLUDE: &str = include_str!("../../scripts/fw3-include.sh");
         let lines: Vec<&str> = INCLUDE.lines().map(str::trim).collect();
 
-        let lock = format!("LOCK_FILE=\"{FW3_LOCK_PATH}\"");
+        let lock = format!(
+            "LOCK_FILE=\"$NYM_RUNTIME_DIR{}\"",
+            FW3_LOCK_PATH.strip_prefix(RUNTIME_DIR).unwrap()
+        );
         assert!(
             lines.contains(&lock.as_str()),
             "fw3-include.sh must define {lock}"
@@ -1118,6 +1184,105 @@ mod tests {
         );
         drop(reacquired);
         std::fs::remove_file(path).unwrap();
+    }
+
+    /// Every script that reads or writes kill-switch runtime state derives
+    /// its paths from one `NYM_RUNTIME_DIR` variable defaulting to the Rust
+    /// constant, and names each file exactly as the backend does.
+    #[test]
+    fn scripts_derive_every_state_path_from_the_runtime_dir() {
+        const INCLUDE: &str = include_str!("../../scripts/fw3-include.sh");
+        const GUARD: &str = include_str!("../../scripts/fw-boot-guard.sh");
+        let default = format!("NYM_RUNTIME_DIR=\"${{NYM_RUNTIME_DIR:-{RUNTIME_DIR}}}\"");
+        for (name, script) in [("fw3-include.sh", INCLUDE), ("fw-boot-guard.sh", GUARD)] {
+            assert!(
+                script.lines().map(str::trim).any(|l| l == default),
+                "{name} must define {default}"
+            );
+            // No hard-coded state path anywhere in the script.
+            for line in script.lines() {
+                assert!(
+                    !line.contains("/tmp/nym-") && !line.contains("/tmp/run/nym"),
+                    "{name} must not name a runtime file directly: {line}"
+                );
+            }
+        }
+        let file = |full: &str| full.strip_prefix(RUNTIME_DIR).unwrap().to_owned();
+        for expected in [
+            format!("RULES_V4=\"$NYM_RUNTIME_DIR{}\"", file(FW3_RULES_V4_PATH)),
+            format!("RULES_V6=\"$NYM_RUNTIME_DIR{}\"", file(FW3_RULES_V6_PATH)),
+            format!("IFACES_FILE=\"$NYM_RUNTIME_DIR{}\"", file(IFACES_PATH)),
+            format!(
+                "TRANSITION_FILE=\"$NYM_RUNTIME_DIR{}\"",
+                file(FW3_TRANSITION_PATH)
+            ),
+        ] {
+            assert!(
+                INCLUDE.lines().map(str::trim).any(|l| l == expected),
+                "fw3-include.sh must define {expected}"
+            );
+        }
+        let stopped = format!(
+            "NYM_VPND_STOPPED=\"${{NYM_VPND_STOPPED:-$NYM_RUNTIME_DIR{}}}\"",
+            file(STOP_MARKER_PATH)
+        );
+        assert!(
+            GUARD.lines().map(str::trim).any(|l| l == stopped),
+            "fw-boot-guard.sh must define {stopped}"
+        );
+        // State is only read once the directory has been verified, and the
+        // guard ignores a stop marker it cannot trust.
+        assert!(INCLUDE.contains("nym_runtime_dir_prepare"));
+        assert!(GUARD.contains("nym_runtime_dir_trusted"));
+        for line in INCLUDE.lines() {
+            for var in ["RULES_V4", "RULES_V6", "IFACES_FILE", "TRANSITION_FILE"] {
+                assert!(
+                    !line.contains(&format!("[ -f \"${var}\""))
+                        && !line.contains(&format!("[ ! -f \"${var}\"")),
+                    "fw3-include.sh must test state files through have_state: {line}"
+                );
+            }
+        }
+    }
+
+    /// A file or symlink planted at the temp name is never followed: the
+    /// open fails, the policy is not reported, and the planted target is
+    /// left untouched.
+    #[test]
+    fn state_file_write_refuses_a_planted_temp_path() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "nym-firewall-plant-test-{}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let victim = root.join("victim");
+        std::fs::write(&victim, "untouched").unwrap();
+        let target = root.join("v4.rules");
+        let tmp = root.join("v4.rules.planted.tmp");
+        std::os::unix::fs::symlink(&victim, &tmp).unwrap();
+
+        let result = write_state_file_via(
+            target.to_str().unwrap(),
+            tmp.to_str().unwrap(),
+            "*filter\nCOMMIT\n",
+        );
+        assert!(result.is_err(), "must not write through a planted symlink");
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "untouched");
+        assert!(!target.exists());
+
+        // The failed write unlinks the planted temp entry (the symlink, not
+        // its target). A plain file at the temp name is refused the same way
+        // (O_EXCL).
+        assert!(!tmp.exists() && std::fs::symlink_metadata(&tmp).is_err());
+        std::fs::write(&tmp, "planted").unwrap();
+        assert!(
+            write_state_file_via(target.to_str().unwrap(), tmp.to_str().unwrap(), "x").is_err()
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

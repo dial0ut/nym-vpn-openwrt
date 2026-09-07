@@ -113,10 +113,14 @@ else
     done
 fi
 
-# The persisted fw3 policy and transition marker are the include's reload
-# state; the fw4 script is the daemon's. Removal only, for the same reason.
+# The runtime-state directory (RUNTIME_DIR in the firewall backends; rules
+# files, transition marker, lock, stop marker) is the includes' reload state.
+# Removal only, for the same reason. The /tmp names are what versions before
+# the runtime directory used; nothing reads them any more.
+rm -rf /var/run/nym-firewall 2>/dev/null
 rm -f /tmp/nym-firewall-v4.rules /tmp/nym-firewall-v6.rules /tmp/nym-firewall.nft \
-    /tmp/nym-firewall.ifaces /tmp/nym-firewall.transition 2>/dev/null
+    /tmp/nym-firewall.ifaces /tmp/nym-firewall.transition /tmp/nym-firewall.lock \
+    /tmp/nym-vpnd.stopped /tmp/nym-vpnd.stop-pid 2>/dev/null
 
 fi # PKG_UPGRADE != 1
 
