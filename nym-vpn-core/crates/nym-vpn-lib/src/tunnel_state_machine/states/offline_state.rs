@@ -87,7 +87,7 @@ impl OfflineState {
     }
 
     fn reset_firewall_policy(shared_state: &mut SharedState) {
-        if let Err(e) = shared_state.firewall.reset_policy() {
+        if let Err(e) = shared_state.release_firewall_on_shutdown() {
             trace_err_chain!(e, "Failed to reset firewall policy");
         }
     }

@@ -98,7 +98,7 @@ impl TunnelStateHandler for ErrorState {
             }
             _ = shutdown_token.cancelled() => {
                 Self::reset_dns(shared_state).await;
-                if let Err(e) = shared_state.firewall.reset_policy() {
+                if let Err(e) = shared_state.release_firewall_on_shutdown() {
                     trace_err_chain!(e, "Failed to reset firewall policy");
                 }
                 NextTunnelState::Finished
