@@ -142,6 +142,12 @@ the GitHub release notes.
   method list instead of the plugin wrapper file, which never changes; a new
   `nym-vpnc` with new methods therefore refreshes rpcd even when the ACL file
   is unchanged.
+- With the kill-switch on and the tunnel disconnected, the daemon now
+  resolves the API endpoints through its own DNS hatch and admits them in the
+  Blocked policy, refreshing them hourly while idle. A fresh install can
+  register an account, sync and list gateways without turning the kill-switch
+  off; a failed resolution leaves the firewall Blocked and retries after a
+  minute (#15). Reproduced on 23.05, 24.10 and 25.12 before the fix.
 - After a failed firewall policy apply the daemon no longer stays parked in
   the error state once a settings change re-applies the policy successfully;
   it returns to Disconnected.
