@@ -12,14 +12,23 @@ case_begin custom-dns
 
 vpn_require_ready || return 0 2>/dev/null || exit 0
 
-marker="harness-${SLOT}-$(date +%s).example.test"
+# A sub-name of a real, delegated domain: OpenWrt's dnsmasq answers names
+# under `.test` (RFC 6761 special-use) locally with NXDOMAIN and never
+# forwards them, so a `.example.test` marker never reached the logger. The
+# logger forwards to 1.1.1.1 and logs the query; its answer (NXDOMAIN for an
+# unknown sub-name) is irrelevant here. Whatever it answers must not be a
+# private or reserved address, or the router's dnsmasq rebind protection
+# discards the reply (seen with a synthetic 203.0.113.7).
+marker="harness-${SLOT}-$(date +%s).nym-harness.example.com"
 
-# Configure custom DNS to our logger.
-if ! pct_sh "$OPENWRT_CTID" "nym-vpnc dns custom on >/dev/null 2>&1"; then
-    echo "  nym-vpnc dns custom on failed; CLI may differ on this version"
-fi
+# Configure custom DNS to our logger: `dns set` stores the servers, `dns
+# enable` switches custom DNS on (there is no `dns custom` subcommand).
 if ! pct_sh "$OPENWRT_CTID" "nym-vpnc dns set ${DNS_IP} >/dev/null 2>&1"; then
     case_fail "could not set custom DNS to $DNS_IP"
+    return 0 2>/dev/null || exit 0
+fi
+if ! pct_sh "$OPENWRT_CTID" "nym-vpnc dns enable >/dev/null 2>&1"; then
+    case_fail "could not enable custom DNS"
     return 0 2>/dev/null || exit 0
 fi
 
@@ -47,6 +56,6 @@ else
 fi
 
 # Restore default DNS for downstream cases.
-pct_sh "$OPENWRT_CTID" "nym-vpnc dns custom off >/dev/null 2>&1" || true
+pct_sh "$OPENWRT_CTID" "nym-vpnc dns disable >/dev/null 2>&1; nym-vpnc dns clear >/dev/null 2>&1" || true
 vpn_disconnect "$OPENWRT_CTID"
 vpn_wait_state "$OPENWRT_CTID" '^Disconnected' 30 || true

@@ -16,7 +16,7 @@ use self::{
     dnsmasq::Dnsmasq, network_manager::NetworkManager, resolvconf::Resolvconf,
     static_resolv_conf::StaticResolvConf, systemd_resolved::SystemdResolved,
 };
-use super::ResolvedDnsConfig;
+use super::{IdleDns, ResolvedDnsConfig};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -92,6 +92,25 @@ impl super::DnsMonitorT for DnsMonitor {
     async fn reset(&mut self) -> Result<()> {
         if let Some(mut inner) = self.inner.take() {
             inner.reset().await?;
+        }
+        Ok(())
+    }
+
+    async fn reset_idle(&mut self, idle: IdleDns) -> Result<()> {
+        if let Some(mut inner) = self.inner.take() {
+            return inner.reset_idle(idle).await;
+        }
+        // Nothing was set since the daemon started (fresh boot, or the user
+        // configured a LAN resolver while disconnected): the dnsmasq actor is
+        // already mirroring the WAN, so hand it the idle resolvers directly.
+        // Only dnsmasq has an idle mode; elsewhere there is nothing to do.
+        if idle.local_resolvers.is_empty() {
+            return Ok(());
+        }
+        match Dnsmasq::new() {
+            Ok(mut dnsmasq) => dnsmasq.reset_idle(idle).await?,
+            Err(dnsmasq::Error::NotOpenWrt) | Err(dnsmasq::Error::NoDnsmasq) => {}
+            Err(other) => return Err(other.into()),
         }
         Ok(())
     }
@@ -198,6 +217,13 @@ impl DnsMonitorHolder {
             NetworkManager(network_manager) => network_manager.reset()?,
         }
         Ok(())
+    }
+
+    async fn reset_idle(&mut self, idle: IdleDns) -> Result<()> {
+        match self {
+            DnsMonitorHolder::Dnsmasq(dnsmasq) => Ok(dnsmasq.reset_idle(idle).await?),
+            _ => self.reset().await,
+        }
     }
 }
 

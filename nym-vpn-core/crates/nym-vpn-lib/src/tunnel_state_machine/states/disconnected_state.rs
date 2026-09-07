@@ -64,6 +64,7 @@ impl DisconnectedState {
         // here and re-installed by the first live resolution below.
         shared_state.reset_resolver_overrides().await;
         shared_state.allow_networking().await;
+        Self::reset_dns(shared_state).await;
 
         let mut state = Self {
             resolve_api_addrs_fut: Fuse::terminated(),
@@ -128,8 +129,13 @@ impl DisconnectedState {
         NextTunnelState::SameState(self)
     }
 
+    /// Point dnsmasq at what is usable while idle: the LAN custom resolvers
+    /// the kill-switch admits, plus the WAN resolvers only when the
+    /// kill-switch is off. Re-run whenever the DNS or kill-switch settings
+    /// change while disconnected so the change takes effect at once.
     async fn reset_dns(shared_state: &mut SharedState) {
-        if let Err(error) = shared_state.dns_handler.reset().await {
+        let idle = shared_state.tunnel_settings.idle_dns();
+        if let Err(error) = shared_state.dns_handler.reset_idle(idle).await {
             trace_err_chain!(error, "Failed to reset DNS");
         }
     }
@@ -152,7 +158,12 @@ impl TunnelStateHandler for DisconnectedState {
                     },
                     TunnelCommand::Disconnect => NextTunnelState::SameState(self),
                     TunnelCommand::SetTunnelSettings(tunnel_settings) => {
+                        let idle_dns_changed =
+                            shared_state.tunnel_settings.idle_dns() != tunnel_settings.idle_dns();
                         shared_state.tunnel_settings = tunnel_settings;
+                        if idle_dns_changed {
+                            Self::reset_dns(shared_state).await;
+                        }
                         // Re-apply so enabling/disabling the kill-switch while
                         // disconnected installs/removes the Blocked table now,
                         // instead of silently waiting for the next connect.

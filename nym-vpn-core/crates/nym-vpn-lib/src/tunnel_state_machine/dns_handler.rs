@@ -1,7 +1,7 @@
 // Copyright 2023 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
-use nym_dns::{DnsMonitor, ResolvedDnsConfig};
+use nym_dns::{DnsMonitor, IdleDns, ResolvedDnsConfig};
 use tokio::{
     sync::{mpsc, oneshot},
     task::JoinHandle,
@@ -33,6 +33,10 @@ impl DnsHandler {
         self.inner.reset().await
     }
 
+    pub async fn reset_idle(&mut self, idle: IdleDns) -> Result<(), nym_dns::Error> {
+        self.inner.reset_idle(idle).await
+    }
+
     pub async fn reset_before_interface_removal(&mut self) -> Result<(), nym_dns::Error> {
         self.inner.reset_before_interface_removal().await
     }
@@ -46,6 +50,10 @@ enum DnsHandlerCommand {
     },
     #[allow(unused)]
     Reset {
+        reply_tx: oneshot::Sender<Result<(), nym_dns::Error>>,
+    },
+    ResetIdle {
+        idle: IdleDns,
         reply_tx: oneshot::Sender<Result<(), nym_dns::Error>>,
     },
     ResetBeforeInterfaceRemoval {
@@ -81,6 +89,9 @@ impl DnsHandlerHandle {
                             DnsHandlerCommand::Reset { reply_tx } => {
                                 _ = reply_tx.send(dns_handler.reset().await);
                             }
+                            DnsHandlerCommand::ResetIdle { idle, reply_tx } => {
+                                _ = reply_tx.send(dns_handler.reset_idle(idle).await);
+                            }
                             DnsHandlerCommand::ResetBeforeInterfaceRemoval { reply_tx } => {
                                 _ = reply_tx.send(dns_handler.reset_before_interface_removal().await);
                             }
@@ -114,6 +125,15 @@ impl DnsHandlerHandle {
         let (reply_tx, reply_rx) = oneshot::channel();
 
         self.send_and_wait(DnsHandlerCommand::Reset { reply_tx }, reply_rx)
+            .await
+    }
+
+    /// Reset for the tunnel-down state, keeping the user's LAN custom
+    /// resolvers in dnsmasq's upstream list (see [`IdleDns`]).
+    pub async fn reset_idle(&mut self, idle: IdleDns) -> Result<()> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+
+        self.send_and_wait(DnsHandlerCommand::ResetIdle { idle, reply_tx }, reply_rx)
             .await
     }
 
