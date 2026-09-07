@@ -22,11 +22,12 @@ sleep 2
 
 ks_on_pass=true
 why=""
-# Daemon should still reach its API. On a fresh install with no endpoint
-# cache this is exactly issue #15 (idle Blocked policy allows no API hosts).
-if ! pct_sh "$OPENWRT_CTID" 'wget --timeout=8 -qO- https://validator.nymtech.net/api/v1/epoch/key-rotation-info >/dev/null 2>&1'; then
-    echo "  router could not reach Nym API with KS=on (no endpoint cache / exemptions, #15)"
-    why="$why router-api-blocked-with-ks-on;"
+# The daemon must still reach its API while idle (issue #15: the Blocked
+# policy admits the resolved API endpoints for the daemon). Probed through
+# the daemon; the router shell's own lookups are blocked by design.
+if ! vpn_api_reachable "$OPENWRT_CTID"; then
+    echo "  daemon could not reach the Nym API while idle with KS=on (#15)"
+    why="$why daemon-api-blocked-with-ks-on;"
     ks_on_pass=false
 fi
 # LAN client traffic should be blocked (forward chain rejects).

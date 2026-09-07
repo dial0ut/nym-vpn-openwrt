@@ -171,3 +171,14 @@ vpn_dump() {
         pct_sh "$ctid" 'logread 2>&1 | grep -E "nym-vpnd|nym-vpn:" | tail -40' || true
     }
 }
+
+# Whether the daemon can reach the Nym API right now. Probes through the
+# daemon (an unknown gateway id forces a directory lookup, and "not found"
+# means the API answered), not with wget from the router shell: under the
+# Blocked policy only the daemon's own DNS hatch is open, so a router-shell
+# lookup fails by design and would say nothing about issue #15.
+vpn_api_reachable() {
+    local out
+    out=$(pct_sh "$1" 'nym-vpnc gateway test --id 11111111111111111111111111111111 --count 1 --timeout 1 2>&1 | tail -1')
+    echo "$out" | grep -q 'not found'
+}

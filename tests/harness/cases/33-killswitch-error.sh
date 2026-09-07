@@ -22,8 +22,8 @@ vpn_wait_state "$OPENWRT_CTID" '^Disconnected' 30 || true
 # reachability. Probe the API itself; without a populated endpoint cache
 # (fresh install, see issue #15) it is unreachable and the deadlock cannot be
 # triggered fairly.
-if ! pct_sh "$OPENWRT_CTID" 'wget --timeout=8 -qO- https://validator.nymtech.net/api/v1/epoch/key-rotation-info >/dev/null 2>&1'; then
-    case_skip "router cannot reach the API while idle with the kill-switch on (no endpoint cache yet, #15); cannot trigger fairly"
+if ! vpn_api_reachable "$OPENWRT_CTID"; then
+    case_skip "daemon cannot reach the API while idle with the kill-switch on (#15 regression); cannot trigger fairly"
     return 0 2>/dev/null || exit 0
 fi
 endpoints_before=$(pct_sh "$OPENWRT_CTID" 'nft list table inet nym 2>/dev/null | awk "/ip saddr .* tcp sport 443 accept/ {n++} END {print n+0}"')
@@ -58,7 +58,7 @@ if [ "${endpoints_after:-0}" -eq 0 ]; then
     echo "  ErrorState wiped API exemptions ($endpoints_before -> 0) — deadlock present"
     ok=false
 fi
-if ! pct_sh "$OPENWRT_CTID" 'wget --timeout=8 -qO- https://validator.nymtech.net/api/v1/epoch/key-rotation-info >/dev/null 2>&1'; then
+if ! vpn_api_reachable "$OPENWRT_CTID"; then
     echo "  daemon cannot reach its own API from Error state — self-recovery blocked"
     ok=false
 fi
