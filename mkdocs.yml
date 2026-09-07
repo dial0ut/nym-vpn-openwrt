@@ -76,6 +76,7 @@ nav:
       - Overview: architecture/overview.md
       - WireGuard: architecture/wireguard.md
       - Firewall Backends: architecture/firewall.md
+      - Firewall State Ownership: architecture/firewall-state.md
   - Development:
       - Building from Source: development/building.md
       - Packaging: development/packaging.md

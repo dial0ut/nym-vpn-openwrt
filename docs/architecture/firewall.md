@@ -1,5 +1,8 @@
 # Firewall Integration
 
+> Who writes which runtime file, chain and table, and under which lock, is tabulated in
+> [Firewall State Ownership](firewall-state.md).
+
 ## Two backends
 
 OpenWrt moved from iptables to nftables in 22.03. Older firmware runs fw3 (iptables), current
