@@ -211,9 +211,9 @@ the GitHub release notes.
   after Tunnel Settings: the device/domain exclusion list and the legacy
   luci-app-pbr switch live there, with a note standing in for the exclusions
   while PBR owns the routing. **Tunnel Settings** keeps the daemon switches,
-  now in two groups — *Protection* (Kill-Switch first, with the Inbound
-  Services exceptions nested directly under it, then Gateway Independence,
-  Server Family Reminders and Always On) and *Transport* (Two-Hop,
+  now in two groups — *Protection* (Always On first, then the Kill-Switch with
+  the Inbound Services exceptions nested directly under it, Gateway
+  Independence and Server Family Reminders) and *Transport* (Two-Hop,
   Circumvention Transports, Stealth API Connect, IPv6). Switches that only
   apply on the next connect carry a small `reconnect` tag instead of each
   description saying so; descriptions are shortened to one or two sentences.

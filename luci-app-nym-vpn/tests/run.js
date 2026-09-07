@@ -119,7 +119,7 @@ async function scenarioStructure() {
   const strayText = Array.from(t.document.body.querySelectorAll('*')).flatMap((el) => Array.from(el.childNodes)).filter((n) => n.nodeType === 3 && /^(null|undefined)$/.test(n.textContent.trim())).length;
   check(strayText === 0, 'no "null"/"undefined" text rendered anywhere on the page: ' + strayText);
   const rows = Array.from(card(t, 'Tunnel Settings').querySelectorAll('.nym-toggle-row .nym-toggle-title')).map((e) => e.textContent);
-  check(rows[0] === 'Kill-Switch', 'kill-switch is the first Tunnel Settings row: ' + JSON.stringify(rows));
+  check(rows[0] === 'Always On' && rows[1] === 'Kill-Switch', 'Always On leads Protection, kill-switch second: ' + JSON.stringify(rows));
   check(eq(rows.slice().sort(), ['Always On', 'Circumvention Transports', 'Gateway Independence', 'IPv6', 'Kill-Switch', 'Server Family Reminders', 'Stealth API Connect', 'Two-Hop Mode'].sort()),
     'all eight tunnel rows present, legacy split moved out');
   const splitCard = card(t, 'Split Tunneling');

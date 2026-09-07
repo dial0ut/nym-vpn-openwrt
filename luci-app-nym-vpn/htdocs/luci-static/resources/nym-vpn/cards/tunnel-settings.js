@@ -11,10 +11,10 @@
 
 // Tunnel Settings — the daemon's tunnel switches in three groups:
 //
-//   Protection  kill-switch (first: it decides whether anything leaks),
-//               with its inbound-service exceptions nested beneath it,
-//               then gateway independence, the family reminders and Always
-//               On, whose status line follows the daemon's supervisor
+//   Protection  Always On first (whose status line follows the daemon's
+//               supervisor), then the kill-switch with its inbound-service
+//               exceptions nested beneath it, gateway independence and the
+//               family reminders
 //   Transport   two-hop, circumvention transports, stealth API, IPv6
 //
 // Each row states what the switch does in one clause; the full explanation
@@ -287,10 +287,10 @@ return baseclass.extend({
                 card.group({
                     title: 'Protection',
                     body: [
+                        alwaysOnRow,
                         E('div', { 'class': 'nym-row-with-sub' }, [killswitchRow, inboundMount]),
                         independenceRow,
-                        remindersRow,
-                        alwaysOnRow
+                        remindersRow
                     ]
                 }),
                 card.group({
