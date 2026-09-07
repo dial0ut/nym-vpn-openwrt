@@ -32,6 +32,25 @@ marked with a small `reconnect` tag take effect on the next connect; the rest ap
 
 ### Protection
 
+#### Always On
+
+Keeps the tunnel up while the router is on. The daemon itself does the work, so there is no
+poller and no interval to pick: it connects when it starts, waiting for a default route rather
+than probing for one (the WAN may still be coming up, PPPoE may still be dialling), reconnects
+after drops and WAN outages the moment the route is back, retries error states with a growing
+backoff — moving off gateways that keep failing — and forces a fresh gateway selection if a
+connect drags on for ten minutes. Firewall, routing or DNS failures that repeat for about five
+minutes make the daemon hand over to procd, which restarts it with the kill-switch still in
+place.
+
+The line under the switch says what it is doing: *Active*, *Waiting for network*, *Retrying in
+N s (attempt K)*, *Paused — disconnected by you* after you press **Disconnect** (the setting stays
+on and the next connect or reboot resumes it), or *Stopped: …* for errors that need you to change
+something first — an account problem, or a pinned entry/exit pair that fails the independence
+criteria. Fixing the configuration, a renewed subscription or pressing **Connect** resumes it. Its
+log lines are prefixed `always-on:` in the daemon log (`logread -e nym-vpnd`). The same switch is
+`nym-vpnc tunnel set --always-on on|off`.
+
 #### Kill-Switch
 
 `reconnect` — first in the card. Blocks all non-tunnel WAN egress. It is *only* a firewall block:
@@ -71,25 +90,6 @@ servers**, which returns you to the pickers. With reminders off the connection g
 and a notice says so. The check is bounded to a few seconds and never blocks connecting: if the
 daemon cannot answer, the connect proceeds as usual and any refusal shows up as a status error
 with the same two choices.
-
-#### Always On
-
-Keeps the tunnel up while the router is on. The daemon itself does the work, so there is no
-poller and no interval to pick: it connects when it starts, waiting for a default route rather
-than probing for one (the WAN may still be coming up, PPPoE may still be dialling), reconnects
-after drops and WAN outages the moment the route is back, retries error states with a growing
-backoff — moving off gateways that keep failing — and forces a fresh gateway selection if a
-connect drags on for ten minutes. Firewall, routing or DNS failures that repeat for about five
-minutes make the daemon hand over to procd, which restarts it with the kill-switch still in
-place.
-
-The line under the switch says what it is doing: *Active*, *Waiting for network*, *Retrying in
-N s (attempt K)*, *Paused — disconnected by you* after you press **Disconnect** (the setting stays
-on and the next connect or reboot resumes it), or *Stopped: …* for errors that need you to change
-something first — an account problem, or a pinned entry/exit pair that fails the independence
-criteria. Fixing the configuration, a renewed subscription or pressing **Connect** resumes it. Its
-log lines are prefixed `always-on:` in the daemon log (`logread -e nym-vpnd`). The same switch is
-`nym-vpnc tunnel set --always-on on|off`.
 
 ### Transport
 
