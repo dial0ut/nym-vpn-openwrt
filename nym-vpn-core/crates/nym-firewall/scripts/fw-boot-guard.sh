@@ -44,11 +44,13 @@ NYM_BOOT_REASON=""
 
 # Whether the runtime directory can be trusted: a real directory (not a
 # symlink), owned by uid 0, mode exactly 0700. Anything else, including a
-# missing directory or a busybox without `stat -c`, means "no state".
+# missing directory, means "no state".
 nym_runtime_dir_trusted() {
     [ -d "$NYM_RUNTIME_DIR" ] && [ ! -L "$NYM_RUNTIME_DIR" ] || return 1
-    [ "$(stat -c %u "$NYM_RUNTIME_DIR" 2>/dev/null)" = "0" ] || return 1
-    [ "$(stat -c %a "$NYM_RUNTIME_DIR" 2>/dev/null)" = "700" ]
+    # busybox has no stat(1) on stock OpenWrt images; find(1) with -user and
+    # -perm is always built in. Without -L it does not follow a symlinked
+    # argument, so a planted symlink fails -type d here as well.
+    [ -n "$(find "$NYM_RUNTIME_DIR" -maxdepth 0 -type d -user root -perm 0700 -print 2>/dev/null)" ]
 }
 
 # For writers: create the directory when missing (root only — /var/run is
