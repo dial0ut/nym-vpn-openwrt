@@ -19,7 +19,9 @@ the GitHub release notes.
   disconnected with the kill-switch on. A private address on the WAN side,
   such as the upstream router behind another NAT, stays rejected like any
   public resolver outside the tunnel. Private custom resolvers were also
-  never handed to dnsmasq before, so the setting had no effect at all.
+  never handed to dnsmasq before, so the setting had no effect at all; while
+  disconnected, dnsmasq now uses the LAN resolver instead of the WAN-provided
+  ones the kill-switch rejects.
 - `nym-vpnc gateway test` probes gateways with ICMP echo from the router and
   prints RTT min/avg/max and packet loss per gateway, plus a summed pair RTT
   for every entry/exit combination. Without options it tests the configured
