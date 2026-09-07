@@ -89,6 +89,9 @@ fn render_rule(rule: &Rule, family: AddrFamily) -> String {
     if let Some(iface) = &m.iif_not {
         parts.push(format!("! -i {iface}"));
     }
+    if let Some(iface) = &m.oif_not {
+        parts.push(format!("! -o {iface}"));
+    }
     if let Some(saddr) = &m.saddr {
         parts.push(format!("-s {}", render_addr(saddr)));
     }
@@ -272,6 +275,19 @@ mod tests {
         assert_eq!(
             render_rule(&rule, AddrFamily::V4),
             "! -i wg0 -d 10.64.0.2 -j DROP"
+        );
+    }
+
+    #[test]
+    fn renders_output_interface_negation() {
+        let rule = Rule::accept(Family::V4)
+            .oif_not("eth1")
+            .proto(Proto::Udp)
+            .daddr(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)))
+            .dport(53);
+        assert_eq!(
+            render_rule(&rule, AddrFamily::V4),
+            "! -o eth1 -d 10.0.0.2 -p udp --dport 53 -j ACCEPT"
         );
     }
 
