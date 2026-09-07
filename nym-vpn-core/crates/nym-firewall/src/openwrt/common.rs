@@ -17,6 +17,15 @@ pub const FW3_RULES_V6_PATH: &str = "/tmp/nym-firewall-v6.rules";
 /// persisted state. A crash deliberately leaves it behind; a later successful
 /// apply/reset or an explicit daemon stop removes it.
 pub const FW3_TRANSITION_PATH: &str = "/tmp/nym-firewall.transition";
+/// Advisory `flock(2)` file serializing every writer of fw3 state: this
+/// backend's apply/forwarding-only/reset, `fw3-include.sh` (run by fw3 on
+/// every reload) and the init script's stop-time teardown. The transition
+/// marker alone cannot exclude a concurrent include: it could test the marker,
+/// lose the CPU while the daemon finished and lifted its block, then install
+/// an emergency block nobody removes. Each writer holds the lock for its whole
+/// mutation, so the include observes fw3 state only between complete
+/// transitions. Never deleted while the package is installed.
+pub const FW3_LOCK_PATH: &str = "/tmp/nym-firewall.lock";
 /// Tunnel interface list (one name per line) for masquerade restore. Shared
 /// naming with the fw4 include script, which reads it as an optional hint.
 pub const IFACES_PATH: &str = "/tmp/nym-firewall.ifaces";

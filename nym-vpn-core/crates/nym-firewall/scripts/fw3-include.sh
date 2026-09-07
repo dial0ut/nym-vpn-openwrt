@@ -14,10 +14,14 @@
 #     /tmp/nym-firewall-v6.rules  ip6tables-restore script, if IPv6 is up
 #     /tmp/nym-firewall.ifaces    tunnel interfaces needing masquerade
 #     /tmp/nym-firewall.transition fail-closed multi-file update marker
-#   and this script re-applies them after every reload. While the transition
-#   marker exists it installs dedicated emergency OUTPUT/FORWARD drops (reply
-#   traffic for inbound management sessions excepted) instead of reading or
-#   cleaning partially-updated state. No rules files means no blocking policy
+#     /tmp/nym-firewall.lock       flock(2) serializing every writer
+#   and this script re-applies them after every reload, holding the lock for
+#   the whole run like the daemon does for every apply/reset: the two never
+#   interleave, so this script only ever sees fw3 state between complete
+#   transitions. While the transition marker exists — a daemon crashed
+#   mid-transition — it installs dedicated emergency OUTPUT/FORWARD drops
+#   (reply traffic for inbound management sessions excepted) instead of
+#   reading or cleaning partially-updated state. No rules files means no blocking policy
 #   is in force: the kill-switch is off, the daemon was stopped, or — the boot
 #   window — the daemon (S90) has not run yet since power-on while the
 #   firewall (S19) and network (S20) are already up. In that last case, when
@@ -38,6 +42,7 @@ RULES_V4="/tmp/nym-firewall-v4.rules"
 RULES_V6="/tmp/nym-firewall-v6.rules"
 IFACES_FILE="/tmp/nym-firewall.ifaces"
 TRANSITION_FILE="/tmp/nym-firewall.transition"
+LOCK_FILE="/tmp/nym-firewall.lock"
 
 # fw3 hook chains (user chains fw3 recreates on every reload).
 HOOK_INPUT="input_rule"
@@ -468,14 +473,16 @@ handle_no_policy() {
     return "$failed"
 }
 
-# Main logic
+# Main logic. Runs under the fw3 state lock (see the bottom of the file).
 main() {
     local failed=0
 
-    # Rust creates this marker before touching live or persisted fw3 state.
-    # Never interpret missing/partially-updated rules files as kill-switch-off
-    # while it exists. A daemon crash leaves the marker and emergency block in
-    # place; a later successful apply/reset or explicit service stop clears it.
+    # Rust creates this marker before touching live or persisted fw3 state
+    # and holds the state lock until it has removed the marker again, so
+    # finding it here means a daemon died mid-transition. Never interpret
+    # missing/partially-updated rules files as kill-switch-off while it
+    # exists; a later successful apply/reset or explicit service stop clears
+    # it.
     if [ -f "$TRANSITION_FILE" ]; then
         logger -t nym-vpn "Firewall transition in progress; enforcing emergency block"
         emergency_block "iptables" || failed=1
@@ -498,5 +505,24 @@ main() {
     restore_forwarding
     return "$failed"
 }
+
+# Serialize with the daemon's fw3 backend and the init script's stop-time
+# teardown. Existence checks on the marker are not mutual exclusion: without
+# the lock this script could see the marker, lose the CPU while the daemon
+# finished and lifted its block, and then install an emergency block that
+# nothing removes until the next transition. fd 9 stays open for the rest of
+# the script, so the lock is released when it exits. A caller that already
+# holds the lock (the init script) sets NYM_FW_LOCKED=1; taking it again on a
+# fresh descriptor would deadlock against the inherited one. busybox ships
+# flock in stock OpenWrt images; without it run unlocked rather than fail the
+# firewall reload.
+if [ "${NYM_FW_LOCKED:-}" != "1" ]; then
+    if command -v flock >/dev/null 2>&1; then
+        exec 9>"$LOCK_FILE"
+        flock 9 || logger -t nym-vpn "cannot take $LOCK_FILE; running unlocked"
+    else
+        logger -t nym-vpn "flock unavailable; running the fw3 include unlocked"
+    fi
+fi
 
 main "$@"
