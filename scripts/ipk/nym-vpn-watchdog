@@ -16,7 +16,9 @@
 VPNC="/usr/bin/nym-vpnc"
 UCI_SECTION="nym-vpn.settings"
 LOGPREFIX="nym-watchdog"
-STATEFILE="/tmp/nym-watchdog.state"
+# Under /var/run (root-owned 0755), not /tmp: the rpcd bridge reads this file
+# as root, so it must live where nothing unprivileged can pre-create it.
+STATEFILE="/var/run/nym-watchdog.state"
 
 # Default values (overridden by UCI)
 DEFAULT_INTERVAL=30
