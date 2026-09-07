@@ -4,13 +4,18 @@
 //! `nym-vpnc gateway test`: pick the gateways to probe, resolve their
 //! addresses from the directory and ping them from the daemon.
 
-use std::{collections::HashMap, net::IpAddr, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    net::IpAddr,
+    sync::Arc,
+    time::Duration,
+};
 
 use nym_gateway_directory::{Gateway, GatewayFilter, GatewayFilters, GatewayType, ScoreValue};
 use nym_vpn_lib::{
     NodeIdentity,
     gateway_directory::GatewayCacheHandle,
-    gateway_probe::{self, ProbeOutcome, ProbeParams},
+    gateway_probe::{self, MAX_CONCURRENT_TARGETS, PROBE_INTERVAL, ProbeOutcome, ProbeParams},
 };
 use nym_vpn_lib_types::{
     EntryPoint, ExitPoint, GatewayTestParams, GatewayTestReport, GatewayTestResult,
@@ -18,6 +23,48 @@ use nym_vpn_lib_types::{
 };
 
 use super::error::GatewayTestError;
+
+/// Time allowed on top of the probes themselves for directory lookups (up to
+/// one round trip per unknown explicit identity).
+const LOOKUP_SLACK: Duration = Duration::from_secs(30);
+/// Hard ceiling on one run, whatever the request asks for.
+const MAX_DEADLINE: Duration = Duration::from_secs(300);
+
+/// Worst-case wall time of a run with these parameters: every candidate slot
+/// filled, every probe timing out, targets probed [`MAX_CONCURRENT_TARGETS`]
+/// at a time. The daemon aborts a run that outlives this.
+pub(super) fn deadline(params: &GatewayTestParams) -> Duration {
+    let per_probe =
+        Duration::from_millis(u64::from(params.effective_timeout_ms())) + PROBE_INTERVAL;
+    let per_target = per_probe * params.effective_count();
+    let role_targets = if params.explicit_only() {
+        0
+    } else {
+        2 * params.effective_top() as usize
+    };
+    let targets = role_targets + params.gateways.len();
+    let waves = targets.div_ceil(MAX_CONCURRENT_TARGETS).max(1) as u32;
+    (per_target * waves + LOOKUP_SLACK).min(MAX_DEADLINE)
+}
+
+/// The single permission to run a gateway test. The kill-switch probe hatch
+/// is rate limited for one run ([`MAX_CONCURRENT_TARGETS`] targets at
+/// [`PROBE_INTERVAL`]); two runs at once would push probes into the limiter
+/// and report the drops as gateway loss.
+#[derive(Clone)]
+pub(super) struct GatewayTestSlot(Arc<tokio::sync::Semaphore>);
+
+impl GatewayTestSlot {
+    pub(super) fn new() -> Self {
+        Self(Arc::new(tokio::sync::Semaphore::new(1)))
+    }
+
+    /// The permit for one run, or `None` while another run holds it. The run
+    /// is over when the permit drops.
+    pub(super) fn try_take(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
+        self.0.clone().try_acquire_owned().ok()
+    }
+}
 
 /// Daemon state a test needs, snapshotted so the probing can run off the
 /// service loop.
@@ -100,8 +147,13 @@ struct Target {
 
 pub(super) async fn run(
     ctx: GatewayTestContext,
-    params: GatewayTestParams,
+    mut params: GatewayTestParams,
 ) -> Result<GatewayTestReport, GatewayTestError> {
+    // The RPC boundary already did this; repeated here so the bound holds for
+    // any other caller too.
+    params.dedup_gateways();
+    params.validate().map_err(GatewayTestError::Params)?;
+
     let top = params.effective_top() as usize;
     let probe_params = ProbeParams {
         count: params.effective_count(),
@@ -175,14 +227,12 @@ pub(super) async fn run(
     }
 
     // Probe each address once even if it is listed under both roles.
-    let mut addresses: Vec<IpAddr> = Vec::new();
-    for target in &targets {
-        if let Some(address) = target.address
-            && !addresses.contains(&address)
-        {
-            addresses.push(address);
-        }
-    }
+    let mut seen = HashSet::new();
+    let addresses: Vec<IpAddr> = targets
+        .iter()
+        .filter_map(|target| target.address)
+        .filter(|address| seen.insert(*address))
+        .collect();
     let outcomes = gateway_probe::probe_targets(&addresses, probe_params)
         .await
         .map_err(GatewayTestError::Probe)?;
@@ -319,5 +369,68 @@ fn to_result(target: Target, outcome: Option<&ProbeOutcome>) -> GatewayTestResul
         rtt_avg_ms: avg,
         rtt_max_ms: max,
         error: target.error.or(probe_error),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nym_vpn_lib::gateway_probe::ProbeError;
+    use nym_vpn_lib_types::{
+        DEFAULT_PROBE_COUNT, DEFAULT_PROBE_TIMEOUT_MS, DEFAULT_TOP_CANDIDATES,
+        MAX_EXPLICIT_GATEWAYS,
+    };
+
+    #[test]
+    fn deadline_covers_the_worst_case_and_is_capped() {
+        // Defaults: 2 roles x 5 candidates = 10 targets -> 2 waves of
+        // 5 probes x (2000 + 200) ms, plus lookup slack.
+        assert_eq!(DEFAULT_TOP_CANDIDATES, 5, "test assumes 2 waves");
+        let d = deadline(&GatewayTestParams::default());
+        let per_target =
+            Duration::from_millis(u64::from(DEFAULT_PROBE_TIMEOUT_MS) + 200) * DEFAULT_PROBE_COUNT;
+        assert_eq!(d, per_target * 2 + LOOKUP_SLACK);
+
+        // One explicit id: a single wave.
+        let one = GatewayTestParams {
+            gateways: vec!["A".into()],
+            count: 1,
+            timeout_ms: 1000,
+            ..Default::default()
+        };
+        assert_eq!(deadline(&one), Duration::from_millis(1200) + LOOKUP_SLACK);
+
+        // Everything at its maximum stays under the ceiling.
+        let max = GatewayTestParams {
+            gateways: vec!["A".into(); MAX_EXPLICIT_GATEWAYS],
+            count: u32::MAX,
+            timeout_ms: u32::MAX,
+            top: u32::MAX,
+            ..Default::default()
+        };
+        assert_eq!(deadline(&max), MAX_DEADLINE);
+    }
+
+    #[test]
+    fn slot_admits_one_run_at_a_time() {
+        let slot = GatewayTestSlot::new();
+        let first = slot.try_take().expect("free slot");
+        assert!(slot.try_take().is_none(), "second run must be refused");
+        drop(first);
+        assert!(slot.try_take().is_some(), "slot is free once the run ends");
+    }
+
+    #[test]
+    fn error_chain_reaches_the_os_error() {
+        let eperm = std::io::Error::from_raw_os_error(1);
+        let err = GatewayTestError::Probe(ProbeError::OpenSocket(eperm));
+        let chain = err.chain();
+        assert!(chain.starts_with("failed to probe gateways: failed to open ICMP socket: "));
+        assert!(
+            chain.to_lowercase().contains("not permitted"),
+            "OS error text must survive: {chain}"
+        );
+        // Display alone loses it, which is why `chain` exists.
+        assert_eq!(err.to_string(), "failed to probe gateways");
     }
 }

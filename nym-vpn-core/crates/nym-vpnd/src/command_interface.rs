@@ -582,11 +582,15 @@ impl NymVpnService for CommandInterface {
             .send_and_wait(VpnServiceCommand::TestGateways, params)
             .await?
             .map_err(|err| match err {
-                GatewayTestError::InvalidGatewayId(_) | GatewayTestError::NoTargets => {
-                    tonic::Status::invalid_argument(err.to_string())
-                }
+                GatewayTestError::InvalidGatewayId(_)
+                | GatewayTestError::NoTargets
+                | GatewayTestError::Params(_) => tonic::Status::invalid_argument(err.chain()),
+                // The single run slot is a per-daemon resource; the client
+                // can retry once the other test has finished.
+                GatewayTestError::AlreadyRunning => tonic::Status::resource_exhausted(err.chain()),
+                GatewayTestError::Timeout(_) => tonic::Status::deadline_exceeded(err.chain()),
                 GatewayTestError::GetGateways { .. } | GatewayTestError::Probe(_) => {
-                    tonic::Status::internal(format!("Failed to test gateways: {err}"))
+                    tonic::Status::internal(format!("Failed to test gateways: {}", err.chain()))
                 }
             })?;
 

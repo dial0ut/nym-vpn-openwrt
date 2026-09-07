@@ -24,7 +24,7 @@ use super::{
         AccountLinksError, Error, GatewayTestError, GlobalConfigError, ListGatewaysError, Result,
         SetNetworkError,
     },
-    gateway_test::{self, GatewayTestContext},
+    gateway_test::{self, GatewayTestContext, GatewayTestSlot},
     socks5::Socks5EnableConfig,
     socks5_idle_timeout, socks5_request_timeout,
 };
@@ -283,6 +283,9 @@ pub struct NymVpnService {
 
     // Gateway cache handle
     gateway_cache_handle: GatewayCacheHandle,
+
+    // Permission for the one gateway test that may run at a time
+    gateway_test_slot: GatewayTestSlot,
 
     // Discovery refresher event receiver
     discovery_refresher_event_rx: mpsc::UnboundedReceiver<DiscoveryRefresherEvent>,
@@ -584,6 +587,7 @@ impl NymVpnService {
             state_machine_shutdown_token,
             gateway_cache_handle,
             gateway_cache_join_handle,
+            gateway_test_slot: GatewayTestSlot::new(),
             discovery_refresher_event_rx,
             discovery_refresher_join_handle,
             discovery_refresher_command_tx,
@@ -1387,6 +1391,10 @@ impl NymVpnService {
         params: GatewayTestParams,
         completion_tx: oneshot::Sender<Result<GatewayTestReport, GatewayTestError>>,
     ) {
+        let Some(permit) = self.gateway_test_slot.try_take() else {
+            completion_tx.send(Err(GatewayTestError::AlreadyRunning)).ok();
+            return;
+        };
         let config = self.config_manager.config();
         let active = match &*self.tunnel_state.read().await {
             TunnelState::Connected { connection_data } => Some((
@@ -1403,13 +1411,33 @@ impl NymVpnService {
             active,
         };
 
-        // Probing takes seconds; keep the service loop free for status polls.
+        // Probing takes seconds; keep the service loop free for status polls,
+        // so the run is spawned rather than awaited here. Two things bound
+        // it: a deadline computed from the request, and the caller. The gRPC
+        // handler holds the receiving end of `completion_tx` inside its own
+        // future; when the client disconnects tonic drops that future, the
+        // receiver goes with it, `closed()` resolves and the probes are
+        // dropped mid-flight. The permit travels with the task, so the slot
+        // frees up on every exit path.
+        let deadline = gateway_test::deadline(&params);
         tokio::spawn(async move {
-            let result = gateway_test::run(ctx, params).await;
-            if let Err(err) = &result {
-                tracing::warn!("Gateway test failed: {err}");
+            let _permit = permit;
+            // `closed()` needs `&mut`; the sender is ours alone from here.
+            let mut completion_tx = completion_tx;
+            let run = tokio::time::timeout(deadline, gateway_test::run(ctx, params));
+            tokio::select! {
+                _ = completion_tx.closed() => {
+                    tracing::info!("Gateway test cancelled: the caller went away");
+                }
+                result = run => {
+                    let result = result
+                        .unwrap_or_else(|_elapsed| Err(GatewayTestError::Timeout(deadline)));
+                    if let Err(err) = &result {
+                        tracing::warn!("Gateway test failed: {}", err.chain());
+                    }
+                    completion_tx.send(result).ok();
+                }
             }
-            completion_tx.send(result).ok();
         });
     }
 

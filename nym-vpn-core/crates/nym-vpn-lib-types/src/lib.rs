@@ -72,8 +72,9 @@ pub use gateway::{
 };
 pub use gateway_test::{
     DEFAULT_PROBE_COUNT, DEFAULT_PROBE_TIMEOUT_MS, DEFAULT_TOP_CANDIDATES, GatewayPairResult,
-    GatewayTestParams, GatewayTestReport, GatewayTestResult, GatewayTestRole, GatewayTestSelector,
-    MAX_PROBE_COUNT, MAX_PROBE_TIMEOUT_MS, MAX_TOP_CANDIDATES, pair_results,
+    GatewayTestParams, GatewayTestParamsError, GatewayTestReport, GatewayTestResult,
+    GatewayTestRole, GatewayTestSelector, MAX_EXPLICIT_GATEWAYS, MAX_PROBE_COUNT,
+    MAX_PROBE_TIMEOUT_MS, MAX_TOP_CANDIDATES, pair_results,
 };
 pub use log_path::LogPath;
 pub use network::{

@@ -102,7 +102,7 @@ pub struct TestArgs {
     #[arg(long, group = "test_exit")]
     pub exit_country: Option<celes::Country>,
 
-    /// Probe this gateway regardless of role (repeatable).
+    /// Probe this gateway regardless of role (repeatable, at most 20 per test).
     #[arg(long = "id", value_name = "ID")]
     pub ids: Vec<String>,
 
@@ -409,7 +409,7 @@ impl TestArgs {
         let timeout_ms = u32::try_from((self.timeout * 1000.0).round() as u64)
             .map_err(|_| anyhow!("--timeout is too large"))?;
 
-        Ok(GatewayTestParams {
+        let mut params = GatewayTestParams {
             entry: selector(&self.entry_id, &self.entry_country)?,
             exit: selector(&self.exit_id, &self.exit_country)?,
             gateways: self
@@ -420,7 +420,12 @@ impl TestArgs {
             count: self.count,
             timeout_ms,
             top: self.top,
-        })
+        };
+        // Same rules the daemon applies, so the mistake is reported here
+        // with the flag's name instead of as an RPC error.
+        params.dedup_gateways();
+        params.validate().map_err(|e| anyhow!("--id: {e}"))?;
+        Ok(params)
     }
 }
 

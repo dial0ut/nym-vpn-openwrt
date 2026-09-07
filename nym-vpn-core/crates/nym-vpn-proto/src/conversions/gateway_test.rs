@@ -64,14 +64,22 @@ impl TryFrom<proto::GatewayTestParams> for GatewayTestParams {
     type Error = ConversionError;
 
     fn try_from(value: proto::GatewayTestParams) -> Result<Self, Self::Error> {
-        Ok(Self {
+        let mut params = Self {
             entry: value.entry.map(TryInto::try_into).transpose()?,
             exit: value.exit.map(TryInto::try_into).transpose()?,
             gateways: value.gateways.into_iter().map(|g| g.id).collect(),
             count: value.count,
             timeout_ms: value.timeout_ms,
             top: value.top,
-        })
+        };
+        // The explicit list is the one knob that is rejected rather than
+        // clamped; do it here so the daemon answers INVALID_ARGUMENT before
+        // any work starts.
+        params.dedup_gateways();
+        params
+            .validate()
+            .map_err(|e| ConversionError::Generic(e.to_string()))?;
+        Ok(params)
     }
 }
 
