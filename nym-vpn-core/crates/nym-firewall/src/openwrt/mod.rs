@@ -7,7 +7,10 @@
 //!
 //! The shape of the module:
 //! - [`policy`] compiles a [`FirewallPolicy`] into a backend-neutral
-//!   [`rules::RuleSet`] — single source of truth for the kill-switch.
+//!   [`rules::RuleSet`] — the source of truth for the daemon's policies. The
+//!   boot-time block and the fw3 emergency block live in the shell includes
+//!   (`scripts/`), mirrored by string-scan tests; the guarantees of both are
+//!   tabulated in docs/architecture/killswitch-contract.md.
 //! - [`render_nft`] and [`render_iptables`] translate the AST into the
 //!   backend's wire syntax.
 //! - [`fw3`] and [`fw4`] are thin backends that apply the rendered script

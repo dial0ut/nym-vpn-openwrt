@@ -21,9 +21,12 @@
 # daemon's own default — kill-switch on, legacy split tunnelling off — so the
 # guard and the daemon that is about to start agree. The daemon preserves an
 # unparseable config as .json.bak and starts with defaults, and writes a
-# missing config on its first start; either way the daemon that comes up
-# applies a Blocked policy and lifts the boot block itself. Only an explicit
-# "false" turns the block off. NYM_BOOT_REASON tells the caller what was
+# missing config on its first start; either way a daemon that comes up
+# applies a Blocked policy and lifts the boot block itself. (A daemon that
+# cannot come up — a non-mainnet network with no cached discovery fails
+# before its first policy — leaves the block in place until `stop`; see
+# docs/architecture/killswitch-contract.md.) Only an explicit "false" turns
+# the block off. NYM_BOOT_REASON tells the caller what was
 # decided and from which value, for the log.
 #
 # SPDX-License-Identifier: GPL-3.0-only

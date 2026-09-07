@@ -76,6 +76,7 @@ nav:
       - Overview: architecture/overview.md
       - WireGuard: architecture/wireguard.md
       - Firewall Backends: architecture/firewall.md
+      - Kill-Switch Contract: architecture/killswitch-contract.md
   - Development:
       - Building from Source: development/building.md
       - Packaging: development/packaging.md
