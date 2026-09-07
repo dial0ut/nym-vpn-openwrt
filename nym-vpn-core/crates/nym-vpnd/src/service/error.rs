@@ -99,8 +99,35 @@ pub enum GatewayTestError {
     #[error("no gateway to test: nothing selected and no entry or exit point configured")]
     NoTargets,
 
+    #[error("invalid gateway test request")]
+    Params(#[source] nym_vpn_lib_types::GatewayTestParamsError),
+
+    /// One run at a time: the kill-switch probe hatch is rate limited for a
+    /// single run, so a second concurrent run would read as packet loss.
+    #[error("a gateway test is already running; wait for it to finish")]
+    AlreadyRunning,
+
+    #[error("gateway test did not finish within {}s", .0.as_secs())]
+    Timeout(std::time::Duration),
+
     #[error("failed to probe gateways")]
     Probe(#[source] nym_vpn_lib::gateway_probe::ProbeError),
+}
+
+impl GatewayTestError {
+    /// The whole cause chain on one line, for gRPC messages and log lines:
+    /// `Display` alone stops at "failed to probe gateways" and hides the
+    /// EPERM/ENETUNREACH underneath.
+    pub fn chain(&self) -> String {
+        let mut s = self.to_string();
+        let mut source = std::error::Error::source(self);
+        while let Some(err) = source {
+            s.push_str(": ");
+            s.push_str(&err.to_string());
+            source = err.source();
+        }
+        s
+    }
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

@@ -24,8 +24,9 @@ const _: () = assert!(crate::TUNNEL_FWMARK == nym_firewall::TUNNEL_FWMARK);
 pub const PROBE_INTERVAL: Duration = Duration::from_millis(200);
 
 /// Targets probed at the same time. Together with [`PROBE_INTERVAL`] this
-/// caps the packet rate at about 40/s, under the firewall hatch's limit.
-const MAX_CONCURRENT_TARGETS: usize = 8;
+/// caps the packet rate at about 40/s, under the firewall hatch's limit —
+/// for one run. The daemon serializes runs for the same reason.
+pub const MAX_CONCURRENT_TARGETS: usize = 8;
 
 /// Same payload size as `ping(8)`: 56 bytes after the 8-byte ICMP header.
 const PAYLOAD: [u8; 56] = [0; 56];
@@ -106,6 +107,15 @@ impl ProbeOutcome {
     }
 }
 
+/// The ICMP socket for one address family, alive for one probe run.
+///
+/// Deliberately not `Clone`: dropping *any* clone of a surge-ping `Client`
+/// marks its shared reply map destroyed, so a fast target finishing first
+/// would fail the remaining probes of a slower one with `ClientDestroyed`
+/// (the bug fixed in f5f5f6be). Sharing goes through `Arc<ProbeClient>`;
+/// the type makes an accidental `.clone()` of the inner client impossible.
+struct ProbeClient(Client);
+
 #[derive(Debug, thiserror::Error)]
 pub enum ProbeError {
     #[error("failed to open ICMP socket")]
@@ -125,12 +135,12 @@ pub async fn probe_targets(
     // One socket per family, opened only when needed: an IPv6 socket can be
     // refused outright on a kernel built without IPv6.
     //
-    // Shared through an `Arc`, never cloned: dropping *any* clone of a
-    // surge-ping `Client` marks its reply map destroyed, so a fast target
-    // finishing first would fail the remaining probes of a slower one with
-    // `ClientDestroyed`. The `Arc`s below outlive the whole probe run — they
-    // drop at the end of this function, after `collect()` has awaited every
-    // probe, timeouts included.
+    // The `Arc<ProbeClient>`s outlive the whole probe run — they drop at the
+    // end of this function, after `collect()` has awaited every probe,
+    // timeouts included (see `ProbeClient` for why the client itself is
+    // never cloned). Nothing here is spawned: every probe is a future inside
+    // `buffered`, so dropping this function's future — a deadline or a
+    // cancelled RPC — drops the in-flight probes and the sockets with it.
     let v4 = targets
         .iter()
         .any(IpAddr::is_ipv4)
@@ -164,7 +174,7 @@ pub async fn probe_targets(
 
 /// Open an ICMP socket and put the tunnel fwmark on it so its packets take
 /// the main routing table and the kill switch's probe hatch.
-fn marked_client(kind: ICMP) -> Result<Client, ProbeError> {
+fn marked_client(kind: ICMP) -> Result<ProbeClient, ProbeError> {
     let client =
         Client::new(&Config::builder().kind(kind).build()).map_err(ProbeError::OpenSocket)?;
     let raw_fd = client.get_socket().get_native_sock();
@@ -173,11 +183,11 @@ fn marked_client(kind: ICMP) -> Result<Client, ProbeError> {
     let fd = unsafe { BorrowedFd::borrow_raw(raw_fd) };
     Mark.set(&fd, &crate::TUNNEL_FWMARK)
         .map_err(ProbeError::SetMark)?;
-    Ok(client)
+    Ok(ProbeClient(client))
 }
 
 async fn probe_one(
-    client: Option<Arc<Client>>,
+    client: Option<Arc<ProbeClient>>,
     addr: IpAddr,
     ident: PingIdentifier,
     params: ProbeParams,
@@ -188,7 +198,7 @@ async fn probe_one(
         return outcome;
     };
 
-    let mut pinger = client.pinger(addr, ident).await;
+    let mut pinger = client.0.pinger(addr, ident).await;
     pinger.timeout(params.timeout);
 
     for seq in 0..params.count {

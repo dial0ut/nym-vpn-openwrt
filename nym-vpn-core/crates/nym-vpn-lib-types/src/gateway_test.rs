@@ -7,7 +7,7 @@
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use std::net::IpAddr;
+use std::{collections::HashSet, net::IpAddr};
 
 /// Echo requests per gateway when the request leaves `count` at zero.
 pub const DEFAULT_PROBE_COUNT: u32 = 5;
@@ -20,6 +20,16 @@ pub const DEFAULT_TOP_CANDIDATES: u32 = 5;
 pub const MAX_PROBE_COUNT: u32 = 20;
 pub const MAX_PROBE_TIMEOUT_MS: u32 = 10_000;
 pub const MAX_TOP_CANDIDATES: u32 = 20;
+/// Most explicit gateway identities one request may name. Unlike the knobs
+/// above this is not clamped: a longer list is a mistake, not a preference,
+/// and each unknown identity costs the daemon a directory round trip.
+pub const MAX_EXPLICIT_GATEWAYS: usize = 20;
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum GatewayTestParamsError {
+    #[error("too many gateways to test: {given} named, at most {max} per test")]
+    TooManyGateways { given: usize, max: usize },
+}
 
 /// Which gateways to probe for one role.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,6 +78,25 @@ impl GatewayTestParams {
     /// True when only the explicit `gateways` list is to be probed.
     pub fn explicit_only(&self) -> bool {
         self.entry.is_none() && self.exit.is_none() && !self.gateways.is_empty()
+    }
+
+    /// Drop repeated identities from `gateways`, keeping first-seen order, so
+    /// `--id A --id A` probes A once and yields one row.
+    pub fn dedup_gateways(&mut self) {
+        let mut seen = HashSet::with_capacity(self.gateways.len());
+        self.gateways.retain(|id| seen.insert(id.clone()));
+    }
+
+    /// Reject what cannot be clamped: an explicit list longer than
+    /// [`MAX_EXPLICIT_GATEWAYS`]. Call after [`Self::dedup_gateways`].
+    pub fn validate(&self) -> Result<(), GatewayTestParamsError> {
+        if self.gateways.len() > MAX_EXPLICIT_GATEWAYS {
+            return Err(GatewayTestParamsError::TooManyGateways {
+                given: self.gateways.len(),
+                max: MAX_EXPLICIT_GATEWAYS,
+            });
+        }
+        Ok(())
     }
 }
 
@@ -231,6 +260,46 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(plain.effective_count(), 3);
+    }
+
+    #[test]
+    fn dedup_keeps_first_seen_order() {
+        let mut params = GatewayTestParams {
+            gateways: vec!["B".into(), "A".into(), "B".into(), "C".into(), "A".into()],
+            ..Default::default()
+        };
+        params.dedup_gateways();
+        assert_eq!(params.gateways, vec!["B", "A", "C"]);
+    }
+
+    #[test]
+    fn explicit_list_is_capped_not_clamped() {
+        let within = GatewayTestParams {
+            gateways: (0..MAX_EXPLICIT_GATEWAYS).map(|i| i.to_string()).collect(),
+            ..Default::default()
+        };
+        assert_eq!(within.validate(), Ok(()));
+
+        let over = GatewayTestParams {
+            gateways: (0..=MAX_EXPLICIT_GATEWAYS).map(|i| i.to_string()).collect(),
+            ..Default::default()
+        };
+        assert_eq!(
+            over.validate(),
+            Err(GatewayTestParamsError::TooManyGateways {
+                given: MAX_EXPLICIT_GATEWAYS + 1,
+                max: MAX_EXPLICIT_GATEWAYS,
+            })
+        );
+
+        // Duplicates do not count towards the cap once deduplicated.
+        let mut dupes = GatewayTestParams {
+            gateways: vec!["A".to_owned(); MAX_EXPLICIT_GATEWAYS + 5],
+            ..Default::default()
+        };
+        assert!(dupes.validate().is_err());
+        dupes.dedup_gateways();
+        assert_eq!(dupes.validate(), Ok(()));
     }
 
     #[test]
