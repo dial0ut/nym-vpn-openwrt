@@ -9,13 +9,19 @@
 #   be restored. fw3 has no such isolation: a reload wipes the shared
 #   filter/mangle/nat tables wholesale, custom chains included, so the whole
 #   kill-switch would silently vanish until the daemon's next state change.
-#   To close that gap the daemon persists exactly what it applied:
-#     /tmp/nym-firewall-v4.rules  iptables-restore script (filter [+ mangle])
-#     /tmp/nym-firewall-v6.rules  ip6tables-restore script, if IPv6 is up
-#     /tmp/nym-firewall.ifaces    tunnel interfaces needing masquerade
-#     /tmp/nym-firewall.transition fail-closed multi-file update marker
-#     /tmp/nym-firewall.lock       flock(2) serializing every writer
-#   and this script re-applies them after every reload, holding the lock for
+#   To close that gap the daemon persists exactly what it applied, in the
+#   root-owned runtime directory $NYM_RUNTIME_DIR (default
+#   /var/run/nym-firewall, shared with fw-boot-guard.sh and the init script):
+#     v4.rules    iptables-restore script (filter [+ mangle])
+#     v6.rules    ip6tables-restore script, if IPv6 is up
+#     ifaces      tunnel interfaces needing masquerade
+#     transition  fail-closed multi-file update marker
+#     lock        flock(2) serializing every writer
+#   Nothing in that directory is used unless it still is a plain directory
+#   owned by root with no group/other access (this script runs as root and
+#   feeds the rules files to iptables-restore, so a world-writable location
+#   such as /tmp would let any local user hand it a ruleset). This script
+#   re-applies the files after every reload, holding the lock for
 #   the whole run like the daemon does for every apply/reset: the two never
 #   interleave, so this script only ever sees fw3 state between complete
 #   transitions. While the transition marker exists — a daemon crashed
@@ -37,12 +43,14 @@
 
 set -e
 
-# Persisted daemon state (paths are a contract with the fw3 backend).
-RULES_V4="/tmp/nym-firewall-v4.rules"
-RULES_V6="/tmp/nym-firewall-v6.rules"
-IFACES_FILE="/tmp/nym-firewall.ifaces"
-TRANSITION_FILE="/tmp/nym-firewall.transition"
-LOCK_FILE="/tmp/nym-firewall.lock"
+# Persisted daemon state (directory and names are a contract with the fw3
+# backend, common.rs). Trusted only after nym_runtime_dir_prepare (below).
+NYM_RUNTIME_DIR="${NYM_RUNTIME_DIR:-/var/run/nym-firewall}"
+RULES_V4="$NYM_RUNTIME_DIR/v4.rules"
+RULES_V6="$NYM_RUNTIME_DIR/v6.rules"
+IFACES_FILE="$NYM_RUNTIME_DIR/ifaces"
+TRANSITION_FILE="$NYM_RUNTIME_DIR/transition"
+LOCK_FILE="$NYM_RUNTIME_DIR/lock"
 
 # fw3 hook chains (user chains fw3 recreates on every reload).
 HOOK_INPUT="input_rule"
@@ -81,7 +89,18 @@ else
         NYM_BOOT_REASON="$NYM_SHARE_DIR/fw-boot-guard.sh is missing; not blocking"
         return 1
     }
+    # Without the shared checks nothing in the runtime directory is trusted.
+    nym_runtime_dir_prepare() { return 1; }
 fi
+
+# A persisted state file exists AND lives in a directory that passed the
+# ownership/mode checks. Every test of a state file goes through here; a
+# directory that cannot be trusted reads as "no state", which lands in the
+# fail-closed branches below (boot guard verdict, emergency block).
+STATE_TRUSTED=0
+have_state() {
+    [ "$STATE_TRUSTED" = 1 ] && [ -f "$1" ]
+}
 
 # Make a jump lead its hook chain. Mode "first": it must be rule 1. Mode
 # "leading": only jumps to our own NYM_* chains may precede it (a foreign
@@ -317,7 +336,7 @@ apply_rules() {
 # add_masquerade_rules in the fw3 backend: owned chain, flush + repopulate,
 # jump added only when missing.
 restore_masquerade() {
-    if [ ! -f "$IFACES_FILE" ]; then
+    if ! have_state "$IFACES_FILE"; then
         cleanup_masquerade
         return 0
     fi
@@ -348,7 +367,7 @@ cleanup_masquerade() {
 # Needed with the kill-switch on AND off — the tun devices are in no fw3
 # zone, so fw3's global forward policy rejects LAN clients without it.
 restore_forwarding() {
-    if [ ! -f "$IFACES_FILE" ]; then
+    if ! have_state "$IFACES_FILE"; then
         cleanup_forwarding
         return 0
     fi
@@ -392,7 +411,7 @@ restore_policy() {
     local failed=0
 
     apply_rules "iptables-restore" "$RULES_V4" "iptables" || failed=1
-    if [ -f "$RULES_V6" ]; then
+    if have_state "$RULES_V6"; then
         apply_rules "ip6tables-restore" "$RULES_V6" "ip6tables" || failed=1
     elif kernel_ipv6_enabled; then
         # The daemon persisted a v4 policy while IPv6 was disabled, but
@@ -461,9 +480,9 @@ handle_no_policy() {
     # transition marker means the daemon is mid-apply and lifts the block
     # itself; a persisted policy that is not hooked yet means the daemon is
     # about to activate it and does the same.
-    if [ -f "$TRANSITION_FILE" ]; then
+    if have_state "$TRANSITION_FILE"; then
         :
-    elif [ -f "$RULES_V4" ]; then
+    elif have_state "$RULES_V4"; then
         if policy_hooked; then
             lift_emergency "daemon policy went live meanwhile" || failed=1
         fi
@@ -483,7 +502,7 @@ main() {
     # missing/partially-updated rules files as kill-switch-off while it
     # exists; a later successful apply/reset or explicit service stop clears
     # it.
-    if [ -f "$TRANSITION_FILE" ]; then
+    if have_state "$TRANSITION_FILE"; then
         logger -t nym-vpn "Firewall transition in progress; enforcing emergency block"
         emergency_block "iptables" || failed=1
         if kernel_ipv6_enabled; then
@@ -492,7 +511,7 @@ main() {
         return 1
     fi
 
-    if [ -f "$RULES_V4" ]; then
+    if have_state "$RULES_V4"; then
         restore_policy || failed=1
     else
         handle_no_policy || failed=1
@@ -516,7 +535,17 @@ main() {
 # fresh descriptor would deadlock against the inherited one. busybox ships
 # flock in stock OpenWrt images; without it run unlocked rather than fail the
 # firewall reload.
-if [ "${NYM_FW_LOCKED:-}" != "1" ]; then
+# Establish trust in the runtime directory first: create it when missing (fw3
+# starts before the daemon has ever run), then verify owner and mode. If it
+# cannot be trusted no state file is read and the lock — which lives inside
+# it — is not taken; the fail-closed branches decide from live state alone.
+if nym_runtime_dir_prepare; then
+    STATE_TRUSTED=1
+else
+    logger -t nym-vpn "$NYM_RUNTIME_DIR is not a private root-owned directory; ignoring persisted state"
+fi
+
+if [ "${NYM_FW_LOCKED:-}" != "1" ] && [ "$STATE_TRUSTED" = 1 ]; then
     if command -v flock >/dev/null 2>&1; then
         exec 9>"$LOCK_FILE"
         flock 9 || logger -t nym-vpn "cannot take $LOCK_FILE; running unlocked"

@@ -126,7 +126,19 @@ is *armed*:
    `killswitch` on and `legacy_split_tunnel` off — the same effective value the daemon computes;
 2. the daemon is enabled to start at boot (`/etc/rc.d/S*nym-vpnd` exists);
 3. the administrator has not stopped it: `/etc/init.d/nym-vpnd stop` writes
-   `/tmp/nym-vpnd.stopped`, `start` removes it, and tmpfs clears it on reboot.
+   `/var/run/nym-firewall/stopped`, `start` removes it, and tmpfs clears it on reboot.
+
+All runtime state the daemon, the includes and the init script share — that stop marker, the fw3
+rules files, the transition marker and the lock — lives in `/var/run/nym-firewall`, never in
+`/tmp`. The includes run as root and act on what they find there (a rules file is fed to
+`iptables-restore`; the stop marker keeps the boot block off), so it must not be somewhere any
+local user can create files: only root can create entries under `/var/run`, the daemon creates
+the directory 0700, and every reader and writer first checks that it still is a plain directory
+owned by root with no group/other permission bits. A directory that fails the check is treated as
+empty: the stop marker is ignored, no rules file is loaded, and the fail-closed branches decide.
+The daemon refuses to apply any policy on top of a directory it cannot trust, and writes each
+file `O_EXCL | O_NOFOLLOW` under a unique temporary name before renaming it into place, so a
+planted file or symlink is never followed.
 
 If all three hold, the include installs a boot-time emergency block. On fw4 that is a separate
 `inet nym_boot` table at priority `filter - 20`, ahead of both `inet nym` and fw4; on fw3 it is the
@@ -177,11 +189,11 @@ network reconfiguration, DHCP changes, dnsmasq restarts, a manual `fw3 reload` o
 On fw4 the kill-switch lives in its own `inet nym` table and survives; the reload only wipes the
 daemon's masquerade and forward integration inside `inet fw4`. On fw3 all custom iptables chains
 are wiped, so the daemon persists the applied restore scripts and tunnel-interface list under
-`/tmp`; the fw3 include restores both blocking and forwarding planes. With nothing to restore,
+`/var/run/nym-firewall`; the fw3 include restores both blocking and forwarding planes. With nothing to restore,
 both includes fall through to the boot-time guard above: arm the block, or make sure none is left.
 
 fw3 policy changes use a fail-closed transition protocol. Before touching live or persisted state,
-the daemon creates `/tmp/nym-firewall.transition`. While the marker exists, a firewall reload's
+the daemon creates `/var/run/nym-firewall/transition`. While the marker exists, a firewall reload's
 include run installs dedicated emergency OUTPUT/FORWARD drop chains (`NYM_EMERGENCY_OUT/FWD`;
 INPUT is untouched and reply-direction packets are accepted, preserving SSH/LuCI management) instead of interpreting absent or
 partially-written rules files as kill-switch-off. Once every v4/v6/interface file is complete, the

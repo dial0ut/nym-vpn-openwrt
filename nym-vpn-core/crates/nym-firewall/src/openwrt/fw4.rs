@@ -18,11 +18,18 @@
 //! script installs it at firewall start to cover the window before this
 //! daemon's first policy (see [`FW4_BOOT_TABLE`]). Every apply and reset
 //! lifts it last, once the live state has converged.
+//!
+//! This backend keeps no persisted state of its own, but every entry point
+//! first makes sure the shared runtime directory
+//! ([`RUNTIME_DIR`](super::common::RUNTIME_DIR)) exists
+//! and is private to root: the init script's stop marker and the include's
+//! optional hints live there, and the include trusts them only from a
+//! directory that passes the same checks.
 
 use std::io::Write as IoWrite;
 use std::process::{Command, Stdio};
 
-use super::common::FW4_BOOT_TABLE;
+use super::common::{FW4_BOOT_TABLE, ensure_runtime_dir};
 use super::render_nft;
 use super::rules::RuleSet;
 use super::{Error, Result};
@@ -40,6 +47,7 @@ const FW4_FORWARD_LAN: &str = "forward_lan";
 /// lift the boot-time block only once both are in place.
 pub fn apply(rs: &RuleSet) -> Result<()> {
     tracing::debug!("Applying firewall policy via fw4/nftables backend");
+    ensure_runtime_dir()?;
 
     let script = render_nft::render(rs);
     run_nft_script(&script)?;
@@ -58,6 +66,7 @@ pub fn apply(rs: &RuleSet) -> Result<()> {
 /// forward LAN traffic, but nothing is fenced off from the WAN.
 pub fn apply_forwarding_only(rs: &RuleSet) -> Result<()> {
     tracing::debug!("Applying tunnel forwarding plane (kill-switch off) via fw4/nftables");
+    ensure_runtime_dir()?;
 
     // Lift any blocking left over from a previous kill-switch-on state.
     delete_nym_table();
@@ -79,6 +88,7 @@ pub fn apply_forwarding_only(rs: &RuleSet) -> Result<()> {
 /// — that is reported, since it would leave WAN egress blackholed.
 pub fn reset() -> Result<()> {
     tracing::debug!("Resetting firewall policy via fw4/nftables backend");
+    ensure_runtime_dir()?;
 
     remove_integration();
     delete_nym_table();
@@ -355,6 +365,7 @@ fn remove_jumps(parent: &str, target: &str) {
 
 #[cfg(test)]
 mod tests {
+    use super::super::common::{FW4_POLICY_PATH, IFACES_PATH, RUNTIME_DIR};
     use super::*;
 
     /// The include script that installs the boot-time block this backend
@@ -457,6 +468,41 @@ mod tests {
                 assert!(
                     pos("ct state established,related ct direction reply accept") < udp,
                     "reply-direction accept must stay ahead of the DNS reject"
+                );
+            }
+        }
+    }
+
+    /// The include's optional hint files live in the runtime directory and
+    /// are only read once it has been verified.
+    #[test]
+    fn include_script_reads_hints_from_the_runtime_dir_only() {
+        let default = format!("NYM_RUNTIME_DIR=\"${{NYM_RUNTIME_DIR:-{RUNTIME_DIR}}}\"");
+        assert!(
+            lines().any(|l| l == default),
+            "fw4-include.sh must define {default}"
+        );
+        let file = |full: &str| full.strip_prefix(RUNTIME_DIR).unwrap().to_owned();
+        for expected in [
+            format!("RULES_NFT=\"$NYM_RUNTIME_DIR{}\"", file(FW4_POLICY_PATH)),
+            format!("IFACES_FILE=\"$NYM_RUNTIME_DIR{}\"", file(IFACES_PATH)),
+        ] {
+            assert!(
+                lines().any(|l| l == expected),
+                "fw4-include.sh must define {expected}"
+            );
+        }
+        assert!(INCLUDE.contains("nym_runtime_dir_trusted"));
+        for line in lines() {
+            assert!(
+                !line.contains("/tmp/nym"),
+                "no runtime file outside the directory: {line}"
+            );
+            for var in ["RULES_NFT", "IFACES_FILE"] {
+                assert!(
+                    !line.contains(&format!("[ -f \"${var}\""))
+                        && !line.contains(&format!("[ ! -f \"${var}\"")),
+                    "hints must be tested through have_state: {line}"
                 );
             }
         }

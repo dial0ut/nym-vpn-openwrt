@@ -3,11 +3,29 @@ START=90
 STOP=10
 USE_PROCD=1
 
+# Runtime state shared with the daemon and the firewall includes lives in a
+# root-owned private directory, not /tmp: the boot guard honours the stop
+# marker and the fw3 include loads the rules files only from a directory
+# nobody else could have written to. fw-boot-guard.sh owns the paths and the
+# checks (NYM_RUNTIME_DIR, NYM_VPND_STOPPED, nym_runtime_dir_prepare); source
+# it so this script cannot drift from the includes. Without it there is no
+# boot-time block either, so the marker is irrelevant and is not written.
+NYM_SHARE_DIR="${NYM_SHARE_DIR:-/usr/share/nym-vpn}"
+if [ -r "$NYM_SHARE_DIR/fw-boot-guard.sh" ]; then
+    # shellcheck source=/dev/null
+    . "$NYM_SHARE_DIR/fw-boot-guard.sh"
+else
+    NYM_RUNTIME_DIR="${NYM_RUNTIME_DIR:-/var/run/nym-firewall}"
+    NYM_VPND_STOPPED="$NYM_RUNTIME_DIR/stopped"
+    nym_runtime_dir_prepare() { return 1; }
+fi
+
 # Written on explicit stop, cleared on start (contract with fw-boot-guard.sh).
 # While present, a firewall reload must not re-install the boot-time
 # kill-switch block: the administrator asked for their network back and no
-# daemon is coming to lift it. /tmp is tmpfs, so a reboot re-arms the block.
-STOPPED_MARKER=/tmp/nym-vpnd.stopped
+# daemon is coming to lift it. /var/run is tmpfs, so a reboot re-arms the
+# block.
+STOPPED_MARKER="$NYM_VPND_STOPPED"
 
 # Only an explicit `stop` opens the network. A `restart` — which is also
 # how a package upgrade swaps the daemon (postinst restarts through this
@@ -44,17 +62,26 @@ start_service() {
     procd_close_instance
 }
 
-STOP_PID_STASH=/tmp/nym-vpnd.stop-pid
+STOP_PID_STASH="$NYM_RUNTIME_DIR/stop-pid"
 
 stop_service() {
     # First thing, before anything can fail or block: a reload racing this
-    # stop must already see the marker.
-    keep_killswitch || touch "$STOPPED_MARKER" 2>/dev/null
+    # stop must already see the marker. Only ever written into a directory
+    # that passed the ownership/mode checks; the guard ignores it elsewhere.
+    if ! keep_killswitch; then
+        if nym_runtime_dir_prepare; then
+            touch "$STOPPED_MARKER" 2>/dev/null
+        else
+            logger -t nym-vpn "not writing $STOPPED_MARKER: $NYM_RUNTIME_DIR is not a private root-owned directory"
+        fi
+    fi
 
     # Stash the daemon pid before procd kills it: service_stopped() needs
     # it, and pidof is useless there — rc.common itself runs with comm
     # "nym-vpnd" and would match.
-    cat /var/run/nym-vpnd.pid 2>/dev/null > "$STOP_PID_STASH"
+    if nym_runtime_dir_prepare; then
+        cat /var/run/nym-vpnd.pid 2>/dev/null > "$STOP_PID_STASH"
+    fi
 
     # Graceful disconnect, guarded: a hung daemon accepts the control
     # socket but never replies, and an unguarded nym-vpnc wedges stop
@@ -118,13 +145,19 @@ service_stopped() {
     # firewall reload cannot observe the files half-removed; the include is
     # told the lock is already held (re-taking it would deadlock).
     (
-        if command -v flock >/dev/null 2>&1; then
-            exec 9>/tmp/nym-firewall.lock
+        if command -v flock >/dev/null 2>&1 && nym_runtime_dir_prepare; then
+            exec 9>"$NYM_RUNTIME_DIR/lock"
             flock 9 || true
             export NYM_FW_LOCKED=1
         fi
+        rm -f "$NYM_RUNTIME_DIR/v4.rules" "$NYM_RUNTIME_DIR/v6.rules" \
+            "$NYM_RUNTIME_DIR/ifaces" "$NYM_RUNTIME_DIR/transition" 2>/dev/null
+        # Files a pre-runtime-directory daemon left under /tmp. Never read
+        # any more; removed on explicit stop so they do not linger until the
+        # next reboot.
         rm -f /tmp/nym-firewall-v4.rules /tmp/nym-firewall-v6.rules \
-            /tmp/nym-firewall.ifaces /tmp/nym-firewall.transition 2>/dev/null
+            /tmp/nym-firewall.ifaces /tmp/nym-firewall.transition \
+            /tmp/nym-firewall.lock /tmp/nym-vpnd.stopped /tmp/nym-vpnd.stop-pid 2>/dev/null
         if [ -x /usr/share/nym-vpn/fw-backend.sh ] \
             && [ "$(/usr/share/nym-vpn/fw-backend.sh)" = "fw3" ] \
             && iptables -L input_rule -n >/dev/null 2>&1 \

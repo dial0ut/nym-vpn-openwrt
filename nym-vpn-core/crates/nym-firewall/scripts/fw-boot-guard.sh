@@ -10,9 +10,11 @@
 #                           legacy_split_tunnel); written atomically by the
 #                           daemon, only read here
 #   /etc/rc.d/S*nym-vpnd    the daemon is enabled to start at boot
-#   /tmp/nym-vpnd.stopped   the administrator stopped the daemon explicitly
+#   $NYM_RUNTIME_DIR/stopped  the administrator stopped the daemon explicitly
 #                           (the init script writes it on stop and clears it
-#                           on start; /tmp is tmpfs, so a reboot clears it)
+#                           on start; /var/run is tmpfs, so a reboot clears
+#                           it). Honoured only inside a private root-owned
+#                           directory — see nym_runtime_dir_trusted below.
 #
 # Whether the daemon has already applied a policy is backend-specific and is
 # checked by the caller. A setting that is absent or cannot be read takes the
@@ -29,8 +31,35 @@
 
 NYM_VPND_CONFIG="${NYM_VPND_CONFIG:-/etc/nym/nym-vpnd.json}"
 NYM_RC_DIR="${NYM_RC_DIR:-/etc/rc.d}"
-NYM_VPND_STOPPED="${NYM_VPND_STOPPED:-/tmp/nym-vpnd.stopped}"
+# Runtime-state directory shared with the daemon (RUNTIME_DIR in the fw3/fw4
+# backends), both firewall includes and the init script. It sits under
+# /var/run, where only root can create entries — never /tmp, where any local
+# user could plant the stop marker to suppress the boot block, or a rules
+# file for the fw3 include to load. The daemon creates it 0700; nothing in
+# it is trusted unless it still is a plain directory owned by root with no
+# group/other access.
+NYM_RUNTIME_DIR="${NYM_RUNTIME_DIR:-/var/run/nym-firewall}"
+NYM_VPND_STOPPED="${NYM_VPND_STOPPED:-$NYM_RUNTIME_DIR/stopped}"
 NYM_BOOT_REASON=""
+
+# Whether the runtime directory can be trusted: a real directory (not a
+# symlink), owned by uid 0, mode exactly 0700. Anything else, including a
+# missing directory or a busybox without `stat -c`, means "no state".
+nym_runtime_dir_trusted() {
+    [ -d "$NYM_RUNTIME_DIR" ] && [ ! -L "$NYM_RUNTIME_DIR" ] || return 1
+    [ "$(stat -c %u "$NYM_RUNTIME_DIR" 2>/dev/null)" = "0" ] || return 1
+    [ "$(stat -c %a "$NYM_RUNTIME_DIR" 2>/dev/null)" = "700" ]
+}
+
+# For writers: create the directory when missing (root only — /var/run is
+# root-owned 0755), then apply the same verdict. Never repairs an existing
+# entry: a wrong one is a reason to refuse, not to fix up.
+nym_runtime_dir_prepare() {
+    if [ ! -e "$NYM_RUNTIME_DIR" ] && [ ! -L "$NYM_RUNTIME_DIR" ]; then
+        mkdir -m 0700 "$NYM_RUNTIME_DIR" 2>/dev/null
+    fi
+    nym_runtime_dir_trusted
+}
 
 # Print the JSON boolean stored under a top-level key of the daemon config:
 # "true"/"false" when present, "absent" when the key or the file is missing
@@ -98,8 +127,13 @@ nym_boot_block_wanted() {
     local killswitch legacy
 
     if [ -f "$NYM_VPND_STOPPED" ]; then
-        NYM_BOOT_REASON="nym-vpnd was stopped by the administrator ($NYM_VPND_STOPPED present)"
-        return 1
+        if nym_runtime_dir_trusted; then
+            NYM_BOOT_REASON="nym-vpnd was stopped by the administrator ($NYM_VPND_STOPPED present)"
+            return 1
+        fi
+        # A marker outside a private root-owned directory could have been
+        # planted to keep the boot block off; it does not count.
+        logger -t nym-vpn "ignoring $NYM_VPND_STOPPED: $NYM_RUNTIME_DIR is not a private root-owned directory"
     fi
     if ! nym_vpnd_enabled_at_boot; then
         NYM_BOOT_REASON="nym-vpnd is not enabled to start at boot (no $NYM_RC_DIR/S*nym-vpnd)"

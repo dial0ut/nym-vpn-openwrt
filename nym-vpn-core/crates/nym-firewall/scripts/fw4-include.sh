@@ -42,9 +42,14 @@
 set -e
 
 # Optional daemon-written hints (kept for forward-compatibility; the script does
-# not depend on them and falls back to live detection when absent).
-RULES_NFT="/tmp/nym-firewall.nft"
-IFACES_FILE="/tmp/nym-firewall.ifaces"
+# not depend on them and falls back to live detection when absent). They live
+# in the root-owned runtime directory shared with the daemon, the boot guard
+# and the init script, and are read only once nym_runtime_dir_trusted (from
+# fw-boot-guard.sh) has vouched for it: a saved ruleset is fed to `nft -f`,
+# so it must not be something any local user could have planted in /tmp.
+NYM_RUNTIME_DIR="${NYM_RUNTIME_DIR:-/var/run/nym-firewall}"
+RULES_NFT="$NYM_RUNTIME_DIR/policy.nft"
+IFACES_FILE="$NYM_RUNTIME_DIR/ifaces"
 
 # Chain names — kept identical to the daemon's fw4 backend (integrate_with_fw4)
 # so restore and the daemon converge on a single structure instead of two
@@ -72,7 +77,15 @@ else
         NYM_BOOT_REASON="$NYM_SHARE_DIR/fw-boot-guard.sh is missing; not blocking"
         return 1
     }
+    # Without the shared checks nothing in the runtime directory is trusted.
+    nym_runtime_dir_trusted() { return 1; }
 fi
+
+# A hint file exists AND its directory passed the ownership/mode checks.
+STATE_TRUSTED=0
+have_state() {
+    [ "$STATE_TRUSTED" = 1 ] && [ -f "$1" ]
+}
 
 # Resolve the active tunnel interfaces to masquerade/forward. Order of trust:
 #   1. daemon-written iface list (authoritative, if present)
@@ -80,11 +93,11 @@ fi
 #   3. live detection of nym* tunnel devices (the common case — the daemon
 #      pipes its ruleset to `nft -f -` and writes no file)
 get_tunnel_interfaces() {
-    if [ -f "$IFACES_FILE" ]; then
+    if have_state "$IFACES_FILE"; then
         grep -v '^lo$' "$IFACES_FILE" 2>/dev/null | sort -u
         return
     fi
-    if [ -f "$RULES_NFT" ]; then
+    if have_state "$RULES_NFT"; then
         grep -o 'oifname "[^"]*" accept' "$RULES_NFT" 2>/dev/null | \
             sed 's/oifname "//;s/" accept//' | \
             grep -v '^lo$' | \
@@ -251,7 +264,7 @@ main() {
     # table is otherwise daemon-managed and survives the reload on its own — we
     # must NOT delete it here, or a firewall reload would silently drop the
     # kill-switch while the daemon thinks it is still up).
-    if [ -f "$RULES_NFT" ]; then
+    if have_state "$RULES_NFT"; then
         logger -t nym-vpn "Re-applying saved nftables rules after fw4 restart"
         nft -f "$RULES_NFT" 2>/dev/null || logger -t nym-vpn "Failed to apply saved rules"
     fi
@@ -263,5 +276,14 @@ main() {
     restore_fw4_tunnel_rules
     return "$failed"
 }
+
+# Trust the runtime directory only if the daemon (or the init script) created
+# it and it still is a private root-owned directory. Missing is normal before
+# the daemon's first run and simply means no hints.
+if nym_runtime_dir_trusted; then
+    STATE_TRUSTED=1
+elif [ -e "$NYM_RUNTIME_DIR" ] || [ -L "$NYM_RUNTIME_DIR" ]; then
+    logger -t nym-vpn "$NYM_RUNTIME_DIR is not a private root-owned directory; ignoring persisted state"
+fi
 
 main "$@"

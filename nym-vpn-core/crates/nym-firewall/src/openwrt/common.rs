@@ -5,18 +5,38 @@
 use std::net::IpAddr;
 use std::path::Path;
 
+use super::{Error, Result};
+
+/// Root-owned private directory for every piece of kill-switch runtime
+/// state shared between the daemon, the firewall includes (`fw3-include.sh`,
+/// `fw4-include.sh`, `fw-boot-guard.sh`), the init script and the package
+/// hooks. It lives under `/var/run` (OpenWrt: a root-owned, 0755 tmpfs
+/// directory that exists before the firewall starts, so a reboot clears it)
+/// rather than `/tmp`, which is world-writable: the includes run as root and
+/// act on what they find here — a rules file is fed to `iptables-restore`,
+/// the stop marker suppresses the boot-time block — so an unprivileged
+/// local process must not be able to plant any of it. Only root can create
+/// entries in `/var/run`; [`ensure_runtime_dir`] additionally refuses to use
+/// the directory unless it is a real directory owned by uid 0 with no
+/// group/other permission bits, and the scripts perform the same check
+/// before trusting a file in it. The path is a contract with those scripts:
+/// each derives its file names from one `NYM_RUNTIME_DIR` variable whose
+/// default the tests pin to this constant.
+pub const RUNTIME_DIR: &str = "/var/run/nym-firewall";
+
 /// Persisted fw3 state, consumed by `fw3-include.sh` to re-apply the
-/// kill-switch after an fw3 reload wipes the iptables tables. The paths are
-/// part of the contract with that script and with the package prerm — keep
-/// them in sync when renaming.
-pub const FW3_RULES_V4_PATH: &str = "/tmp/nym-firewall-v4.rules";
-pub const FW3_RULES_V6_PATH: &str = "/tmp/nym-firewall-v6.rules";
+/// kill-switch after an fw3 restart has flushed the iptables tables (an fw3
+/// *reload* leaves foreign chains alone; the include then only reconciles).
+/// The file names are part of the contract with that script and with the
+/// package prerm — keep them in sync when renaming.
+pub const FW3_RULES_V4_PATH: &str = "/var/run/nym-firewall/v4.rules";
+pub const FW3_RULES_V6_PATH: &str = "/var/run/nym-firewall/v6.rules";
 /// Present for the full duration of any fw3 state transition. The reload
 /// include treats its presence as an instruction to install an emergency
 /// OUTPUT/FORWARD block instead of reading or cleaning partially-updated
 /// persisted state. A crash deliberately leaves it behind; a later successful
 /// apply/reset or an explicit daemon stop removes it.
-pub const FW3_TRANSITION_PATH: &str = "/tmp/nym-firewall.transition";
+pub const FW3_TRANSITION_PATH: &str = "/var/run/nym-firewall/transition";
 /// Advisory `flock(2)` file serializing every writer of fw3 state: this
 /// backend's apply/forwarding-only/reset, `fw3-include.sh` (run by fw3 on
 /// every reload) and the init script's stop-time teardown. The transition
@@ -25,10 +45,75 @@ pub const FW3_TRANSITION_PATH: &str = "/tmp/nym-firewall.transition";
 /// an emergency block nobody removes. Each writer holds the lock for its whole
 /// mutation, so the include observes fw3 state only between complete
 /// transitions. Never deleted while the package is installed.
-pub const FW3_LOCK_PATH: &str = "/tmp/nym-firewall.lock";
+pub const FW3_LOCK_PATH: &str = "/var/run/nym-firewall/lock";
 /// Tunnel interface list (one name per line) for masquerade restore. Shared
 /// naming with the fw4 include script, which reads it as an optional hint.
-pub const IFACES_PATH: &str = "/tmp/nym-firewall.ifaces";
+pub const IFACES_PATH: &str = "/var/run/nym-firewall/ifaces";
+/// Optional saved nftables policy the fw4 include would replay. The fw4
+/// backend does not write it today (it pipes its ruleset to `nft -f -`); the
+/// name is reserved so the include's forward-compatible read stays inside
+/// the trusted directory instead of taking an `nft -f` input from `/tmp`.
+/// Consumed by the shell side only; the tests pin the script to it.
+#[allow(dead_code)]
+pub const FW4_POLICY_PATH: &str = "/var/run/nym-firewall/policy.nft";
+/// Stop marker written by the init script on an explicit `stop` and read by
+/// `fw-boot-guard.sh`: while present, no boot-time block is installed
+/// because the administrator asked for the network back and no daemon is
+/// coming to lift one. The daemon never touches it; the constant exists so
+/// the tests can pin the scripts to the same name.
+#[allow(dead_code)]
+pub const STOP_MARKER_PATH: &str = "/var/run/nym-firewall/stopped";
+
+/// Make sure [`RUNTIME_DIR`] exists and can be trusted, failing closed
+/// otherwise. Creates it 0700 when missing; then requires a real directory
+/// (not a symlink), owned by root, with no group/other permission bits.
+/// Anything else means the state files in it could have been planted or
+/// read by an unprivileged process, and no policy is applied on top of that.
+pub fn ensure_runtime_dir() -> Result<()> {
+    ensure_runtime_dir_at(Path::new(RUNTIME_DIR), 0)
+}
+
+/// [`ensure_runtime_dir`] for an arbitrary path and expected owner uid, so
+/// the checks can be exercised in tests as an unprivileged user.
+pub fn ensure_runtime_dir_at(dir: &Path, expected_uid: u32) -> Result<()> {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+
+    let refuse = |what: String| {
+        Error::ApplyError(format!(
+            "firewall runtime directory {}: {what}; refusing to apply a policy on top of it",
+            dir.display()
+        ))
+    };
+
+    match std::fs::DirBuilder::new().mode(0o700).create(dir) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => return Err(refuse(format!("cannot create: {e}"))),
+    }
+
+    // symlink_metadata: a symlink planted at this path must be seen as a
+    // symlink, not as whatever it points at.
+    let meta = std::fs::symlink_metadata(dir).map_err(|e| refuse(format!("cannot stat: {e}")))?;
+    if meta.file_type().is_symlink() {
+        return Err(refuse("is a symlink".into()));
+    }
+    if !meta.is_dir() {
+        return Err(refuse("is not a directory".into()));
+    }
+    if meta.uid() != expected_uid {
+        return Err(refuse(format!(
+            "owned by uid {}, expected {expected_uid}",
+            meta.uid()
+        )));
+    }
+    let mode = meta.mode() & 0o777;
+    if mode & 0o077 != 0 {
+        return Err(refuse(format!(
+            "mode {mode:o} grants group/other access, expected 0700"
+        )));
+    }
+    Ok(())
+}
 
 /// nftables table holding the boot-time kill-switch block. `fw4-include.sh`
 /// installs it at firewall start when the kill-switch is armed
@@ -245,5 +330,117 @@ mod tests {
         // formatting mismatch.
         let json = "{\n\t\"up\": true,\n\t\"pending\": false,\n\t\"available\": true,\n\t\"l3_device\": \"eth0\",\n\t\"proto\": \"static\",\n\t\"device\": \"eth0\"\n}\n";
         assert_eq!(parse_ubus_l3_device(json).as_deref(), Some("eth0"));
+    }
+
+    fn tmp_root(tag: &str) -> std::path::PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root =
+            std::env::temp_dir().join(format!("nym-firewall-{tag}-{}-{nonce}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        root
+    }
+
+    fn my_uid() -> u32 {
+        // SAFETY: geteuid has no preconditions and cannot fail.
+        unsafe { libc::geteuid() }
+    }
+
+    #[test]
+    fn runtime_dir_is_created_private_when_missing() {
+        use std::os::unix::fs::MetadataExt;
+        let root = tmp_root("rtdir-create");
+        let dir = root.join("state");
+        ensure_runtime_dir_at(&dir, my_uid()).unwrap();
+        let meta = std::fs::metadata(&dir).unwrap();
+        assert!(meta.is_dir());
+        assert_eq!(meta.mode() & 0o777, 0o700);
+        // Idempotent on the directory it just created.
+        ensure_runtime_dir_at(&dir, my_uid()).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn runtime_dir_rejects_a_symlink() {
+        let root = tmp_root("rtdir-symlink");
+        let target = root.join("elsewhere");
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            std::fs::DirBuilder::new()
+                .mode(0o700)
+                .create(&target)
+                .unwrap();
+        }
+        let dir = root.join("state");
+        std::os::unix::fs::symlink(&target, &dir).unwrap();
+        let err = ensure_runtime_dir_at(&dir, my_uid())
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("symlink"), "{err}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn runtime_dir_rejects_group_or_other_access() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tmp_root("rtdir-mode");
+        let dir = root.join("state");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let err = ensure_runtime_dir_at(&dir, my_uid())
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("group/other"), "{err}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn runtime_dir_rejects_a_foreign_owner() {
+        // Cannot chown to another user without privileges, so ask for an
+        // owner the directory is not: the check must fail the same way it
+        // would for a directory root did not create.
+        let root = tmp_root("rtdir-owner");
+        let dir = root.join("state");
+        let err = ensure_runtime_dir_at(&dir, my_uid().wrapping_add(1))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("owned by uid"), "{err}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn runtime_dir_rejects_a_plain_file() {
+        let root = tmp_root("rtdir-file");
+        let dir = root.join("state");
+        std::fs::write(&dir, b"").unwrap();
+        let err = ensure_runtime_dir_at(&dir, my_uid())
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("not a directory"), "{err}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn every_runtime_path_lives_in_the_runtime_dir() {
+        for path in [
+            FW3_RULES_V4_PATH,
+            FW3_RULES_V6_PATH,
+            FW3_TRANSITION_PATH,
+            FW3_LOCK_PATH,
+            IFACES_PATH,
+            FW4_POLICY_PATH,
+            STOP_MARKER_PATH,
+        ] {
+            let rest = path
+                .strip_prefix(RUNTIME_DIR)
+                .unwrap_or_else(|| panic!("{path} is outside {RUNTIME_DIR}"));
+            assert!(rest.starts_with('/') && !rest[1..].contains('/'), "{path}");
+        }
+        assert!(
+            !RUNTIME_DIR.starts_with("/tmp/"),
+            "runtime state must not live in /tmp"
+        );
     }
 }
