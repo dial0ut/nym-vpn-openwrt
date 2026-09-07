@@ -20,6 +20,15 @@ use crate::table_style::TableStyle;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Rust ignores SIGPIPE, so `nym-vpnc tunnel get | grep -q x` ended with
+    // "failed printing to stdout: Broken pipe" once grep closed the pipe.
+    // Restore the default so the process exits quietly like other CLIs.
+    // SAFETY: called before any other thread exists; signal(2) with SIG_DFL
+    // has no preconditions.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+
     let args = ProgramArgs::parse();
 
     // The rpcd bridge connects lazily per-method: it must keep answering
