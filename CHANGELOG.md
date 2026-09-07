@@ -30,8 +30,10 @@ the GitHub release notes.
   directory, discovery) directly and only falls back to cover domains after a
   direct request fails; with this on, every API request goes through the cover
   domains from the start. Helps where the API hosts are blocked, at the cost
-  of slower API calls. It affects API traffic only, so it applies immediately
-  without a reconnect, and it is persisted in the daemon config. CLI and web
+  of slower API calls. It covers every daemon API request, including the
+  long-lived gateway directory client and start-up discovery, and applies
+  from the next request without a reconnect; it is persisted in the daemon
+  config. CLI and web
   UI both say so when the network environment publishes no cover domains, in
   which case the setting has nothing to route through.
 - LuCI **Privacy** card with the anonymous statistics switch, previously
@@ -58,7 +60,7 @@ the GitHub release notes.
   package's post-install step restarted rpcd — the service LuCI runs opkg/apk
   through — inside the transaction, cutting off the reply the page was
   waiting for and dropping every login session. The rpcd refresh is now
-  detached and runs a few seconds after the transaction has returned. On
+  detached and runs once the package manager process has exited. On
   upgrades it is also scaled down: skipped when neither the LuCI backend nor
   its ACL file changed, a session-preserving reload when only the backend
   changed, and a restart — which asks you to log in again — only when the ACL
@@ -81,9 +83,24 @@ the GitHub release notes.
   the existing emergency chains. It drops new router-originated and forwarded
   traffic but always lets loopback, LAN/link-local, DHCP/DHCPv6, IPv6 ND and
   reply traffic through, so SSH and LuCI from the LAN keep working even if
-  the daemon never comes up. The daemon lifts it with its first policy
-  (kill-switch on or off); `/etc/init.d/nym-vpnd stop` and package removal
-  remove it, and a setting that cannot be read counts as off.
+  the daemon never comes up. As in the daemon's own policy, DNS is rejected
+  ahead of the LAN allowance, so a router behind another router does not
+  leak lookups to a private-address upstream resolver during boot. The
+  daemon lifts it with its first policy (kill-switch on or off);
+  `/etc/init.d/nym-vpnd stop` and package removal remove it, and a setting
+  that is absent or cannot be read takes the daemon's default (kill-switch
+  on).
+- `/etc/init.d/nym-vpnd restart` and a package upgrade no longer open the
+  kill-switch for the seconds until the new daemon's first policy: the daemon
+  leaves its Blocked policy in place on shutdown while the kill-switch is on
+  (the Error and Offline states used to reset the firewall unconditionally),
+  and the init script and `prerm` tear the firewall down only on an explicit
+  `stop` or a real removal.
+- fw3: the daemon, the firewall include and the init script now serialize
+  their changes to the kill-switch chains with a lock. Before, a `firewall
+  reload` that observed the daemon mid-change could install its emergency
+  block after the daemon had already finished and lifted it, leaving the
+  router blocked until the next policy change or reload.
 - fw3/iptables routers (OpenWrt 21.02 and older): the kill-switch now survives
   `/etc/init.d/firewall reload` — fw3 wipes every custom chain on reload — by
   persisting the applied ruleset under `/tmp` and re-applying it from the
@@ -126,6 +143,9 @@ the GitHub release notes.
 
 ### Changed
 
+- The OpenWrt integration test harness (QEMU multi-architecture runner and
+  Proxmox container harness with kill-switch and DNS cases) is now tracked
+  under `tests/`.
 - The always-on watchdog now reacts to WAN link events instead of only
   noticing a dropped tunnel at its next poll. A hotplug hook wakes it on
   `ifup`/`ifdown` of a WAN-facing interface (`wan`, `wan6`, anything in the
