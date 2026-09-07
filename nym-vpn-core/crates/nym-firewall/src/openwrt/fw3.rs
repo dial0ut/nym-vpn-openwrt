@@ -1040,11 +1040,13 @@ mod tests {
                 .unwrap_or_else(|| panic!("fw3-include.sh must carry: {needle}"))
         };
 
-        let udp =
-            pos("echo \"-A $chain -p udp --dport 53 -j REJECT --reject-with $udp_reject\"");
+        let udp = pos("echo \"-A $chain -p udp --dport 53 -j REJECT --reject-with $udp_reject\"");
         let tcp = pos("echo \"-A $chain -p tcp --dport 53 -j REJECT --reject-with tcp-reset\"");
         // Both emergency chains get the reject.
-        assert_eq!(pos("for chain in \"$EMERGENCY_OUT\" \"$EMERGENCY_FWD\"; do") + 1, udp);
+        assert_eq!(
+            pos("for chain in \"$EMERGENCY_OUT\" \"$EMERGENCY_FWD\"; do") + 1,
+            udp
+        );
         // Per-family ICMP reject type, TCP reset for tcp.
         assert!(lines.contains(&"udp_reject=\"icmp6-port-unreachable\""));
         assert!(lines.contains(&"udp_reject=\"icmp-port-unreachable\""));
