@@ -77,7 +77,11 @@ else
     nym_fw_backend="fw3"
 fi
 if [ "$nym_fw_backend" = "fw4" ]; then
-    # fw4/nftables cleanup
+    # fw4/nftables cleanup. No lock is involved on fw4: each nft command is
+    # one atomic transaction, the fw4 include never touches `inet nym`, and
+    # the only other writer of `inet nym_boot` is that include, which cannot
+    # re-arm the block while the stop marker written by the init script's
+    # stop above exists.
     nft delete table inet nym 2>/dev/null
     # Remove rules from fw4 chains (srcnat, forward_lan)
     for chain in srcnat forward_lan; do
@@ -87,36 +91,61 @@ if [ "$nym_fw_backend" = "fw4" ]; then
         done
     done
 else
-    # fw3/iptables cleanup
-    for ipt in iptables ip6tables; do
-        # Remove jump rules from fw3 hook chains
-        for hook in input_rule output_rule forwarding_rule; do
-            $ipt -D "$hook" -j NYM_INPUT 2>/dev/null
-            $ipt -D "$hook" -j NYM_OUTPUT 2>/dev/null
-            $ipt -D "$hook" -j NYM_FORWARD 2>/dev/null
+    # fw3/iptables cleanup. The include script owns the teardown of our
+    # chains (fw3-include.sh with the stop marker present: discard persisted
+    # state, remove chains, jumps, masquerade and LAN forwarding), and the
+    # init script already ran it under the fw3 state lock when it stopped the
+    # daemon above. Run it once more the same way — marker written, lock held
+    # — so a stop that could not take the lock is completed here and a
+    # firewall reload cannot interleave with the removal. The inline teardown
+    # is the fallback for an installation whose include or guard is already
+    # gone; it is the same set of chains, named here for that case only.
+    nym_fw3_teardown_inline() {
+        for ipt in iptables ip6tables; do
+            # Remove jump rules from fw3 hook chains
+            for hook in input_rule output_rule forwarding_rule; do
+                $ipt -D "$hook" -j NYM_INPUT 2>/dev/null
+                $ipt -D "$hook" -j NYM_OUTPUT 2>/dev/null
+                $ipt -D "$hook" -j NYM_FORWARD 2>/dev/null
+            done
+            # Remove jump rules from mangle table built-ins (inbound exemption)
+            $ipt -t mangle -D PREROUTING -j NYM_MANGLE_PREROUTING 2>/dev/null
+            $ipt -t mangle -D OUTPUT -j NYM_MANGLE_OUTPUT 2>/dev/null
+            # Remove forwarding-plane and transition-emergency jumps.
+            $ipt -D forwarding_rule -j NYM_FORWARD_LAN 2>/dev/null
+            while $ipt -D output_rule -j NYM_EMERGENCY_OUT 2>/dev/null; do :; done
+            while $ipt -D forwarding_rule -j NYM_EMERGENCY_FWD 2>/dev/null; do :; done
+            # Flush and delete our chains in filter + mangle
+            for chain in NYM_INPUT NYM_OUTPUT NYM_FORWARD NYM_FORWARD_LAN \
+                NYM_EMERGENCY_OUT NYM_EMERGENCY_FWD; do
+                $ipt -F "$chain" 2>/dev/null
+                $ipt -X "$chain" 2>/dev/null
+            done
+            for chain in NYM_MANGLE_PREROUTING NYM_MANGLE_OUTPUT; do
+                $ipt -t mangle -F "$chain" 2>/dev/null
+                $ipt -t mangle -X "$chain" 2>/dev/null
+            done
         done
-        # Remove jump rules from mangle table built-ins (inbound exemption)
-        $ipt -t mangle -D PREROUTING -j NYM_MANGLE_PREROUTING 2>/dev/null
-        $ipt -t mangle -D OUTPUT -j NYM_MANGLE_OUTPUT 2>/dev/null
-        # Remove forwarding-plane and transition-emergency jumps.
-        $ipt -D forwarding_rule -j NYM_FORWARD_LAN 2>/dev/null
-        while $ipt -D output_rule -j NYM_EMERGENCY_OUT 2>/dev/null; do :; done
-        while $ipt -D forwarding_rule -j NYM_EMERGENCY_FWD 2>/dev/null; do :; done
-        # Flush and delete our chains in filter + mangle
-        for chain in NYM_INPUT NYM_OUTPUT NYM_FORWARD NYM_FORWARD_LAN \
-            NYM_EMERGENCY_OUT NYM_EMERGENCY_FWD; do
-            $ipt -F "$chain" 2>/dev/null
-            $ipt -X "$chain" 2>/dev/null
+        # Remove masquerade rules from NAT table
+        for num in $(iptables -t nat -L POSTROUTING -n --line-numbers -v 2>/dev/null | grep "nym-vpn" | awk '{print $1}' | sort -rn); do
+            iptables -t nat -D POSTROUTING "$num" 2>/dev/null
         done
-        for chain in NYM_MANGLE_PREROUTING NYM_MANGLE_OUTPUT; do
-            $ipt -t mangle -F "$chain" 2>/dev/null
-            $ipt -t mangle -X "$chain" 2>/dev/null
-        done
-    done
-    # Remove masquerade rules from NAT table
-    for num in $(iptables -t nat -L POSTROUTING -n --line-numbers -v 2>/dev/null | grep "nym-vpn" | awk '{print $1}' | sort -rn); do
-        iptables -t nat -D POSTROUTING "$num" 2>/dev/null
-    done
+    }
+    if [ -r /usr/share/nym-vpn/fw-boot-guard.sh ] \
+        && [ -x /usr/share/nym-vpn/fw3-include.sh ] \
+        && command -v flock >/dev/null 2>&1; then
+        (
+            # shellcheck source=/dev/null
+            . /usr/share/nym-vpn/fw-boot-guard.sh
+            nym_runtime_dir_prepare || exit 1
+            touch "$NYM_VPND_STOPPED" 2>/dev/null || exit 1
+            exec 9>"$NYM_RUNTIME_DIR/lock"
+            flock 9 || exit 1
+            NYM_FW_LOCKED=1 /usr/share/nym-vpn/fw3-include.sh 2>/dev/null
+        ) || nym_fw3_teardown_inline
+    else
+        nym_fw3_teardown_inline
+    fi
 fi
 
 # The runtime-state directory (RUNTIME_DIR in the firewall backends; rules
