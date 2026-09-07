@@ -98,6 +98,26 @@ vpn_wait_ready() {
     return 1
 }
 
+# "Account state: <State>" as printed by nym-vpnc, or "unknown".
+vpn_account_state() {
+    pct_sh "$1" 'nym-vpnc account get 2>&1' | sed -n 's/^Account state: //p' | head -1 | grep . || echo unknown
+}
+
+# Account identity line, for asserting an upgrade kept the account.
+vpn_account_identity() {
+    pct_sh "$1" 'nym-vpnc account get 2>&1' | sed -n 's/^Account identity: //p' | head -1
+}
+
+# For cases that need a tunnel: SKIP with the reason when the slot's account
+# never became ReadyToConnect (the slot runner exports ACCOUNT_READY).
+vpn_require_ready() {
+    if [ "${ACCOUNT_READY:-0}" != 1 ]; then
+        case_skip "needs a connectable account; registration ended in $(vpn_account_state "$OPENWRT_CTID")"
+        return 1
+    fi
+    return 0
+}
+
 vpn_state() {
     local ctid="$1"
     pct_sh "$ctid" 'nym-vpnc status 2>&1' | head -1 | sed 's/^State: //'

@@ -12,6 +12,8 @@
 
 case_begin killswitch-connected
 
+vpn_require_ready || return 0 2>/dev/null || exit 0
+
 # Baseline: what does traffic look like when it bypasses the tunnel?
 vpn_killswitch "$OPENWRT_CTID" off
 sleep 1

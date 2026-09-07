@@ -10,6 +10,8 @@
 
 case_begin custom-dns
 
+vpn_require_ready || return 0 2>/dev/null || exit 0
+
 marker="harness-${SLOT}-$(date +%s).example.test"
 
 # Configure custom DNS to our logger.

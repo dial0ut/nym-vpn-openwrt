@@ -145,9 +145,11 @@ fi
 # kill-switch off so the remaining cases still get a registered router; the
 # kill-switch is switched back on before the cases run.
 echo "==> registering account"
+ACCOUNT_READY=0
 case_begin account-set
 if vpn_account_set "$OPENWRT_CTID" && vpn_wait_ready "$OPENWRT_CTID" 120; then
     case_pass "ReadyToConnect with default settings (kill-switch on)"
+    ACCOUNT_READY=1
 else
     case_fail "account did not reach ReadyToConnect within 120s with the default kill-switch on; state: $(pct_sh "$OPENWRT_CTID" 'nym-vpnc account get 2>&1 | grep "^Account state"' || echo unknown)"
     vpn_dump "$OPENWRT_CTID"
@@ -160,14 +162,17 @@ else
     vpn_account_set "$OPENWRT_CTID" || true
     if vpn_wait_ready "$OPENWRT_CTID" 180; then
         echo "  account ready with the kill-switch off; switching it back on"
-        vpn_killswitch "$OPENWRT_CTID" on
-        sleep 2
+        ACCOUNT_READY=1
     else
-        echo "  account still not ready with the kill-switch off; aborting slot"
+        # Not a reason to stop: the install, upgrade and kill-switch cases
+        # do not need a tunnel. Cases that do will SKIP with this state.
+        echo "  account still not ready with the kill-switch off: $(vpn_account_state "$OPENWRT_CTID"); tunnel cases will be skipped"
         vpn_dump "$OPENWRT_CTID"
-        exit 1
     fi
+    vpn_killswitch "$OPENWRT_CTID" on
+    sleep 2
 fi
+export ACCOUNT_READY
 
 # ---------- 5. run cases ----------
 echo "==> running cases"

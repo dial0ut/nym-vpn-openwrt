@@ -8,7 +8,7 @@
 #     taken inside the router from before the upgrade starts until the new
 #     daemon is up — the upgrade must not open the firewall
 #   - the daemon is running under procd afterwards and reports the new version
-#   - the account survived (still ReadyToConnect)
+#   - the account survived (same identity before and after)
 # Without a previous artifact there is nothing to upgrade from: SKIP.
 
 case_begin upgrade
@@ -25,7 +25,8 @@ fi
 vpn_killswitch "$OPENWRT_CTID" on
 sleep 2
 before_ver=$(vpn_version "$OPENWRT_CTID")
-echo "  installed before upgrade: $before_ver"
+before_id=$(vpn_account_identity "$OPENWRT_CTID")
+echo "  installed before upgrade: $before_ver (account ${before_id:-none})"
 
 # Sampler inside the router: one line per second, table present or GONE.
 pct_sh "$OPENWRT_CTID" 'rm -f /tmp/ks-poll.log; ( for i in $(seq 1 90); do if nft list table inet nym >/dev/null 2>&1; then echo "$(date +%T) present"; else echo "$(date +%T) GONE"; fi; sleep 1; done > /tmp/ks-poll.log 2>&1 & )'
@@ -71,8 +72,9 @@ if ! pct_sh "$OPENWRT_CTID" 'logread 2>/dev/null | grep -q "nym-vpnd restart: le
     echo "  init script did not log the restart keep path"
     upgrade_ok=false
 fi
-if ! vpn_wait_ready "$OPENWRT_CTID" 60; then
-    echo "  account not ReadyToConnect after upgrade"
+after_id=$(vpn_account_identity "$OPENWRT_CTID")
+if [ -n "$before_id" ] && [ "$after_id" != "$before_id" ]; then
+    echo "  account identity changed across the upgrade: '$before_id' -> '$after_id'"
     upgrade_ok=false
 fi
 

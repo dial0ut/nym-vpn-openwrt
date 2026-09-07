@@ -180,9 +180,6 @@ EOF
     # which is half-broken in our LXCs. Pin upstreams directly.
     pct_sh "$ctid" 'printf "nameserver 1.1.1.1\nnameserver 8.8.8.8\n" > /etc/resolv.conf'
 
-    # Re-render fw4 zones against the new network config.
-    pct_sh "$ctid" 'fw4 reload >/dev/null 2>&1 || /etc/init.d/firewall reload >/dev/null 2>&1 || true'
-
     # Everything downstream (the sidecars' package installs, the client's
     # lease, the daemon's registration) needs the router on the WAN. The
     # DHCP lease from the lab network has taken up to a minute; wait for the
@@ -199,6 +196,10 @@ EOF
         pct_sh "$ctid" 'ip -4 -o addr; logread | grep -iE "udhcpc|wan" | tail -4' >&2 || true
         return 1
     fi
+    # Re-render the firewall zones now that both interfaces exist. In a
+    # container no hotplug event does this for us; a reload before the WAN
+    # was up leaves the wan zone without its device and the LAN unmasqueraded.
+    pct_sh "$ctid" 'fw4 reload >/dev/null 2>&1 || /etc/init.d/firewall reload >/dev/null 2>&1 || true'
     # dnsmasq started before eth1 existed; make sure it serves the LAN now.
     pct_sh "$ctid" '/etc/init.d/dnsmasq restart >/dev/null 2>&1 || true'
     sleep 2

@@ -5,6 +5,8 @@
 
 case_begin connect-random
 
+vpn_require_ready || return 0 2>/dev/null || exit 0
+
 # Clear any pinned gateway selection from a prior case.
 pct_sh "$OPENWRT_CTID" 'nym-vpnc gateway set --entry-random --exit-random >/dev/null 2>&1' || true
 
