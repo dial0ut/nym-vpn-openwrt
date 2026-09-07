@@ -540,26 +540,48 @@ main() {
 # nothing removes until the next transition. fd 9 stays open for the rest of
 # the script, so the lock is released when it exits. A caller that already
 # holds the lock (the init script) sets NYM_FW_LOCKED=1; taking it again on a
-# fresh descriptor would deadlock against the inherited one. busybox ships
-# flock in stock OpenWrt images; without it run unlocked rather than fail the
-# firewall reload.
-# Establish trust in the runtime directory first: create it when missing (fw3
-# starts before the daemon has ever run), then verify owner and mode. If it
-# cannot be trusted no state file is read and the lock — which lives inside
-# it — is not taken; the fail-closed branches decide from live state alone.
-if nym_runtime_dir_prepare; then
-    STATE_TRUSTED=1
-else
-    logger -t nym-vpn "$NYM_RUNTIME_DIR is not a private root-owned directory; ignoring persisted state"
-fi
-
-if [ "${NYM_FW_LOCKED:-}" != "1" ] && [ "$STATE_TRUSTED" = 1 ]; then
-    if command -v flock >/dev/null 2>&1; then
-        exec 9>"$LOCK_FILE"
-        flock 9 || logger -t nym-vpn "cannot take $LOCK_FILE; running unlocked"
-    else
-        logger -t nym-vpn "flock unavailable; running the fw3 include unlocked"
+# fresh descriptor would deadlock against the inherited one.
+#
+# The lock is a prerequisite, not a nicety: with no lock, main() never runs.
+# What happens instead is fail-closed (run_without_lock): a live kill-switch
+# is left exactly as it is, and when nothing is hooked — a firewall restart
+# flushed everything, or first boot — the boot-time emergency block goes in
+# so the router is protected until the daemon's next apply lifts it. Either
+# way it is logged as CRITICAL: a box that gets here has no flock, or a
+# runtime directory somebody tampered with, and needs an administrator.
+run_without_lock() {
+    if policy_hooked; then
+        logger -t nym-vpn "CRITICAL: fw3 include ran without the state lock ($1); the live kill-switch is left untouched and reconciliation is skipped"
+        return 1
     fi
+    if ! nym_boot_block_wanted; then
+        logger -t nym-vpn "CRITICAL: fw3 include ran without the state lock ($1); nothing is hooked and no block is wanted ($NYM_BOOT_REASON)"
+        return 1
+    fi
+    logger -t nym-vpn "CRITICAL: fw3 include ran without the state lock ($1); nothing is hooked, installing the boot-time emergency block"
+    emergency_block "iptables" boot
+    if kernel_ipv6_enabled; then
+        emergency_block "ip6tables" boot
+    fi
+    return 1
+}
+
+# Establish trust in the runtime directory first: create it when missing (fw3
+# starts before the daemon has ever run), then verify owner and mode. The lock
+# lives inside it, so an untrusted directory means no lock as well.
+if ! nym_runtime_dir_prepare; then
+    run_without_lock "$NYM_RUNTIME_DIR is not a private root-owned directory"
+    exit 1
+fi
+STATE_TRUSTED=1
+
+if [ "${NYM_FW_LOCKED:-}" != "1" ]; then
+    if ! command -v flock >/dev/null 2>&1; then
+        run_without_lock "flock is not installed"
+        exit 1
+    fi
+    exec 9>"$LOCK_FILE"
+    flock 9 || { run_without_lock "flock failed on $LOCK_FILE"; exit 1; }
 fi
 
 main "$@"

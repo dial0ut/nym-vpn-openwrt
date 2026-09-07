@@ -145,11 +145,19 @@ service_stopped() {
     # firewall reload cannot observe the files half-removed; the include is
     # told the lock is already held (re-taking it would deadlock).
     (
-        if command -v flock >/dev/null 2>&1 && nym_runtime_dir_prepare; then
-            exec 9>"$NYM_RUNTIME_DIR/lock"
-            flock 9 || true
-            export NYM_FW_LOCKED=1
+        # Same rule as the include: no lock, no fw3 mutation. The daemon is
+        # already gone and the stop marker is written, so nothing is lost
+        # by leaving the chains for the include's next locked run.
+        if ! command -v flock >/dev/null 2>&1 || ! nym_runtime_dir_prepare; then
+            logger -t nym-vpn "cannot take the fw3 state lock; skipping the fw3 teardown"
+            exit 0
         fi
+        exec 9>"$NYM_RUNTIME_DIR/lock"
+        flock 9 || {
+            logger -t nym-vpn "flock failed on $NYM_RUNTIME_DIR/lock; skipping the fw3 teardown"
+            exit 0
+        }
+        export NYM_FW_LOCKED=1
         rm -f "$NYM_RUNTIME_DIR/v4.rules" "$NYM_RUNTIME_DIR/v6.rules" \
             "$NYM_RUNTIME_DIR/ifaces" "$NYM_RUNTIME_DIR/transition" 2>/dev/null
         # Files a pre-runtime-directory daemon left under /tmp. Never read

@@ -1156,6 +1156,28 @@ mod tests {
         let lock_at = lines.iter().position(|l| l.starts_with("flock 9")).unwrap();
         let main_at = lines.iter().position(|l| *l == "main \"$@\"").unwrap();
         assert!(lock_at < main_at);
+        // No lock means no reconciliation: the fallback is fail-closed and
+        // loud, never a silent unlocked run.
+        assert!(
+            !lines
+                .iter()
+                .any(|l| l.contains("running unlocked") || l.contains("include unlocked")),
+            "fw3-include.sh must not fall back to running unlocked"
+        );
+        let fallback_at = lines
+            .iter()
+            .position(|l| *l == "run_without_lock() {")
+            .expect("fw3-include.sh must define run_without_lock");
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("CRITICAL") && l.contains("without the state lock")),
+            "the lockless path must log CRITICAL"
+        );
+        assert!(
+            fallback_at < lock_at,
+            "fallback is defined before it is needed"
+        );
     }
 
     /// The guard excludes a second opener while held and releases on drop.
