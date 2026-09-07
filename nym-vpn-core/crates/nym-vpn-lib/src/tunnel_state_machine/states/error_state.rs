@@ -12,7 +12,12 @@ use crate::tunnel_state_machine::{
     states::{ConnectingState, DisconnectedState, OfflineState},
 };
 
-pub struct ErrorState;
+pub struct ErrorState {
+    /// Why we are here. A settings change that makes the failed operation
+    /// succeed again is a way out only for the reasons this state can
+    /// re-attempt itself (a firewall policy apply).
+    reason: ErrorStateReason,
+}
 
 impl ErrorState {
     pub async fn enter(
@@ -35,7 +40,12 @@ impl ErrorState {
         shared_state.reset_resolver_overrides().await;
         shared_state.allow_networking().await;
 
-        (Box::new(Self), PrivateTunnelState::Error(reason))
+        (
+            Box::new(Self {
+                reason: reason.clone(),
+            }),
+            PrivateTunnelState::Error(reason),
+        )
     }
 
     async fn reset_dns(shared_state: &mut SharedState) {
@@ -87,8 +97,20 @@ impl TunnelStateHandler for ErrorState {
                             || diff.is_field_changed(&TunnelSettingsDiffFields::EnableIpv6)
                             || diff.is_field_changed(&TunnelSettingsDiffFields::Dns)
                         {
-                            if let Err(e) = shared_state.apply_killswitch_policy() {
-                                trace_err_chain!(e, "Failed to apply kill-switch policy in error state");
+                            match shared_state.apply_killswitch_policy() {
+                                Err(e) => {
+                                    trace_err_chain!(e, "Failed to apply kill-switch policy in error state");
+                                }
+                                // We came here because a policy apply failed;
+                                // the re-apply just succeeded, so the error
+                                // is resolved. Stay parked only for reasons a
+                                // settings change cannot fix.
+                                Ok(()) if matches!(self.reason, ErrorStateReason::SetFirewallPolicy) => {
+                                    return NextTunnelState::NewState(
+                                        DisconnectedState::enter(None, shared_state).await,
+                                    );
+                                }
+                                Ok(()) => {}
                             }
                         }
 
