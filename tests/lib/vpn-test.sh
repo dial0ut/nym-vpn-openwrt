@@ -6,45 +6,61 @@
 # Connection Verification
 # ---------------------------------------------------------------------------
 
-# Verify that the VPN tunnel is actually working.
-# Checks: tunnel interface exists, has an IP, can reach external services.
-# Usage: verify_vpn_connection <arch>
+# Verify that the VPN tunnel is actually carrying traffic.
+# Every check is mandatory: the daemon must report Connected (exact state
+# line — "State: Disconnected" also contains the word "connected"), a nym
+# tunnel interface must exist with an address, DNS must resolve, and the
+# router's egress address must differ from the public address it had while
+# disconnected. Working DNS alone proves nothing about the tunnel.
+# Usage: verify_vpn_connection <arch> <public_ip_while_disconnected>
 verify_vpn_connection() {
-    local arch="$1"
-    local ok=true
+    local arch="$1" wan_public_ip="${2:-}"
 
-    # Check 1: nym-vpnc status reports connected
+    # Check 1: exact state. `nym-vpnc status` opens with
+    # "State: Connected wg to ..." when the tunnel is up.
     local status
     status=$(vm_ssh "$arch" "nym-vpnc status 2>&1") || true
-    if ! echo "$status" | grep -qi "connected"; then
-        log_error "[$arch]   Status not connected: $status"
+    if ! echo "$status" | grep -qE '^State: Connected( |$)'; then
+        log_error "[$arch]   Status not Connected: $(echo "$status" | head -1)"
         return 1
     fi
-    log_info "[$arch]   Status: connected"
+    log_info "[$arch]   Status: Connected"
 
-    # Check 2: TUN interface exists
-    if ! vm_ssh "$arch" "ip link show nym-tun0" >/dev/null 2>&1; then
-        log_warn "[$arch]   No nym-tun0 interface (may use different name)"
+    # Check 2: a nym tunnel interface (nym0/nym1) exists and has an address.
+    local tun_addr
+    tun_addr=$(vm_ssh "$arch" "ip -o -4 addr show 2>/dev/null | awk '\$2 ~ /^nym[0-9]+\$/ {print \$2, \$4}'" 2>/dev/null || true)
+    if [[ -z "$tun_addr" ]]; then
+        log_error "[$arch]   No nym tunnel interface with an address"
+        vm_ssh "$arch" "ip -o link show" 2>/dev/null || true
+        return 1
     fi
+    log_info "[$arch]   Tunnel interface: $tun_addr"
 
-    # Check 3: Can resolve DNS through tunnel
-    if vm_ssh "$arch" "nslookup example.com" >/dev/null 2>&1; then
-        log_info "[$arch]   DNS resolution: OK"
-    else
-        log_warn "[$arch]   DNS resolution failed"
-        ok=false
+    # Check 3: DNS resolves (through the tunnel, given checks 1 and 4).
+    if ! vm_ssh "$arch" "nslookup example.com" >/dev/null 2>&1; then
+        log_error "[$arch]   DNS resolution failed"
+        return 1
     fi
+    log_info "[$arch]   DNS resolution: OK"
 
-    # Check 4: External IP check (best-effort, may fail on some archs)
+    # Check 4: egress moved. The public address seen from the tunnel must
+    # differ from the one captured before connecting; without a baseline
+    # the check can only require that some egress exists.
     local ext_ip
-    ext_ip=$(vm_ssh "$arch" "wget -qO- https://api.ipify.org 2>/dev/null" || true)
-    if [[ -n "$ext_ip" ]]; then
-        log_info "[$arch]   External IP: $ext_ip"
-    else
-        log_warn "[$arch]   Could not determine external IP"
+    ext_ip=$(vm_ssh "$arch" "wget -qO- -T 15 https://api.ipify.org 2>/dev/null" || true)
+    if [[ -z "$ext_ip" ]]; then
+        log_error "[$arch]   Could not determine egress IP through the tunnel"
+        return 1
     fi
-
-    $ok
+    if [[ -n "$wan_public_ip" && "$ext_ip" == "$wan_public_ip" ]]; then
+        log_error "[$arch]   Egress IP $ext_ip is the router's own public address — traffic bypasses the tunnel"
+        return 1
+    fi
+    if [[ -z "$wan_public_ip" ]]; then
+        log_warn "[$arch]   No pre-connect public IP known; cannot prove egress moved"
+    fi
+    log_info "[$arch]   Egress IP: $ext_ip (before connect: ${wan_public_ip:-unknown})"
+    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -109,12 +125,22 @@ run_vpn_test() {
         sleep 5
     done
 
+    # Baseline for the egress check: the router's public address with no
+    # tunnel up. Captured once, before the first connect.
+    local wan_public_ip
+    wan_public_ip=$(vm_ssh "$arch" "wget -qO- -T 15 https://api.ipify.org 2>/dev/null" || true)
+    if [[ -n "$wan_public_ip" ]]; then
+        log_info "[$arch] Public IP while disconnected: $wan_public_ip"
+    else
+        log_warn "[$arch] Could not learn the public IP while disconnected"
+    fi
+
     # --- Step 3: Two-hop test ---
     log_step "[$arch] Testing TWO-HOP mode..."
     vm_ssh "$arch" "nym-vpnc tunnel set --two-hop on" 2>&1 || true
 
     if timeout_cmd "$connect_timeout" vm_ssh "$arch" "nym-vpnc connect --wait" 2>&1; then
-        if verify_vpn_connection "$arch"; then
+        if verify_vpn_connection "$arch" "$wan_public_ip"; then
             log_info "[$arch] TWO-HOP: PASS"
             two_hop_ok=true
         else
@@ -138,7 +164,7 @@ run_vpn_test() {
     # Five-hop is slower, give extra time
     local mixnet_timeout=$(( connect_timeout + 120 ))
     if timeout_cmd "$mixnet_timeout" vm_ssh "$arch" "nym-vpnc connect --wait" 2>&1; then
-        if verify_vpn_connection "$arch"; then
+        if verify_vpn_connection "$arch" "$wan_public_ip"; then
             log_info "[$arch] FIVE-HOP: PASS"
             five_hop_ok=true
         else
