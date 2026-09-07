@@ -138,6 +138,34 @@ impl ResolvedDnsConfig {
     }
 }
 
+/// What the system resolver should use while the tunnel is down.
+///
+/// Only the OpenWrt dnsmasq backend acts on this; every other backend treats
+/// an idle reset as a plain [`DnsMonitor::reset`]. `local_resolvers` are the
+/// user's custom DNS servers on private addresses (a LAN Pi-hole): the
+/// kill-switch admits them on every interface but the WAN, so they keep
+/// working while disconnected. The WAN-provided resolvers are kept only when
+/// the kill-switch is off or there is no local resolver: with the kill-switch
+/// on they are unreachable, and listing them would only make dnsmasq burn its
+/// retries on rejected upstreams.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct IdleDns {
+    pub local_resolvers: Vec<IpAddr>,
+    pub killswitch: bool,
+}
+
+impl IdleDns {
+    /// The stock behaviour: mirror whatever the WAN handed out.
+    pub fn wan_only() -> Self {
+        Self::default()
+    }
+
+    /// Whether the WAN-provided resolvers belong in the idle resolv file.
+    pub fn includes_wan(&self) -> bool {
+        !self.killswitch || self.local_resolvers.is_empty()
+    }
+}
+
 /// Sets and monitors system DNS settings. Makes sure the desired DNS servers are being used.
 pub struct DnsMonitor {
     inner: imp::DnsMonitor,
@@ -164,6 +192,21 @@ impl DnsMonitor {
         self.inner.reset().await
     }
 
+    /// Reset system DNS for the idle (tunnel down) state, keeping the user's
+    /// private custom resolvers in play where the backend supports it.
+    pub async fn reset_idle(&mut self, idle: IdleDns) -> Result<(), Error> {
+        tracing::info!(
+            "Resetting DNS for idle: local resolvers {:?}, WAN resolvers {}",
+            idle.local_resolvers,
+            if idle.includes_wan() {
+                "kept"
+            } else {
+                "dropped (kill-switch on)"
+            }
+        );
+        self.inner.reset_idle(idle).await
+    }
+
     /// Reset DNS settings to what they were before being set by this instance.
     /// If the settings only affect a specific interface, this can be a no-op,
     /// as the interface will be destroyed.
@@ -182,6 +225,10 @@ trait DnsMonitorT: Sized {
     -> Result<(), Self::Error>;
 
     async fn reset(&mut self) -> Result<(), Self::Error>;
+
+    async fn reset_idle(&mut self, _idle: IdleDns) -> Result<(), Self::Error> {
+        self.reset().await
+    }
 
     async fn reset_before_interface_removal(&mut self) -> Result<(), Self::Error> {
         self.reset().await

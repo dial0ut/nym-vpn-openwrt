@@ -34,7 +34,7 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use nym_dns::DnsConfig;
+use nym_dns::{DnsConfig, IdleDns};
 use nym_firewall::{
     AllowedClients, AllowedEndpoint, Endpoint, Firewall, FirewallArguments, FirewallPolicy,
     InitialFirewallState, TransportProtocol,
@@ -187,14 +187,32 @@ impl TunnelSettings {
     /// tunnel is down.
     pub fn idle_dns_ips(&self) -> Vec<IpAddr> {
         let mut ips = self.default_dns_ips();
-        if let DnsOptions::Custom(_) = self.dns {
-            ips.extend(
-                self.dns_ips()
-                    .into_iter()
-                    .filter(|ip| nym_firewall_config::is_local_address(ip) && !ip.is_loopback()),
-            );
-        }
+        ips.extend(self.local_custom_dns_ips());
         ips
+    }
+
+    /// The user's custom DNS servers on private addresses (a LAN Pi-hole),
+    /// which are never routed through the tunnel. Empty unless custom DNS is
+    /// enabled.
+    pub fn local_custom_dns_ips(&self) -> Vec<IpAddr> {
+        match self.dns {
+            DnsOptions::Custom(_) => self
+                .dns_ips()
+                .into_iter()
+                .filter(|ip| nym_firewall_config::is_local_address(ip) && !ip.is_loopback())
+                .collect(),
+            DnsOptions::Default => Vec::new(),
+        }
+    }
+
+    /// What dnsmasq should use while the tunnel is down: the LAN custom
+    /// resolvers (admitted by the kill-switch on every interface but the WAN)
+    /// and, only when they are reachable, the WAN-provided ones.
+    pub fn idle_dns(&self) -> IdleDns {
+        IdleDns {
+            local_resolvers: self.local_custom_dns_ips(),
+            killswitch: self.killswitch,
+        }
     }
 
     pub fn bridges_enabled(&self) -> bool {

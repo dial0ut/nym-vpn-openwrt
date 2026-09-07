@@ -207,6 +207,9 @@ A custom DNS server with a private address (10/8, 172.16/12, 192.168/16, link-lo
 is not routed through the tunnel: it is handed to dnsmasq as an upstream and the kill-switch
 admits it on every interface **except the WAN**, whether the tunnel is up or down. So a Pi-hole
 on the LAN keeps answering the router and your clients while connected and while disconnected.
+While disconnected with the kill-switch on, dnsmasq's upstream list holds only the LAN resolver:
+the WAN-provided resolvers are rejected by the kill-switch anyway, and listing them would make
+dnsmasq burn its retries on them first. With the kill-switch off they follow the LAN resolver.
 The exclusion of the WAN is deliberate: behind another router the upstream gateway is also a
 private address, and a resolver there would carry every lookup out the ISP path — that one is
 rejected like any public resolver. The Pi-hole's own upstream queries are ordinary LAN-to-WAN
