@@ -120,13 +120,36 @@ fi
 
 # ---------- 5. run cases ----------
 echo "==> running cases"
+# Every case must leave exactly one STATUS|name|... line behind. A case that
+# exits early (set -e in a helper, a killed ssh) would otherwise leave no line,
+# and the verdict below only sees explicit FAIL lines — so an aborted case is
+# recorded as a FAIL here, with its exit code, instead of vanishing.
 shopt -s nullglob
 for case_file in "$HARNESS_DIR"/cases/*.sh; do
     case_name=$(basename "$case_file" .sh)
+    # cases call case_begin with the file name minus its ordering prefix
+    result_name="${case_name#[0-9]*-}"
     echo "---- $case_name ----"
+    lines_before=$(grep -c . "$RESULTS_FILE" || true)
     # shellcheck disable=SC1090
-    if ! ( source "$case_file" ); then
-        echo "($case_name) returned non-zero, continuing"
+    ( source "$case_file" )
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "($case_name) exited $rc"
+        if [ "$(grep -c . "$RESULTS_FILE" || true)" -eq "$lines_before" ]; then
+            printf 'FAIL|%s|0|exited %d before recording a result\n' "$result_name" "$rc" >> "$RESULTS_FILE"
+        fi
+    fi
+done
+
+# Second net: one result line per case, whatever path it took.
+for case_file in "$HARNESS_DIR"/cases/*.sh; do
+    result_name="$(basename "$case_file" .sh)"; result_name="${result_name#[0-9]*-}"
+    n=$(grep -c "^[A-Z]*|${result_name}|" "$RESULTS_FILE" || true)
+    if [ "$n" -eq 0 ]; then
+        printf 'FAIL|%s|0|case recorded no result\n' "$result_name" >> "$RESULTS_FILE"
+    elif [ "$n" -gt 1 ]; then
+        printf 'FAIL|%s|0|case recorded %d results, expected one\n' "$result_name" "$n" >> "$RESULTS_FILE"
     fi
 done
 

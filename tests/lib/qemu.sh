@@ -26,93 +26,84 @@ start_vm() {
     # Kill any existing instance
     stop_vm "$arch" 2>/dev/null || true
 
-    log_info "[$arch] Starting VM (${qemu_bin}, ssh=localhost:${ssh_port})..."
+    # -nographic puts the guest console on stdio, which QEMU refuses to combine
+    # with -daemonize ("-nographic cannot be used with -daemonize"). Detach the
+    # display instead and write the serial console to a file next to the logs;
+    # nothing here reads the console, wait_for_ssh polls the guest.
+    local serial_log="${RESULTS_DIR:-$SCRATCH_DIR}/${arch}-serial.log"
+    log_info "[$arch] Starting VM (${qemu_bin}, ssh=localhost:${ssh_port}, console=${serial_log})..."
 
-    local net_opts="-netdev user,id=net0,hostfwd=tcp::${ssh_port}-:22"
-    local kvm_opts=""
-
+    local -a kvm_opts=()
     # Enable KVM for x86 if available
     if [[ "$arch" == "x86_64" || "$arch" == "i686" ]] && has_kvm; then
-        kvm_opts="-enable-kvm"
+        kvm_opts=(-enable-kvm)
         cpu="host"
         log_info "[$arch] KVM acceleration enabled"
     fi
 
+    # Flags every architecture shares; the case below adds boot media and NIC.
+    local -a common_opts=(
+        -machine "$machine" -cpu "$cpu" -m "${mem}M"
+        -display none -monitor none -serial "file:${serial_log}"
+        -netdev "user,id=net0,hostfwd=tcp::${ssh_port}-:22"
+        -daemonize -pidfile "$pidfile"
+    )
+    local -a arch_opts=()
+
     case "$arch" in
         x86_64|i686)
-            local image="${SCRATCH_DIR}/${arch}.img"
-            $qemu_bin \
-                $kvm_opts \
-                -machine "$machine" -cpu "$cpu" \
-                -m "${mem}M" -nographic \
-                -drive "file=${image},format=raw,if=virtio" \
-                $net_opts \
-                -device virtio-net-pci,netdev=net0 \
-                -daemonize -pidfile "$pidfile"
+            arch_opts=(
+                -drive "file=${SCRATCH_DIR}/${arch}.img,format=raw,if=virtio"
+                -device "virtio-net-pci,netdev=net0"
+            )
             ;;
 
         aarch64)
-            local image="${SCRATCH_DIR}/${arch}.img"
             local bios
             bios=$(find_firmware \
                 /usr/share/edk2/aarch64/QEMU_EFI.fd \
                 /usr/share/qemu-efi-aarch64/QEMU_EFI.fd \
                 /usr/share/AAVMF/AAVMF_CODE.fd \
                 /usr/share/qemu/edk2-aarch64-code.fd)
-
-            $qemu_bin \
-                -machine "$machine" -cpu "$cpu" \
-                -m "${mem}M" -nographic \
-                -bios "$bios" \
-                -drive "file=${image},format=raw,if=virtio" \
-                $net_opts \
-                -device virtio-net-pci,netdev=net0 \
-                -daemonize -pidfile "$pidfile"
+            arch_opts=(
+                -bios "$bios"
+                -drive "file=${SCRATCH_DIR}/${arch}.img,format=raw,if=virtio"
+                -device "virtio-net-pci,netdev=net0"
+            )
             ;;
 
         armv7)
-            local image="${SCRATCH_DIR}/${arch}.img"
-            $qemu_bin \
-                -machine "$machine" -cpu "$cpu" \
-                -m "${mem}M" -nographic \
-                -drive "file=${image},format=raw,if=virtio" \
-                $net_opts \
-                -device virtio-net-pci,netdev=net0 \
-                -daemonize -pidfile "$pidfile"
+            arch_opts=(
+                -drive "file=${SCRATCH_DIR}/${arch}.img,format=raw,if=virtio"
+                -device "virtio-net-pci,netdev=net0"
+            )
             ;;
 
         mips|mipsel)
-            local kernel="${SCRATCH_DIR}/${arch}.elf"
-            $qemu_bin \
-                -machine "$machine" -cpu "$cpu" \
-                -m "${mem}M" -nographic \
-                -kernel "$kernel" \
-                $net_opts \
-                -device pcnet,netdev=net0 \
-                -daemonize -pidfile "$pidfile"
+            arch_opts=(
+                -kernel "${SCRATCH_DIR}/${arch}.elf"
+                -device "pcnet,netdev=net0"
+            )
             ;;
 
         riscv64)
-            local image="${SCRATCH_DIR}/${arch}.img"
             local bios
             bios=$(find_firmware \
                 /usr/share/qemu/opensbi-riscv64-generic-fw_dynamic.bin \
                 /usr/lib/riscv64-linux-gnu/opensbi/generic/fw_dynamic.bin)
-
-            $qemu_bin \
-                -machine "$machine" -cpu "$cpu" \
-                -m "${mem}M" -nographic \
-                -bios "$bios" \
-                -drive "file=${image},format=raw,if=virtio" \
-                $net_opts \
-                -device virtio-net-pci,netdev=net0 \
-                -daemonize -pidfile "$pidfile"
+            arch_opts=(
+                -bios "$bios"
+                -drive "file=${SCRATCH_DIR}/${arch}.img,format=raw,if=virtio"
+                -device "virtio-net-pci,netdev=net0"
+            )
             ;;
 
         *)
             die "[$arch] No QEMU configuration defined"
             ;;
     esac
+
+    "$qemu_bin" "${kvm_opts[@]}" "${common_opts[@]}" "${arch_opts[@]}"
 
     log_info "[$arch] VM started (pid: $(cat "$pidfile" 2>/dev/null || echo '?'))"
 }
