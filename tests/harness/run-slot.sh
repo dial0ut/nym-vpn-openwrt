@@ -154,7 +154,11 @@ else
     echo "==> retrying registration with the kill-switch off (registration only)"
     vpn_killswitch "$OPENWRT_CTID" off
     sleep 3
-    if vpn_wait_ready "$OPENWRT_CTID" 120; then
+    # The account controller is in its error state by now and retries on a
+    # two-minute cadence; setting the account again triggers an immediate
+    # sync instead of waiting that out.
+    vpn_account_set "$OPENWRT_CTID" || true
+    if vpn_wait_ready "$OPENWRT_CTID" 180; then
         echo "  account ready with the kill-switch off; switching it back on"
         vpn_killswitch "$OPENWRT_CTID" on
         sleep 2
