@@ -31,7 +31,7 @@ DNS_CIDR="10.9${SLOT}.0.2/24"
 log() { printf '[slot%s] %s\n' "$SLOT" "$*" >&2; }
 # set -e aborts silently otherwise; name the step so a failed provision is
 # diagnosable from the slot log alone.
-trap 'log "provision failed at line $LINENO: $BASH_COMMAND"' ERR
+trap 'log "provision failed in ${FUNCNAME[0]:-main} at line $LINENO: $BASH_COMMAND"' ERR
 
 log "ensuring bridge $BRIDGE"
 bridge_ensure "$BRIDGE"
@@ -64,7 +64,11 @@ for _ in $(seq 1 25); do
 done
 if [ -z "$CLIENT_IP" ]; then
     log "client got no DHCP lease from $LAN_CIDR within 50 s"
-    pct_sh "$OPENWRT_CTID" "logread | grep -i dhcp | tail -5" >&2 || true
+    {
+        echo "  router: dnsmasq pid=$(pct_sh "$OPENWRT_CTID" 'pidof dnsmasq' || true) addrs=$(pct_sh "$OPENWRT_CTID" 'ip -4 -o addr | awk "{print \$2, \$4}" | tr "\n" " "' || true)"
+        pct_sh "$OPENWRT_CTID" "logread | grep -iE 'dnsmasq|dhcp' | tail -6" || true
+        echo "  client: $(pct_sh "$CLIENT_CTID" 'ip -4 -o addr show eth0; ps | grep -c [u]dhcpc' | tr '\n' ' ' || true)"
+    } >&2
     exit 1
 fi
 log "client got IP: $CLIENT_IP"

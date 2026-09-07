@@ -234,7 +234,12 @@ pct_create_alpine() {
 # Args: ctid listen_ip
 dns_logger_start() {
     local ctid="$1" listen_ip="$2"
-    pct_sh "$ctid" "apk add --quiet dnsmasq >/dev/null 2>&1"
+    # Needs the router's WAN to be up (apk fetches through it); keep the
+    # error visible, it is the usual reason a provision dies here.
+    if ! pct_sh "$ctid" "apk add --quiet dnsmasq >/dev/null"; then
+        echo "[ctl] dnsmasq install on CT $ctid failed; does the router have a default route?" >&2
+        return 1
+    fi
     pct_sh "$ctid" "cat > /etc/dnsmasq.conf <<EOF
 listen-address=$listen_ip
 bind-interfaces

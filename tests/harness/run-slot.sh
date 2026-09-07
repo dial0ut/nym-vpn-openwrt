@@ -139,14 +139,30 @@ else
 fi
 
 # ---------- 4. register account ----------
+# Exactly what a user does on a fresh install: register with the default
+# settings, kill-switch on. If the account never becomes ready that is a
+# product failure and is recorded as one. The slot then retries with the
+# kill-switch off so the remaining cases still get a registered router; the
+# kill-switch is switched back on before the cases run.
 echo "==> registering account"
 case_begin account-set
 if vpn_account_set "$OPENWRT_CTID" && vpn_wait_ready "$OPENWRT_CTID" 120; then
-    case_pass
+    case_pass "ReadyToConnect with default settings (kill-switch on)"
 else
-    case_fail "account did not reach ReadyToConnect within 120s"
+    case_fail "account did not reach ReadyToConnect within 120s with the default kill-switch on; state: $(pct_sh "$OPENWRT_CTID" 'nym-vpnc account get 2>&1 | grep "^Account state"' || echo unknown)"
     vpn_dump "$OPENWRT_CTID"
-    exit 1
+    echo "==> retrying registration with the kill-switch off (registration only)"
+    vpn_killswitch "$OPENWRT_CTID" off
+    sleep 3
+    if vpn_wait_ready "$OPENWRT_CTID" 120; then
+        echo "  account ready with the kill-switch off; switching it back on"
+        vpn_killswitch "$OPENWRT_CTID" on
+        sleep 2
+    else
+        echo "  account still not ready with the kill-switch off; aborting slot"
+        vpn_dump "$OPENWRT_CTID"
+        exit 1
+    fi
 fi
 
 # ---------- 5. run cases ----------
