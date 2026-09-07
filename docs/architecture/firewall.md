@@ -1,5 +1,10 @@
 # Firewall Integration
 
+This page explains the mechanisms. What they guarantee in each situation — boot, crash, upgrade,
+reload, restart, shutdown, IPv6, exemptions — and how each guarantee was verified is the
+[kill-switch contract](killswitch-contract.md); read that first when changing anything here. The
+one known hole, the fw3 restart window, has its own [decision record](fw3-restart.md).
+
 ## Two backends
 
 OpenWrt moved from iptables to nftables in 22.03. Older firmware runs fw3 (iptables), current
@@ -163,16 +168,10 @@ an explicit `false` leaves the boot window open. A `firewall reload` while the
 daemon is up never touches a live policy: the include sees `inet nym` (or the fw3 rules file) and
 at most removes a stale boot block.
 
-Only an explicit `stop` opens the router. `/etc/init.d/nym-vpnd restart` leaves the kill-switch
-armed for the gap: with the kill-switch on the daemon keeps its Blocked policy in place on
-shutdown, the init script writes no stop marker and tears nothing down (rc.common runs `restart`
-in one process, so the stop hooks see `action=restart`), and the new daemon replaces the stale
-policy atomically on its first apply. A package upgrade rides on the same path: `prerm` leaves the
-old daemon running through the file swap and `postinst` restarts it through the newly installed
-init script, so the old package's stop hooks never run. A system shutdown or reboot takes the same
-keep path (`action=shutdown`): the firewall stays closed while the box goes down, and the boot-time
-block covers the way back up. If the new daemon never comes up, `stop` is what opens the network
-again.
+Only an explicit `stop` opens the router; `restart`, package upgrade and system shutdown all take
+the init script's keep path. The per-event behaviour, including the one-time exception for the
+first opkg upgrade from a package that predates the keep path, is tabulated in the
+[contract](killswitch-contract.md#lifecycle-events).
 
 Two orderings make the racy cases converge instead of leaving a block nobody removes. The daemon
 applies its table before it deletes the boot block and persists a kill-switch toggle before it
@@ -207,9 +206,10 @@ with the firewall rather than at the daemon's next state change. With nothing to
 includes fall through to the boot-time guard above: arm the block, or make sure none is left.
 
 **Known limit:** between fw3's flush and the moment it runs the includes, the router has an ACCEPT
-policy and none of our chains. That window is inside fw3 itself; no include, marker or lock can
-close it, and this project does not claim a fail-closed kill-switch across an fw3 restart. A reload
-does not have this window. fw4 restarts are unaffected because `inet nym` is not fw4's table.
+policy and none of our chains. That window is inside fw3 itself and this project does not claim a
+fail-closed kill-switch across an fw3 restart; the options and the recommended fix are in
+[fw3 restart exposure](fw3-restart.md). A reload does not have this window. fw4 restarts are
+unaffected because `inet nym` is not fw4's table.
 
 fw3 policy changes use a fail-closed transition protocol. Before touching live or persisted state,
 the daemon creates `/var/run/nym-firewall/transition`. While the marker exists, a firewall reload's
