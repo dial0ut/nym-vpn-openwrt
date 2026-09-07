@@ -1,0 +1,2 @@
+SKIP
+no global IPv6 on the WAN (bed has no v6 upstream); v6 path not exercised

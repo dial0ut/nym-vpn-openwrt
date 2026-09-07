@@ -1,0 +1,2 @@
+PASS
+syn=0 dns=0 unattributed=0; opkg+postinst SIGKILLed as post-upgrade started (trigger=postinst-started); old daemon kept running, policy hooked; opkg configure was a no-op (status still read p14 while files were p15); re-running the install completed the upgrade, daemon restarted with the kill-switch armed

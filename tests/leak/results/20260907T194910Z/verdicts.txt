@@ -1,0 +1,12 @@
+01-control|PASS|positive control: syn=11 dns=1 (a leak MUST be visible here)
+02-kill-mid-transition|PASS|syn=0 dns=0 unattributed=58; recovered: daemon respawned, policy hooked 
+03-kill-connected|PASS|syn=0 dns=0 unattributed=0; recovered: daemon respawned, policy hooked 
+04-restore-fails|PASS|syn=0 dns=0 unattributed=0; recovered after binary restored + re-apply 
+05-lock-lost|PASS|syn=0 dns=0 unattributed=0; CRITICAL logged, live policy untouched 
+06a-fw-reload-connected|PASS|syn=0 dns=0 unattributed=0
+06b-fw-restart-connected|PASS|syn=0 dns=0 unattributed=0; fw3 restart window: see watcher for unhooked samples 
+06c-fw-reload-disconnected|PASS|syn=0 dns=0 unattributed=0
+06d-fw-restart-disconnected|PASS|syn=0 dns=0 unattributed=0; fw3 restart window while disconnected: see watcher 
+07-ipv6|SKIP|no global IPv6 on the WAN (bed has no v6 upstream); v6 path not exercised
+08-interrupted-upgrade|PASS|syn=0 dns=0 unattributed=0; opkg+postinst SIGKILLed as post-upgrade started (trigger=postinst-started); old daemon kept running, policy hooked; opkg configure was a no-op (status still read p14 while files were p15); re-running the install completed the upgrade, daemon restarted with the kill-switch armed
+09-boot|PASS|syn=0 dns=0 unattributed=0; boot block installed then lifted; policy hooked after boot 
