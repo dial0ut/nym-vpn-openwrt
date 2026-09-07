@@ -112,7 +112,9 @@ run_vpn_test() {
     while true; do
         local acct_status
         acct_status=$(vm_ssh "$arch" "nym-vpnc account get 2>&1") || true
-        if echo "$acct_status" | grep -qi "registered\|ready\|active"; then
+        # `nym-vpnc account get` prints "Account state: <State>"; only the
+        # exact ready state counts (a substring match also hits "not ready").
+        if echo "$acct_status" | grep -q '^Account state: ReadyToConnect$'; then
             log_info "[$arch] Account registered"
             break
         fi

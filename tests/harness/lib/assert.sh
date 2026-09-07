@@ -3,7 +3,14 @@
 #
 # Each case appends one line to $RESULTS_FILE in the form:
 #   STATUS|case_name|elapsed_seconds|note
-# where STATUS is PASS / FAIL / SKIP.
+# where STATUS is one of:
+#   PASS     the assertion held
+#   FAIL     the assertion did not hold (note says which)
+#   SKIP     the case could not be exercised here; the note MUST say why
+#            (missing prerequisite, unsupported version). Skips are listed
+#            in the report and never fail a run.
+#   MISSING  written by the slot runner, never by a case: a selected case
+#            left no line at all. Fails the run like FAIL.
 
 set -euo pipefail
 
@@ -29,7 +36,7 @@ case_fail() {
 
 case_skip() {
     local elapsed=$(( $(date +%s) - _case_start_ts ))
-    printf 'SKIP|%s|%d|%s\n' "$_case_name" "$elapsed" "${1:-}" >> "$RESULTS_FILE"
+    printf 'SKIP|%s|%d|%s\n' "$_case_name" "$elapsed" "${1:?a skip needs a reason}" >> "$RESULTS_FILE"
 }
 
 # Boolean asserts. Each returns 0/1 and prints a one-line failure note.

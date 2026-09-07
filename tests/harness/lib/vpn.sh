@@ -8,26 +8,65 @@ set -euo pipefail
 
 : "${NYM_MNEMONIC:?NYM_MNEMONIC must be set (load .env first)}"
 
-# Start the daemon inside the container. Bypasses init.d (procd/ubus
-# is half-functional in our LXCs).
-vpn_daemon_start() {
+# Install a local .apk or .ipk into the OpenWrt CT. The package's postinst
+# enables and (re)starts the daemon through /etc/init.d/nym-vpnd under procd,
+# which is the path a real router takes; nothing in the harness starts the
+# daemon by hand. Copies over stdin (the CTs have no shared filesystem).
+# Args: ctid path
+vpn_pkg_install() {
+    local ctid="$1" file="$2" name rc=0
+    name=$(basename "$file")
+    _ssh_host "pct exec $ctid -- sh -c 'cat > /tmp/$name'" < "$file" || return 1
+    case "$name" in
+        *.apk)
+            # apk resolves the local file's dependencies from its index.
+            pct_sh "$ctid" "apk update >/tmp/pkg-update.log 2>&1 || true; apk add --allow-untrusted /tmp/$name >/tmp/pkg-install.log 2>&1" || rc=$? ;;
+        *.ipk)
+            # A fresh rootfs has no package lists; without `opkg update` the
+            # dependencies (libmnl, libnftnl, kmod-*) cannot be resolved and
+            # opkg exits 255.
+            pct_sh "$ctid" "opkg update >/tmp/pkg-update.log 2>&1 || true; opkg install /tmp/$name >/tmp/pkg-install.log 2>&1" || rc=$? ;;
+        *) echo "[vpn] package must end in .apk or .ipk: $name" >&2; return 1 ;;
+    esac
+    # Do not trust the exit code alone: the package manager's own view of
+    # success is what matters, and it must have left the binaries behind.
+    if [ "$rc" -ne 0 ] || ! pct_sh "$ctid" 'command -v nym-vpnc >/dev/null && command -v nym-vpnd >/dev/null'; then
+        echo "[vpn] package install of $name failed (rc=$rc); package manager output:" >&2
+        pct_sh "$ctid" 'tail -15 /tmp/pkg-install.log 2>/dev/null' >&2 || true
+        return 1
+    fi
+    return 0
+}
+
+# Installed package version as the package manager reports it.
+vpn_version() {
     local ctid="$1"
-    pct_sh "$ctid" 'killall -9 nym-vpnd >/dev/null 2>&1 || true; sleep 1; rm -f /var/run/nym-vpnd.pid; setsid /usr/sbin/nym-vpnd > /tmp/nym.log 2>&1 < /dev/null &'
-    # Wait for the gRPC socket.
-    for _ in 1 2 3 4 5 6 7 8 9 10; do
+    pct_sh "$ctid" 'apk list --installed 2>/dev/null | grep -o "nym-vpn-[0-9][^ ]*" || opkg list-installed 2>/dev/null | grep "^nym-vpn " | awk "{print \$3}"' | head -1
+}
+
+# Wait until the daemon answers on its socket. Args: ctid [timeout]
+vpn_daemon_wait() {
+    local ctid="$1" timeout="${2:-30}" i=0
+    while [ "$i" -lt "$timeout" ]; do
         if pct_sh "$ctid" 'nym-vpnc status >/dev/null 2>&1'; then
             return 0
         fi
-        sleep 1
+        sleep 1; i=$((i + 1))
     done
-    echo "[vpn] daemon failed to come up on $ctid" >&2
+    echo "[vpn] daemon did not answer on $ctid within ${timeout}s" >&2
     return 1
 }
 
-vpn_daemon_stop() {
+# True when procd lists a running nym-vpnd instance.
+vpn_daemon_under_procd() {
     local ctid="$1"
-    pct_sh "$ctid" 'killall -9 nym-vpnd >/dev/null 2>&1 || true'
+    pct_sh "$ctid" 'ubus call service list "{\"name\":\"nym-vpnd\"}" 2>/dev/null | grep -q "\"running\": true"'
 }
+
+# Stop/start/restart through the init script, like an administrator would.
+vpn_daemon_stop()    { pct_sh "$1" '/etc/init.d/nym-vpnd stop >/dev/null 2>&1'; }
+vpn_daemon_start()   { pct_sh "$1" '/etc/init.d/nym-vpnd start >/dev/null 2>&1' && vpn_daemon_wait "$1" 30; }
+vpn_daemon_restart() { pct_sh "$1" '/etc/init.d/nym-vpnd restart >/dev/null 2>&1' && vpn_daemon_wait "$1" 30; }
 
 # Register the account. The mnemonic travels on stdin the whole way — local
 # ssh, pct exec, the container's sh — so it is in no argv on this machine or
@@ -36,7 +75,7 @@ vpn_daemon_stop() {
 # call; nothing else on the container sees it.
 vpn_account_set() {
     local ctid="$1"
-    printf '%s\n' "$NYM_MNEMONIC" | ssh -o BatchMode=yes "$PROXMOX_HOST" \
+    printf '%s\n' "$NYM_MNEMONIC" | _ssh_host \
         "pct exec $ctid -- sh -c 'IFS= read -r M && exec nym-vpnc account set \"\$M\" --mode api'" \
         >/dev/null
 }
@@ -51,12 +90,32 @@ vpn_wait_ready() {
     local ctid="$1" timeout="${2:-90}"
     local deadline=$(( $(date +%s) + timeout ))
     while [ "$(date +%s)" -lt "$deadline" ]; do
-        if pct_sh "$ctid" 'nym-vpnc account get 2>&1' | grep -q 'ReadyToConnect'; then
+        if pct_sh "$ctid" 'nym-vpnc account get 2>&1' | grep -q '^Account state: ReadyToConnect$'; then
             return 0
         fi
         sleep 3
     done
     return 1
+}
+
+# "Account state: <State>" as printed by nym-vpnc, or "unknown".
+vpn_account_state() {
+    pct_sh "$1" 'nym-vpnc account get 2>&1' | sed -n 's/^Account state: //p' | head -1 | grep . || echo unknown
+}
+
+# Account identity line, for asserting an upgrade kept the account.
+vpn_account_identity() {
+    pct_sh "$1" 'nym-vpnc account get 2>&1' | sed -n 's/^Account identity: //p' | head -1
+}
+
+# For cases that need a tunnel: SKIP with the reason when the slot's account
+# never became ReadyToConnect (the slot runner exports ACCOUNT_READY).
+vpn_require_ready() {
+    if [ "${ACCOUNT_READY:-0}" != 1 ]; then
+        case_skip "needs a connectable account; registration ended in $(vpn_account_state "$OPENWRT_CTID")"
+        return 1
+    fi
+    return 0
 }
 
 vpn_state() {
@@ -106,7 +165,9 @@ vpn_dump() {
         pct_sh "$ctid" 'nym-vpnc status' || true
         echo "=== nft list table inet nym ==="
         pct_sh "$ctid" 'nft list table inet nym 2>&1 | head -80' || true
-        echo "=== daemon log (last 30) ==="
-        pct_sh "$ctid" 'tail -30 /tmp/nym.log 2>&1' || true
+        echo "=== procd view ==="
+        pct_sh "$ctid" 'ubus call service list "{\"name\":\"nym-vpnd\"}" 2>&1' || true
+        echo "=== daemon + include log (last 40) ==="
+        pct_sh "$ctid" 'logread 2>&1 | grep -E "nym-vpnd|nym-vpn:" | tail -40' || true
     }
 }

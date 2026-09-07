@@ -5,6 +5,8 @@
 
 case_begin connect-country
 
+vpn_require_ready || return 0 2>/dev/null || exit 0
+
 pct_sh "$OPENWRT_CTID" 'nym-vpnc gateway set --entry-country US --exit-country DE >/dev/null 2>&1' || true
 
 vpn_connect "$OPENWRT_CTID"

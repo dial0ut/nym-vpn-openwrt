@@ -16,11 +16,17 @@ vpn_killswitch "$OPENWRT_CTID" on
 vpn_disconnect "$OPENWRT_CTID"
 vpn_wait_state "$OPENWRT_CTID" '^Disconnected' 30 || true
 
-endpoints_before=$(pct_sh "$OPENWRT_CTID" 'nft list table inet nym 2>/dev/null | awk "/ip saddr .* tcp sport 443 accept/ {n++} END {print n+0}"')
-if [ "${endpoints_before:-0}" -eq 0 ]; then
-    case_skip "no API exemptions in Disconnected state — cache not populated, can't trigger fairly"
+# The precondition is that the idle Blocked policy lets the daemon reach its
+# API. Counting "sport 443 accept" rules is not enough: the DNS-over-HTTPS
+# hatch (9.9.9.9, 1.1.1.1 ...) matches too, and it says nothing about API
+# reachability. Probe the API itself; without a populated endpoint cache
+# (fresh install, see issue #15) it is unreachable and the deadlock cannot be
+# triggered fairly.
+if ! pct_sh "$OPENWRT_CTID" 'wget --timeout=8 -qO- https://validator.nymtech.net/api/v1/epoch/key-rotation-info >/dev/null 2>&1'; then
+    case_skip "router cannot reach the API while idle with the kill-switch on (no endpoint cache yet, #15); cannot trigger fairly"
     return 0 2>/dev/null || exit 0
 fi
+endpoints_before=$(pct_sh "$OPENWRT_CTID" 'nft list table inet nym 2>/dev/null | awk "/ip saddr .* tcp sport 443 accept/ {n++} END {print n+0}"')
 
 # Force SetFirewallPolicy by hiding nft, then issuing connect.
 pct_sh "$OPENWRT_CTID" 'mv /usr/sbin/nft /tmp/nft.bak'
