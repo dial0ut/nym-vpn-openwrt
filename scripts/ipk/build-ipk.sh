@@ -172,6 +172,14 @@ if [ -f "$FW_SCRIPTS_DIR/fw-boot-guard.sh" ]; then
     cp "$FW_SCRIPTS_DIR/fw-boot-guard.sh" "$BUILD_DIR/data/usr/share/nym-vpn/"
     chmod 644 "$BUILD_DIR/data/usr/share/nym-vpn/fw-boot-guard.sh"
 fi
+# Generated emergency/boot-time rule sets (nym-firewall build.rs), sourced by
+# both includes. A package without it cannot install any emergency block.
+if [ ! -f "$FW_SCRIPTS_DIR/fw-rules.sh" ]; then
+    echo "Error: $FW_SCRIPTS_DIR/fw-rules.sh missing (run: cargo build -p nym-firewall)" >&2
+    exit 1
+fi
+cp "$FW_SCRIPTS_DIR/fw-rules.sh" "$BUILD_DIR/data/usr/share/nym-vpn/"
+chmod 644 "$BUILD_DIR/data/usr/share/nym-vpn/fw-rules.sh"
 
 # === DATA: Feed signing public key ===
 echo "=== Adding feed signing key ==="

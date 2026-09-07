@@ -63,7 +63,6 @@ FORWARD_CHAIN="nym_forward_lan"
 # Both names are a contract with the fw4 backend (common.rs) and the package
 # scripts.
 NYM_TABLE="nym"
-BOOT_TABLE="nym_boot"
 
 # Boot-time kill-switch guard: the shared decision logic. A missing helper
 # must fail towards not blocking, never towards a block nothing can lift.
@@ -80,6 +79,29 @@ else
     # Without the shared checks nothing in the runtime directory is trusted.
     nym_runtime_dir_trusted() { return 1; }
 fi
+
+# The emergency and boot-time rule sets. Generated from the daemon's own
+# definition (nym-firewall/src/openwrt/boot_rules.rs → fw-rules.sh) so this
+# script, the fw4 include and the daemon install one and the same block.
+# Without it no emergency block can be built: the generator stubs fail, the
+# callers log CRITICAL, and the persisted policy is still restored.
+if [ -r "$NYM_SHARE_DIR/fw-rules.sh" ]; then
+    # shellcheck source-path=SCRIPTDIR
+    # shellcheck source=fw-rules.sh
+    . "$NYM_SHARE_DIR/fw-rules.sh"
+else
+    logger -t nym-vpn "CRITICAL: $NYM_SHARE_DIR/fw-rules.sh is missing; no emergency block can be installed"
+    NYM_EMERGENCY_OUT="NYM_EMERGENCY_OUT"
+    NYM_EMERGENCY_FWD="NYM_EMERGENCY_FWD"
+    NYM_BOOT_TABLE="nym_boot"
+    nym_emergency_rules_v4() { return 1; }
+    nym_emergency_rules_v6() { return 1; }
+    nym_boot_block_nft() { return 1; }
+fi
+
+# The boot-time block's table, as the daemon and the generated rule set name
+# it (the daemon deletes it once its own policy is live).
+BOOT_TABLE="$NYM_BOOT_TABLE"
 
 # A hint file exists AND its directory passed the ownership/mode checks.
 STATE_TRUSTED=0
@@ -163,55 +185,15 @@ boot_block_present() {
 
 # Boot-time emergency block for WAN egress: drop new router-originated and
 # forwarded traffic except what the router needs to come up and stay
-# manageable from the LAN. Same allowances as the base of the daemon's Blocked
-# policy — loopback, DHCP/DHCPv6 as client and server, IPv6 ND — plus LAN,
-# link-local, ULA and multicast destinations. Reply-direction packets leave
-# so SSH/LuCI sessions to the router keep working; flows the router itself
-# opened stay blocked. INPUT is left to fw4.
-#
-# Rule order matters as it does in the daemon's policy (block_dns before
-# allow_lan_traffic): DNS is rejected BEFORE the LAN-destination accepts. A
-# private address is not a LAN interface — behind another router the
-# upstream resolver is 192.168.x.1 — so without that, dnsmasq's forwarded
-# lookups and LAN clients' direct queries would leave in plaintext during the
-# boot window. Replies from the router's own dnsmasq are unaffected: LAN
-# queries arrive via INPUT and the answers match the reply-direction accept,
-# which stays ahead of the reject.
-#
-# The chains run ahead of both `inet nym` (filter -10) and fw4 (filter);
-# accept here only means "let the next table decide". The create/delete/
-# create dance makes the load an atomic replace, exactly like the daemon's
-# own table.
+# manageable from the LAN. The rule set is the generated one (fw-rules.sh,
+# from boot_rules.rs): reply-direction and loopback first, DHCP/DHCPv6 and
+# IPv6 ND, DNS rejected BEFORE the LAN/link-local/ULA/multicast accepts, a
+# terminal drop, INPUT left to fw4. Its chains run ahead of both `inet nym`
+# (filter -10) and fw4 (filter); accept here only means "let the next table
+# decide". The create/delete/create dance in the generated text makes the
+# load an atomic replace, exactly like the daemon's own table.
 install_boot_block() {
-    nft -f - <<EOF
-table inet $BOOT_TABLE
-delete table inet $BOOT_TABLE
-table inet $BOOT_TABLE {
-    chain output {
-        type filter hook output priority filter - 20; policy accept;
-        oifname "lo" accept
-        ct state established,related ct direction reply accept
-        udp sport 68 udp dport 67 accept
-        udp sport 67 udp dport 68 accept
-        udp sport 546 udp dport 547 accept
-        udp sport 547 udp dport 546 accept
-        icmpv6 type { nd-router-solicit, nd-neighbor-solicit, nd-neighbor-advert } accept
-        udp dport 53 reject
-        tcp dport 53 reject
-        ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 224.0.0.0/4 } accept
-        ip6 daddr { fe80::/10, fc00::/7, ff00::/8 } accept
-        drop
-    }
-    chain forward {
-        type filter hook forward priority filter - 20; policy accept;
-        udp dport 53 reject
-        tcp dport 53 reject
-        ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } accept
-        ip6 daddr { fe80::/10, fc00::/7 } accept
-        drop
-    }
-}
-EOF
+    nym_boot_block_nft | nft -f -
 }
 
 # Remove the boot-time block if present. $1 is the reason, for the log.

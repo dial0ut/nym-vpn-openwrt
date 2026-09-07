@@ -115,22 +115,15 @@ pub fn ensure_runtime_dir_at(dir: &Path, expected_uid: u32) -> Result<()> {
     Ok(())
 }
 
-/// nftables table holding the boot-time kill-switch block. `fw4-include.sh`
-/// installs it at firewall start when the kill-switch is armed
-/// (`fw-boot-guard.sh`: on in the daemon's saved settings, daemon enabled at
-/// boot, not stopped by the administrator) and no `inet nym` table exists yet
-/// — the window between network-up and this daemon's first policy. The fw4
-/// backend deletes it as the last step of every apply and reset; the init
-/// script and package prerm delete it on explicit stop and removal. The name
-/// is a contract with those scripts. fw3 needs no counterpart: its include
-/// reuses the `NYM_EMERGENCY_*` chains, which the fw3 backend already lifts.
-pub const FW4_BOOT_TABLE: &str = "nym_boot";
-
-/// fw3 hook chains — user chains in the `filter` table that survive a fw3
-/// reload. Our chains are jumped to from the front of these.
-pub const FW3_HOOK_INPUT: &str = "input_rule";
-pub const FW3_HOOK_OUTPUT: &str = "output_rule";
-pub const FW3_HOOK_FORWARD: &str = "forwarding_rule";
+/// Names shared with the shell includes — the fw3 hook chains our jumps
+/// lead, and the `inet nym_boot` table `fw4-include.sh` installs at firewall
+/// start when the kill-switch is armed and no `inet nym` table exists yet
+/// (the window between network-up and this daemon's first policy; the fw4
+/// backend deletes it as the last step of every apply and reset, the init
+/// script and package prerm on explicit stop and removal). Defined once in
+/// [`super::boot_rules`], which also renders the shell side, so the names
+/// cannot drift between Rust and the scripts.
+pub use super::boot_rules::{FW3_HOOK_FORWARD, FW3_HOOK_INPUT, FW3_HOOK_OUTPUT, FW4_BOOT_TABLE};
 
 /// Firewall mark used for inbound-exemption reply pinning. Distinct from the
 /// tunnel fwmark (`0x14d`). Carried in `ct mark` for the connection lifetime

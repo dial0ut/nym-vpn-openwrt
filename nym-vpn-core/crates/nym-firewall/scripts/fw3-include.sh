@@ -16,6 +16,9 @@
 #   would stay gone until the daemon's next state change. (Between the flush
 #   and this script fw3 itself runs with an ACCEPT policy; that window is
 #   fw3's and nothing here can close it.)
+#   The emergency and boot-time rule sets themselves come from fw-rules.sh,
+#   generated from the daemon's boot_rules.rs, so the block this script
+#   installs is the block the daemon lifts.
 #   For that rebuild the daemon persists exactly what it applied, in the
 #   root-owned runtime directory $NYM_RUNTIME_DIR (default
 #   /var/run/nym-firewall, shared with fw-boot-guard.sh and the init script):
@@ -74,16 +77,6 @@ NYM_MANGLE_PRE="NYM_MANGLE_PREROUTING"
 NYM_MANGLE_OUT="NYM_MANGLE_OUTPUT"
 NAT_CHAIN="NYM_POSTROUTING"
 FORWARD_LAN_CHAIN="NYM_FORWARD_LAN"
-EMERGENCY_OUT="NYM_EMERGENCY_OUT"
-EMERGENCY_FWD="NYM_EMERGENCY_FWD"
-
-# Destinations the boot-time block always lets through: the LAN set the
-# daemon's Blocked policy uses (RFC1918, ULA) plus link-local, and multicast
-# for router-originated traffic only. Mirrors policy.rs.
-LAN_NETS_V4="10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16"
-LAN_NETS_V6="fe80::/10 fc00::/7"
-MCAST_V4="224.0.0.0/4"
-MCAST_V6="ff00::/8"
 
 # Boot-time kill-switch guard: the shared decision logic. A missing helper
 # must fail towards not blocking, never towards a block nothing can lift.
@@ -100,6 +93,30 @@ else
     # Without the shared checks nothing in the runtime directory is trusted.
     nym_runtime_dir_prepare() { return 1; }
 fi
+
+# The emergency and boot-time rule sets. Generated from the daemon's own
+# definition (nym-firewall/src/openwrt/boot_rules.rs → fw-rules.sh) so this
+# script, the fw4 include and the daemon install one and the same block.
+# Without it no emergency block can be built: the generator stubs fail, the
+# callers log CRITICAL, and the persisted policy is still restored.
+if [ -r "$NYM_SHARE_DIR/fw-rules.sh" ]; then
+    # shellcheck source-path=SCRIPTDIR
+    # shellcheck source=fw-rules.sh
+    . "$NYM_SHARE_DIR/fw-rules.sh"
+else
+    logger -t nym-vpn "CRITICAL: $NYM_SHARE_DIR/fw-rules.sh is missing; no emergency block can be installed"
+    NYM_EMERGENCY_OUT="NYM_EMERGENCY_OUT"
+    NYM_EMERGENCY_FWD="NYM_EMERGENCY_FWD"
+    NYM_BOOT_TABLE="nym_boot"
+    nym_emergency_rules_v4() { return 1; }
+    nym_emergency_rules_v6() { return 1; }
+    nym_boot_block_nft() { return 1; }
+fi
+
+# The emergency chain names, as the daemon and the generated rule sets name
+# them.
+EMERGENCY_OUT="$NYM_EMERGENCY_OUT"
+EMERGENCY_FWD="$NYM_EMERGENCY_FWD"
 
 # A persisted state file exists AND lives in a directory that passed the
 # ownership/mode checks. Every test of a state file goes through here; a
@@ -189,75 +206,18 @@ setup_jumps() {
 # The daemon tears both rule sets down the same way once its live state has
 # converged.
 emergency_block() {
-    local ipt="$1" mode="${2:-transition}" restore="${1}-restore"
+    local ipt="$1" mode="${2:-transition}" restore="${1}-restore" rules
 
-    emergency_rules() {
-        local net chain udp_reject
-        cat <<EOF
-*filter
-:$EMERGENCY_OUT - [0:0]
-:$EMERGENCY_FWD - [0:0]
--F $EMERGENCY_OUT
--F $EMERGENCY_FWD
--A $EMERGENCY_OUT -m conntrack --ctstate RELATED,ESTABLISHED --ctdir REPLY -j ACCEPT
-EOF
-        if [ "$mode" = "boot" ]; then
-            echo "-A $EMERGENCY_OUT -o lo -j ACCEPT"
-            if [ "$ipt" = "ip6tables" ]; then
-                cat <<EOF
--A $EMERGENCY_OUT -p udp --sport 546 --dport 547 -j ACCEPT
--A $EMERGENCY_OUT -p udp --sport 547 --dport 546 -j ACCEPT
--A $EMERGENCY_OUT -p icmpv6 --icmpv6-type router-solicitation -j ACCEPT
-EOF
-            else
-                cat <<EOF
--A $EMERGENCY_OUT -p udp --sport 68 --dport 67 -j ACCEPT
--A $EMERGENCY_OUT -p udp --sport 67 --dport 68 -j ACCEPT
-EOF
-            fi
-        fi
-        if [ "$ipt" = "ip6tables" ]; then
-            cat <<EOF
--A $EMERGENCY_OUT -p icmpv6 --icmpv6-type neighbour-solicitation -j ACCEPT
--A $EMERGENCY_OUT -p icmpv6 --icmpv6-type neighbour-advertisement -j ACCEPT
-EOF
-        fi
-        if [ "$mode" = "boot" ]; then
-            if [ "$ipt" = "ip6tables" ]; then
-                # shellcheck disable=SC2086  # word-split the network lists
-                set -- $LAN_NETS_V6
-                udp_reject="icmp6-port-unreachable"
-            else
-                # shellcheck disable=SC2086
-                set -- $LAN_NETS_V4
-                udp_reject="icmp-port-unreachable"
-            fi
-            # DNS first, then the LAN/multicast accepts (see above).
-            for chain in "$EMERGENCY_OUT" "$EMERGENCY_FWD"; do
-                echo "-A $chain -p udp --dport 53 -j REJECT --reject-with $udp_reject"
-                echo "-A $chain -p tcp --dport 53 -j REJECT --reject-with tcp-reset"
-            done
-            if [ "$ipt" = "ip6tables" ]; then
-                echo "-A $EMERGENCY_OUT -d $MCAST_V6 -j ACCEPT"
-            else
-                echo "-A $EMERGENCY_OUT -d $MCAST_V4 -j ACCEPT"
-            fi
-            for net in "$@"; do
-                echo "-A $EMERGENCY_OUT -d $net -j ACCEPT"
-                echo "-A $EMERGENCY_FWD -d $net -j ACCEPT"
-            done
-        fi
-        cat <<EOF
--A $EMERGENCY_OUT -j DROP
--A $EMERGENCY_FWD -j DROP
--I $HOOK_OUTPUT 1 -j $EMERGENCY_OUT
--I $HOOK_FORWARD 1 -j $EMERGENCY_FWD
-COMMIT
-EOF
-    }
-
-    emergency_rules | $restore --noflush -w 2>/dev/null \
-        || emergency_rules | $restore --noflush 2>/dev/null
+    case "$ipt" in
+        ip6tables) rules=nym_emergency_rules_v6 ;;
+        *) rules=nym_emergency_rules_v4 ;;
+    esac
+    # One atomic --noflush restore of the generated rule set; the boot set
+    # (mode "boot") adds the allowances a router needs to come up and stay
+    # manageable, the transition set only passes reply traffic and ND. See
+    # boot_rules.rs for the rules and the order they must keep.
+    $rules "$mode" | $restore --noflush -w 2>/dev/null \
+        || $rules "$mode" | $restore --noflush 2>/dev/null
 }
 
 cleanup_emergency() {

@@ -17,11 +17,10 @@ use crate::net::{
     AllowedClients, AllowedEndpoint, InboundExemption, TransportProtocol, TunnelMetadata,
 };
 
-/// LAN networks (RFC1918 private + IPv6 link-local + ULA).
-const LAN_NETS_V4: &[&str] = &["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"];
-const LAN_NETS_V6: &[&str] = &["fe80::/10", "fc00::/7"];
-const MULTICAST_V4: &str = "224.0.0.0/4";
-const MULTICAST_V6: &str = "ff00::/8";
+// LAN networks (RFC1918 private + IPv6 link-local + ULA) and multicast:
+// defined once in boot_rules, which the boot-time block and the shell
+// includes derive from as well.
+use super::boot_rules::{LAN_NETS_V4, LAN_NETS_V6, MULTICAST_V4, MULTICAST_V6};
 
 const DHCPV4_CLIENT_PORT: u16 = 68;
 const DHCPV4_SERVER_PORT: u16 = 67;

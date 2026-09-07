@@ -40,6 +40,7 @@ use std::time::Instant;
 use nix::errno::Errno;
 use nix::fcntl::{Flock, FlockArg};
 
+use super::boot_rules::{self, EMERGENCY_FORWARD_CHAIN, EMERGENCY_OUTPUT_CHAIN};
 use super::common::{
     FW3_HOOK_FORWARD, FW3_HOOK_INPUT, FW3_HOOK_OUTPUT, FW3_LOCK_PATH, FW3_RULES_V4_PATH,
     FW3_RULES_V6_PATH, FW3_TRANSITION_PATH, IFACES_PATH, Ipv6Status, ensure_runtime_dir,
@@ -64,19 +65,19 @@ const NAT_CHAIN: &str = "NYM_POSTROUTING";
 /// tunnel blackholes full-size segments whenever ICMP frag-needed is lost.
 const FORWARD_LAN_CHAIN: &str = "NYM_FORWARD_LAN";
 
-/// Dedicated fail-closed chains. The fw3 include script installs them when a
-/// firewall reload runs while a transition marker exists, when it cannot
-/// restore the persisted policy, and — with a boot rule set that also lets
-/// the router come up and stay manageable from the LAN — at boot, before
-/// this daemon has applied any policy (see fw-boot-guard.sh). The daemon
-/// installs them only for the *first* activation (no hook jumps in place
-/// yet, so nothing is protecting traffic while the chains are built) and
-/// tears them down once the live state has converged, which also lifts the
-/// include's boot-time block — a re-apply of a live policy never blackholes
-/// traffic. Names and rule shape are a contract with fw3-include.sh and
-/// scripts/ipk/prerm.
-const EMERGENCY_OUTPUT_CHAIN: &str = "NYM_EMERGENCY_OUT";
-const EMERGENCY_FORWARD_CHAIN: &str = "NYM_EMERGENCY_FWD";
+// Dedicated fail-closed chains (EMERGENCY_OUTPUT_CHAIN / EMERGENCY_FORWARD_CHAIN,
+// imported from boot_rules). The fw3 include script installs them when a
+// firewall reload runs while a transition marker exists, when it cannot
+// restore the persisted policy, and — with a boot rule set that also lets
+// the router come up and stay manageable from the LAN — at boot, before
+// this daemon has applied any policy (see fw-boot-guard.sh). The daemon
+// installs them only for the *first* activation (no hook jumps in place
+// yet, so nothing is protecting traffic while the chains are built) and
+// tears them down once the live state has converged, which also lifts the
+// include's boot-time block — a re-apply of a live policy never blackholes
+// traffic. Names and rule text are defined once, in boot_rules, from which
+// fw3-include.sh derives its copy (scripts/fw-rules.sh, rendered by
+// build.rs); scripts/ipk/prerm names the chains for removal.
 
 /// Apply the [`RuleSet`] to fw3 using a fail-closed transition protocol:
 ///
@@ -266,28 +267,18 @@ fn install_emergency_block(family: AddrFamily) -> Result<()> {
     run_restore(&emergency_script(family), family)
 }
 
+/// The transition-mode emergency block, from the shared definition. The
+/// daemon never installs the boot set: by the time it runs, the include has
+/// either installed it or decided against it, and this backend lifts it.
 fn emergency_script(family: AddrFamily) -> String {
-    let nd = match family {
-        AddrFamily::V4 => "",
-        AddrFamily::V6 => {
-            "-A NYM_EMERGENCY_OUT -p icmpv6 --icmpv6-type neighbour-solicitation -j ACCEPT\n\
-             -A NYM_EMERGENCY_OUT -p icmpv6 --icmpv6-type neighbour-advertisement -j ACCEPT\n"
-        }
-    };
-    format!(
-        "*filter\n\
-         :{EMERGENCY_OUTPUT_CHAIN} - [0:0]\n\
-         :{EMERGENCY_FORWARD_CHAIN} - [0:0]\n\
-         -F {EMERGENCY_OUTPUT_CHAIN}\n\
-         -F {EMERGENCY_FORWARD_CHAIN}\n\
-         -A {EMERGENCY_OUTPUT_CHAIN} -m conntrack --ctstate RELATED,ESTABLISHED --ctdir REPLY -j ACCEPT\n\
-         {nd}\
-         -A {EMERGENCY_OUTPUT_CHAIN} -j DROP\n\
-         -A {EMERGENCY_FORWARD_CHAIN} -j DROP\n\
-         -I {FW3_HOOK_OUTPUT} 1 -j {EMERGENCY_OUTPUT_CHAIN}\n\
-         -I {FW3_HOOK_FORWARD} 1 -j {EMERGENCY_FORWARD_CHAIN}\n\
-         COMMIT\n"
-    )
+    boot_rules::iptables_emergency_rules(boot_family(family), boot_rules::Mode::Transition)
+}
+
+fn boot_family(family: AddrFamily) -> boot_rules::Family {
+    match family {
+        AddrFamily::V4 => boot_rules::Family::V4,
+        AddrFamily::V6 => boot_rules::Family::V6,
+    }
 }
 
 /// Whether every hook jump into our filter chains is in place. An fw3
@@ -1048,88 +1039,38 @@ mod tests {
         assert!(!emergency_script(AddrFamily::V4).contains("icmpv6"));
     }
 
-    /// The include installs its boot-time block in the same chains this
-    /// backend lifts. Scan the script so a rename on either side fails here
-    /// instead of leaving chains nobody removes, and pin the allowances the
-    /// boot rule set must keep so a crash-looping daemon never locks the
-    /// administrator out of the LAN.
+    /// The include installs its emergency and boot-time blocks from the
+    /// generated fragment (`scripts/fw-rules.sh`, rendered from
+    /// `boot_rules`), not from text of its own: it sources the fragment,
+    /// takes the chain names from it and pipes the generator functions into
+    /// `*-restore`. Rule content itself is tested in `boot_rules`.
     #[test]
-    fn include_script_shares_the_emergency_chains_and_boot_rules_keep_lan_alive() {
+    fn include_script_installs_the_generated_rule_sets() {
         const INCLUDE: &str = include_str!("../../scripts/fw3-include.sh");
         let lines: Vec<&str> = INCLUDE.lines().map(str::trim).collect();
+        let has = |needle: &str| lines.contains(&needle);
 
-        let out = format!("EMERGENCY_OUT=\"{EMERGENCY_OUTPUT_CHAIN}\"");
-        let fwd = format!("EMERGENCY_FWD=\"{EMERGENCY_FORWARD_CHAIN}\"");
-        assert!(lines.contains(&out.as_str()), "fw3-include.sh must define {out}");
-        assert!(lines.contains(&fwd.as_str()), "fw3-include.sh must define {fwd}");
-
-        for must in [
-            "-A $EMERGENCY_OUT -m conntrack --ctstate RELATED,ESTABLISHED --ctdir REPLY -j ACCEPT",
-            "echo \"-A $EMERGENCY_OUT -o lo -j ACCEPT\"",
-            "-A $EMERGENCY_OUT -p udp --sport 68 --dport 67 -j ACCEPT",
-            "-A $EMERGENCY_OUT -p udp --sport 67 --dport 68 -j ACCEPT",
-            "-A $EMERGENCY_OUT -p udp --sport 546 --dport 547 -j ACCEPT",
-            "-A $EMERGENCY_OUT -p udp --sport 547 --dport 546 -j ACCEPT",
-            "-A $EMERGENCY_OUT -p icmpv6 --icmpv6-type router-solicitation -j ACCEPT",
-            "echo \"-A $EMERGENCY_OUT -d $net -j ACCEPT\"",
-            "echo \"-A $EMERGENCY_FWD -d $net -j ACCEPT\"",
-            "LAN_NETS_V4=\"10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16\"",
-            "LAN_NETS_V6=\"fe80::/10 fc00::/7\"",
-            "-A $EMERGENCY_OUT -j DROP",
-            "-A $EMERGENCY_FWD -j DROP",
-        ] {
-            assert!(lines.contains(&must), "fw3-include.sh boot block must carry: {must}");
-        }
-        // INPUT stays fw3's: no emergency rule ever targets input_rule.
-        assert!(!lines.iter().any(|l| {
-            !l.starts_with('#') && l.contains("EMERGENCY") && l.contains("HOOK_INPUT")
-        }));
-    }
-
-    /// Same ordering rule as the daemon's policy (`block_dns` before
-    /// `allow_lan_traffic`): the boot rule set rejects DNS in both emergency
-    /// chains before any LAN/multicast destination accept, so a double-NAT
-    /// router does not leak plaintext lookups to its upstream during the boot
-    /// window — but after the reply-direction and loopback accepts, so the
-    /// router's own dnsmasq keeps answering the LAN.
-    #[test]
-    fn include_script_boot_rules_reject_dns_before_lan_accepts() {
-        const INCLUDE: &str = include_str!("../../scripts/fw3-include.sh");
-        let lines: Vec<&str> = INCLUDE.lines().map(str::trim).collect();
-        let pos = |needle: &str| {
-            lines
-                .iter()
-                .position(|l| *l == needle)
-                .unwrap_or_else(|| panic!("fw3-include.sh must carry: {needle}"))
-        };
-
-        let udp = pos("echo \"-A $chain -p udp --dport 53 -j REJECT --reject-with $udp_reject\"");
-        let tcp = pos("echo \"-A $chain -p tcp --dport 53 -j REJECT --reject-with tcp-reset\"");
-        // Both emergency chains get the reject.
-        assert_eq!(
-            pos("for chain in \"$EMERGENCY_OUT\" \"$EMERGENCY_FWD\"; do") + 1,
-            udp
-        );
-        // Per-family ICMP reject type, TCP reset for tcp.
-        assert!(lines.contains(&"udp_reject=\"icmp6-port-unreachable\""));
-        assert!(lines.contains(&"udp_reject=\"icmp-port-unreachable\""));
-
-        let reply = pos(
-            "-A $EMERGENCY_OUT -m conntrack --ctstate RELATED,ESTABLISHED --ctdir REPLY -j ACCEPT",
-        );
-        let lo = pos("echo \"-A $EMERGENCY_OUT -o lo -j ACCEPT\"");
-        let mcast4 = pos("echo \"-A $EMERGENCY_OUT -d $MCAST_V4 -j ACCEPT\"");
-        let mcast6 = pos("echo \"-A $EMERGENCY_OUT -d $MCAST_V6 -j ACCEPT\"");
-        let lan_out = pos("echo \"-A $EMERGENCY_OUT -d $net -j ACCEPT\"");
-        let lan_fwd = pos("echo \"-A $EMERGENCY_FWD -d $net -j ACCEPT\"");
+        assert!(has(". \"$NYM_SHARE_DIR/fw-rules.sh\""), "must source fw-rules.sh");
+        assert!(has("EMERGENCY_OUT=\"$NYM_EMERGENCY_OUT\""));
+        assert!(has("EMERGENCY_FWD=\"$NYM_EMERGENCY_FWD\""));
         assert!(
-            reply < udp && lo < udp,
-            "reply/loopback accepts must precede the DNS reject"
+            lines.iter().any(|l| l.contains("nym_emergency_rules_v4"))
+                && lines.iter().any(|l| l.contains("nym_emergency_rules_v6")),
+            "emergency_block must use the generated rule functions"
         );
-        for accept in [mcast4, mcast6, lan_out, lan_fwd] {
+        // No rule text of its own: nothing in the include appends to the
+        // emergency chains or names a LAN network.
+        for line in &lines {
+            if line.starts_with('#') {
+                continue;
+            }
             assert!(
-                udp < accept && tcp < accept,
-                "DNS reject must precede every LAN/multicast accept"
+                !line.contains("-A $EMERGENCY_OUT") && !line.contains("-A $EMERGENCY_FWD"),
+                "fw3-include.sh must not carry emergency rule text: {line}"
+            );
+            assert!(
+                !line.contains("10.0.0.0/8") && !line.contains("fe80::/10"),
+                "fw3-include.sh must not carry LAN network lists: {line}"
             );
         }
     }
