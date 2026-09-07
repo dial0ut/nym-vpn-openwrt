@@ -15,15 +15,14 @@
 #                           on start; /tmp is tmpfs, so a reboot clears it)
 #
 # Whether the daemon has already applied a policy is backend-specific and is
-# checked by the caller. The verdict errs towards NOT blocking, and that is a
-# deliberate choice rather than a mirror of the daemon's defaults: a config
-# the daemon cannot parse makes it refuse to start, so no daemon would ever
-# come to lift a block installed on its behalf. A missing file is only ever
-# seen before the daemon's very first run — the config manager writes it on
-# first start (kill-switch defaulting to on), and postinst starts the daemon
-# right after install — so it is not worth a block either. In both cases the
-# setting counts as "off" here and NYM_BOOT_REASON tells the caller why, for
-# the log.
+# checked by the caller. A setting that is absent or cannot be read takes the
+# daemon's own default — kill-switch on, legacy split tunnelling off — so the
+# guard and the daemon that is about to start agree. The daemon preserves an
+# unparseable config as .json.bak and starts with defaults, and writes a
+# missing config on its first start; either way the daemon that comes up
+# applies a Blocked policy and lifts the boot block itself. Only an explicit
+# "false" turns the block off. NYM_BOOT_REASON tells the caller what was
+# decided and from which value, for the log.
 #
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright 2026 Nym Technologies SA <contact@nymtech.net>
@@ -35,9 +34,9 @@ NYM_BOOT_REASON=""
 
 # Print the JSON boolean stored under a top-level key of the daemon config:
 # "true"/"false" when present, "absent" when the key or the file is missing
-# (an older config version the daemon migrates, or no config yet — see the
-# header for why neither blocks), "unknown" when the file exists but cannot
-# be read with confidence.
+# (an older config version the daemon migrates, or no config yet), "unknown"
+# when the file exists but cannot be read with confidence. The caller maps
+# both "absent" and "unknown" to the daemon's default for the key.
 nym_config_bool() {
     local key="$1" value
 
@@ -45,9 +44,10 @@ nym_config_bool() {
 
     if command -v jsonfilter >/dev/null 2>&1; then
         # OpenWrt's JSON extractor. It exits non-zero and prints nothing both
-        # for a missing key and for unparseable JSON. The daemon treats those
-        # differently (migration default vs. refusing to start), but the
-        # guard's verdict is the same — no block — so "absent" serves both.
+        # for a missing key and for unparseable JSON. The daemon falls back
+        # to its default in both cases (migration default for a missing key,
+        # a preserved .json.bak plus defaults for bad JSON), so "absent"
+        # serves both.
         value=$(jsonfilter -i "$NYM_VPND_CONFIG" -e "@.$key" 2>/dev/null) \
             || { echo absent; return 0; }
         case "$value" in
@@ -106,32 +106,20 @@ nym_boot_block_wanted() {
         return 1
     fi
 
+    # Absent or unreadable settings take the daemon's defaults (see header):
+    # only an explicit false opens, only an explicit true forces legacy off.
     killswitch=$(nym_config_bool killswitch)
-    case "$killswitch" in
-        true) ;;
-        false | absent)
-            NYM_BOOT_REASON="kill-switch is off in $NYM_VPND_CONFIG"
-            return 1
-            ;;
-        *)
-            NYM_BOOT_REASON="cannot read the kill-switch setting from $NYM_VPND_CONFIG; not blocking"
-            return 1
-            ;;
-    esac
+    if [ "$killswitch" = "false" ]; then
+        NYM_BOOT_REASON="kill-switch is off in $NYM_VPND_CONFIG"
+        return 1
+    fi
 
     legacy=$(nym_config_bool legacy_split_tunnel)
-    case "$legacy" in
-        false | absent) ;;
-        true)
-            NYM_BOOT_REASON="legacy split tunnelling forces the kill-switch off"
-            return 1
-            ;;
-        *)
-            NYM_BOOT_REASON="cannot read the legacy split-tunnel setting from $NYM_VPND_CONFIG; not blocking"
-            return 1
-            ;;
-    esac
+    if [ "$legacy" = "true" ]; then
+        NYM_BOOT_REASON="legacy split tunnelling forces the kill-switch off"
+        return 1
+    fi
 
-    NYM_BOOT_REASON="kill-switch on, nym-vpnd enabled at boot, no policy applied yet"
+    NYM_BOOT_REASON="kill-switch on (config: killswitch=$killswitch, legacy_split_tunnel=$legacy), nym-vpnd enabled at boot, no policy applied yet"
     return 0
 }

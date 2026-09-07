@@ -144,8 +144,10 @@ The block is lifted by whichever comes first: the daemon's first policy (kill-sw
 has converged), an explicit `/etc/init.d/nym-vpnd stop` (which also writes the stop marker, so a
 later reload does not re-install it), package removal (`prerm`), or a later include run finding
 that a condition no longer holds — kill-switch turned off, daemon disabled or stopped. A setting
-the include cannot read with confidence counts as off: it logs why and does not block, matching
-the daemon's own fallback to defaults for an unreadable config. A `firewall reload` while the
+that is absent or cannot be read takes the daemon's own default (kill-switch on, legacy split
+tunnelling off), because that is the daemon that is about to start: it preserves an unparseable
+config as `.json.bak` and runs with defaults, and it writes a missing config on first start. Only
+an explicit `false` leaves the boot window open. A `firewall reload` while the
 daemon is up never touches a live policy: the include sees `inet nym` (or the fw3 rules file) and
 at most removes a stale boot block.
 
