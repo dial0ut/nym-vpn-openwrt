@@ -75,7 +75,7 @@ through; check with
 opkg list-installed nym-vpn     # or: apk list -I nym-vpn
 ```
 
-Newer packages refresh rpcd a few seconds *after* the transaction has returned, so the page gets
+Newer packages refresh rpcd only *after* the package manager process has exited, so the page gets
 its result. Being asked to log in again after an upgrade that changed the web UI's permissions is
 expected.
 

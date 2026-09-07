@@ -90,9 +90,10 @@ fi
 # the page never gets its reply and the user ends up logged out (#13).
 # The job below is detached — a subshell with every fd on /dev/null, so
 # neither opkg (waitpid on this script) nor apk (which also reads the
-# script's stdout/stderr pipes to EOF) waits for it — and delayed until
-# the package manager has committed its database and rpcd has delivered
-# the transaction's reply.
+# script's stdout/stderr pipes to EOF) waits for it — and it waits for the
+# package manager process itself to exit before touching rpcd, bounded so
+# a stuck transaction cannot defer the refresh forever. Once opkg/apk has
+# exited, rpcd has delivered the transaction's reply to the page.
 #
 # Upgrades pick the least disruptive refresh from the checksums prerm
 # stashed: nothing when neither the rpcd plugin nor the ACL file changed,
@@ -124,13 +125,58 @@ rm -f "$nym_rpcd_state"
 # background processes behind.
 [ -z "${IPKG_INSTROOT:-}" ] || nym_rpcd_action=""
 
+# Pid of the opkg/apk process running this script. postinst is a child of
+# the package manager directly or of a sh wrapper it spawned, so walk the
+# parent chain (bounded) for a comm of opkg or apk and fall back to the
+# direct parent. NYM_PROC lets the walk be tested on hosts without /proc.
+NYM_PROC="${NYM_PROC:-/proc}"
+proc_comm() {
+    cat "$NYM_PROC/$1/comm" 2>/dev/null
+}
+proc_ppid() {
+    # /proc/<pid>/stat is "pid (comm) state ppid ..."; comm may contain
+    # spaces, so cut after the last ')'.
+    sed 's/.*) //' "$NYM_PROC/$1/stat" 2>/dev/null | cut -d' ' -f2
+}
+find_package_manager_pid() {
+    local pid="$1" depth=0
+    while [ -n "$pid" ] && [ "$pid" -gt 1 ] 2>/dev/null && [ "$depth" -lt 8 ]; do
+        case "$(proc_comm "$pid")" in
+            opkg | apk)
+                echo "$pid"
+                return 0
+                ;;
+        esac
+        pid=$(proc_ppid "$pid")
+        depth=$((depth + 1))
+    done
+    echo "$1"
+}
+
 if [ -n "$nym_rpcd_action" ]; then
+    nym_pm_pid=$(find_package_manager_pid "$PPID")
+    nym_pm_comm=$(proc_comm "$nym_pm_pid")
     (
         # Survive the caller's terminal going away (SSH session closed
         # right after a CLI upgrade); INT is already ignored for the
         # background jobs of a non-interactive shell.
         trap '' HUP
-        sleep 5
+        # Wait for the package manager to exit. A changed comm means the
+        # pid was reused; the bound keeps a wedged transaction from
+        # blocking the refresh for good.
+        i=0
+        while kill -0 "$nym_pm_pid" 2>/dev/null \
+            && [ "$(proc_comm "$nym_pm_pid")" = "$nym_pm_comm" ]; do
+            if [ "$i" -ge 120 ]; then
+                logger -t nym-vpn "package manager pid $nym_pm_pid still running after 120 s; refreshing rpcd anyway"
+                break
+            fi
+            sleep 1
+            i=$((i + 1))
+        done
+        # Let apk finish tearing down the script's pipes and rpcd hand the
+        # reply to the page.
+        sleep 1
         /etc/init.d/rpcd "$nym_rpcd_action"
         # rpcd builds without a SIGHUP handler exit on reload instead of
         # re-executing. Whatever happened, leave LuCI with a running rpcd.

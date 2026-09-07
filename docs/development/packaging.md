@@ -84,7 +84,8 @@ so `kmod-tun` was never pulled in and the daemon died at TUN device creation.
 3. **Service** — enables and starts `nym-vpnd`. If `nym-vpn.settings.always_on` is already `1`
    (i.e. this is an upgrade), enables and starts `nym-vpn-watchdog` too.
 4. **LuCI plumbing** — clears `/tmp/luci-indexcache*` and `/tmp/luci-modulecache/`, then refreshes
-   rpcd from a detached job that fires about five seconds *after* the transaction has returned.
+   rpcd from a detached job that waits for the opkg/apk process to exit (bounded at two minutes)
+   before it fires.
    rpcd scans `/usr/libexec/rpcd` only at start-up and computes a session's ACL grants at login,
    so a fresh install restarts it. An upgrade compares the new rpcd plugin and ACL file against
    the checksums prerm stashed in `/tmp/nym-vpn.rpcd-state`: nothing changed → no refresh; only
