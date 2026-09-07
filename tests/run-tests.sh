@@ -167,14 +167,14 @@ for arch in "${SELECTED_ARCHS[@]}"; do
     if ! start_vm "$arch" 2>&1 | tee -a "$LOG_FILE"; then
         log_error "[$arch] Failed to start VM"
         RESULTS[$arch]="FAIL:vm_start"
-        ((FAIL_COUNT++))
+        FAIL_COUNT=$((FAIL_COUNT + 1))
         continue
     fi
 
     # Wait for SSH
     if ! wait_for_ssh "$arch" 180 2>&1 | tee -a "$LOG_FILE"; then
         RESULTS[$arch]="FAIL:ssh_timeout"
-        ((FAIL_COUNT++))
+        FAIL_COUNT=$((FAIL_COUNT + 1))
         $KEEP_VMS || stop_vm "$arch" 2>/dev/null || true
         continue
     fi
@@ -187,7 +187,7 @@ for arch in "${SELECTED_ARCHS[@]}"; do
         feed)
             if ! install_package_feed "$arch" 2>&1 | tee -a "$LOG_FILE"; then
                 RESULTS[$arch]="FAIL:install"
-                ((FAIL_COUNT++))
+                FAIL_COUNT=$((FAIL_COUNT + 1))
                 $KEEP_VMS || stop_vm "$arch" 2>/dev/null || true
                 continue
             fi
@@ -199,13 +199,13 @@ for arch in "${SELECTED_ARCHS[@]}"; do
             if [[ -z "$pkg_file" ]]; then
                 log_error "[$arch] No package found for $pkg_arch in $PACKAGE_DIR"
                 RESULTS[$arch]="FAIL:no_package"
-                ((FAIL_COUNT++))
+                FAIL_COUNT=$((FAIL_COUNT + 1))
                 $KEEP_VMS || stop_vm "$arch" 2>/dev/null || true
                 continue
             fi
             if ! install_package_file "$arch" "$pkg_file" 2>&1 | tee -a "$LOG_FILE"; then
                 RESULTS[$arch]="FAIL:install"
-                ((FAIL_COUNT++))
+                FAIL_COUNT=$((FAIL_COUNT + 1))
                 $KEEP_VMS || stop_vm "$arch" 2>/dev/null || true
                 continue
             fi
@@ -213,7 +213,7 @@ for arch in "${SELECTED_ARCHS[@]}"; do
         release)
             if ! install_package_release "$arch" "$RELEASE_TAG" 2>&1 | tee -a "$LOG_FILE"; then
                 RESULTS[$arch]="FAIL:install"
-                ((FAIL_COUNT++))
+                FAIL_COUNT=$((FAIL_COUNT + 1))
                 $KEEP_VMS || stop_vm "$arch" 2>/dev/null || true
                 continue
             fi
@@ -223,10 +223,10 @@ for arch in "${SELECTED_ARCHS[@]}"; do
     # Run VPN test
     if run_vpn_test "$arch" 2>&1 | tee -a "$LOG_FILE"; then
         RESULTS[$arch]="PASS"
-        ((PASS_COUNT++))
+        PASS_COUNT=$((PASS_COUNT + 1))
     else
         RESULTS[$arch]="FAIL"
-        ((FAIL_COUNT++))
+        FAIL_COUNT=$((FAIL_COUNT + 1))
     fi
 
     # Stop VM

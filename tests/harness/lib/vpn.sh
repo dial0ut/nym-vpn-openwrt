@@ -14,7 +14,7 @@ vpn_daemon_start() {
     local ctid="$1"
     pct_sh "$ctid" 'killall -9 nym-vpnd >/dev/null 2>&1 || true; sleep 1; rm -f /var/run/nym-vpnd.pid; setsid /usr/sbin/nym-vpnd > /tmp/nym.log 2>&1 < /dev/null &'
     # Wait for the gRPC socket.
-    for i in 1 2 3 4 5 6 7 8 9 10; do
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
         if pct_sh "$ctid" 'nym-vpnc status >/dev/null 2>&1'; then
             return 0
         fi
@@ -29,16 +29,15 @@ vpn_daemon_stop() {
     pct_sh "$ctid" 'killall -9 nym-vpnd >/dev/null 2>&1 || true'
 }
 
-# Push the mnemonic to the daemon via stdin. The mnemonic is sent over the
-# pmx ssh channel and into pct exec's stdin; it never lands in argv or a
-# proxy log file.
+# Register the account. The mnemonic travels on stdin the whole way — local
+# ssh, pct exec, the container's sh — so it is in no argv on this machine or
+# on the Proxmox host. nym-vpnc has no stdin form for `account set`, so inside
+# the container it is that one process's argument for the duration of the
+# call; nothing else on the container sees it.
 vpn_account_set() {
     local ctid="$1"
-    # `nym-vpnc account set <mnemonic>` is the documented form; we feed
-    # mnemonic via env var on the remote side so it never appears in the
-    # command line. The remote `sh -c` reads $M from env populated by ssh.
-    ssh -o BatchMode=yes "$PROXMOX_HOST" \
-        "M=\"$NYM_MNEMONIC\" pct exec $ctid -- env M=\"\$M\" sh -c 'nym-vpnc account set \"\$M\" --mode api'" \
+    printf '%s\n' "$NYM_MNEMONIC" | ssh -o BatchMode=yes "$PROXMOX_HOST" \
+        "pct exec $ctid -- sh -c 'IFS= read -r M && exec nym-vpnc account set \"\$M\" --mode api'" \
         >/dev/null
 }
 
@@ -49,7 +48,8 @@ vpn_account_forget() {
 
 # Block until the account reaches ReadyToConnect (or timeout).
 vpn_wait_ready() {
-    local ctid="$1" timeout="${2:-90}" deadline=$(( $(date +%s) + timeout ))
+    local ctid="$1" timeout="${2:-90}"
+    local deadline=$(( $(date +%s) + timeout ))
     while [ "$(date +%s)" -lt "$deadline" ]; do
         if pct_sh "$ctid" 'nym-vpnc account get 2>&1' | grep -q 'ReadyToConnect'; then
             return 0

@@ -13,7 +13,7 @@
 set -uo pipefail
 
 HARNESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$HARNESS_DIR"
+cd "$HARNESS_DIR" || exit 2
 
 # ---- load .env ----
 if [ ! -f "$HARNESS_DIR/.env" ]; then
@@ -78,13 +78,18 @@ for version in "${RUN_VERSIONS[@]}"; do
 done
 
 # ---- launch slots ----
+# Every slot's exit code is kept: a slot that dies before writing results is
+# a failed run, not an empty row.
 declare -A PIDS
+declare -A SLOT_RC
 for i in "${!RUN_SLOTS[@]}"; do
     slot="${RUN_SLOTS[$i]}"
     version="${RUN_VERSIONS[$i]}"
     echo "launching slot $slot ($version)"
     if [ "$SERIAL" -eq 1 ]; then
-        "$HARNESS_DIR/run-slot.sh" "$slot" "$version" "$RESULTS_DIR" || true
+        rc=0
+        "$HARNESS_DIR/run-slot.sh" "$slot" "$version" "$RESULTS_DIR" || rc=$?
+        SLOT_RC[$slot]=$rc
     else
         "$HARNESS_DIR/run-slot.sh" "$slot" "$version" "$RESULTS_DIR" &
         PIDS[$slot]=$!
@@ -94,8 +99,10 @@ done
 # ---- wait for parallel slots ----
 if [ "$SERIAL" -eq 0 ]; then
     for slot in "${!PIDS[@]}"; do
-        wait "${PIDS[$slot]}" || true
-        echo "slot $slot done"
+        rc=0
+        wait "${PIDS[$slot]}" || rc=$?
+        SLOT_RC[$slot]=$rc
+        echo "slot $slot done (rc=$rc)"
     done
 fi
 
@@ -114,12 +121,18 @@ REPORT="$RESULTS_DIR/report.md"
     total_pass=0
     total_fail=0
     total_skip=0
+    slot_failures=0
     for i in "${!RUN_SLOTS[@]}"; do
         slot="${RUN_SLOTS[$i]}"
         version="${RUN_VERSIONS[$i]}"
         rf="$RESULTS_DIR/slot-${slot}.results"
-        if [ ! -f "$rf" ]; then
-            echo "| $slot | $version | (no results) | - | - | - |"
+        rc="${SLOT_RC[$slot]:-1}"
+        if [ ! -s "$rf" ]; then
+            # No results at all: the slot never got as far as a case. Count
+            # it as a failure so an aborted run cannot look like a clean one.
+            echo "| $slot | $version | (no results, slot rc=$rc) | - | 1 | - |"
+            total_fail=$((total_fail + 1))
+            slot_failures=$((slot_failures + 1))
             continue
         fi
         p=$(grep -c '^PASS|' "$rf" || true)
@@ -129,10 +142,15 @@ REPORT="$RESULTS_DIR/report.md"
         total_pass=$((total_pass + p))
         total_fail=$((total_fail + f))
         total_skip=$((total_skip + s))
-        echo "| $slot | $version | $t | $p | $f | $s |"
+        if [ "$rc" -ne 0 ]; then
+            slot_failures=$((slot_failures + 1))
+            echo "| $slot | $version | $t | $p | $f | $s | slot rc=$rc |"
+        else
+            echo "| $slot | $version | $t | $p | $f | $s |"
+        fi
     done
     echo ""
-    echo "**Overall:** $total_pass passed, $total_fail failed, $total_skip skipped"
+    echo "**Overall:** $total_pass passed, $total_fail failed, $total_skip skipped, $slot_failures slot(s) exited non-zero"
     echo ""
     echo "## Per-case results"
     echo ""
@@ -164,7 +182,8 @@ cat "$REPORT"
 echo "================"
 echo "full report: $REPORT"
 
-# Exit nonzero if any case failed
-if [ "$total_fail" -gt 0 ]; then
+# Exit nonzero if any case failed, any slot produced no results, or any slot
+# runner exited non-zero.
+if [ "$total_fail" -gt 0 ] || [ "$slot_failures" -gt 0 ]; then
     exit 1
 fi

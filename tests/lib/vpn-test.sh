@@ -181,23 +181,26 @@ cleanup_account() {
     vm_ssh "$arch" "nym-vpnc account forget" 2>/dev/null || true
 }
 
-# Run a command with a timeout (portable wrapper).
+# Run a command with a timeout.
 # Usage: timeout_cmd <seconds> <command...>
+#
+# The command is usually a shell function (vm_ssh), which coreutils `timeout`
+# cannot exec (it would exit 127), so the command runs in a background
+# subshell that inherits our functions and is raced against a sleeper.
+# Returns the command's exit code, or 124 when the sleeper killed it (same
+# convention as coreutils timeout).
 timeout_cmd() {
     local secs="$1"
     shift
-    if command -v timeout &>/dev/null; then
-        timeout "$secs" "$@"
-    else
-        # Fallback for systems without coreutils timeout
-        local pid
-        "$@" &
-        pid=$!
-        ( sleep "$secs"; kill "$pid" 2>/dev/null ) &
-        local watchdog=$!
-        wait "$pid" 2>/dev/null
-        local rc=$?
-        kill "$watchdog" 2>/dev/null || true
-        return $rc
-    fi
+    local pid watchdog rc=0
+    ( "$@" ) &
+    pid=$!
+    ( sleep "$secs"; kill "$pid" 2>/dev/null ) &
+    watchdog=$!
+    wait "$pid" 2>/dev/null || rc=$?
+    kill "$watchdog" 2>/dev/null || true
+    wait "$watchdog" 2>/dev/null || true
+    # 143 = terminated by SIGTERM, which only the sleeper sends here.
+    [[ "$rc" -eq 143 ]] && rc=124
+    return "$rc"
 }

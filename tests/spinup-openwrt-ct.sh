@@ -174,8 +174,8 @@ if [ "$KEEP_DEFAULT_NET" -eq 0 ]; then
     LAN_PREFIX="${LAN_IP#*/}"
     # Compute netmasks from prefix length so we don't have to import a tool.
     mask_from_prefix() {
-        local prefix="$1" mask="" i
-        for i in 1 2 3 4; do
+        local prefix="$1" mask=""
+        for _ in 1 2 3 4; do
             if [ "$prefix" -ge 8 ]; then mask="${mask}.255"; prefix=$((prefix-8))
             elif [ "$prefix" -gt 0 ]; then mask="${mask}.$((256 - (1 << (8 - prefix))))"; prefix=0
             else mask="${mask}.0"; fi

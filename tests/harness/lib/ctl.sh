@@ -22,6 +22,7 @@ pct_exec() {
 # quoting inside it is unaffected by the outer ssh+pct framing.
 pct_sh() {
     local ctid="$1"; shift
+    # shellcheck disable=SC2087  # the snippet is meant to expand here, not on the host
     ssh -o BatchMode=yes "$PROXMOX_HOST" "pct exec $ctid -- sh -s" <<EOF
 $*
 EOF
