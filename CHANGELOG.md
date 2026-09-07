@@ -42,6 +42,14 @@ the GitHub release notes.
 
 ### Security
 
+- Kill-switch runtime state (the fw3 rules files and transition marker, the
+  fw4 policy hint, the interface list, the lock and the init script's stop
+  marker) moved from world-writable `/tmp` into the root-owned private
+  directory `/var/run/nym-firewall` (mode 0700). The firewall includes and the
+  boot guard trust a file only inside a directory that passes ownership and
+  mode checks, so an unprivileged local process can no longer plant a stop
+  marker to keep the boot block off or a rules file for the fw3 include to
+  load. The daemon writes state with create-new, no-follow temp files.
 - CI now runs the workspace test suite and a fast security job on every push
   to `develop` and feature branches: secret scanning of the pushed commits,
   dependency policy and advisory checks (`cargo deny`), shellcheck over the
@@ -94,22 +102,46 @@ the GitHub release notes.
   kill-switch for the seconds until the new daemon's first policy: the daemon
   leaves its Blocked policy in place on shutdown while the kill-switch is on
   (the Error and Offline states used to reset the firewall unconditionally),
-  and the init script and `prerm` tear the firewall down only on an explicit
-  `stop` or a real removal.
+  the init script tears the firewall down only on an explicit `stop`, and an
+  upgrade leaves the old daemon running through the file swap and restarts it
+  through the newly installed init script, so the old package's stop hooks
+  never run. Measured on OpenWrt 25.12: the kill-switch table never
+  disappeared across an upgrade and a LAN client saw no leak.
 - fw3: the daemon, the firewall include and the init script now serialize
   their changes to the kill-switch chains with a lock. Before, a `firewall
   reload` that observed the daemon mid-change could install its emergency
   block after the daemon had already finished and lifted it, leaving the
   router blocked until the next policy change or reload.
+- `nym-vpnc gateway test` is bounded: one test runs at a time per daemon (a
+  second request is refused instead of doubling the probe rate and reporting
+  phantom loss), `--id` accepts at most 20 gateways and duplicates are
+  collapsed, every run has a deadline derived from its parameters, a client
+  that disconnects cancels the probes, and socket errors such as a missing
+  capability now reach the error message instead of a generic "failed to
+  probe gateways".
+- Package upgrades decide whether rpcd needs a reload from the exported RPC
+  method list instead of the plugin wrapper file, which never changes; a new
+  `nym-vpnc` with new methods therefore refreshes rpcd even when the ACL file
+  is unchanged.
+- The firewall include registration script (`uci-defaults`) exits non-zero
+  when a `uci set` or the commit fails, so postinst and the boot-time
+  defaults runner keep it for another attempt instead of treating the failure
+  as success.
 - fw3/iptables routers (OpenWrt 21.02 and older): the kill-switch now survives
-  `/etc/init.d/firewall reload` — fw3 wipes every custom chain on reload — by
-  persisting the applied ruleset under `/tmp` and re-applying it from the
-  firewall include, and `/etc/init.d/nym-vpnd stop` tears everything down
-  through the same path. A reload that lands in the middle of a policy change
-  (or after a daemon crash mid-change) installs a fail-closed emergency block
-  instead of reading half-written state as "kill-switch off"; the daemon
-  lifts it once the policy has converged. Reply traffic for SSH/LuCI sessions
-  is exempted from that block, so a stuck state never locks you out.
+  `/etc/init.d/firewall restart`, which flushes every chain, by persisting the
+  applied ruleset and re-applying it from the firewall include; on a plain
+  `reload` fw3 leaves foreign chains alone and the include only reconciles
+  (re-hooks a displaced jump, lifts a stale emergency block). An earlier
+  version of this note claimed reload wiped the chains; that was our own
+  include's cleanup deleting them. `/etc/init.d/nym-vpnd stop` tears
+  everything down through the same path. An include run that lands in the
+  middle of a policy change (or after a daemon crash mid-change) installs a
+  fail-closed emergency block instead of reading half-written state as
+  "kill-switch off"; the daemon lifts it once the policy has converged. Reply
+  traffic for SSH/LuCI sessions is exempted from that block, so a stuck state
+  never locks you out. Known limit: during fw3's own restart the built-in
+  policy is ACCEPT until fw3 has rebuilt its tables and run the includes;
+  nothing in an include can cover that window.
 - fw3: hook jumps are only inserted when missing or when a foreign rule has
   been placed ahead of them, instead of being deleted and re-inserted on every
   policy change (which briefly left the kill-switch chains unhooked). A rule
@@ -145,7 +177,11 @@ the GitHub release notes.
 
 - The OpenWrt integration test harness (QEMU multi-architecture runner and
   Proxmox container harness with kill-switch and DNS cases) is now tracked
-  under `tests/`.
+  under `tests/`, and made runnable: pass/fail counters no longer abort the
+  runner, the timeout wrapper works on shell functions, the mnemonic is
+  delivered on stdin, a failed slot fails the run, and the connected-state
+  case compares against the router's real public address rather than its
+  private WAN interface.
 - The always-on watchdog now reacts to WAN link events instead of only
   noticing a dropped tunnel at its next poll. A hotplug hook wakes it on
   `ifup`/`ifdown` of a WAN-facing interface (`wan`, `wan6`, anything in the
