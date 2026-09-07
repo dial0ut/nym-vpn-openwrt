@@ -47,15 +47,23 @@ dns_logger_start "$DNS_CTID" "$DNS_IP"
 log "creating client CT $CLIENT_CTID (DHCP)"
 pct_create_alpine "$CLIENT_CTID" "$BRIDGE" "client-slot${SLOT}" ""
 
-# Sanity: the client should have gotten a DHCP lease from OpenWrt.
-for _ in 1 2 3 4 5; do
-    if pct_sh "$CLIENT_CTID" "ip -4 addr show eth0 | grep -q 'inet 10\\.9${SLOT}\\.'"; then
-        break
-    fi
+# The client must get a DHCP lease from the OpenWrt CT's dnsmasq. Observed
+# to take 15-25 s after the client starts (dnsmasq comes up after the
+# network restart), so wait for it rather than sampling once; without a
+# lease nothing downstream means anything, so a missing lease fails the
+# provision loudly.
+CLIENT_IP=""
+for _ in $(seq 1 25); do
+    CLIENT_IP=$(pct_sh "$CLIENT_CTID" "ip -4 -o addr show eth0 2>/dev/null | awk '{print \$4}' | cut -d/ -f1")
+    case "$CLIENT_IP" in 10.9"${SLOT}".*) break ;; esac
+    CLIENT_IP=""
     sleep 2
 done
-
-CLIENT_IP=$(pct_sh "$CLIENT_CTID" "ip -4 -o addr show eth0 | awk '{print \$4}' | cut -d/ -f1")
+if [ -z "$CLIENT_IP" ]; then
+    log "client got no DHCP lease from $LAN_CIDR within 50 s"
+    pct_sh "$OPENWRT_CTID" "logread | grep -i dhcp | tail -5" >&2 || true
+    exit 1
+fi
 log "client got IP: $CLIENT_IP"
 
 # The reachability checks run curl and dig on the client; the Alpine template

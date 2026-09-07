@@ -7,19 +7,38 @@ set -euo pipefail
 
 : "${PROXMOX_HOST:?PROXMOX_HOST must be set (load .env first)}"
 
-# ssh to the host with retries on transport failure (exit 255). Three
-# slots provisioning at once make the host slow to accept connections; a
-# transient connect timeout must not turn into a failed provision or a
-# skipped teardown. Command failures (any other exit code) are returned as is.
+# ssh to the host with retries on transport failure. Three slots provisioning
+# at once make the host slow to accept connections; a transient connect
+# timeout must not turn into a failed provision or a skipped teardown.
+#
+# Exit code 255 is not enough to tell a transport failure apart: opkg and
+# pct exit 255 for their own errors too. Only ssh's own diagnostics on stderr
+# count as transport failures; every other outcome is the command's and is
+# returned as is. Stdin is buffered so a retry replays the same script
+# instead of feeding `sh -s` an empty one, which would exit 0 and turn a
+# failed command into a pass.
 _ssh_host() {
-    local attempt=1 rc
+    local attempt=1 rc in err
+    in=$(mktemp) || return 1
+    err=$(mktemp) || { rm -f "$in"; return 1; }
+    if [ ! -t 0 ]; then cat > "$in"; fi
     while :; do
-        ssh -o BatchMode=yes -o ConnectTimeout=15 "$PROXMOX_HOST" "$@"
+        ssh -o BatchMode=yes -o ConnectTimeout=15 "$PROXMOX_HOST" "$@" < "$in" 2> "$err"
         rc=$?
-        [ "$rc" -ne 255 ] && return "$rc"
-        [ "$attempt" -ge 4 ] && { echo "[ctl] ssh to $PROXMOX_HOST failed $attempt times" >&2; return 255; }
-        sleep $((attempt * 5))
-        attempt=$((attempt + 1))
+        if [ "$rc" -eq 255 ] && grep -qE '^(ssh: connect to host|kex_exchange_identification|Connection (timed out|closed|reset)|client_loop: send disconnect)' "$err"; then
+            if [ "$attempt" -ge 4 ]; then
+                cat "$err" >&2
+                echo "[ctl] ssh to $PROXMOX_HOST failed $attempt times" >&2
+                rm -f "$in" "$err"
+                return 255
+            fi
+            sleep $((attempt * 5))
+            attempt=$((attempt + 1))
+            continue
+        fi
+        cat "$err" >&2
+        rm -f "$in" "$err"
+        return "$rc"
     done
 }
 

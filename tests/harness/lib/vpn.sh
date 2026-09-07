@@ -14,14 +14,28 @@ set -euo pipefail
 # daemon by hand. Copies over stdin (the CTs have no shared filesystem).
 # Args: ctid path
 vpn_pkg_install() {
-    local ctid="$1" file="$2" name
+    local ctid="$1" file="$2" name rc=0
     name=$(basename "$file")
-    ssh -o BatchMode=yes "$PROXMOX_HOST" "pct exec $ctid -- sh -c 'cat > /tmp/$name'" < "$file" || return 1
+    _ssh_host "pct exec $ctid -- sh -c 'cat > /tmp/$name'" < "$file" || return 1
     case "$name" in
-        *.apk) pct_sh "$ctid" "apk add --allow-untrusted /tmp/$name >/tmp/pkg-install.log 2>&1" ;;
-        *.ipk) pct_sh "$ctid" "opkg install /tmp/$name >/tmp/pkg-install.log 2>&1" ;;
+        *.apk)
+            # apk resolves the local file's dependencies from its index.
+            pct_sh "$ctid" "apk update >/tmp/pkg-update.log 2>&1 || true; apk add --allow-untrusted /tmp/$name >/tmp/pkg-install.log 2>&1" || rc=$? ;;
+        *.ipk)
+            # A fresh rootfs has no package lists; without `opkg update` the
+            # dependencies (libmnl, libnftnl, kmod-*) cannot be resolved and
+            # opkg exits 255.
+            pct_sh "$ctid" "opkg update >/tmp/pkg-update.log 2>&1 || true; opkg install /tmp/$name >/tmp/pkg-install.log 2>&1" || rc=$? ;;
         *) echo "[vpn] package must end in .apk or .ipk: $name" >&2; return 1 ;;
     esac
+    # Do not trust the exit code alone: the package manager's own view of
+    # success is what matters, and it must have left the binaries behind.
+    if [ "$rc" -ne 0 ] || ! pct_sh "$ctid" 'command -v nym-vpnc >/dev/null && command -v nym-vpnd >/dev/null'; then
+        echo "[vpn] package install of $name failed (rc=$rc); package manager output:" >&2
+        pct_sh "$ctid" 'tail -15 /tmp/pkg-install.log 2>/dev/null' >&2 || true
+        return 1
+    fi
+    return 0
 }
 
 # Installed package version as the package manager reports it.
