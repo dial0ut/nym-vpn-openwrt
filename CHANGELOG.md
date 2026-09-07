@@ -13,6 +13,13 @@ the GitHub release notes.
 
 ### Added
 
+- A custom DNS server on a private address (a Pi-hole or AdGuard on the LAN)
+  is now admitted on every interface except the WAN one, in every
+  kill-switch state, so it keeps answering while connected and while
+  disconnected with the kill-switch on. A private address on the WAN side,
+  such as the upstream router behind another NAT, stays rejected like any
+  public resolver outside the tunnel. Private custom resolvers were also
+  never handed to dnsmasq before, so the setting had no effect at all.
 - `nym-vpnc gateway test` probes gateways with ICMP echo from the router and
   prints RTT min/avg/max and packet loss per gateway, plus a summed pair RTT
   for every entry/exit combination. Without options it tests the configured
