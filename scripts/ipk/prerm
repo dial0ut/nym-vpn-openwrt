@@ -16,11 +16,17 @@ nym_rpcd_schema_hash() {
     [ -n "$out" ] || return 0
     printf '%s\n' "$out" | md5sum | cut -d' ' -f1
 }
+# The stash lives under /var/run (root-owned 0755 on OpenWrt), not /tmp: a
+# predictable world-writable path could be pre-created as a FIFO and hang
+# this script at the redirect, or seeded with content. Remove any stale
+# entry first so the redirect always creates a fresh regular file.
+nym_rpcd_state=/var/run/nym-vpn.rpcd-state
+rm -f "$nym_rpcd_state" /tmp/nym-vpn.rpcd-state 2>/dev/null
 if [ "$PKG_UPGRADE" = "1" ]; then
     {
         echo "plugin=$(nym_rpcd_schema_hash)"
         echo "acl=$(md5sum /usr/share/rpcd/acl.d/luci-app-nym-vpn.json 2>/dev/null | cut -d' ' -f1)"
-    } > /tmp/nym-vpn.rpcd-state
+    } > "$nym_rpcd_state"
 fi
 
 # Stop the watchdog: it would fight the restart postinst does. On an upgrade
@@ -151,7 +157,7 @@ fi
 # Clean up temporary files (safe on both upgrade and removal)
 rm -f /tmp/dnsmasq.d/nym-adblock.conf 2>/dev/null
 rm -f /tmp/nym-dns-backup /tmp/resolv.conf.nymbackup 2>/dev/null
-rm -f /tmp/nym-watchdog.state 2>/dev/null
+rm -f /var/run/nym-watchdog.state /tmp/nym-watchdog.state 2>/dev/null
 
 # DNS: on full removal, return dnsmasq to stock resolv handling. On upgrade,
 # leave everything in place — the new daemon reconverges without a restart
@@ -178,7 +184,7 @@ fi
 if [ "$PKG_UPGRADE" != "1" ]; then
     rm -rf /etc/nym 2>/dev/null
     rm -rf /var/log/nym-vpnd 2>/dev/null
-    rm -f /tmp/nym-vpn.rpcd-state 2>/dev/null
+    rm -f /var/run/nym-vpn.rpcd-state 2>/dev/null
 
     # Remove package feed registration
     if [ -f /etc/opkg/customfeeds.conf ]; then

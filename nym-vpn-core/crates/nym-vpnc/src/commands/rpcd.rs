@@ -1831,7 +1831,31 @@ fn clients_list() -> Value {
     json!({ "clients": clients })
 }
 
-/// /tmp/nym-watchdog.state is a shell-sourceable KEY=value file.
+/// Where the always-on watchdog publishes its state. Under /var/run (root-owned
+/// 0755 on OpenWrt) rather than /tmp, so nothing unprivileged can plant a file
+/// there for this root-run bridge to read.
+const WATCHDOG_STATE_PATH: &str = "/var/run/nym-watchdog.state";
+
+/// Read the watchdog state file without following a symlink or blocking on a
+/// FIFO: open no-follow and non-blocking, then insist on a regular file.
+fn read_watchdog_state() -> std::io::Result<String> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let mut file = std::fs::File::options()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(WATCHDOG_STATE_PATH)?;
+    if !file.metadata()?.file_type().is_file() {
+        return Err(std::io::Error::other(
+            "watchdog state is not a regular file",
+        ));
+    }
+    let mut content = String::new();
+    file.read_to_string(&mut content)?;
+    Ok(content)
+}
+
+/// The watchdog state file is a shell-sourceable KEY=value file.
 fn parse_state_file(content: &str) -> BTreeMap<String, String> {
     content
         .lines()
@@ -1874,7 +1898,7 @@ fn watchdog_json(include_details: bool) -> Value {
         json!(if initd_running("nym-vpn-watchdog") { "running" } else { "stopped" }),
     );
 
-    match std::fs::read_to_string("/tmp/nym-watchdog.state") {
+    match read_watchdog_state() {
         Ok(content) => {
             let state = parse_state_file(&content);
             let get = |k: &str| state.get(k).cloned();
@@ -2348,7 +2372,7 @@ fn watchdog_set(args: &Value) -> Value {
     } else {
         initd_run("nym-vpn-watchdog", "stop");
         initd_run("nym-vpn-watchdog", "disable");
-        let _ = std::fs::remove_file("/tmp/nym-watchdog.state");
+        let _ = std::fs::remove_file(WATCHDOG_STATE_PATH);
     }
 
     ok_msg(format!(

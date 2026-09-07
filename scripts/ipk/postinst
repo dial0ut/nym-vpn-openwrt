@@ -113,7 +113,7 @@ fi
 rm -f /tmp/luci-indexcache* 2>/dev/null
 rm -rf /tmp/luci-modulecache/ 2>/dev/null
 
-nym_rpcd_state=/tmp/nym-vpn.rpcd-state
+nym_rpcd_state=/var/run/nym-vpn.rpcd-state
 nym_rpcd_action=restart
 if [ -f "$nym_rpcd_state" ]; then
     old_plugin=$(sed -n 's/^plugin=//p' "$nym_rpcd_state")
