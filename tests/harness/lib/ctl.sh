@@ -250,17 +250,31 @@ pct_create_alpine() {
     sleep 3
 }
 
+# apk add on an Alpine sidecar, through the freshly created OpenWrt router.
+# Its forwarding and DNS settle over the first minute, so a single attempt
+# fails often for reasons that have nothing to do with the package under
+# test; retry for up to two minutes and show the last error when giving up.
+# Args: ctid pkg...
+ct_apk_add() {
+    local ctid="$1" attempt err; shift
+    err=$(mktemp)
+    for attempt in 1 2 3 4 5 6 7 8; do
+        if pct_sh "$ctid" "apk add --quiet $* >/dev/null" 2> "$err"; then
+            rm -f "$err"; return 0
+        fi
+        sleep 15
+    done
+    echo "[ctl] apk add $* on CT $ctid failed after $attempt attempts:" >&2
+    tail -4 "$err" >&2; rm -f "$err"
+    return 1
+}
+
 # Install dnsmasq with query logging on an Alpine CT, listening on $ip:53,
 # forwarding to 1.1.1.1. Query log goes to /tmp/queries.log inside the CT.
 # Args: ctid listen_ip
 dns_logger_start() {
     local ctid="$1" listen_ip="$2"
-    # Needs the router's WAN to be up (apk fetches through it); keep the
-    # error visible, it is the usual reason a provision dies here.
-    if ! pct_sh "$ctid" "apk add --quiet dnsmasq >/dev/null"; then
-        echo "[ctl] dnsmasq install on CT $ctid failed; does the router have a default route?" >&2
-        return 1
-    fi
+    ct_apk_add "$ctid" dnsmasq || return 1
     pct_sh "$ctid" "cat > /etc/dnsmasq.conf <<EOF
 listen-address=$listen_ip
 bind-interfaces

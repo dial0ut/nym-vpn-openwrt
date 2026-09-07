@@ -83,13 +83,8 @@ log "client got IP: $CLIENT_IP"
 # for the wrong reason. Install them now, while the router still forwards
 # freely (nym-vpn is not installed yet).
 log "installing curl/dig on the client"
-for _ in 1 2 3; do
-    if pct_sh "$CLIENT_CTID" "apk add --quiet curl bind-tools >/dev/null 2>&1 && command -v curl >/dev/null"; then
-        break
-    fi
-    sleep 3
-done
-pct_sh "$CLIENT_CTID" "command -v curl >/dev/null" || { log "client has no curl; reachability checks would be meaningless"; exit 1; }
+ct_apk_add "$CLIENT_CTID" curl bind-tools || { log "client has no curl; reachability checks would be meaningless"; exit 1; }
+pct_sh "$CLIENT_CTID" "command -v curl >/dev/null" || { log "client has no curl after install; reachability checks would be meaningless"; exit 1; }
 
 # Emit machine-readable summary on stdout for the slot runner to consume.
 cat <<EOF
