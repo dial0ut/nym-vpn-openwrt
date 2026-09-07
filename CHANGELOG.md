@@ -194,6 +194,16 @@ the GitHub release notes.
 
 ### Changed
 
+- The emergency and boot-time kill-switch rule sets are now defined once, in
+  Rust (`nym-firewall/src/openwrt/boot_rules.rs`), and rendered at build time
+  into `fw-rules.sh`, which the fw3 and fw4 firewall includes source. The
+  three hand-maintained copies of that rule text are gone, and the build
+  fails if the committed fragment is stale. The include owns chain teardown
+  on fw3; `prerm` and the init script go through it under the shared lock.
+- New architecture documents: the kill-switch contract (what is protected in
+  every state and lifecycle event, how each cell was verified, and which are
+  not protected or unverified), a decision record on the fw3 firewall-restart
+  window, and a state-ownership table for every runtime file, chain and table.
 - The OpenWrt integration test harness (QEMU multi-architecture runner and
   Proxmox container harness with kill-switch and DNS cases) is now tracked
   under `tests/`, and made runnable: pass/fail counters no longer abort the
