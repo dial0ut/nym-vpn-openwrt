@@ -87,7 +87,8 @@ test("remove all registered devices from Nym account", async ({ page }) => {
       await input.fill(words[i]);
     }
   }
-  await screenshot("03-mnemonic-filled");
+  // No screenshot here: the page now shows the mnemonic in clear text and a
+  // debug run must not write it to disk.
 
   // Submit login
   // STUB: Replace with actual selector
