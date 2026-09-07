@@ -118,7 +118,11 @@ the GitHub release notes.
   cannot be taken at all (no `flock`, or the runtime directory fails its
   checks) the include no longer runs unlocked: it leaves a live policy
   untouched, installs the boot-time block when nothing is hooked and the
-  kill-switch is on, logs CRITICAL and exits non-zero.
+  kill-switch is on (re-checking afterwards and lifting it if the daemon
+  hooked a policy meanwhile), logs CRITICAL and exits non-zero. The include
+  also honours the administrator's stop marker ahead of any persisted
+  policy, so a stop whose teardown could not take the lock is completed by
+  the next firewall reload instead of leaving the router blocked.
 - On a package upgrade `prerm` no longer deletes the running daemon's policy
   routing rules (the fwmark lookups); with inbound exemptions active that
   left replies without their WAN route until the restart. The cleanup is
