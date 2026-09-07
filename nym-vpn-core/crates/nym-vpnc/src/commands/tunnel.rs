@@ -49,7 +49,9 @@ pub struct SetParams {
 
     /// Enable or disable Stealth API connect: reach the Nym API through cover
     /// domains on every request instead of only after a direct request fails.
-    /// Slower API calls, but works where the API is blocked. No reconnect needed.
+    /// Slower API calls, but works where the API is blocked. Covers every API
+    /// request the daemon makes, including network discovery at start-up, and
+    /// takes effect on the next request; no reconnect or restart needed.
     #[arg(long, value_parser = clap::value_parser!(BooleanOption))]
     stealth_api: Option<BooleanOption>,
 

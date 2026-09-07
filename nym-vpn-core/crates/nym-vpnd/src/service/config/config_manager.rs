@@ -542,6 +542,24 @@ impl VpnServiceConfigManager {
     }
 }
 
+/// Put the persisted Stealth API choice in force before anything talks to the
+/// network. The daemon discovers its environment before the service (and its
+/// config manager) exists, and that discovery may fetch over HTTPS; without
+/// this the first request of every start-up would go direct even with Stealth
+/// API on. Reads the same file the same way as [`VpnServiceConfigManager::new`],
+/// falling back to the same default, so both installs agree. Unlike the
+/// manager it never touches the file.
+pub async fn install_persisted_front_policy(network_config_dir: &Path) {
+    let toml_config_path = network_config_dir.join(DEFAULT_CONFIG_FILE_TOML);
+    let json_config_path = network_config_dir.join(DEFAULT_CONFIG_FILE_JSON);
+    let stealth_api =
+        match VpnServiceConfigManager::read_from_file(&toml_config_path, &json_config_path).await {
+            Ok((config, _)) => config.stealth_api,
+            Err(_) => nym_vpn_lib_types::VpnServiceConfig::default().stealth_api,
+        };
+    apply_front_policy(stealth_api);
+}
+
 /// Map the Stealth API switch onto the shared domain-fronting policy that every
 /// fronting-capable API client in this process follows.
 fn apply_front_policy(stealth_api: bool) {

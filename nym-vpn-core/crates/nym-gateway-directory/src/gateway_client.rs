@@ -13,7 +13,7 @@ use nym_validator_client::{
     models::NymNodeDescriptionV2, nym_api::NymApiClientExt, nym_nodes::SkimmedNodesWithMetadata,
 };
 use nym_vpn_api_client::{
-    ResolverOverrides, api_urls_to_urls, fronted_http_client,
+    ResolverOverrides, api_urls_to_urls, fronted_http_client, prefer_fronted_base_url,
     types::{GatewayMinPerformance, Percent},
     url_to_socket_addr,
 };
@@ -243,9 +243,19 @@ impl GatewayClient {
             .and_then(|min_performance| min_performance.vpn_min_performance)
     }
 
+    /// The nym-api client, ready to send. This client lives as long as the
+    /// daemon, so under Stealth API it is first moved onto a base URL with
+    /// cover domains (the http-api-client fronts only through its current base
+    /// URL). Every nym-api request goes through here so a policy switched on
+    /// at runtime reaches it too, exactly like `VpnApiClient::client`.
+    fn api_client(&self) -> &nym_http_api_client::Client {
+        prefer_fronted_base_url(&self.api_client);
+        &self.api_client
+    }
+
     async fn lookup_described_nodes(&self) -> Result<Vec<NymNodeDescriptionV2>> {
         debug!("Fetching all described nodes from nym-api...");
-        self.api_client
+        self.api_client()
             .get_all_described_nodes_v2()
             .await
             .map_err(|e| Error::NymApi {
@@ -255,7 +265,7 @@ impl GatewayClient {
 
     async fn lookup_skimmed_gateways(&self) -> Result<SkimmedNodesWithMetadata> {
         debug!("Fetching skimmed entry assigned nodes from nym-api...");
-        self.api_client
+        self.api_client()
             .get_all_basic_entry_assigned_nodes_with_metadata()
             .await
             .map_err(|e| Error::NymApi {
@@ -265,7 +275,7 @@ impl GatewayClient {
 
     async fn lookup_skimmed_nodes(&self) -> Result<SkimmedNodesWithMetadata> {
         debug!("Fetching skimmed entry assigned nodes from nym-api...");
-        self.api_client
+        self.api_client()
             .get_all_basic_nodes_with_metadata()
             .await
             .map_err(|e| Error::NymApi {
@@ -276,7 +286,7 @@ impl GatewayClient {
     pub async fn lookup_gateway_ip_from_nym_api(&self, gateway_identity: &str) -> Result<IpAddr> {
         debug!("Fetching gateway ip from nym-api...");
         let mut ips = self
-            .api_client
+            .api_client()
             .get_all_described_nodes_v2()
             .await
             .map_err(|e| Error::NymApi {

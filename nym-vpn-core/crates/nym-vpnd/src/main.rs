@@ -118,6 +118,11 @@ async fn run_standalone(
 
     // Migrate global configuration here, where we will have more information about the environment.
 
+    // Discovery below may fetch over the network. The Stealth API (domain
+    // fronting) policy is process-wide, so it must be in force before that
+    // first request, not only once the service reads its config.
+    service::install_persisted_front_policy(&service::config_dir()).await;
+
     let network_env =
         environment::setup_environment(&global_config_file, parameters.config_env_file.as_deref())
             .await?;
