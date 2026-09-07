@@ -2,11 +2,23 @@
 # Pre-removal script for nym-vpn IPK package
 
 # Upgrade only: remember what rpcd is currently serving. postinst compares
-# this against the new files to pick the least disruptive rpcd refresh
+# this against the new package to pick the least disruptive rpcd refresh
 # (see there); a missing stash makes it restart rpcd.
+#
+# The plugin file /usr/libexec/rpcd/nym-vpn is a fixed wrapper around
+# `nym-vpnc rpcd`, so its checksum never changes; what rpcd caches at start
+# is the method list that wrapper prints for `list`. Hash that output (from
+# the binary still installed here). Empty when `list` fails, which postinst
+# reads as "changed".
+nym_rpcd_schema_hash() {
+    local out
+    out=$(/usr/libexec/rpcd/nym-vpn list 2>/dev/null) || return 0
+    [ -n "$out" ] || return 0
+    printf '%s\n' "$out" | md5sum | cut -d' ' -f1
+}
 if [ "$PKG_UPGRADE" = "1" ]; then
     {
-        echo "plugin=$(md5sum /usr/libexec/rpcd/nym-vpn 2>/dev/null | cut -d' ' -f1)"
+        echo "plugin=$(nym_rpcd_schema_hash)"
         echo "acl=$(md5sum /usr/share/rpcd/acl.d/luci-app-nym-vpn.json 2>/dev/null | cut -d' ' -f1)"
     } > /tmp/nym-vpn.rpcd-state
 fi

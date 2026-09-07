@@ -87,9 +87,11 @@ so `kmod-tun` was never pulled in and the daemon died at TUN device creation.
    rpcd from a detached job that waits for the opkg/apk process to exit (bounded at two minutes)
    before it fires.
    rpcd scans `/usr/libexec/rpcd` only at start-up and computes a session's ACL grants at login,
-   so a fresh install restarts it. An upgrade compares the new rpcd plugin and ACL file against
-   the checksums prerm stashed in `/tmp/nym-vpn.rpcd-state`: nothing changed → no refresh; only
-   the plugin changed → `rpcd reload` (SIGHUP — rpcd re-executes itself and keeps its sessions);
+   so a fresh install restarts it. An upgrade compares the new package's exported rpcd method
+   list (`/usr/libexec/rpcd/nym-vpn list`, which is `nym-vpnc rpcd list` behind a fixed wrapper)
+   and ACL file against the checksums prerm stashed in `/tmp/nym-vpn.rpcd-state`: nothing
+   changed → no refresh; only the method list changed → `rpcd reload` (SIGHUP — rpcd re-executes
+   itself and keeps its sessions);
    the ACL file changed, or no stash → `rpcd restart`, which drops the sessions and forces the
    re-login that picks up the new grants. Deferred because LuCI's Software page runs opkg/apk
    *through* rpcd (`file exec`): a restart inside the transaction kills the request the page is
@@ -100,8 +102,9 @@ so `kmod-tun` was never pulled in and the daemon died at TUN device creation.
 
 ## prerm
 
-On an upgrade (`PKG_UPGRADE=1`) prerm first stashes `md5sum`s of the rpcd plugin and the ACL file
-in `/tmp/nym-vpn.rpcd-state` for postinst's rpcd decision above. Steps 1–3 then run on **every**
+On an upgrade (`PKG_UPGRADE=1`) prerm first stashes `md5sum`s of the exported rpcd method list
+(from the binary still installed) and the ACL file in `/tmp/nym-vpn.rpcd-state` for postinst's
+rpcd decision above. Steps 1–3 then run on **every**
 removal including upgrades. The rest is gated on `PKG_UPGRADE != 1`, so an upgrade does not tear
 down state the incoming version is about to reuse.
 

@@ -101,12 +101,15 @@ fi
 # exited, rpcd has delivered the transaction's reply to the page.
 #
 # Upgrades pick the least disruptive refresh from the checksums prerm
-# stashed: nothing when neither the rpcd plugin nor the ACL file changed,
-# a reload (SIGHUP: rpcd re-executes itself and keeps its sessions) when
-# only the plugin changed, and a restart — a forced re-login, which is
-# what makes new grants take effect — when the ACL file changed or the
-# stash is missing (fresh install, or an upgrade from a package whose
-# prerm predates it).
+# stashed: nothing when neither the exported rpcd method list nor the ACL
+# file changed, a reload (SIGHUP: rpcd re-executes itself and keeps its
+# sessions) when only the method list changed, and a restart — a forced
+# re-login, which is what makes new grants take effect — when the ACL file
+# changed or the stash is missing (fresh install, or an upgrade from a
+# package whose prerm predates it). The method list is what rpcd caches at
+# start-up; it comes from `nym-vpnc rpcd list` behind the fixed plugin
+# wrapper, so the wrapper file itself is never a useful signal. An empty
+# hash (list failed) counts as changed.
 rm -f /tmp/luci-indexcache* 2>/dev/null
 rm -rf /tmp/luci-modulecache/ 2>/dev/null
 
@@ -115,7 +118,8 @@ nym_rpcd_action=restart
 if [ -f "$nym_rpcd_state" ]; then
     old_plugin=$(sed -n 's/^plugin=//p' "$nym_rpcd_state")
     old_acl=$(sed -n 's/^acl=//p' "$nym_rpcd_state")
-    new_plugin=$(md5sum /usr/libexec/rpcd/nym-vpn 2>/dev/null | cut -d' ' -f1)
+    new_plugin=$(out=$(/usr/libexec/rpcd/nym-vpn list 2>/dev/null) && [ -n "$out" ] \
+        && printf '%s\n' "$out" | md5sum | cut -d' ' -f1)
     new_acl=$(md5sum /usr/share/rpcd/acl.d/luci-app-nym-vpn.json 2>/dev/null | cut -d' ' -f1)
     if [ -n "$old_acl" ] && [ "$old_acl" = "$new_acl" ]; then
         if [ -n "$old_plugin" ] && [ "$old_plugin" = "$new_plugin" ]; then
