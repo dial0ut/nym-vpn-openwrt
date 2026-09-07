@@ -56,10 +56,15 @@ pct_create_alpine "$CLIENT_CTID" "$BRIDGE" "client-slot${SLOT}" ""
 # lease nothing downstream means anything, so a missing lease fails the
 # provision loudly.
 CLIENT_IP=""
-for _ in $(seq 1 25); do
+for i in $(seq 1 25); do
     CLIENT_IP=$(pct_sh "$CLIENT_CTID" "ip -4 -o addr show eth0 2>/dev/null | awk '{print \$4}' | cut -d/ -f1")
     case "$CLIENT_IP" in 10.9"${SLOT}".*) break ;; esac
     CLIENT_IP=""
+    # udhcpc backs off after its first unanswered discovers; ask again
+    # explicitly every few rounds instead of waiting out its timer.
+    if [ $((i % 4)) -eq 0 ]; then
+        pct_sh "$CLIENT_CTID" "udhcpc -i eth0 -n -q -t 3 -T 2 >/dev/null 2>&1 || true"
+    fi
     sleep 2
 done
 if [ -z "$CLIENT_IP" ]; then

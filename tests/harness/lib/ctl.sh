@@ -182,6 +182,26 @@ EOF
 
     # Re-render fw4 zones against the new network config.
     pct_sh "$ctid" 'fw4 reload >/dev/null 2>&1 || /etc/init.d/firewall reload >/dev/null 2>&1 || true'
+
+    # Everything downstream (the sidecars' package installs, the client's
+    # lease, the daemon's registration) needs the router on the WAN. The
+    # DHCP lease from the lab network has taken up to a minute; wait for the
+    # default route rather than letting the first consumer fail obscurely.
+    local i=0
+    while [ "$i" -lt 30 ]; do
+        if pct_sh "$ctid" 'ip -4 route show default 2>/dev/null | grep -q default'; then
+            break
+        fi
+        sleep 2; i=$((i + 1))
+    done
+    if [ "$i" -ge 30 ]; then
+        echo "[ctl] OpenWrt CT $ctid got no WAN default route within 60 s" >&2
+        pct_sh "$ctid" 'ip -4 -o addr; logread | grep -iE "udhcpc|wan" | tail -4' >&2 || true
+        return 1
+    fi
+    # dnsmasq started before eth1 existed; make sure it serves the LAN now.
+    pct_sh "$ctid" '/etc/init.d/dnsmasq restart >/dev/null 2>&1 || true'
+    sleep 2
 }
 
 # Ensure an Alpine LXC template is on the host. Returns template filename.
