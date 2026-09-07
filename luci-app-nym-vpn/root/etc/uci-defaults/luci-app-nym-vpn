@@ -27,17 +27,29 @@ fi
 # Reconcile every field, not just the path. This repairs disabled or legacy
 # sections left by earlier packages and removes fw4_compatible, which would
 # make fw4 capture stdout instead of running the include's nft side effects.
-uci set firewall.nym_vpn=include
-uci set firewall.nym_vpn.type=script
-uci set firewall.nym_vpn.path="$nym_fw_include"
-uci set firewall.nym_vpn.enabled=1
+#
+# The section is what lets the kill-switch survive a firewall reload, so a
+# failure here must not pass as success: exit non-zero. Both callers keep
+# the script for another attempt in that case — postinst leaves it in
+# /etc/uci-defaults, and OpenWrt's boot-time defaults runner deletes a
+# script only when it exits 0. Only the deletes of optional fields are
+# tolerant (they fail when the field is already absent).
+fail() {
+    echo "nym-vpn: firewall include registration failed: $1" >&2
+    logger -t nym-vpn "firewall include registration failed: $1"
+    exit 1
+}
+uci set firewall.nym_vpn=include || fail "uci set firewall.nym_vpn=include"
+uci set firewall.nym_vpn.type=script || fail "uci set type"
+uci set firewall.nym_vpn.path="$nym_fw_include" || fail "uci set path"
+uci set firewall.nym_vpn.enabled=1 || fail "uci set enabled"
 uci -q delete firewall.nym_vpn.fw4_compatible
 if [ -n "$nym_fw_reload" ]; then
-    uci set firewall.nym_vpn.reload="$nym_fw_reload"
+    uci set firewall.nym_vpn.reload="$nym_fw_reload" || fail "uci set reload"
 else
     uci -q delete firewall.nym_vpn.reload
 fi
-uci commit firewall
+uci commit firewall || fail "uci commit firewall"
 
 # rpcd and the LuCI caches are deliberately left alone here: the package
 # postinst owns that and defers the rpcd refresh until the package
