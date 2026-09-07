@@ -247,22 +247,11 @@ impl ConnectingState {
         mut self: Box<Self>,
         shared_state: &mut SharedState,
     ) -> NextTunnelState {
-        let gateway_config = shared_state.nym_config.gateway_config.clone();
-
-        self.resolve_api_addrs_fut = async move {
-            // With the kill switch up nothing else on the router can fix a
-            // cold clock (sysntpd's pool lookup dies with the rest of
-            // dnsmasq's upstream traffic), and a clock that predates this
-            // binary fails every TLS handshake the resolve below depends
-            // on. Daemon-owned bootstrap; no-op when the clock is sane.
-            #[cfg(target_os = "linux")]
-            crate::clock_bootstrap::ensure_sane_clock().await;
-
-            nym_gateway_directory::resolve_config(&gateway_config)
-                .await
-                .map_err(|err| Error::ResolveApiHostnames(Box::new(err)))
-        }
-        .boxed()
+        // Same resolver the idle states use; what the kill-switch admits is
+        // decided in one place.
+        self.resolve_api_addrs_fut = crate::tunnel_state_machine::resolve_api_endpoints(
+            shared_state.nym_config.gateway_config.clone(),
+        )
         .fuse();
 
         NextTunnelState::SameState(self)
@@ -284,12 +273,8 @@ impl ConnectingState {
             }
         };
 
-        self.firewall_policy_params.api_endpoints = resolved_gateway_config.all_socket_addrs();
-        shared_state.api_endpoints = resolved_gateway_config.all_socket_addrs();
-        crate::tunnel_state_machine::api_endpoints_cache::save(
-            shared_state.nym_config.data_path.as_deref(),
-            &shared_state.api_endpoints,
-        );
+        shared_state.adopt_resolved_api_endpoints(&resolved_gateway_config);
+        self.firewall_policy_params.api_endpoints = shared_state.api_endpoints.clone();
         if let Err(err) = Self::set_firewall_policy(shared_state, &self.firewall_policy_params) {
             trace_err_chain!(err, "failed to set firewall policy");
             return NextTunnelState::NewState(
