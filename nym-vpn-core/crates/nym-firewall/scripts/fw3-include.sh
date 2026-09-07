@@ -147,13 +147,20 @@ setup_jumps() {
 # window before the daemon's first policy since power-on and additionally
 # lets the router come up and stay manageable: loopback, DHCP/DHCPv6 as client
 # and server, IPv6 router solicitation, and LAN/link-local/multicast
-# destinations — the base of the daemon's own Blocked policy. The daemon tears
-# both down the same way once its live state has converged.
+# destinations — the base of the daemon's own Blocked policy. As in that
+# policy (block_dns before allow_lan_traffic), DNS is rejected BEFORE the
+# LAN-destination accepts: a private address is not a LAN interface, and
+# behind another router the upstream resolver is 192.168.x.1, so dnsmasq's
+# forwarded lookups and LAN clients' direct queries would otherwise leave in
+# plaintext during the boot window. The router's own dnsmasq answering the
+# LAN is unaffected — those answers match the reply-direction accept above.
+# The daemon tears both rule sets down the same way once its live state has
+# converged.
 emergency_block() {
     local ipt="$1" mode="${2:-transition}" restore="${1}-restore"
 
     emergency_rules() {
-        local net
+        local net chain udp_reject
         cat <<EOF
 *filter
 :$EMERGENCY_OUT - [0:0]
@@ -187,10 +194,20 @@ EOF
             if [ "$ipt" = "ip6tables" ]; then
                 # shellcheck disable=SC2086  # word-split the network lists
                 set -- $LAN_NETS_V6
-                echo "-A $EMERGENCY_OUT -d $MCAST_V6 -j ACCEPT"
+                udp_reject="icmp6-port-unreachable"
             else
                 # shellcheck disable=SC2086
                 set -- $LAN_NETS_V4
+                udp_reject="icmp-port-unreachable"
+            fi
+            # DNS first, then the LAN/multicast accepts (see above).
+            for chain in "$EMERGENCY_OUT" "$EMERGENCY_FWD"; do
+                echo "-A $chain -p udp --dport 53 -j REJECT --reject-with $udp_reject"
+                echo "-A $chain -p tcp --dport 53 -j REJECT --reject-with tcp-reset"
+            done
+            if [ "$ipt" = "ip6tables" ]; then
+                echo "-A $EMERGENCY_OUT -d $MCAST_V6 -j ACCEPT"
+            else
                 echo "-A $EMERGENCY_OUT -d $MCAST_V4 -j ACCEPT"
             fi
             for net in "$@"; do

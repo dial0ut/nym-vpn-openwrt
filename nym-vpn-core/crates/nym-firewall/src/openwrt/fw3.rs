@@ -972,6 +972,52 @@ mod tests {
         }));
     }
 
+    /// Same ordering rule as the daemon's policy (`block_dns` before
+    /// `allow_lan_traffic`): the boot rule set rejects DNS in both emergency
+    /// chains before any LAN/multicast destination accept, so a double-NAT
+    /// router does not leak plaintext lookups to its upstream during the boot
+    /// window — but after the reply-direction and loopback accepts, so the
+    /// router's own dnsmasq keeps answering the LAN.
+    #[test]
+    fn include_script_boot_rules_reject_dns_before_lan_accepts() {
+        const INCLUDE: &str = include_str!("../../scripts/fw3-include.sh");
+        let lines: Vec<&str> = INCLUDE.lines().map(str::trim).collect();
+        let pos = |needle: &str| {
+            lines
+                .iter()
+                .position(|l| *l == needle)
+                .unwrap_or_else(|| panic!("fw3-include.sh must carry: {needle}"))
+        };
+
+        let udp =
+            pos("echo \"-A $chain -p udp --dport 53 -j REJECT --reject-with $udp_reject\"");
+        let tcp = pos("echo \"-A $chain -p tcp --dport 53 -j REJECT --reject-with tcp-reset\"");
+        // Both emergency chains get the reject.
+        assert_eq!(pos("for chain in \"$EMERGENCY_OUT\" \"$EMERGENCY_FWD\"; do") + 1, udp);
+        // Per-family ICMP reject type, TCP reset for tcp.
+        assert!(lines.contains(&"udp_reject=\"icmp6-port-unreachable\""));
+        assert!(lines.contains(&"udp_reject=\"icmp-port-unreachable\""));
+
+        let reply = pos(
+            "-A $EMERGENCY_OUT -m conntrack --ctstate RELATED,ESTABLISHED --ctdir REPLY -j ACCEPT",
+        );
+        let lo = pos("echo \"-A $EMERGENCY_OUT -o lo -j ACCEPT\"");
+        let mcast4 = pos("echo \"-A $EMERGENCY_OUT -d $MCAST_V4 -j ACCEPT\"");
+        let mcast6 = pos("echo \"-A $EMERGENCY_OUT -d $MCAST_V6 -j ACCEPT\"");
+        let lan_out = pos("echo \"-A $EMERGENCY_OUT -d $net -j ACCEPT\"");
+        let lan_fwd = pos("echo \"-A $EMERGENCY_FWD -d $net -j ACCEPT\"");
+        assert!(
+            reply < udp && lo < udp,
+            "reply/loopback accepts must precede the DNS reject"
+        );
+        for accept in [mcast4, mcast6, lan_out, lan_fwd] {
+            assert!(
+                udp < accept && tcp < accept,
+                "DNS reject must precede every LAN/multicast accept"
+            );
+        }
+    }
+
     #[test]
     fn persistence_write_failure_is_reported() {
         let result = write_state_file("/proc/nym-firewall-test.rules", "*filter\nCOMMIT\n");

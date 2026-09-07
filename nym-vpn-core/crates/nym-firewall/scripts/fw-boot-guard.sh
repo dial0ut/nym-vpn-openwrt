@@ -15,10 +15,15 @@
 #                           on start; /tmp is tmpfs, so a reboot clears it)
 #
 # Whether the daemon has already applied a policy is backend-specific and is
-# checked by the caller. The verdict errs towards NOT blocking: a setting
-# that cannot be read with confidence counts as "off" — the same default the
-# daemon falls back to for an unreadable config — and NYM_BOOT_REASON tells
-# the caller why, for the log.
+# checked by the caller. The verdict errs towards NOT blocking, and that is a
+# deliberate choice rather than a mirror of the daemon's defaults: a config
+# the daemon cannot parse makes it refuse to start, so no daemon would ever
+# come to lift a block installed on its behalf. A missing file is only ever
+# seen before the daemon's very first run — the config manager writes it on
+# first start (kill-switch defaulting to on), and postinst starts the daemon
+# right after install — so it is not worth a block either. In both cases the
+# setting counts as "off" here and NYM_BOOT_REASON tells the caller why, for
+# the log.
 #
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright 2026 Nym Technologies SA <contact@nymtech.net>
@@ -30,8 +35,9 @@ NYM_BOOT_REASON=""
 
 # Print the JSON boolean stored under a top-level key of the daemon config:
 # "true"/"false" when present, "absent" when the key or the file is missing
-# (the daemon then uses its default, which is false for both keys read here),
-# "unknown" when the file exists but cannot be read with confidence.
+# (an older config version the daemon migrates, or no config yet — see the
+# header for why neither blocks), "unknown" when the file exists but cannot
+# be read with confidence.
 nym_config_bool() {
     local key="$1" value
 
@@ -39,8 +45,9 @@ nym_config_bool() {
 
     if command -v jsonfilter >/dev/null 2>&1; then
         # OpenWrt's JSON extractor. It exits non-zero and prints nothing both
-        # for a missing key and for unparseable JSON; the daemon handles both
-        # the same way (defaults), so "absent" is the faithful answer.
+        # for a missing key and for unparseable JSON. The daemon treats those
+        # differently (migration default vs. refusing to start), but the
+        # guard's verdict is the same — no block — so "absent" serves both.
         value=$(jsonfilter -i "$NYM_VPND_CONFIG" -e "@.$key" 2>/dev/null) \
             || { echo absent; return 0; }
         case "$value" in
