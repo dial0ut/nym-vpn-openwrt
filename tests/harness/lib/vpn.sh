@@ -75,7 +75,7 @@ vpn_daemon_restart() { pct_sh "$1" '/etc/init.d/nym-vpnd restart >/dev/null 2>&1
 # call; nothing else on the container sees it.
 vpn_account_set() {
     local ctid="$1"
-    printf '%s\n' "$NYM_MNEMONIC" | ssh -o BatchMode=yes "$PROXMOX_HOST" \
+    printf '%s\n' "$NYM_MNEMONIC" | _ssh_host \
         "pct exec $ctid -- sh -c 'IFS= read -r M && exec nym-vpnc account set \"\$M\" --mode api'" \
         >/dev/null
 }

@@ -9,6 +9,7 @@
 #   ./run.sh --slot 1 --slot 3
 #
 # Reads .env from the same directory. Bails out if NYM_MNEMONIC is empty.
+# PROXMOX_HOST=local runs pct directly (the harness copied onto the host).
 
 set -uo pipefail
 

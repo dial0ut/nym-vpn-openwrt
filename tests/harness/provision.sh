@@ -11,7 +11,7 @@
 # Writes: nothing on disk locally; all state is in Proxmox CTs.
 # Echoes a summary line that the slot runner parses.
 
-set -euo pipefail
+set -Eeuo pipefail
 
 HARNESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091

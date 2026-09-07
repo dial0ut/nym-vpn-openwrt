@@ -1,7 +1,10 @@
 # shellcheck shell=bash
 # Proxmox / pct control wrappers. Source me.
 #
-# Expects PROXMOX_HOST in the environment (an SSH alias for the host).
+# Expects PROXMOX_HOST in the environment: an SSH alias for the host, or
+# the word "local" when the harness itself runs on the Proxmox host. Local
+# mode keeps the control path off the network entirely, which matters when
+# the operator's link to the host is the flaky part of the setup.
 
 set -euo pipefail
 
@@ -18,6 +21,10 @@ set -euo pipefail
 # instead of feeding `sh -s` an empty one, which would exit 0 and turn a
 # failed command into a pass.
 _ssh_host() {
+    if [ "$PROXMOX_HOST" = local ]; then
+        bash -c "$*"
+        return
+    fi
     local attempt=1 rc in err
     in=$(mktemp) || return 1
     err=$(mktemp) || { rm -f "$in"; return 1; }
