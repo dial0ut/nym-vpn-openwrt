@@ -6,10 +6,17 @@
 # Why this exists (mirror of fw4-include.sh, adapted to fw3's world):
 #   On fw4 the kill-switch lives in a separate `inet nym` table that a
 #   firewall reload cannot touch — only the small in-fw4 integration has to
-#   be restored. fw3 has no such isolation: a reload wipes the shared
-#   filter/mangle/nat tables wholesale, custom chains included, so the whole
-#   kill-switch would silently vanish until the daemon's next state change.
-#   To close that gap the daemon persists exactly what it applied, in the
+#   be restored. fw3 shares its filter/mangle/nat tables with everyone. A
+#   `fw3 reload` is selective: it removes only fw3's own tagged rules and
+#   leaves the user *_rule chains and foreign chains (ours) alone, so on a
+#   reload this script only reconciles — re-hooks a jump a foreign rule got
+#   ahead of, lifts a stale emergency block, converges. A `fw3 restart` or
+#   `stop` flushes every table, chains included; `start` then rebuilds fw3's
+#   rules and runs this script last, and without it the whole kill-switch
+#   would stay gone until the daemon's next state change. (Between the flush
+#   and this script fw3 itself runs with an ACCEPT policy; that window is
+#   fw3's and nothing here can close it.)
+#   For that rebuild the daemon persists exactly what it applied, in the
 #   root-owned runtime directory $NYM_RUNTIME_DIR (default
 #   /var/run/nym-firewall, shared with fw-boot-guard.sh and the init script):
 #     v4.rules    iptables-restore script (filter [+ mangle])
@@ -21,7 +28,7 @@
 #   owned by root with no group/other access (this script runs as root and
 #   feeds the rules files to iptables-restore, so a world-writable location
 #   such as /tmp would let any local user hand it a ruleset). This script
-#   re-applies the files after every reload, holding the lock for
+#   re-applies the files whenever fw3 runs it, holding the lock for
 #   the whole run like the daemon does for every apply/reset: the two never
 #   interleave, so this script only ever sees fw3 state between complete
 #   transitions. While the transition marker exists — a daemon crashed
@@ -52,7 +59,8 @@ IFACES_FILE="$NYM_RUNTIME_DIR/ifaces"
 TRANSITION_FILE="$NYM_RUNTIME_DIR/transition"
 LOCK_FILE="$NYM_RUNTIME_DIR/lock"
 
-# fw3 hook chains (user chains fw3 recreates on every reload).
+# fw3 hook chains (user chains fw3 preserves on reload and recreates empty
+# on restart).
 HOOK_INPUT="input_rule"
 HOOK_OUTPUT="output_rule"
 HOOK_FORWARD="forwarding_rule"
@@ -318,7 +326,7 @@ apply_rules() {
             cleanup_mangle "$ipt"
         fi
         if cleanup_emergency "$ipt"; then
-            logger -t nym-vpn "Restored $ipt kill-switch rules after firewall reload"
+            logger -t nym-vpn "Restored $ipt kill-switch rules after firewall reload/restart"
             return 0
         fi
     fi

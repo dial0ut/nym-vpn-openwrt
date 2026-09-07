@@ -181,23 +181,41 @@ mid-activation and lifts it itself. A daemon that fails to apply keeps the block
 surfaces as an error state, the LAN stays reachable, and `/etc/init.d/nym-vpnd stop` opens the
 router again.
 
-## Surviving firewall reloads
+## Surviving firewall reloads and restarts
 
-OpenWrt rebuilds its entire ruleset from scratch on every reload, and reloads are frequent:
-network reconfiguration, DHCP changes, dnsmasq restarts, a manual `fw3 reload` or `fw4 reload`.
+Firewall reloads are frequent: network reconfiguration, DHCP changes, dnsmasq restarts, a manual
+`fw3 reload` or `fw4 reload`. Restarts (`/etc/init.d/firewall restart`, `fw3 restart`) are rarer
+and behave differently, and the two must not be conflated.
 
-On fw4 the kill-switch lives in its own `inet nym` table and survives; the reload only wipes the
-daemon's masquerade and forward integration inside `inet fw4`. On fw3 all custom iptables chains
-are wiped, so the daemon persists the applied restore scripts and tunnel-interface list under
-`/var/run/nym-firewall`; the fw3 include restores both blocking and forwarding planes. With nothing to restore,
-both includes fall through to the boot-time guard above: arm the block, or make sure none is left.
+On fw4 a reload rebuilds `inet fw4` from scratch; the kill-switch lives in its own `inet nym` table
+and survives, and only the daemon's masquerade and forward integration inside `inet fw4` has to be
+restored by the include. On fw3 a reload is selective: firewall3's `fw3_flush_rules(reload=true)`
+removes only fw3's own tagged rules from the built-in chains and explicitly leaves the user
+`*_rule` chains alone, and chains fw3 did not create — ours — are never on its list. The
+kill-switch chains and their jumps therefore survive an fw3 reload untouched, and the include's
+job on a reload is reconciliation: re-hook a jump a foreign rule was inserted ahead of, lift a
+stale emergency block, converge on the persisted state. (Earlier versions of this document said a
+reload wiped every custom chain; that was our own include's cleanup branch deleting them.)
+
+An fw3 `restart` or `stop` flushes every table, our chains included, and resets the built-in
+policies to ACCEPT; `start` then rebuilds fw3's rules and runs the includes last. That is what the
+persisted restore scripts and tunnel-interface list under `/var/run/nym-firewall` are for: the fw3
+include rebuilds both blocking and forwarding planes at that point, so the kill-switch comes back
+with the firewall rather than at the daemon's next state change. With nothing to restore, both
+includes fall through to the boot-time guard above: arm the block, or make sure none is left.
+
+**Known limit:** between fw3's flush and the moment it runs the includes, the router has an ACCEPT
+policy and none of our chains. That window is inside fw3 itself; no include, marker or lock can
+close it, and this project does not claim a fail-closed kill-switch across an fw3 restart. A reload
+does not have this window. fw4 restarts are unaffected because `inet nym` is not fw4's table.
 
 fw3 policy changes use a fail-closed transition protocol. Before touching live or persisted state,
 the daemon creates `/var/run/nym-firewall/transition`. While the marker exists, a firewall reload's
 include run installs dedicated emergency OUTPUT/FORWARD drop chains (`NYM_EMERGENCY_OUT/FWD`;
 INPUT is untouched and reply-direction packets are accepted, preserving SSH/LuCI management) instead of interpreting absent or
 partially-written rules files as kill-switch-off. Once every v4/v6/interface file is complete, the
-daemon removes the marker; if fw3's hook jumps are gone (a reload raced the apply) it re-activates
+daemon removes the marker; if fw3's hook jumps are gone (a restart or another flush raced the
+apply — a reload leaves them) it re-activates
 the desired policy from the same persisted scripts and lifts the emergency block last. The daemon
 installs the emergency block itself only for a family's first activation (no hook jumps exist yet
 for it — on first start, or for IPv6 when it becomes enabled after an IPv4-only policy — so a crash
@@ -207,7 +225,7 @@ chain contents atomically and hook jumps are only (re)inserted when absent or wh
 has been placed ahead of them — each Nym jump must lead its `*_rule` hook chain, and the LAN
 forwarding plane (`NYM_FORWARD_LAN`, which carries the MSS clamp) must be rule 1 ahead of
 `NYM_FORWARD`. A
-crash leaves the marker behind (reloads stay fail-closed); a later successful apply/reset or an
+crash leaves the marker behind (include runs stay fail-closed); a later successful apply/reset or an
 explicit service stop clears it. In the include, a restore or mandatory-jump failure also falls
 back to the emergency block and returns failure rather than claiming success.
 

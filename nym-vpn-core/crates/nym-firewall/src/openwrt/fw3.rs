@@ -9,6 +9,26 @@
 //! Atomic application via `iptables-restore --noflush`. Masquerade lives in
 //! its own chain (`NYM_POSTROUTING` in the `nat` table) so re-applies
 //! flush + repopulate without touching anyone else's NAT rules.
+//!
+//! # What fw3 does to our rules, and what this backend can promise
+//!
+//! `fw3 reload` (`fw3_flush_rules(..., reload=true)` in firewall3) deletes
+//! only fw3's own tagged rules from the built-in chains and explicitly
+//! skips the user `*_rule` chains; chains fw3 did not create are never on
+//! its list. Our `NYM_*` chains and our jumps in `output_rule` /
+//! `forwarding_rule` therefore survive a reload untouched, and the include
+//! fw3 runs afterwards only reconciles: re-hooks a jump a foreign rule got
+//! ahead of, lifts a stale emergency block, converges on the persisted
+//! state (idempotent).
+//!
+//! `fw3 restart` and `fw3 stop` are different: they flush every table,
+//! built-in policies included, `start` rebuilds fw3's own rules and runs
+//! the includes *last*. The persisted restore scripts exist so the include
+//! can rebuild our policy at that point. Between the flush and the include
+//! there is a window with no kill-switch and an ACCEPT policy; it is fw3's
+//! own, no include or lock can close it, and this backend does not claim to.
+//! The transition marker and the lock cover crashes and concurrency of
+//! *our* writers, not fw3's restart.
 
 use std::fs::File;
 use std::io::Write as IoWrite;
@@ -75,17 +95,18 @@ const EMERGENCY_FORWARD_CHAIN: &str = "NYM_EMERGENCY_FWD";
 ///    complete v4/v6/interface state;
 /// 3. remove the marker (the persisted v4 file is now the reload activation
 ///    marker);
-/// 4. if a firewall reload ran just before the lock was taken — it wiped
-///    our chains and, seeing the marker of a crashed earlier transition,
-///    installed the emergency block instead of reading half-written state —
-///    re-activate from the same scripts the include would now read, then
-///    lift the block.
+/// 4. if our hook jumps are gone — an fw3 restart (or anything else that
+///    flushed the tables) ran before the lock was taken and the include,
+///    seeing the marker of a crashed earlier transition, installed the
+///    emergency block instead of reading half-written state — re-activate
+///    from the same scripts the include would now read, then lift the
+///    block. An fw3 reload does not remove our jumps (see the module doc).
 ///
 /// The marker covers crashes, not concurrency: any error or daemon crash
-/// before completion deliberately leaves it behind, so reloads stay
+/// before completion deliberately leaves it behind, so include runs stay
 /// fail-closed until a later successful apply/reset or an explicit service
-/// stop. The lock is what keeps a reload from interleaving with a live
-/// transition.
+/// stop. The lock is what keeps an include run from interleaving with a
+/// live transition. Neither covers the window inside an fw3 restart itself.
 pub fn apply(rs: &RuleSet) -> Result<()> {
     tracing::debug!("Applying firewall policy via fw3/iptables backend");
     ensure_runtime_dir()?;
@@ -144,17 +165,22 @@ pub fn apply(rs: &RuleSet) -> Result<()> {
     persist_state(&v4_script, v6_script.as_deref(), &rs.tunnel_interfaces)?;
     finish_transition()?;
 
-    // A reload that ran while the marker existed recreated fw3's hook chains
-    // empty, which is how we detect it. Re-activate from the persisted
+    // An fw3 restart (or another flush) that ran while the marker existed
+    // recreated fw3's hook chains empty, which is how we detect it — a plain
+    // reload leaves our jumps in place. Re-activate from the persisted
     // scripts so both paths converge on the same state.
     if !jumps_present(AddrFamily::V4) {
-        tracing::info!("Firewall reload raced the policy apply; re-activating IPv4 rules");
+        tracing::info!(
+            "Firewall tables were flushed during the policy apply; re-activating IPv4 rules"
+        );
         activate_family_script(&v4_script, AddrFamily::V4)?;
     }
     if let Some(script) = &v6_script
         && !jumps_present(AddrFamily::V6)
     {
-        tracing::info!("Firewall reload raced the policy apply; re-activating IPv6 rules");
+        tracing::info!(
+            "Firewall tables were flushed during the policy apply; re-activating IPv6 rules"
+        );
         activate_family_script(script, AddrFamily::V6)?;
     }
 
@@ -264,9 +290,10 @@ fn emergency_script(family: AddrFamily) -> String {
     )
 }
 
-/// Whether every hook jump into our filter chains is in place. fw3 recreates
-/// its `*_rule` hook chains empty on every reload, so a missing jump after
-/// the transition marker was removed means a reload raced the apply.
+/// Whether every hook jump into our filter chains is in place. An fw3
+/// restart recreates the `*_rule` hook chains empty (a reload preserves
+/// them), so a missing jump after the transition marker was removed means
+/// the tables were flushed underneath the apply.
 fn jumps_present(family: AddrFamily) -> bool {
     let ipt = ipt_cmd(family);
     JUMPS.iter().all(|(hook, target)| {
@@ -279,7 +306,7 @@ fn jumps_present(family: AddrFamily) -> bool {
 }
 
 /// Activate a previously-rendered family script and reconcile its hook
-/// jumps. Used to converge with a firewall reload that raced the apply.
+/// jumps. Used to converge after a table flush raced the apply.
 fn activate_family_script(script: &str, family: AddrFamily) -> Result<()> {
     run_restore(script, family)?;
     setup_jumps(family)?;
@@ -419,13 +446,13 @@ fn connmark_target_available(family: AddrFamily) -> bool {
     ok
 }
 
-/// Persist the applied ruleset for `fw3-include.sh`. Unlike fw4 — whose
-/// `inet nym` table survives a firewall reload untouched — fw3 wipes the
-/// shared iptables tables on every reload, chains and all. The include
-/// script re-applies these files afterwards, so a reload is transparent
-/// exactly like it is on fw4. Persistence is part of successful policy
-/// application: reporting success without it would create a known leak on
-/// the next firewall reload.
+/// Persist the applied ruleset for `fw3-include.sh`. An fw3 reload leaves
+/// our chains alone, but an fw3 restart flushes the shared iptables tables,
+/// chains and all, and runs the include last; the include rebuilds our
+/// policy from these files, so the kill-switch comes back with the firewall
+/// instead of waiting for the daemon's next state change. Persistence is
+/// part of successful policy application: reporting success without it
+/// would leave a known hole after the next firewall restart.
 fn persist_state(v4_script: &str, v6_script: Option<&str>, interfaces: &[String]) -> Result<()> {
     write_state_file(FW3_RULES_V4_PATH, v4_script)?;
     match v6_script {
