@@ -16,10 +16,25 @@ fi
 # new daemon: the init script skips the stop marker and the firewall teardown
 # (see keep_killswitch there), and the firewall cleanup below is removal-only.
 /etc/init.d/nym-vpn-watchdog stop 2>/dev/null
-if [ "$PKG_UPGRADE" = "1" ]; then
+if [ "$PKG_UPGRADE" != "1" ]; then
+    /etc/init.d/nym-vpnd stop 2>/dev/null
+elif grep -q keep_killswitch /etc/init.d/nym-vpnd 2>/dev/null; then
     NYM_VPND_KEEP_KILLSWITCH=1 /etc/init.d/nym-vpnd stop 2>/dev/null
 else
-    /etc/init.d/nym-vpnd stop 2>/dev/null
+    # The init script still installed is the old package's, and its stop
+    # hooks write the stop marker and tear the firewall down whatever we
+    # export. Stop the daemon through procd instead so no hook runs: the
+    # daemon keeps its Blocked policy on shutdown and postinst's start
+    # re-registers the service. Observed on the first upgrade to the
+    # keep-armed init script: ~15 s of open WAN egress, one LAN request
+    # caught leaving on the real address.
+    ubus call service delete '{"name":"nym-vpnd"}' 2>/dev/null
+    i=0
+    while pidof nym-vpnd >/dev/null 2>&1 && [ "$i" -lt 30 ]; do
+        sleep 1
+        i=$((i + 1))
+    done
+    rm -f /tmp/nym-vpnd.stopped 2>/dev/null
 fi
 
 # Disabling is for real removal only. On an upgrade the boot symlinks must
