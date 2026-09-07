@@ -1392,7 +1392,9 @@ impl NymVpnService {
         completion_tx: oneshot::Sender<Result<GatewayTestReport, GatewayTestError>>,
     ) {
         let Some(permit) = self.gateway_test_slot.try_take() else {
-            completion_tx.send(Err(GatewayTestError::AlreadyRunning)).ok();
+            completion_tx
+                .send(Err(GatewayTestError::AlreadyRunning))
+                .ok();
             return;
         };
         let config = self.config_manager.config();
