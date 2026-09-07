@@ -50,6 +50,9 @@ the GitHub release notes.
   mode checks, so an unprivileged local process can no longer plant a stop
   marker to keep the boot block off or a rules file for the fw3 include to
   load. The daemon writes state with create-new, no-follow temp files.
+  The package hooks' rpcd stash and the always-on watchdog's state file
+  moved out of `/tmp` for the same reason (`/var/run`, root-only parent), and
+  the rpcd bridge refuses to read a state file that is not a regular file.
 - CI now runs the workspace test suite and a fast security job on every push
   to `develop` and feature branches: secret scanning of the pushed commits,
   dependency policy and advisory checks (`cargo deny`), shellcheck over the
@@ -111,7 +114,15 @@ the GitHub release notes.
   their changes to the kill-switch chains with a lock. Before, a `firewall
   reload` that observed the daemon mid-change could install its emergency
   block after the daemon had already finished and lifted it, leaving the
-  router blocked until the next policy change or reload.
+  router blocked until the next policy change or reload. When the lock
+  cannot be taken at all (no `flock`, or the runtime directory fails its
+  checks) the include no longer runs unlocked: it leaves a live policy
+  untouched, installs the boot-time block when nothing is hooked and the
+  kill-switch is on, logs CRITICAL and exits non-zero.
+- On a package upgrade `prerm` no longer deletes the running daemon's policy
+  routing rules (the fwmark lookups); with inbound exemptions active that
+  left replies without their WAN route until the restart. The cleanup is
+  removal-only.
 - `nym-vpnc gateway test` is bounded: one test runs at a time per daemon (a
   second request is refused instead of doubling the probe rate and reporting
   phantom loss), `--id` accepts at most 20 gateways and duplicates are
@@ -179,9 +190,11 @@ the GitHub release notes.
   Proxmox container harness with kill-switch and DNS cases) is now tracked
   under `tests/`, and made runnable: pass/fail counters no longer abort the
   runner, the timeout wrapper works on shell functions, the mnemonic is
-  delivered on stdin, a failed slot fails the run, and the connected-state
-  case compares against the router's real public address rather than its
-  private WAN interface.
+  delivered on stdin, a failed slot fails the run, a case that aborts before
+  recording a result is counted as a failure, the connected-state checks
+  require `State: Connected`, a `nym` interface and a moved egress address,
+  and the QEMU runner starts at all (`-nographic` and `-daemonize` are
+  mutually exclusive; it now uses `-display none` with a serial log).
 - The always-on watchdog now reacts to WAN link events instead of only
   noticing a dropped tunnel at its next poll. A hotplug hook wakes it on
   `ifup`/`ifdown` of a WAN-facing interface (`wan`, `wan6`, anything in the
