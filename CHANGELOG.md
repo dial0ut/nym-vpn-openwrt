@@ -225,7 +225,15 @@ the GitHub release notes.
   recording a result is counted as a failure, the connected-state checks
   require `State: Connected`, a `nym` interface and a moved egress address,
   and the QEMU runner starts at all (`-nographic` and `-daemonize` are
-  mutually exclusive; it now uses `-display none` with a serial log).
+  mutually exclusive; it now uses `-display none` with a serial log). Every
+  selected case ends in exactly one of PASS, FAIL, SKIP (with a reason) or
+  MISSING, and the Proxmox container harness installs the exact release
+  artifacts under procd with an upgrade case that samples the kill-switch
+  every second. Run on 2026-09-07 against 23.05.5, 24.10.0 and 25.12.4: the
+  install, daemon and upgrade cases pass on all three; the account and
+  idle kill-switch cases fail because a fresh install with the default
+  kill-switch cannot reach the API until an endpoint cache exists (issue
+  #15), which is the main open item before a release.
 - The always-on watchdog now reacts to WAN link events instead of only
   noticing a dropped tunnel at its next poll. A hotplug hook wakes it on
   `ifup`/`ifdown` of a WAN-facing interface (`wan`, `wan6`, anything in the
