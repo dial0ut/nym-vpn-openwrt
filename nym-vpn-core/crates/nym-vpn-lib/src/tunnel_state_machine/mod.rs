@@ -1385,8 +1385,8 @@ mod tests {
 
     /// Disconnected and Error both enter through `enter_idle_firewall` and
     /// `IdleApiAccess::start`, so one decision covers both.
-    #[test]
-    fn retained_resolution_pins_on_entry_without_resolving_again() {
+    #[tokio::test]
+    async fn retained_resolution_pins_on_entry_without_resolving_again() {
         let resolved = live_resolution();
         assert_eq!(
             idle_resolver_pins(true, Some(&resolved)),
