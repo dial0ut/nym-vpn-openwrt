@@ -40,8 +40,12 @@ pub struct VpnServiceConfig {
     pub stealth_api: bool,
 }
 
+// A v8 file without the key is hand-edited (serde writes every field), and the
+// ≤v7 migrations set the field explicitly, so this only decides that case. It
+// must agree with `nym_vpn_lib_types::VpnServiceConfig::default()` and with
+// `fw-boot-guard.sh`, which both treat an absent setting as on.
 fn default_killswitch() -> bool {
-    false
+    true
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Hash)]

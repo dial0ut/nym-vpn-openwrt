@@ -1,6 +1,31 @@
 // Copyright 2023 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
+//! Per-state contract. "Pinned" means the account and discovery HTTP clients
+//! resolve the API hostnames to the addresses the live policy admits;
+//! [`SharedState::enter_idle_firewall`] keeps policy and pins in step, and
+//! [`IdleApiAccess`] refreshes the allow-list while idle.
+//!
+//! Kill-switch on:
+//!
+//! | State        | Firewall policy                                            | Resolver pins                                                                     | dnsmasq mode                                                   | Refresh timer      |
+//! |--------------|------------------------------------------------------------|-----------------------------------------------------------------------------------|----------------------------------------------------------------|--------------------|
+//! | Disconnected | Blocked; admits the known API endpoints, root only         | pinned from the retained live resolution; cache-only: unpinned until one succeeds | WAN mirror, or the local custom resolver alone when one is set | hourly, 60 s retry |
+//! | Error        | as Disconnected                                            | as Disconnected                                                                   | unchanged on entry; WAN-only mirror on leave                   | as Disconnected    |
+//! | Offline      | Blocked; admits nothing                                    | carried over from the previous state                                              | unchanged on entry; WAN-only mirror on leave                   | none               |
+//! | Connecting   | Connecting; gateway endpoints, API endpoints once resolved | pinned once resolved                                                              | unchanged                                                      | none               |
+//! | Connected    | Connected; tunnel interface                                | unpinned                                                                          | tunnel resolvers                                               | none               |
+//!
+//! Kill-switch off:
+//!
+//! | State        | Firewall policy                 | Resolver pins                        | dnsmasq mode                                 | Refresh timer |
+//! |--------------|---------------------------------|--------------------------------------|----------------------------------------------|---------------|
+//! | Disconnected | reset                           | unpinned                             | WAN mirror plus any local custom resolver    | none          |
+//! | Error        | reset                           | unpinned                             | unchanged on entry; WAN-only mirror on leave | none          |
+//! | Offline      | forwarding plane only, no block | carried over from the previous state | unchanged on entry; WAN-only mirror on leave | none          |
+//! | Connecting   | forwarding plane only, no block | pinned once resolved                 | unchanged                                    | none          |
+//! | Connected    | forwarding plane only, no block | unpinned                             | tunnel resolvers                             | none          |
+
 mod account;
 pub(crate) mod api_endpoints_cache;
 mod dns_handler;
@@ -12,7 +37,10 @@ mod tun_ipv6;
 pub mod tunnel;
 mod tunnel_monitor;
 
-use futures::{FutureExt, future::BoxFuture};
+use futures::{
+    FutureExt,
+    future::{BoxFuture, Fuse, FusedFuture},
+};
 use nym_config::defaults::{WG_METADATA_PORT, WG_TUN_DEVICE_IP_ADDRESS_V4};
 use nym_dns::ResolvedDnsConfig;
 use nym_offline_monitor::ConnectivityHandle;
@@ -617,10 +645,14 @@ pub struct SharedState {
     /// API socket addresses from the most recent resolution; the Blocked
     /// policy admits exactly these, root-scoped.
     api_endpoints: Vec<SocketAddr>,
-    /// `None` after a cold start: the on-disk cache carries addresses but
-    /// not the resolver overrides, so idle states resolve again on entry.
+    /// The last live resolution and its time. Both `None` after a cold
+    /// start: the on-disk cache carries addresses but no hostname map, so the
+    /// idle states cannot pin until they resolve again.
+    api_resolution: Option<ResolvedConfig>,
     api_endpoints_resolved_at: Option<Instant>,
 }
+
+type ResolveApiAddrsFuture = BoxFuture<'static, Result<ResolvedConfig>>;
 
 /// Well inside the cache's seven-day bound.
 pub(crate) const API_ENDPOINT_REFRESH_INTERVAL: Duration = Duration::from_secs(60 * 60);
@@ -692,6 +724,17 @@ pub(crate) fn idle_blocked_policy(
     }
 }
 
+/// The pins follow the policy: only a Blocked policy built from a live
+/// resolution admits addresses worth pinning to.
+pub(crate) fn idle_resolver_pins(
+    killswitch: bool,
+    resolution: Option<&ResolvedConfig>,
+) -> Option<ResolverOverrides> {
+    resolution
+        .filter(|resolved| killswitch && resolved.has_resolver_overrides())
+        .map(|resolved| resolved.nym_vpn_api_resolver_overrides.clone())
+}
+
 impl SharedState {
     /// Notify discovery and account controller when network is unrestricted.
     async fn allow_networking(&self) {
@@ -748,18 +791,30 @@ impl SharedState {
         }
     }
 
-    /// Idle-state policy: Blocked whenever the kill-switch is on (API
-    /// endpoints are an optional addition), reset otherwise. Failures
-    /// propagate; `DisconnectedState` escalates, `ErrorState` logs.
-    fn apply_killswitch_policy(&mut self) -> Result<(), nym_firewall::Error> {
+    /// Idle firewall and the pins that go with it (see the module table).
+    /// Failures propagate; `DisconnectedState` escalates, `ErrorState` logs.
+    async fn enter_idle_firewall(&mut self) -> Result<()> {
         // The firewall caches the kill-switch flag; sync a runtime toggle.
-        self.firewall.set_killswitch(self.tunnel_settings.killswitch);
+        self.firewall
+            .set_killswitch(self.tunnel_settings.killswitch);
         if self.tunnel_settings.killswitch {
             let policy = idle_blocked_policy(&self.tunnel_settings, &self.api_endpoints);
             self.firewall.apply_policy(policy)
         } else {
             self.firewall.reset_policy()
         }
+        .map_err(Error::SetFirewallPolicy)?;
+
+        match idle_resolver_pins(
+            self.tunnel_settings.killswitch,
+            self.api_resolution.as_ref(),
+        ) {
+            Some(pins) => {
+                self.set_resolver_overrides(pins).await;
+            }
+            None => self.reset_resolver_overrides().await,
+        }
+        Ok(())
     }
 
     fn api_endpoints_need_refresh(&self) -> bool {
@@ -781,22 +836,15 @@ impl SharedState {
     /// The one path that updates the allow-list, so cache and memory agree.
     fn adopt_resolved_api_endpoints(&mut self, resolved: &ResolvedConfig) {
         self.api_endpoints = resolved.all_socket_addrs();
+        self.api_resolution = Some(resolved.clone());
         self.api_endpoints_resolved_at = Some(Instant::now());
         api_endpoints_cache::save(self.nym_config.data_path.as_deref(), &self.api_endpoints);
     }
 
-    /// Idle counterpart of Connecting's `handle_resolved_gateway_config`: the
-    /// HTTP clients are pinned to exactly what the firewall admits.
-    async fn install_idle_api_access(
-        &mut self,
-        resolved: &ResolvedConfig,
-    ) -> Result<(), nym_firewall::Error> {
+    /// Idle counterpart of Connecting's `handle_resolved_gateway_config`.
+    async fn install_idle_api_access(&mut self, resolved: &ResolvedConfig) -> Result<()> {
         self.adopt_resolved_api_endpoints(resolved);
-        self.apply_killswitch_policy()?;
-        if resolved.has_resolver_overrides() {
-            self.set_resolver_overrides(resolved.nym_vpn_api_resolver_overrides.clone())
-                .await;
-        }
+        self.enter_idle_firewall().await?;
         tracing::info!(
             "Kill-switch: admitted {} API endpoint(s) while idle",
             self.api_endpoints.len()
@@ -814,6 +862,100 @@ impl SharedState {
         } else {
             self.firewall.reset_policy()
         }
+    }
+}
+
+/// Allow-list upkeep shared by the idle states: resolve when nothing live is
+/// known, otherwise wait for the allow-list to age out. Until a resolution
+/// succeeds the firewall stays Blocked with whatever the cache offered.
+pub(crate) struct IdleApiAccess {
+    pub(crate) resolve_fut: Fuse<ResolveApiAddrsFuture>,
+    pub(crate) timer_fut: Fuse<BoxFuture<'static, ()>>,
+}
+
+impl IdleApiAccess {
+    fn new() -> Self {
+        Self {
+            resolve_fut: Fuse::terminated(),
+            timer_fut: Fuse::terminated(),
+        }
+    }
+
+    pub(crate) fn start(shared_state: &SharedState) -> Self {
+        let mut access = Self::new();
+        access.schedule(shared_state);
+        access
+    }
+
+    pub(crate) fn schedule(&mut self, shared_state: &SharedState) {
+        let gateway_config = &shared_state.nym_config.gateway_config;
+        self.plan(
+            shared_state.tunnel_settings.killswitch,
+            shared_state.api_endpoints_need_refresh(),
+            shared_state.api_endpoints_refresh_due(),
+            || resolve_api_endpoints(gateway_config.clone()),
+        );
+    }
+
+    fn plan(
+        &mut self,
+        killswitch: bool,
+        need_refresh: bool,
+        due: Instant,
+        resolve: impl FnOnce() -> ResolveApiAddrsFuture,
+    ) {
+        if !killswitch {
+            self.resolve_fut = Fuse::terminated();
+            self.timer_fut = Fuse::terminated();
+        } else if need_refresh {
+            // A settings change must not restart a resolution in flight.
+            if !self.resolving() {
+                tracing::info!(
+                    "Kill-switch on while idle: resolving the API endpoints through the DNS hatch"
+                );
+                self.resolve_fut = resolve().fuse();
+            }
+            self.timer_fut = Fuse::terminated();
+        } else {
+            self.arm_timer(due);
+        }
+    }
+
+    fn arm_timer(&mut self, due: Instant) {
+        self.timer_fut = tokio::time::sleep_until(due.into()).boxed().fuse();
+    }
+
+    fn resolving(&self) -> bool {
+        !self.resolve_fut.is_terminated()
+    }
+
+    #[cfg(test)]
+    fn timer_armed(&self) -> bool {
+        !self.timer_fut.is_terminated()
+    }
+
+    /// `Err` only when the firewall refused the new allow-list; a failed
+    /// resolution is retried after [`API_ENDPOINT_RETRY_DELAY`].
+    pub(crate) async fn handle_resolved(
+        &mut self,
+        result: Result<ResolvedConfig>,
+        shared_state: &mut SharedState,
+    ) -> Result<()> {
+        match result {
+            Ok(resolved) => {
+                shared_state.install_idle_api_access(&resolved).await?;
+                self.arm_timer(shared_state.api_endpoints_refresh_due());
+            }
+            Err(e) => {
+                nym_common::trace_err_chain!(
+                    e,
+                    "Failed to resolve the API endpoints while idle; API access stays blocked, retrying in {:?}",
+                    API_ENDPOINT_RETRY_DELAY
+                );
+                self.arm_timer(Instant::now() + API_ENDPOINT_RETRY_DELAY);
+            }
+        }
+        Ok(())
     }
 }
 
@@ -895,6 +1037,7 @@ impl TunnelStateMachine {
             blacklisted_entry_gateways: BlacklistedGateways::new(),
             entry_gateway_grace: None,
             api_endpoints,
+            api_resolution: None,
             api_endpoints_resolved_at: None,
         };
 
@@ -1223,6 +1366,109 @@ mod tests {
 
     fn ep(a: [u8; 4], port: u16) -> SocketAddr {
         SocketAddr::from((a, port))
+    }
+
+    fn live_resolution() -> ResolvedConfig {
+        ResolvedConfig {
+            nyxd_socket_addrs: vec![ep([76, 76, 21, 21], 443)],
+            nym_api_resolver_overrides: ResolverOverrides::default(),
+            nym_vpn_api_resolver_overrides: ResolverOverrides::from_domain(
+                "nymvpn.com",
+                [ep([151, 101, 1, 194], 443)],
+            ),
+        }
+    }
+
+    fn never_resolves() -> ResolveApiAddrsFuture {
+        futures::future::pending().boxed()
+    }
+
+    /// Disconnected and Error both enter through `enter_idle_firewall` and
+    /// `IdleApiAccess::start`, so one decision covers both.
+    #[test]
+    fn retained_resolution_pins_on_entry_without_resolving_again() {
+        let resolved = live_resolution();
+        assert_eq!(
+            idle_resolver_pins(true, Some(&resolved)),
+            Some(resolved.nym_vpn_api_resolver_overrides.clone())
+        );
+
+        let at = Instant::now();
+        let mut access = IdleApiAccess::new();
+        access.plan(
+            true,
+            api_endpoints_need_refresh(true, true, Some(at), at),
+            at + API_ENDPOINT_REFRESH_INTERVAL,
+            never_resolves,
+        );
+        assert!(!access.resolving());
+        assert!(access.timer_armed());
+    }
+
+    #[test]
+    fn cache_only_start_is_unpinned_with_a_resolution_in_flight() {
+        assert_eq!(idle_resolver_pins(true, None), None);
+
+        let now = Instant::now();
+        let mut access = IdleApiAccess::new();
+        access.plan(
+            true,
+            api_endpoints_need_refresh(true, true, None, now),
+            now,
+            never_resolves,
+        );
+        assert!(access.resolving());
+        assert!(!access.timer_armed());
+    }
+
+    #[test]
+    fn kill_switch_off_neither_pins_nor_refreshes() {
+        let resolved = live_resolution();
+        assert_eq!(idle_resolver_pins(false, Some(&resolved)), None);
+
+        let mut access = IdleApiAccess::new();
+        access.plan(false, false, Instant::now(), never_resolves);
+        assert!(!access.resolving());
+        assert!(!access.timer_armed());
+    }
+
+    #[test]
+    fn settings_change_keeps_a_resolution_in_flight() {
+        let now = Instant::now();
+        let mut access = IdleApiAccess::new();
+        access.plan(true, true, now, never_resolves);
+        access.plan(true, true, now, || {
+            panic!("must not restart the resolution")
+        });
+        assert!(access.resolving());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn idle_access_refreshes_on_the_interval() {
+        let at = Instant::now();
+        let mut access = IdleApiAccess::new();
+        access.plan(
+            true,
+            false,
+            at + API_ENDPOINT_REFRESH_INTERVAL,
+            never_resolves,
+        );
+
+        tokio::time::advance(API_ENDPOINT_REFRESH_INTERVAL - Duration::from_secs(1)).await;
+        assert!(futures::poll!(&mut access.timer_fut).is_pending());
+        tokio::time::advance(Duration::from_secs(2)).await;
+        assert!(futures::poll!(&mut access.timer_fut).is_ready());
+
+        // The timer hands back to `schedule`, which now sees a stale stamp.
+        let now = at + API_ENDPOINT_REFRESH_INTERVAL + Duration::from_secs(1);
+        access.plan(
+            true,
+            api_endpoints_need_refresh(true, true, Some(at), now),
+            now,
+            never_resolves,
+        );
+        assert!(access.resolving());
+        assert!(!access.timer_armed());
     }
 
     #[test]

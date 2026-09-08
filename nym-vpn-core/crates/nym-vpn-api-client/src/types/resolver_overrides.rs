@@ -88,6 +88,16 @@ impl ResolverOverrides {
         }
     }
 
+    /// Overrides for one domain whose addresses are already known.
+    pub fn from_domain(
+        domain: impl Into<String>,
+        addresses: impl IntoIterator<Item = SocketAddr>,
+    ) -> Self {
+        Self {
+            overrides: HashMap::from([(domain.into(), addresses.into_iter().collect())]),
+        }
+    }
+
     /// Create resolver overrides from the provided ApiUrls
     pub async fn from_api_urls(api_urls: &[ApiUrl]) -> Result<Self, VpnApiClientError> {
         let urls = api_urls_to_urls(api_urls)?;

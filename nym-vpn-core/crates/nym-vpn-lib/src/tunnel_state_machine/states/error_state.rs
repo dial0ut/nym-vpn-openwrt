@@ -7,13 +7,14 @@ use tokio_util::sync::CancellationToken;
 use nym_common::trace_err_chain;
 
 use crate::tunnel_state_machine::{
-    ErrorStateReason, NextTunnelState, PrivateTunnelState, SharedState, TunnelCommand,
-    TunnelSettingsDiffFields, TunnelStateHandler,
+    ErrorStateReason, IdleApiAccess, NextTunnelState, PrivateTunnelState, SharedState,
+    TunnelCommand, TunnelSettingsDiffFields, TunnelStateHandler,
     states::{ConnectingState, DisconnectedState, OfflineState},
 };
 
 pub struct ErrorState {
     reason: ErrorStateReason,
+    api_access: IdleApiAccess,
 }
 
 impl ErrorState {
@@ -21,23 +22,18 @@ impl ErrorState {
         reason: ErrorStateReason,
         shared_state: &mut SharedState,
     ) -> (Box<dyn TunnelStateHandler>, PrivateTunnelState) {
-        // Same idle policy as DisconnectedState: Blocked whenever the
-        // kill-switch is on (with whatever API endpoints are known, possibly
-        // none), reset otherwise. A failed apply can only be logged here;
-        // escalating would recurse.
-        if let Err(e) = shared_state.apply_killswitch_policy() {
+        // Already the error path: a failed apply can only be logged.
+        if let Err(e) = shared_state.enter_idle_firewall().await {
             trace_err_chain!(e, "Failed to apply kill-switch policy in error state");
         }
 
-        shared_state.reset_resolver_overrides().await;
         shared_state.allow_networking().await;
 
-        (
-            Box::new(Self {
-                reason: reason.clone(),
-            }),
-            PrivateTunnelState::Error(reason),
-        )
+        let state = Self {
+            reason: reason.clone(),
+            api_access: IdleApiAccess::start(shared_state),
+        };
+        (Box::new(state), PrivateTunnelState::Error(reason))
     }
 
     async fn reset_dns(shared_state: &mut SharedState) {
@@ -89,7 +85,7 @@ impl TunnelStateHandler for ErrorState {
                             || diff.is_field_changed(&TunnelSettingsDiffFields::EnableIpv6)
                             || diff.is_field_changed(&TunnelSettingsDiffFields::Dns)
                         {
-                            match shared_state.apply_killswitch_policy() {
+                            match shared_state.enter_idle_firewall().await {
                                 Err(e) => {
                                     trace_err_chain!(e, "Failed to apply kill-switch policy in error state");
                                 }
@@ -99,13 +95,23 @@ impl TunnelStateHandler for ErrorState {
                                         DisconnectedState::enter(None, shared_state).await,
                                     );
                                 }
-                                Ok(()) => {}
+                                Ok(()) => self.api_access.schedule(shared_state),
                             }
                         }
 
                         NextTunnelState::SameState(self)
                     }
                 }
+            }
+            result = &mut self.api_access.resolve_fut => {
+                if let Err(e) = self.api_access.handle_resolved(result, shared_state).await {
+                    trace_err_chain!(e, "Failed to re-apply kill-switch policy with API endpoints");
+                }
+                NextTunnelState::SameState(self)
+            }
+            _ = &mut self.api_access.timer_fut => {
+                self.api_access.schedule(shared_state);
+                NextTunnelState::SameState(self)
             }
             _ = shutdown_token.cancelled() => {
                 Self::reset_dns(shared_state).await;

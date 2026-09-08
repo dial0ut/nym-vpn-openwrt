@@ -113,12 +113,14 @@ established flows — IPv6 during reconnects especially — walk straight past t
 The first `Connecting` policy is applied even before gateway/API endpoints are known. It permits
 only daemon-scoped bootstrap DNS and NTP plus the base DHCP/NDP/mwan3 traffic, so endpoint
 resolution can proceed without opening router or LAN egress. As addresses are resolved they are
-added to the daemon-scoped allow-list. Disconnected applies the same blocked bootstrap policy and
-then resolves the API endpoints itself — the same resolver Connecting uses, through the DNS hatch —
-re-applying Blocked with them admitted and pinning the HTTP clients to those addresses; it repeats
-that hourly while idle and retries a minute after a failure. Until a resolution succeeds the policy
-stays Blocked with no endpoints, so a fresh install is closed, not open, for the seconds the first
-resolution takes. Error re-applies with whatever was last resolved.
+added to the daemon-scoped allow-list. Disconnected and Error apply the same blocked bootstrap
+policy and then resolve the API endpoints themselves — the same resolver Connecting uses, through
+the DNS hatch — re-applying Blocked with them admitted and pinning the HTTP clients to those
+addresses; they repeat that hourly while idle and retry a minute after a failure. The pins follow
+the policy: entering either state with a live resolution still in hand pins at once, while after a
+cold start the on-disk cache only admits its addresses and the clients stay unpinned until the
+first resolution. Until one succeeds the policy stays Blocked with whatever the cache offered, so a
+fresh install is closed, not open, for the seconds the first resolution takes.
 
 ## Boot sequence
 
