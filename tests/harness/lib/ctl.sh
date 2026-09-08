@@ -119,18 +119,42 @@ template_ensure_openwrt() {
     echo "$name"
 }
 
-# Create an OpenWrt CT, configure WAN (DHCP) + LAN (static), pin /etc/resolv.conf
-# and reload fw4 so its zones reflect the new network config.
+# Create an OpenWrt CT, configure WAN (DHCP, or static when wan_cidr is
+# given) + LAN (static), pin /etc/resolv.conf and reload fw4 so its zones
+# reflect the new network config.
 #
-# Args: ctid version wan_bridge lan_bridge lan_cidr
+# Args: ctid version wan_bridge lan_bridge lan_cidr [wan_cidr wan_gw]
 pct_create_openwrt() {
     local ctid="$1" version="$2" wan_bridge="$3" lan_bridge="$4" lan_cidr="$5"
+    local wan_cidr="${6:-}" wan_gw="${7:-}"
     local rootfs
     rootfs="$(template_ensure_openwrt "$version")"
 
     if ctid_in_use "$ctid"; then
         echo "[ctl] CTID $ctid already exists" >&2
         return 1
+    fi
+
+    # A static WAN address that is already in use would collide with another
+    # machine on the host's segment; refuse before the CT exists.
+    local wan_block
+    if [ -n "$wan_cidr" ]; then
+        if pmx "ping -c 2 -W 1 ${wan_cidr%/*} >/dev/null 2>&1"; then
+            echo "[ctl] WAN address ${wan_cidr%/*} already answers on the segment" >&2
+            return 1
+        fi
+        wan_block="config interface \"wan\"
+	option device \"eth0\"
+	option proto \"static\"
+	option ipaddr \"${wan_cidr%/*}\"
+	option netmask \"$(_mask_from_prefix "${wan_cidr#*/}")\"
+	option gateway \"${wan_gw:-192.168.1.1}\"
+	list dns \"1.1.1.1\"
+	list dns \"8.8.8.8\""
+    else
+        wan_block="config interface \"wan\"
+	option device \"eth0\"
+	option proto \"dhcp\""
     fi
 
     local hwaddr_oct
@@ -164,9 +188,7 @@ config interface \"loopback\"
 	option ipaddr \"127.0.0.1\"
 	option netmask \"255.0.0.0\"
 
-config interface \"wan\"
-	option device \"eth0\"
-	option proto \"dhcp\"
+$wan_block
 
 config interface \"lan\"
 	option device \"eth1\"
