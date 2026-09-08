@@ -75,6 +75,10 @@ the GitHub release notes.
 
 ### Fixed
 
+- A daemon settings file with the `killswitch` key removed by hand now loads
+  with the kill-switch on, as a fresh config and the boot-time firewall guard
+  already treat it; the daemon used to read it as off, so its first policy
+  opened the WAN that the guard had blocked.
 - Installing or upgrading from LuCI's Software page reportedly never finished
   while the same upgrade from a shell worked (#13). Likely cause: the
   package's post-install step restarted rpcd — the service LuCI runs opkg/apk
