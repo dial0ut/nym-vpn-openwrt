@@ -51,7 +51,9 @@ by base64-decoding the second line of `scripts/feed/dial0ut.pub` and taking byte
 usign looks keys up that way.
 
 `etc/uci-defaults/luci-app-nym-vpn` runs once on first boot after install. It is what registers
-the firewall include, so the kill-switch survives `fw4 reload`.
+the firewall include, so the kill-switch survives `fw4 reload`, and what declares the `nym`
+firewall zone (`device 'nym+'`, masquerade, MSS clamp) and the `lan -> nym` forwarding that
+fw3/fw4 render as the tunnel plane.
 
 Dependencies come from `scripts/ipk/control.template`, and `build-apk.sh` repeats the same list:
 
@@ -113,14 +115,16 @@ removal including upgrades. The rest is gated on `PKG_UPGRADE != 1`, so an upgra
 down state the incoming version is about to reuse.
 
 1. **Stop** `nym-vpnd`; disable it on real removal only
-2. **Firewall cleanup** — the part that matters. fw4: `nft delete table inet nym`, then walk fw4's
-   own chains deleting rules tagged `nym-vpn:` by handle. fw3: remove jump rules from the hook
-   chains, flush and delete the `NYM_*` chains, delete the NAT POSTROUTING masquerade rules by
-   line number. Skip this and an uninstall leaves the kill-switch up with nothing to take it down.
+2. **Firewall cleanup** — the part that matters. fw4: `nft delete table inet nym` (nothing of ours
+   is inside `inet fw4`). fw3: run the include under the state lock with the stop marker present,
+   which removes the jumps and the `NYM_*` chains; an inline teardown of the same chains covers an
+   install whose include is gone. Skip this and an uninstall leaves the kill-switch up with nothing
+   to take it down.
 3. **Stray routing rules** — flush any `ip rule` entries matching the daemon's fwmarks, v4 and v6.
    The daemon normally clears these itself on stop; a crashed one does not. Matching on fwmark
    rather than priority avoids touching unrelated rules.
-4. **UCI** — delete the `firewall.nym_vpn` include and commit
+4. **UCI** — delete the `firewall.nym_vpn` include and the `nym_zone` / `nym_lan_fwd` sections
+   (the tunnel zone and its `lan -> nym` forwarding), commit, reload the firewall
 5. **Temp files** — the saved firewall rulesets, the adblock dnsmasq drop-in, DNS backups
 
 Then, full removal only:

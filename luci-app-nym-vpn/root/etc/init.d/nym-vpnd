@@ -103,9 +103,9 @@ service_stopped() {
     nft delete table inet nym_boot 2>/dev/null || true
 
     # fw3: the include owns the chain teardown (stop marker present: discard
-    # persisted state, remove chains, jumps, masquerade, LAN forwarding), the
-    # same path a reload takes, run under the shared state lock with
-    # NYM_FW_LOCKED=1 so the include does not re-take it (deadlock).
+    # persisted state, remove chains and jumps), the same path a reload
+    # takes, run under the shared state lock with NYM_FW_LOCKED=1 so the
+    # include does not re-take it (deadlock).
     (
         # No lock, no fw3 mutation; the include honours the marker on its
         # next run and finishes the teardown there.
