@@ -15,6 +15,7 @@ Per slot (`versions.conf`: 23.05.5, 24.10.0, 25.12.4 on x86-64):
 | `daemon-up` | the daemon answers and **procd** lists it as a running instance |
 | `account-set` | the mnemonic registers and the account reaches `ReadyToConnect` |
 | `10-upgrade` | with a previous artifact configured: upgrade to the package under test through the package manager while the kill-switch table is sampled every second inside the router — it must never disappear; the new daemon runs under procd, the init script logged the restart keep path, the account survived. Without a previous artifact: SKIP with that reason |
+| `11-restart-paths` | kill-switch on: the rpcd bridge's `daemon_restart` (LuCI's Restart button) and `account_reset` (the Account card's hard reset) run one after the other while the kill-switch table is sampled every second inside the router — it must never disappear; the daemon runs under procd afterwards and the init script logged both keep paths; the account is registered again at the end |
 | `20-connect-random`, `21-connect-country` | tunnel reaches `Connected` |
 | `30-killswitch-disconnected` | kill-switch on: LAN client blocked, router still reaches the API; off: LAN client forwards |
 | `32-killswitch-connected` | LAN client's egress differs from the router's real public address (learned with the kill-switch off); a plain DNS query from the router to an outside resolver never leaves on the WAN wire (tcpdump on the router's WAN veth on the host) |

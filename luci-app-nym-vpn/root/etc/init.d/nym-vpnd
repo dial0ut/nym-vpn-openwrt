@@ -2,6 +2,8 @@
 START=90
 STOP=10
 USE_PROCD=1
+EXTRA_COMMANDS="reset_account"
+EXTRA_HELP="	reset_account	Stop, wipe the account and key store, start (kill-switch kept)"
 
 # fw-boot-guard.sh owns the runtime-directory paths and checks. Without it
 # there is no boot-time block either, so the stop marker is not written.
@@ -20,12 +22,25 @@ fi
 STOPPED_MARKER="$NYM_VPND_STOPPED"
 
 # Only an explicit `stop` opens the network. `restart` (also how a package
-# upgrade swaps the daemon) and `shutdown` (the K-script on reboot) keep the
-# kill-switch armed: rc.common leaves $action set in the stop hooks, and an
-# open firewall in the last seconds of a reboot leaked LAN DNS/HTTPS on WAN.
+# upgrade swaps the daemon), `shutdown` (the K-script on reboot) and
+# `reset_account` keep the kill-switch armed: rc.common leaves $action set
+# in the stop hooks, and an open firewall in the last seconds of a reboot
+# leaked LAN DNS/HTTPS on WAN.
 keep_killswitch() {
     # shellcheck disable=SC2154  # action is set by rc.common
-    [ "$action" = "restart" ] || [ "$action" = "shutdown" ]
+    case "$action" in
+        restart|shutdown|reset_account) return 0 ;;
+    esac
+    return 1
+}
+
+# The rpcd bridge's account hard-reset. Runs as an EXTRA_COMMAND, so the
+# stop hooks see $action=reset_account and keep the kill-switch.
+reset_account() {
+    stop
+    rm -rf /etc/nym/data
+    mkdir -p /etc/nym/data
+    start
 }
 
 start_service() {

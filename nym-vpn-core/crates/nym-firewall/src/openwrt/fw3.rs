@@ -15,7 +15,7 @@ use std::io::Write as IoWrite;
 use std::os::unix::fs::OpenOptionsExt;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use nix::errno::Errno;
 use nix::fcntl::{Flock, FlockArg};
@@ -133,9 +133,20 @@ fn lock_fw3_state() -> Result<Flock<File>> {
     lock_state_file(FW3_LOCK_PATH)
 }
 
+/// The other holders (the include under `flock 9`, the init script's
+/// teardown) are bounded or dead, so a lock still held after this long is a
+/// stuck process and waiting on it would only wedge the daemon with it.
+const STATE_LOCK_TIMEOUT: Duration = Duration::from_secs(10);
+const STATE_LOCK_POLL: Duration = Duration::from_millis(100);
+const STATE_LOCK_WARN_AFTER: Duration = Duration::from_secs(1);
+
 fn lock_state_file(path: &str) -> Result<Flock<File>> {
+    lock_state_file_with_timeout(path, STATE_LOCK_TIMEOUT)
+}
+
+fn lock_state_file_with_timeout(path: &str, timeout: Duration) -> Result<Flock<File>> {
     // O_NOFOLLOW: a planted symlink must not be opened elsewhere as root.
-    let file = File::options()
+    let mut file = File::options()
         .create(true)
         .truncate(false)
         .write(true)
@@ -147,22 +158,39 @@ fn lock_state_file(path: &str) -> Result<Flock<File>> {
                 "open fw3 state lock {path}: {e}; refusing to change live firewall state"
             ))
         })?;
-    let file = match Flock::lock(file, FlockArg::LockExclusiveNonblock) {
-        Ok(lock) => return Ok(lock),
-        Err((file, Errno::EWOULDBLOCK)) => file,
-        Err((_, e)) => {
-            return Err(Error::ApplyError(format!("lock fw3 state {path}: {e}")));
-        }
-    };
-    tracing::debug!("fw3 state lock {path} is held by another writer; waiting");
     let waited = Instant::now();
-    let lock = Flock::lock(file, FlockArg::LockExclusive)
-        .map_err(|(_, e)| Error::ApplyError(format!("lock fw3 state {path}: {e}")))?;
-    tracing::debug!(
-        "fw3 state lock {path} acquired after {:?}",
-        waited.elapsed()
-    );
-    Ok(lock)
+    let mut warned = false;
+    loop {
+        file = match Flock::lock(file, FlockArg::LockExclusiveNonblock) {
+            Ok(lock) => {
+                if warned {
+                    tracing::debug!(
+                        "fw3 state lock {path} acquired after {:?}",
+                        waited.elapsed()
+                    );
+                }
+                return Ok(lock);
+            }
+            Err((file, Errno::EWOULDBLOCK)) => file,
+            Err((_, e)) => {
+                return Err(Error::ApplyError(format!("lock fw3 state {path}: {e}")));
+            }
+        };
+        let elapsed = waited.elapsed();
+        if elapsed >= timeout {
+            tracing::error!(
+                "fw3 state lock {path} still held by another writer after {elapsed:?}; giving up"
+            );
+            return Err(Error::ApplyError(format!(
+                "fw3 state lock {path} held by another writer for {elapsed:?}; refusing to change live firewall state"
+            )));
+        }
+        if !warned && elapsed >= STATE_LOCK_WARN_AFTER {
+            tracing::warn!("fw3 state lock {path} is held by another writer; waiting");
+            warned = true;
+        }
+        std::thread::sleep(STATE_LOCK_POLL);
+    }
 }
 
 fn begin_transition() -> Result<()> {
@@ -999,6 +1027,36 @@ mod tests {
             "lock must be free once the guard is dropped"
         );
         drop(reacquired);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn state_lock_wait_is_bounded() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "nym-firewall-lock-timeout-test-{}-{nonce}",
+            std::process::id()
+        ));
+        let path = path.to_str().unwrap();
+
+        let held = lock_state_file(path).unwrap();
+        let started = Instant::now();
+        let err = lock_state_file_with_timeout(path, Duration::from_millis(300))
+            .expect_err("a held lock must time out, not block");
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed >= Duration::from_millis(300) && elapsed < Duration::from_secs(5),
+            "waited {elapsed:?}"
+        );
+        assert!(
+            matches!(&err, Error::ApplyError(msg) if msg.contains(path)),
+            "expected an ApplyError naming the lock path, got {err:?}"
+        );
+
+        drop(held);
         std::fs::remove_file(path).unwrap();
     }
 

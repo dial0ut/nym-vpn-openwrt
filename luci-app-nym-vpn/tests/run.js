@@ -813,6 +813,15 @@ async function scenarioService() {
   check(!!modal(t3) && /disconnect you/.test(modal(t3).querySelector('.nym-modal-message').textContent) && eq(modalButtons(t3), ['Cancel', 'Restart']), 'restart while connected asks first');
   clickModalButton(t3, 'Cancel');
   check(callsTo(t3, 'daemon_restart').length === 0, 'cancelled restart does nothing');
+  // daemon_restart blocks for the init script's real restart; the call must
+  // run with a longer LuCI rpc timeout than the 20 s default and leave the
+  // environment as it found it.
+  let seenTimeout;
+  const t4 = setup({ rpc: { status: { state: 'disconnected' }, daemon_restart: () => { seenTimeout = t4.L.env.rpctimeout; return { success: true, status: 'running', enabled: true }; } } });
+  Array.from(card(t4, 'Service Management').querySelectorAll('.nym-card-action'))[1].click();
+  await sleep(20);
+  check(callsTo(t4, 'daemon_restart').length === 1 && seenTimeout === 60 && !('rpctimeout' in t4.L.env), 'restart raises the rpc timeout to 60 s for that call and restores it: ' + seenTimeout + '/' + t4.L.env.rpctimeout);
+  check(!!modal(t4) && modal(t4).classList.contains('success'), 'restart success modal');
 }
 
 async function scenarioAlwaysOn() {
