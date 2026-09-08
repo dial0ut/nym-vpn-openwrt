@@ -25,3 +25,7 @@ site/
 .claude/
 .mcp.json
 .tools/
+
+# test suites
+tests/leak/results/
+tests/harness/runs/

@@ -5,7 +5,7 @@
 scenario_wait=10
 scenario_pre() {
     local v6
-    v6=$(rt 'sysctl -w net.ipv6.conf.all.disable_ipv6=0 >/dev/null 2>&1; ip -6 addr show dev eth1 2>/dev/null | grep -E "inet6 (2|3)" | head -1')
+    v6=$(rt "sysctl -w net.ipv6.conf.all.disable_ipv6=0 >/dev/null 2>&1; ip -6 addr show dev $LEAK_ROUTER_WAN_DEV 2>/dev/null | grep -E 'inet6 (2|3)' | head -1")
     if [ -z "$v6" ]; then
         skip "no global IPv6 on the WAN (bed has no v6 upstream); v6 path not exercised"
         return 1
