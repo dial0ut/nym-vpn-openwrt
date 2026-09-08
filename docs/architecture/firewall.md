@@ -27,6 +27,17 @@ re-probes on the next call. That distinction matters: the daemon can start befor
 does, and caching an early `Unknown` would leave the kill-switch silently disabled for the rest of
 the process's life.
 
+The daemon owns only the kill-switch. The tunnel plane — masquerade into the tunnel, the TCP MSS
+clamp for the 1340-MTU WireGuard tun, and the LAN-to-tunnel forwarding accepts that fw3/fw4's
+zone policy would otherwise reject — is declared once, in `/etc/config/firewall`, by
+`uci-defaults/luci-app-nym-vpn`: a zone `nym` with `device 'nym+'` (the daemon's `nym0`/`nym1`
+tun devices; both backends take the `+` wildcard), `masq`, `masq6`, `mtu_fix`, `input`/`forward`
+`REJECT` (the exit never opens a flow into the router or the LAN), and a `lan -> nym` forwarding.
+fw3 and fw4 render it on every reload and restart with no daemon involvement, which is what makes
+the includes' job the kill-switch alone. A guest or IoT zone that should reach the tunnel needs
+its own `forwarding` to `nym`. `common.rs:wan_zone_devices` skips the zone despite its `masq`, so
+its device never counts as an uplink for the exemption or private-resolver rules.
+
 ## Kill-switch
 
 ### Rule order, and why DNS breaks if you get it wrong
@@ -166,7 +177,7 @@ the block stays — including when the daemon crash-loops before ever applying a
 the case the block exists for.
 
 The block is lifted by whichever comes first: the daemon's first policy (kill-switch on or off —
-`apply`, `apply_forwarding_only` and `reset` all remove it as their last step, once the live state
+`apply` and `reset` both remove it as their last step, once the live state
 has converged), an explicit `/etc/init.d/nym-vpnd stop` (which also writes the stop marker, so a
 later reload does not re-install it), package removal (`prerm`), or a later include run finding
 that a condition no longer holds — kill-switch turned off, daemon disabled or stopped. A setting
@@ -197,9 +208,9 @@ Firewall reloads are frequent: network reconfiguration, DHCP changes, dnsmasq re
 `fw3 reload` or `fw4 reload`. Restarts (`/etc/init.d/firewall restart`, `fw3 restart`) are rarer
 and behave differently, and the two must not be conflated.
 
-On fw4 a reload rebuilds `inet fw4` from scratch; the kill-switch lives in its own `inet nym` table
-and survives, and only the daemon's masquerade and forward integration inside `inet fw4` has to be
-restored by the include. On fw3 a reload is selective: firewall3's `fw3_flush_rules(reload=true)`
+On fw4 a reload rebuilds `inet fw4` from scratch, the `nym` zone with it; the kill-switch lives in
+its own `inet nym` table and survives, and nothing of the daemon's is inside `inet fw4`, so the
+include has nothing to restore there. On fw3 a reload is selective: firewall3's `fw3_flush_rules(reload=true)`
 removes only fw3's own tagged rules from the built-in chains and explicitly leaves the user
 `*_rule` chains alone, and chains fw3 did not create — ours — are never on its list. The
 kill-switch chains and their jumps therefore survive an fw3 reload untouched, and the include's
@@ -209,8 +220,8 @@ reload wiped every custom chain; that was our own include's cleanup branch delet
 
 An fw3 `restart` or `stop` flushes every table, our chains included, and resets the built-in
 policies to ACCEPT; `start` then rebuilds fw3's rules and runs the includes last. That is what the
-persisted restore scripts and tunnel-interface list under `/var/run/nym-firewall` are for: the fw3
-include rebuilds both blocking and forwarding planes at that point, so the kill-switch comes back
+persisted restore scripts under `/var/run/nym-firewall` are for: the fw3 include rebuilds the
+blocking chains at that point (fw3 itself rebuilds the `nym` zone), so the kill-switch comes back
 with the firewall rather than at the daemon's next state change. With nothing to restore, both
 includes fall through to the boot-time guard above: arm the block, or make sure none is left.
 
@@ -233,9 +244,8 @@ for it — on first start, or for IPv6 when it becomes enabled after an IPv4-onl
 between creating the chains and hooking them would otherwise leave that traffic open until the
 daemon respawns); re-applying a live policy never blackholes traffic, because `*-restore` replaces
 chain contents atomically and hook jumps are only (re)inserted when absent or when a foreign rule
-has been placed ahead of them — each Nym jump must lead its `*_rule` hook chain, and the LAN
-forwarding plane (`NYM_FORWARD_LAN`, which carries the MSS clamp) must be rule 1 ahead of
-`NYM_FORWARD`. A
+has been placed ahead of them — each Nym jump must lead its `*_rule` hook chain (the MSS clamp
+is fw3's own, in mangle, so nothing has to precede `NYM_FORWARD`). A
 crash leaves the marker behind (include runs stay fail-closed); a later successful apply/reset or an
 explicit service stop clears it. In the include, a restore or mandatory-jump failure also falls
 back to the emergency block and returns failure rather than claiming success.
@@ -256,9 +266,11 @@ flag looks like the obvious fix and quietly breaks the integration.
 The active backend's include is reconciled at install and upgrade time by
 `/etc/uci-defaults/luci-app-nym-vpn` (invoked immediately by package `postinst`), so a fresh install
 does not wait for the next reboot to gain reload protection. Backend detection is shared
-(`/usr/share/nym-vpn/fw-backend.sh`, used by uci-defaults, `prerm` and the init script): live
+(`fw-boot-guard.sh:nym_fw_backend`, sourced by uci-defaults, `prerm` and the init script): live
 state first, then the firewall init script's own backend, then binary presence — so a boot-time
-run on a vendor image shipping both stacks still registers the right include. `prerm` leaves the
+run on a vendor image shipping both stacks still registers the right include. The guard and the
+generated `fw-rules.sh` ship in every package; a consumer that cannot source them stops rather
+than guessing (the includes log CRITICAL and install nothing, the init script refuses to run). `prerm` leaves the
 UCI section alone on upgrades so an interrupted transaction cannot strand the router without it.
 
 ## Inbound service exemptions

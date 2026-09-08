@@ -245,8 +245,6 @@ impl MangleRules {
 pub struct RuleSet {
     pub filter: FilterRules,
     pub mangle: MangleRules,
-    /// Interfaces needing masquerade/forward integration; empty in `Blocked`.
-    pub tunnel_interfaces: Vec<String>,
 }
 
 impl RuleSet {

@@ -9,6 +9,11 @@
 //! reconciles. `fw3 restart`/`stop` flush every table and run the includes
 //! last, which is what the persisted restore scripts are for. The window
 //! between that flush and the include is fw3's own; nothing here closes it.
+//!
+//! Only the kill-switch lives here. Masquerade, MSS clamp and LAN-to-tunnel
+//! forwarding are fw3's own, rendered from the `nym` zone that
+//! `uci-defaults` declares (`common::NYM_ZONE`), so a reload rebuilds them
+//! without the daemon.
 
 use std::fs::File;
 use std::io::Write as IoWrite;
@@ -23,8 +28,7 @@ use nix::fcntl::{Flock, FlockArg};
 use super::boot_rules::{self, EMERGENCY_FORWARD_CHAIN, EMERGENCY_OUTPUT_CHAIN};
 use super::common::{
     FW3_HOOK_FORWARD, FW3_HOOK_INPUT, FW3_HOOK_OUTPUT, FW3_LOCK_PATH, FW3_RULES_V4_PATH,
-    FW3_RULES_V6_PATH, FW3_TRANSITION_PATH, IFACES_PATH, Ipv6Status, ensure_runtime_dir,
-    ipv6_status,
+    FW3_RULES_V6_PATH, FW3_TRANSITION_PATH, Ipv6Status, ensure_runtime_dir, ipv6_status,
 };
 use super::render_iptables::{
     self, AddrFamily, CHAIN_FORWARD, CHAIN_INPUT, CHAIN_MANGLE_OUTPUT, CHAIN_MANGLE_PREROUTING,
@@ -32,15 +36,6 @@ use super::render_iptables::{
 };
 use super::rules::RuleSet;
 use super::{Error, Result};
-
-/// Chain we own in the iptables `nat` table; POSTROUTING jumps to it.
-const NAT_CHAIN: &str = "NYM_POSTROUTING";
-
-/// LAN<->tunnel forwarding plane (fw3 analogue of fw4's `nym_forward_lan`).
-/// Needed with the kill-switch off too: tun devices belong to no fw3 zone,
-/// so fw3's forward policy rejects LAN flows without explicit accepts. Also
-/// carries the TCP MSS clamp for the 1340-MTU tunnel.
-const FORWARD_LAN_CHAIN: &str = "NYM_FORWARD_LAN";
 
 /// Fail-closed transition: lock, publish the transition marker, install the
 /// emergency block for any family not yet hooked (a crash between chain
@@ -93,7 +88,7 @@ pub fn apply(rs: &RuleSet) -> Result<()> {
         None
     };
 
-    persist_state(&v4_script, v6_script.as_deref(), &rs.tunnel_interfaces)?;
+    persist_state(&v4_script, v6_script.as_deref())?;
     finish_transition()?;
 
     // Missing jumps mean an fw3 restart flushed the tables underneath us (a
@@ -111,14 +106,6 @@ pub fn apply(rs: &RuleSet) -> Result<()> {
             "Firewall tables were flushed during the policy apply; re-activating IPv6 rules"
         );
         activate_family_script(script, AddrFamily::V6)?;
-    }
-
-    if rs.tunnel_interfaces.is_empty() {
-        remove_masquerade_rules();
-        remove_forwarding_rules();
-    } else {
-        add_masquerade_rules(&rs.tunnel_interfaces)?;
-        add_forwarding_rules(&rs.tunnel_interfaces)?;
     }
 
     remove_emergency_blocks(with_v6)?;
@@ -369,22 +356,11 @@ fn connmark_target_available(family: AddrFamily) -> bool {
 
 /// Persist for `fw3-include.sh` to replay after an fw3 restart. Failure
 /// fails the apply: success without it leaves a hole at the next restart.
-fn persist_state(v4_script: &str, v6_script: Option<&str>, interfaces: &[String]) -> Result<()> {
+fn persist_state(v4_script: &str, v6_script: Option<&str>) -> Result<()> {
     write_state_file(FW3_RULES_V4_PATH, v4_script)?;
     match v6_script {
-        Some(script) => write_state_file(FW3_RULES_V6_PATH, script)?,
-        None => remove_state_file(FW3_RULES_V6_PATH)?,
-    }
-    persist_ifaces(interfaces)
-}
-
-fn persist_ifaces(interfaces: &[String]) -> Result<()> {
-    if interfaces.is_empty() {
-        remove_state_file(IFACES_PATH)
-    } else {
-        let mut buf = interfaces.join("\n");
-        buf.push('\n');
-        write_state_file(IFACES_PATH, &buf)
+        Some(script) => write_state_file(FW3_RULES_V6_PATH, script),
+        None => remove_state_file(FW3_RULES_V6_PATH),
     }
 }
 
@@ -434,46 +410,12 @@ fn remove_state_file(path: &str) -> Result<()> {
 
 fn clear_persisted_state() -> Result<()> {
     remove_state_file(FW3_RULES_V4_PATH)?;
-    remove_state_file(FW3_RULES_V6_PATH)?;
-    remove_state_file(IFACES_PATH)
+    remove_state_file(FW3_RULES_V6_PATH)
 }
 
-/// Kill-switch off: forwarding plane only, blocking chains removed.
-pub fn apply_forwarding_only(rs: &RuleSet) -> Result<()> {
-    tracing::debug!("Applying tunnel forwarding plane (kill-switch off) via fw3/iptables");
-    ensure_runtime_dir()?;
-    let _lock = lock_fw3_state()?;
-
-    let with_v6 = ipv6_status() == Ipv6Status::Enabled;
-    begin_transition()?;
-
-    // Persisted blocking state goes before the live firewall opens; the
-    // marker keeps a racing reload from reading the absent v4 file as "open".
-    remove_state_file(FW3_RULES_V4_PATH)?;
-    remove_state_file(FW3_RULES_V6_PATH)?;
-    persist_ifaces(&rs.tunnel_interfaces)?;
-
-    cleanup_filter(AddrFamily::V4);
-    cleanup_mangle(AddrFamily::V4);
-    cleanup_filter(AddrFamily::V6);
-    cleanup_mangle(AddrFamily::V6);
-
-    if rs.tunnel_interfaces.is_empty() {
-        remove_masquerade_rules();
-        remove_forwarding_rules();
-    } else {
-        add_masquerade_rules(&rs.tunnel_interfaces)?;
-        add_forwarding_rules(&rs.tunnel_interfaces)?;
-    }
-
-    finish_transition()?;
-    remove_emergency_blocks(with_v6)?;
-
-    tracing::debug!("Tunnel forwarding plane applied successfully");
-    Ok(())
-}
-
-/// Tear down the jumps and our chains. Best-effort throughout.
+/// Tear down the jumps and our chains. Best-effort throughout. Also what
+/// the kill-switch-off path runs: with no blocking wanted there is nothing
+/// left for the daemon to keep in fw3.
 pub fn reset() -> Result<()> {
     tracing::debug!("Resetting firewall policy via fw3/iptables backend");
     ensure_runtime_dir()?;
@@ -484,8 +426,6 @@ pub fn reset() -> Result<()> {
 
     clear_persisted_state()?;
 
-    remove_masquerade_rules();
-    remove_forwarding_rules();
     cleanup_filter(AddrFamily::V4);
     cleanup_mangle(AddrFamily::V4);
     cleanup_filter(AddrFamily::V6);
@@ -571,18 +511,9 @@ fn run_restore(script: &str, family: AddrFamily) -> Result<()> {
 fn setup_jumps(family: AddrFamily) -> Result<()> {
     let ipt = ipt_cmd(family);
     for (hook, target) in JUMPS {
-        ensure_jump(ipt, hook, target, JumpPosition::Leading)?;
+        ensure_jump(ipt, hook, target)?;
     }
     Ok(())
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum JumpPosition {
-    /// Rule 1 exactly: the MSS clamp must run before the kill-switch chain
-    /// accepts tunnel-bound flows.
-    First,
-    /// Only jumps to our own `NYM_*` chains may precede it.
-    Leading,
 }
 
 /// Rule specs of a chain with the `-A <hook> ` prefix stripped, in order.
@@ -604,20 +535,18 @@ fn list_hook_rules(ipt: &str, hook: &str) -> Result<Vec<String>> {
         .collect())
 }
 
-fn jump_position_ok(rules: &[String], jump: &str, position: JumpPosition) -> bool {
+/// Present, with only jumps to our own `NYM_*` chains ahead of it.
+fn jump_position_ok(rules: &[String], jump: &str) -> bool {
     match rules.iter().position(|r| r == jump) {
-        Some(0) => true,
-        Some(i) => {
-            position == JumpPosition::Leading && rules[..i].iter().all(|r| r.starts_with("-j NYM_"))
-        }
+        Some(i) => rules[..i].iter().all(|r| r.starts_with("-j NYM_")),
         None => false,
     }
 }
 
-fn ensure_jump(ipt: &str, hook: &str, target: &str, position: JumpPosition) -> Result<()> {
+fn ensure_jump(ipt: &str, hook: &str, target: &str) -> Result<()> {
     let jump = format!("-j {target}");
     let mut rules = list_hook_rules(ipt, hook)?;
-    if !jump_position_ok(&rules, &jump, position) {
+    if !jump_position_ok(&rules, &jump) {
         run_ipt(ipt, &["-w", "-I", hook, "1", "-j", target])?;
         rules = list_hook_rules(ipt, hook)?;
     }
@@ -718,130 +647,6 @@ fn ipt_cmd(family: AddrFamily) -> &'static str {
     }
 }
 
-fn add_masquerade_rules(interfaces: &[String]) -> Result<()> {
-    let output = Command::new("iptables")
-        .args(["-w", "-t", "nat", "-N", NAT_CHAIN])
-        .output()
-        .map_err(|e| Error::ApplyError(format!("spawn iptables: {e}")))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if !stderr.contains("already exists") {
-            return Err(Error::ApplyError(format!(
-                "iptables -t nat -N {NAT_CHAIN} failed: {}",
-                stderr.trim()
-            )));
-        }
-    }
-
-    let output = Command::new("iptables")
-        .args(["-w", "-t", "nat", "-F", NAT_CHAIN])
-        .output()
-        .map_err(|e| Error::ApplyError(format!("spawn iptables: {e}")))?;
-    if !output.status.success() {
-        return Err(Error::ApplyError(format!(
-            "iptables -t nat -F {NAT_CHAIN} failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        )));
-    }
-
-    for iface in interfaces {
-        let output = Command::new("iptables")
-            .args([
-                "-w", "-t", "nat", "-A", NAT_CHAIN, "-o", iface, "-j", "MASQUERADE",
-            ])
-            .output()
-            .map_err(|e| Error::ApplyError(format!("spawn iptables: {e}")))?;
-        if !output.status.success() {
-            return Err(Error::ApplyError(format!(
-                "iptables -t nat -A {NAT_CHAIN} -o {iface}: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            )));
-        }
-        tracing::debug!("Populated {NAT_CHAIN} for interface {iface}");
-    }
-
-    let jump_present = Command::new("iptables")
-        .args(["-w", "-t", "nat", "-C", "POSTROUTING", "-j", NAT_CHAIN])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    if !jump_present {
-        let output = Command::new("iptables")
-            .args(["-w", "-t", "nat", "-A", "POSTROUTING", "-j", NAT_CHAIN])
-            .output()
-            .map_err(|e| Error::ApplyError(format!("spawn iptables: {e}")))?;
-        if !output.status.success() {
-            return Err(Error::ApplyError(format!(
-                "iptables -t nat -A POSTROUTING -j {NAT_CHAIN}: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            )));
-        }
-    }
-
-    Ok(())
-}
-
-/// IPv6 is best-effort: the kernel may lack it, and these are additive accepts.
-fn add_forwarding_rules(interfaces: &[String]) -> Result<()> {
-    add_forwarding_rules_family("iptables", interfaces)?;
-    if let Err(e) = add_forwarding_rules_family("ip6tables", interfaces) {
-        tracing::debug!("ip6tables forwarding plane (non-fatal): {e}");
-    }
-    Ok(())
-}
-
-fn add_forwarding_rules_family(ipt: &str, interfaces: &[String]) -> Result<()> {
-    let output = Command::new(ipt)
-        .args(["-w", "-N", FORWARD_LAN_CHAIN])
-        .output()
-        .map_err(|e| Error::ApplyError(format!("spawn {ipt}: {e}")))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if !stderr.contains("exists") {
-            return Err(Error::ApplyError(format!(
-                "{ipt} -N {FORWARD_LAN_CHAIN} failed: {}",
-                stderr.trim()
-            )));
-        }
-    }
-
-    run_ipt(ipt, &["-w", "-F", FORWARD_LAN_CHAIN])?;
-
-    for iface in interfaces {
-        // MSS clamp must precede the accepts.
-        run_ipt(ipt, &[
-            "-w", "-A", FORWARD_LAN_CHAIN, "-o", iface, "-p", "tcp", "--tcp-flags",
-            "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu",
-        ])?;
-        run_ipt(ipt, &[
-            "-w", "-A", FORWARD_LAN_CHAIN, "-i", iface, "-p", "tcp", "--tcp-flags",
-            "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu",
-        ])?;
-        run_ipt(ipt, &["-w", "-A", FORWARD_LAN_CHAIN, "-o", iface, "-j", "ACCEPT"])?;
-        // Established only: the exit never initiates into the LAN.
-        run_ipt(ipt, &[
-            "-w", "-A", FORWARD_LAN_CHAIN, "-i", iface, "-m", "conntrack", "--ctstate",
-            "ESTABLISHED,RELATED", "-j", "ACCEPT",
-        ])?;
-        tracing::debug!("Populated {FORWARD_LAN_CHAIN} ({ipt}) for interface {iface}");
-    }
-    ensure_jump(ipt, FW3_HOOK_FORWARD, FORWARD_LAN_CHAIN, JumpPosition::First)
-}
-
-fn remove_forwarding_rules() {
-    for ipt in ["iptables", "ip6tables"] {
-        let _ = Command::new(ipt)
-            .args(["-w", "-D", FW3_HOOK_FORWARD, "-j", FORWARD_LAN_CHAIN])
-            .output();
-        let _ = Command::new(ipt)
-            .args(["-w", "-F", FORWARD_LAN_CHAIN])
-            .output();
-        let _ = Command::new(ipt)
-            .args(["-w", "-X", FORWARD_LAN_CHAIN])
-            .output();
-    }
-}
-
 fn run_ipt(ipt: &str, args: &[&str]) -> Result<()> {
     let output = Command::new(ipt)
         .args(args)
@@ -858,26 +663,6 @@ fn run_ipt(ipt: &str, args: &[&str]) -> Result<()> {
     }
 }
 
-fn remove_masquerade_rules() {
-    // -D removes one match per call; loop for stale duplicates.
-    loop {
-        let removed = Command::new("iptables")
-            .args(["-w", "-t", "nat", "-D", "POSTROUTING", "-j", NAT_CHAIN])
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if !removed {
-            break;
-        }
-    }
-    let _ = Command::new("iptables")
-        .args(["-w", "-t", "nat", "-F", NAT_CHAIN])
-        .output();
-    let _ = Command::new("iptables")
-        .args(["-w", "-t", "nat", "-X", NAT_CHAIN])
-        .output();
-}
-
 #[cfg(test)]
 mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -889,13 +674,12 @@ mod tests {
     fn jump_position_rules() {
         let r = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         let j = "-j NYM_OUTPUT";
-        assert!(jump_position_ok(&r(&[j]), j, JumpPosition::Leading));
-        assert!(jump_position_ok(&r(&[j, "-j ACCEPT"]), j, JumpPosition::First));
-        assert!(jump_position_ok(&r(&["-j NYM_EMERGENCY_OUT", j]), j, JumpPosition::Leading));
-        assert!(!jump_position_ok(&r(&["-j NYM_EMERGENCY_OUT", j]), j, JumpPosition::First));
-        assert!(!jump_position_ok(&r(&["-j ACCEPT", j]), j, JumpPosition::Leading));
-        assert!(!jump_position_ok(&r(&["-p tcp -j NYM_OUTPUT", j]), j, JumpPosition::Leading));
-        assert!(!jump_position_ok(&r(&[]), j, JumpPosition::Leading));
+        assert!(jump_position_ok(&r(&[j]), j));
+        assert!(jump_position_ok(&r(&[j, "-j ACCEPT"]), j));
+        assert!(jump_position_ok(&r(&["-j NYM_EMERGENCY_OUT", j]), j));
+        assert!(!jump_position_ok(&r(&["-j ACCEPT", j]), j));
+        assert!(!jump_position_ok(&r(&["-p tcp -j NYM_OUTPUT", j]), j));
+        assert!(!jump_position_ok(&r(&[]), j));
     }
 
     #[test]
@@ -940,6 +724,43 @@ mod tests {
                 "fw3-include.sh must not carry LAN network lists: {line}"
             );
         }
+    }
+
+    /// Both helpers ship in every package (build-ipk.sh / build-apk.sh fail
+    /// without them), so the include no longer carries stand-in definitions
+    /// for a missing one: it logs CRITICAL and exits, installing nothing.
+    #[test]
+    fn include_script_refuses_to_run_without_its_helpers() {
+        const INCLUDE: &str = include_str!("../../scripts/fw3-include.sh");
+        const GUARD: &str = include_str!("../../scripts/fw-boot-guard.sh");
+        let lines: Vec<&str> = INCLUDE.lines().map(str::trim).collect();
+
+        for helper in ["fw-boot-guard.sh", "fw-rules.sh"] {
+            let check = format!("[ -r \"$NYM_SHARE_DIR/{helper}\" ] || {{");
+            let at = lines
+                .iter()
+                .position(|l| *l == check)
+                .unwrap_or_else(|| panic!("fw3-include.sh must test for {helper}"));
+            assert!(
+                lines[at + 1].contains("CRITICAL") && lines[at + 2] == "exit 1",
+                "a missing {helper} must log CRITICAL and exit"
+            );
+            let source = format!(". \"$NYM_SHARE_DIR/{helper}\"");
+            assert!(lines.iter().skip(at).any(|l| *l == source));
+        }
+        for line in &lines {
+            assert!(
+                !line.contains("nym_runtime_dir_prepare() {")
+                    && !line.contains("nym_boot_block_wanted() {")
+                    && !line.contains("nym_emergency_rules_v4() {")
+                    && !line.contains("nym_boot_block_nft() {"),
+                "fw3-include.sh must not define a stand-in for a helper function: {line}"
+            );
+        }
+        assert!(
+            GUARD.lines().any(|l| l == "nym_fw_backend() {"),
+            "the backend detector lives in the guard"
+        );
     }
 
     #[test]
@@ -1081,7 +902,6 @@ mod tests {
         for expected in [
             format!("RULES_V4=\"$NYM_RUNTIME_DIR{}\"", file(FW3_RULES_V4_PATH)),
             format!("RULES_V6=\"$NYM_RUNTIME_DIR{}\"", file(FW3_RULES_V6_PATH)),
-            format!("IFACES_FILE=\"$NYM_RUNTIME_DIR{}\"", file(IFACES_PATH)),
             format!(
                 "TRANSITION_FILE=\"$NYM_RUNTIME_DIR{}\"",
                 file(FW3_TRANSITION_PATH)
@@ -1103,7 +923,7 @@ mod tests {
         assert!(INCLUDE.contains("nym_runtime_dir_prepare"));
         assert!(GUARD.contains("nym_runtime_dir_trusted"));
         for line in INCLUDE.lines() {
-            for var in ["RULES_V4", "RULES_V6", "IFACES_FILE", "TRANSITION_FILE"] {
+            for var in ["RULES_V4", "RULES_V6", "TRANSITION_FILE"] {
                 assert!(
                     !line.contains(&format!("[ -f \"${var}\""))
                         && !line.contains(&format!("[ ! -f \"${var}\"")),

@@ -5,7 +5,9 @@
 # `fw3 reload` leaves foreign chains and the *_rule hooks alone, so a reload
 # only reconciles. `fw3 restart`/`stop` flush every table and run this script
 # last; the daemon's persisted restore scripts in $NYM_RUNTIME_DIR (v4.rules,
-# v6.rules, ifaces, transition, lock) are what rebuild the kill-switch then.
+# v6.rules, transition, lock) are what rebuild the kill-switch then. Only the
+# kill-switch: masquerade, MSS clamp and LAN-to-tunnel forwarding are fw3's
+# own, from the `nym` zone in /etc/config/firewall, rebuilt on every reload.
 # The files are fed to iptables-restore as root, so the directory must be a
 # private root-owned one (never /tmp). The whole run holds the same flock the
 # daemon holds for every apply/reset. A transition marker means a daemon died
@@ -26,7 +28,6 @@ set -e
 NYM_RUNTIME_DIR="${NYM_RUNTIME_DIR:-/var/run/nym-firewall}"
 RULES_V4="$NYM_RUNTIME_DIR/v4.rules"
 RULES_V6="$NYM_RUNTIME_DIR/v6.rules"
-IFACES_FILE="$NYM_RUNTIME_DIR/ifaces"
 TRANSITION_FILE="$NYM_RUNTIME_DIR/transition"
 LOCK_FILE="$NYM_RUNTIME_DIR/lock"
 
@@ -41,39 +42,27 @@ NYM_OUTPUT="NYM_OUTPUT"
 NYM_FORWARD="NYM_FORWARD"
 NYM_MANGLE_PRE="NYM_MANGLE_PREROUTING"
 NYM_MANGLE_OUT="NYM_MANGLE_OUTPUT"
-NAT_CHAIN="NYM_POSTROUTING"
-FORWARD_LAN_CHAIN="NYM_FORWARD_LAN"
 
-# A missing guard must fail towards not blocking, never towards a block
-# nothing can lift.
+# Both helpers ship in the package. Without the guard there is no runtime
+# directory check and no boot decision; without the generated rule sets no
+# block can be built. Either way nothing this script could install would
+# be lifted by anything, so it fails towards not blocking, loudly.
 NYM_SHARE_DIR="${NYM_SHARE_DIR:-/usr/share/nym-vpn}"
-if [ -r "$NYM_SHARE_DIR/fw-boot-guard.sh" ]; then
-    # shellcheck source-path=SCRIPTDIR
-    # shellcheck source=fw-boot-guard.sh
-    . "$NYM_SHARE_DIR/fw-boot-guard.sh"
-else
-    nym_boot_block_wanted() {
-        NYM_BOOT_REASON="$NYM_SHARE_DIR/fw-boot-guard.sh is missing; not blocking"
-        return 1
-    }
-    nym_runtime_dir_prepare() { return 1; }
-fi
+[ -r "$NYM_SHARE_DIR/fw-boot-guard.sh" ] || {
+    logger -t nym-vpn "CRITICAL: $NYM_SHARE_DIR/fw-boot-guard.sh is missing; the fw3 include cannot run and installs no block"
+    exit 1
+}
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=fw-boot-guard.sh
+. "$NYM_SHARE_DIR/fw-boot-guard.sh"
 
-# Emergency and boot-time rule sets, generated from boot_rules.rs. Without
-# the file the generators print nothing and no block can be built.
-if [ -r "$NYM_SHARE_DIR/fw-rules.sh" ]; then
-    # shellcheck source-path=SCRIPTDIR
-    # shellcheck source=fw-rules.sh
-    . "$NYM_SHARE_DIR/fw-rules.sh"
-else
-    logger -t nym-vpn "CRITICAL: $NYM_SHARE_DIR/fw-rules.sh is missing; no emergency block can be installed"
-    NYM_EMERGENCY_OUT="NYM_EMERGENCY_OUT"
-    NYM_EMERGENCY_FWD="NYM_EMERGENCY_FWD"
-    NYM_BOOT_TABLE="nym_boot"
-    nym_emergency_rules_v4() { return 1; }
-    nym_emergency_rules_v6() { return 1; }
-    nym_boot_block_nft() { return 1; }
-fi
+[ -r "$NYM_SHARE_DIR/fw-rules.sh" ] || {
+    logger -t nym-vpn "CRITICAL: $NYM_SHARE_DIR/fw-rules.sh is missing; the fw3 include cannot run and installs no block"
+    exit 1
+}
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=fw-rules.sh
+. "$NYM_SHARE_DIR/fw-rules.sh"
 
 EMERGENCY_OUT="$NYM_EMERGENCY_OUT"
 EMERGENCY_FWD="$NYM_EMERGENCY_FWD"
@@ -85,18 +74,18 @@ have_state() {
     [ "$STATE_TRUSTED" = 1 ] && [ -f "$1" ]
 }
 
-# Mode "first": rule 1 exactly. Mode "leading": only NYM_* jumps may precede
-# it, or a foreign rule could accept past the kill-switch. A jump in a valid
-# position is left alone; delete + re-insert would unhook it briefly.
+# Only NYM_* jumps may precede the jump, or a foreign rule could accept past
+# the kill-switch. A jump in a valid position is left alone; delete +
+# re-insert would unhook it briefly.
 ensure_jump() {
-    local ipt="$1" hook="$2" target="$3" mode="$4" rules pos n ok first
+    local ipt="$1" hook="$2" target="$3" rules pos n ok first
 
     rules=$($ipt -w -S "$hook" 2>/dev/null | grep -e "^-A ") || rules=""
     pos=$(printf "%s\n" "$rules" | grep -n -x -e "-A $hook -j $target" | head -1 | cut -d: -f1)
     ok=0
     if [ "$pos" = 1 ]; then
         ok=1
-    elif [ -n "$pos" ] && [ "$mode" = leading ] \
+    elif [ -n "$pos" ] \
         && ! printf "%s\n" "$rules" | head -n $((pos - 1)) | grep -qv -e "-j NYM_"; then
         ok=1
     fi
@@ -127,9 +116,9 @@ ensure_mangle_jump() {
 setup_jumps() {
     local ipt="$1"
 
-    ensure_jump "$ipt" "$HOOK_INPUT" "$NYM_INPUT" leading || return 1
-    ensure_jump "$ipt" "$HOOK_OUTPUT" "$NYM_OUTPUT" leading || return 1
-    ensure_jump "$ipt" "$HOOK_FORWARD" "$NYM_FORWARD" leading || return 1
+    ensure_jump "$ipt" "$HOOK_INPUT" "$NYM_INPUT" || return 1
+    ensure_jump "$ipt" "$HOOK_OUTPUT" "$NYM_OUTPUT" || return 1
+    ensure_jump "$ipt" "$HOOK_FORWARD" "$NYM_FORWARD" || return 1
 }
 
 # Fail-closed OUTPUT/FORWARD block in dedicated chains, one atomic restore.
@@ -221,68 +210,6 @@ apply_rules() {
         logger -t nym-vpn "CRITICAL: failed to install emergency $ipt kill-switch block"
     fi
     return 1
-}
-
-restore_masquerade() {
-    if ! have_state "$IFACES_FILE"; then
-        cleanup_masquerade
-        return 0
-    fi
-
-    iptables -w -t nat -N "$NAT_CHAIN" 2>/dev/null || true
-    iptables -w -t nat -F "$NAT_CHAIN" 2>/dev/null || true
-
-    local iface
-    while read -r iface; do
-        [ -n "$iface" ] || continue
-        iptables -w -t nat -A "$NAT_CHAIN" -o "$iface" -j MASQUERADE 2>/dev/null || true
-        logger -t nym-vpn "Restored masquerade for interface $iface"
-    done < "$IFACES_FILE"
-
-    iptables -w -t nat -C POSTROUTING -j "$NAT_CHAIN" 2>/dev/null || \
-        iptables -w -t nat -A POSTROUTING -j "$NAT_CHAIN" 2>/dev/null || true
-}
-
-cleanup_masquerade() {
-    while iptables -w -t nat -D POSTROUTING -j "$NAT_CHAIN" 2>/dev/null; do :; done
-    iptables -w -t nat -F "$NAT_CHAIN" 2>/dev/null || true
-    iptables -w -t nat -X "$NAT_CHAIN" 2>/dev/null || true
-}
-
-# Needed with the kill-switch off too: tun devices are in no fw3 zone, so
-# fw3's forward policy rejects LAN clients without these accepts.
-restore_forwarding() {
-    if ! have_state "$IFACES_FILE"; then
-        cleanup_forwarding
-        return 0
-    fi
-
-    local ipt iface
-    for ipt in iptables ip6tables; do
-        $ipt -w -N "$FORWARD_LAN_CHAIN" 2>/dev/null || true
-        $ipt -w -F "$FORWARD_LAN_CHAIN" 2>/dev/null || true
-        while read -r iface; do
-            [ -n "$iface" ] || continue
-            $ipt -w -A "$FORWARD_LAN_CHAIN" -o "$iface" -p tcp --tcp-flags SYN,RST SYN \
-                -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
-            $ipt -w -A "$FORWARD_LAN_CHAIN" -i "$iface" -p tcp --tcp-flags SYN,RST SYN \
-                -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
-            $ipt -w -A "$FORWARD_LAN_CHAIN" -o "$iface" -j ACCEPT 2>/dev/null || true
-            $ipt -w -A "$FORWARD_LAN_CHAIN" -i "$iface" -m conntrack \
-                --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
-        done < "$IFACES_FILE"
-        # Rule 1: the MSS clamp must run before NYM_FORWARD accepts.
-        ensure_jump "$ipt" "$HOOK_FORWARD" "$FORWARD_LAN_CHAIN" first || true
-    done
-}
-
-cleanup_forwarding() {
-    local ipt
-    for ipt in iptables ip6tables; do
-        $ipt -w -D "$HOOK_FORWARD" -j "$FORWARD_LAN_CHAIN" 2>/dev/null || true
-        $ipt -w -F "$FORWARD_LAN_CHAIN" 2>/dev/null || true
-        $ipt -w -X "$FORWARD_LAN_CHAIN" 2>/dev/null || true
-    done
 }
 
 kernel_ipv6_enabled() {
@@ -378,10 +305,8 @@ main() {
     # to this run.
     if have_state "$NYM_VPND_STOPPED"; then
         logger -t nym-vpn "nym-vpnd was stopped by the administrator; discarding persisted fw3 state"
-        rm -f "$RULES_V4" "$RULES_V6" "$IFACES_FILE" "$TRANSITION_FILE" 2>/dev/null
+        rm -f "$RULES_V4" "$RULES_V6" "$TRANSITION_FILE" 2>/dev/null
         handle_no_policy || failed=1
-        restore_masquerade
-        restore_forwarding
         return "$failed"
     fi
 
@@ -402,10 +327,6 @@ main() {
     else
         handle_no_policy || failed=1
     fi
-
-    # The tunnel plane is needed with the kill-switch on and off.
-    restore_masquerade
-    restore_forwarding
     return "$failed"
 }
 

@@ -38,6 +38,22 @@ vpn_pkg_install() {
     return 0
 }
 
+# The firewall helpers the package must ship: the includes fw3/fw4 run and
+# the two files they source. An install that lacks one has no boot block
+# and no reload survival, so this is asserted right after every install of
+# the package under test.
+# Args: ctid
+vpn_fw_helpers_present() {
+    local ctid="$1" f ok=0
+    for f in fw3-include.sh fw4-include.sh fw-boot-guard.sh fw-rules.sh; do
+        if ! pct_sh "$ctid" "[ -f /usr/share/nym-vpn/$f ]"; then
+            echo "  missing /usr/share/nym-vpn/$f" >&2
+            ok=1
+        fi
+    done
+    return "$ok"
+}
+
 # Installed package version as the package manager reports it.
 vpn_version() {
     local ctid="$1"

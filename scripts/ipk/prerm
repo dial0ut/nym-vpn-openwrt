@@ -46,34 +46,30 @@ if command -v nft >/dev/null 2>&1; then
     nft delete table inet nym_boot 2>/dev/null
 fi
 
-# Same detector as the include registration, so the two cannot disagree.
-if [ -x /usr/share/nym-vpn/fw-backend.sh ]; then
-    nym_fw_backend="$(/usr/share/nym-vpn/fw-backend.sh)"
-elif [ -x /sbin/fw4 ] || [ -x /usr/sbin/fw4 ]; then
-    nym_fw_backend="fw4"
+# The guard is the one fw3/fw4 detector, shared with the include
+# registration and the init script, so the three cannot disagree. The
+# package's files are still on disk while prerm runs.
+NYM_SHARE_DIR="${NYM_SHARE_DIR:-/usr/share/nym-vpn}"
+if [ -r "$NYM_SHARE_DIR/fw-boot-guard.sh" ]; then
+    # shellcheck source=/dev/null
+    . "$NYM_SHARE_DIR/fw-boot-guard.sh"
+    nym_fw_backend="$(nym_fw_backend)"
 else
-    nym_fw_backend="fw3"
+    logger -t nym-vpn "CRITICAL: $NYM_SHARE_DIR/fw-boot-guard.sh is missing; tearing down the fw3 chains blind"
+    nym_fw_backend=""
 fi
 if [ "$nym_fw_backend" = "fw4" ]; then
-    # No lock on fw4: each nft command is one atomic transaction and the
-    # include never touches `inet nym`. The include cannot re-arm the boot
-    # block after this: the `disable` above removed the rc.d link its guard
-    # requires, and the uci include section goes below.
+    # No lock on fw4: one atomic transaction, and the include never touches
+    # `inet nym`. The include cannot re-arm the boot block after this: the
+    # `disable` above removed the rc.d link its guard requires, and the uci
+    # include section goes below. Nothing of ours is inside `inet fw4`.
     nft delete table inet nym 2>/dev/null
-    for chain in srcnat forward_lan; do
-        handles=$(nft -a list chain inet fw4 "$chain" 2>/dev/null | grep "nym-vpn:" | sed 's/.*handle //')
-        for h in $handles; do
-            nft delete rule inet fw4 "$chain" handle "$h" 2>/dev/null
-        done
-    done
 else
     # The include owns the fw3 teardown (stop marker present: discard
-    # persisted state, remove chains, jumps, masquerade, LAN forwarding).
-    # The init script's stop already ran it under the lock; run it once more
-    # the same way so a stop that could not take the lock is completed here.
-    # The inline fallback is for an install whose include or guard is gone;
-    # it covers the filter and mangle chains but not the NYM_POSTROUTING nat
-    # chain, only the commented POSTROUTING rules.
+    # persisted state, remove chains and jumps). The init script's stop
+    # already ran it under the lock; run it once more the same way so a
+    # stop that could not take the lock is completed here. The inline
+    # fallback is for an install whose include or guard is gone.
     nym_fw3_teardown_inline() {
         for ipt in iptables ip6tables; do
             for hook in input_rule output_rule forwarding_rule; do
@@ -83,10 +79,9 @@ else
             done
             $ipt -t mangle -D PREROUTING -j NYM_MANGLE_PREROUTING 2>/dev/null
             $ipt -t mangle -D OUTPUT -j NYM_MANGLE_OUTPUT 2>/dev/null
-            $ipt -D forwarding_rule -j NYM_FORWARD_LAN 2>/dev/null
             while $ipt -D output_rule -j NYM_EMERGENCY_OUT 2>/dev/null; do :; done
             while $ipt -D forwarding_rule -j NYM_EMERGENCY_FWD 2>/dev/null; do :; done
-            for chain in NYM_INPUT NYM_OUTPUT NYM_FORWARD NYM_FORWARD_LAN \
+            for chain in NYM_INPUT NYM_OUTPUT NYM_FORWARD \
                 NYM_EMERGENCY_OUT NYM_EMERGENCY_FWD; do
                 $ipt -F "$chain" 2>/dev/null
                 $ipt -X "$chain" 2>/dev/null
@@ -96,21 +91,16 @@ else
                 $ipt -t mangle -X "$chain" 2>/dev/null
             done
         done
-        for num in $(iptables -t nat -L POSTROUTING -n --line-numbers -v 2>/dev/null | grep "nym-vpn" | awk '{print $1}' | sort -rn); do
-            iptables -t nat -D POSTROUTING "$num" 2>/dev/null
-        done
     }
-    if [ -r /usr/share/nym-vpn/fw-boot-guard.sh ] \
-        && [ -x /usr/share/nym-vpn/fw3-include.sh ] \
+    if [ -n "$nym_fw_backend" ] \
+        && [ -x "$NYM_SHARE_DIR/fw3-include.sh" ] \
         && command -v flock >/dev/null 2>&1; then
         (
-            # shellcheck source=/dev/null
-            . /usr/share/nym-vpn/fw-boot-guard.sh
             nym_runtime_dir_prepare || exit 1
             touch "$NYM_VPND_STOPPED" 2>/dev/null || exit 1
             exec 9>"$NYM_RUNTIME_DIR/lock"
             flock 9 || exit 1
-            NYM_FW_LOCKED=1 /usr/share/nym-vpn/fw3-include.sh 2>/dev/null
+            NYM_FW_LOCKED=1 "$NYM_SHARE_DIR/fw3-include.sh" 2>/dev/null
         ) || nym_fw3_teardown_inline
     else
         nym_fw3_teardown_inline
@@ -135,11 +125,19 @@ if [ "$PKG_UPGRADE" != "1" ]; then
     done
 fi
 
-# Removal only: postinst reconciles the include on upgrade, and if it never
-# runs a deleted section would leave nothing to survive a firewall reload.
+# Removal only: postinst reconciles the include and the zone on upgrade, and
+# if it never runs a deleted section would leave nothing to survive a
+# firewall reload. Only the sections uci-defaults named are removed; a zone
+# the administrator declared under the same name stays. The reload drops the
+# zone's rules; the include section is already gone, so it does not run.
 if [ "$PKG_UPGRADE" != "1" ]; then
     uci delete firewall.nym_vpn 2>/dev/null
+    uci -q delete firewall.nym_lan_fwd
+    uci -q delete firewall.nym_zone
     uci commit firewall 2>/dev/null
+    if [ -x /etc/init.d/firewall ]; then
+        /etc/init.d/firewall reload >/dev/null 2>&1
+    fi
 fi
 
 rm -f /tmp/dnsmasq.d/nym-adblock.conf 2>/dev/null

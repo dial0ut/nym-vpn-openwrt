@@ -2,33 +2,33 @@
 # Copyright 2025 - Nym Technologies SA <contact@nymtech.net>
 # SPDX-License-Identifier: GPL-3.0-only
 
+# Exit non-zero on failure so both callers (postinst, the boot-time defaults
+# runner) keep the script for another attempt.
+fail() {
+    echo "nym-vpn: firewall registration failed: $1" >&2
+    logger -t nym-vpn "firewall registration failed: $1"
+    exit 1
+}
+
 /etc/init.d/nym-vpnd enable 2>/dev/null
 
-# The boot-time defaults runner executes before the firewall service, so
-# the detector must resolve with nothing loaded.
-if [ -x /usr/share/nym-vpn/fw-backend.sh ]; then
-    nym_fw_backend="$(/usr/share/nym-vpn/fw-backend.sh)"
-elif grep -q -w fw4 /etc/init.d/firewall 2>/dev/null || [ -x /sbin/fw4 ]; then
-    nym_fw_backend="fw4"
-else
-    nym_fw_backend="fw3"
-fi
-if [ "$nym_fw_backend" = "fw4" ]; then
-    nym_fw_include="/usr/share/nym-vpn/fw4-include.sh"
+# The guard ships in the package and is the one fw3/fw4 detector, shared
+# with prerm and the init script; it resolves with nothing loaded, which is
+# the boot-time runner's situation (it executes before the firewall).
+NYM_SHARE_DIR="${NYM_SHARE_DIR:-/usr/share/nym-vpn}"
+[ -r "$NYM_SHARE_DIR/fw-boot-guard.sh" ] || fail "$NYM_SHARE_DIR/fw-boot-guard.sh is missing"
+# shellcheck source=/dev/null
+. "$NYM_SHARE_DIR/fw-boot-guard.sh"
+if [ "$(nym_fw_backend)" = "fw4" ]; then
+    nym_fw_include="$NYM_SHARE_DIR/fw4-include.sh"
     nym_fw_reload=""
 else
-    nym_fw_include="/usr/share/nym-vpn/fw3-include.sh"
+    nym_fw_include="$NYM_SHARE_DIR/fw3-include.sh"
     nym_fw_reload="1"
 fi
 
 # Reconcile every field: fw4_compatible would make fw4 capture stdout
-# instead of running the include's nft side effects. Exit non-zero on
-# failure so both callers keep the script for another attempt.
-fail() {
-    echo "nym-vpn: firewall include registration failed: $1" >&2
-    logger -t nym-vpn "firewall include registration failed: $1"
-    exit 1
-}
+# instead of running the include's nft side effects.
 uci set firewall.nym_vpn=include || fail "uci set firewall.nym_vpn=include"
 uci set firewall.nym_vpn.type=script || fail "uci set type"
 uci set firewall.nym_vpn.path="$nym_fw_include" || fail "uci set path"
@@ -39,7 +39,49 @@ if [ -n "$nym_fw_reload" ]; then
 else
     uci -q delete firewall.nym_vpn.reload
 fi
-uci commit firewall || fail "uci commit firewall"
+
+# The tunnel plane, declared once so fw3/fw4 render masquerade, the MSS
+# clamp and lan -> nym forwarding on every reload without the daemon. The
+# devices are the daemon's tun interfaces (nym0, nym1; both backends take
+# the `+` wildcard). input/forward REJECT: the exit never opens a flow into
+# the router or the LAN. masq6 is fw4-only and ignored by fw3. A zone of
+# that name that already exists is the administrator's; left alone.
+nym_zone_present() {
+    uci -q show firewall | grep -qE "^firewall\.[^.]+\.name='?nym'?$"
+}
+nym_forwarding_present() {
+    local sec
+    for sec in $(uci -q show firewall | sed -n "s/^firewall\.\([^.=]*\)=forwarding$/\1/p"); do
+        [ "$(uci -q get "firewall.$sec.src")" = "lan" ] \
+            && [ "$(uci -q get "firewall.$sec.dest")" = "nym" ] && return 0
+    done
+    return 1
+}
+if ! nym_zone_present; then
+    uci set firewall.nym_zone=zone || fail "uci set firewall.nym_zone=zone"
+    uci set firewall.nym_zone.name=nym || fail "uci set zone name"
+    uci add_list firewall.nym_zone.device='nym+' || fail "uci add_list zone device"
+    uci set firewall.nym_zone.input=REJECT || fail "uci set zone input"
+    uci set firewall.nym_zone.output=ACCEPT || fail "uci set zone output"
+    uci set firewall.nym_zone.forward=REJECT || fail "uci set zone forward"
+    uci set firewall.nym_zone.masq=1 || fail "uci set zone masq"
+    uci set firewall.nym_zone.masq6=1 || fail "uci set zone masq6"
+    uci set firewall.nym_zone.mtu_fix=1 || fail "uci set zone mtu_fix"
+fi
+if ! nym_forwarding_present; then
+    uci set firewall.nym_lan_fwd=forwarding || fail "uci set firewall.nym_lan_fwd=forwarding"
+    uci set firewall.nym_lan_fwd.src=lan || fail "uci set forwarding src"
+    uci set firewall.nym_lan_fwd.dest=nym || fail "uci set forwarding dest"
+fi
+
+# `uci set` of an unchanged value records no change, so this is empty on a
+# re-run; the reload is what renders a new zone before the daemon starts.
+if [ -n "$(uci -q changes firewall)" ]; then
+    uci commit firewall || fail "uci commit firewall"
+    if [ -x /etc/init.d/firewall ]; then
+        /etc/init.d/firewall reload >/dev/null 2>&1 || true
+    fi
+fi
 
 # rpcd is left alone: postinst defers its refresh until the transaction has
 # returned (#13), and at first boot rpcd has not started yet.
