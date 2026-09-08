@@ -75,6 +75,10 @@ the GitHub release notes.
 
 ### Fixed
 
+- With the kill switch on, the daemon's API clients are now pinned to the
+  admitted addresses whenever it sits in Disconnected or Error with a live
+  resolution, instead of only right after a resolution; the Error state also
+  refreshes the allow-list on the same hourly cadence as Disconnected.
 - Installing or upgrading from LuCI's Software page reportedly never finished
   while the same upgrade from a shell worked (#13). Likely cause: the
   package's post-install step restarted rpcd — the service LuCI runs opkg/apk
