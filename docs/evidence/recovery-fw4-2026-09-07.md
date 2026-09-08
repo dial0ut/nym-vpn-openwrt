@@ -1,3 +1,5 @@
+> The scripts that produced this run now live in `tests/leak/` (bed `fw4-ct`, scenarios `11`–`18`); `tests/recovery/` is gone. Content below is unchanged.
+
 # Recovery and management-access evidence, fw4 bed
 
 Date: 2026-09-07. Bed: `openwrt25` = Proxmox LXC CT 425, OpenWrt 25.12.4 x86_64,
