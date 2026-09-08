@@ -2,7 +2,8 @@
 # Daemon SIGKILLed while a connect is in flight (Connecting state, firewall
 # policy mid-change). Expect: no leak, procd respawns it, any leftover
 # transition marker keeps the include fail-closed, and the respawned daemon
-# converges (policy hooked, no emergency chains left).
+# converges (policy hooked, no boot block left).
+scenario_connected=0
 scenario_wait=45
 scenario_pre() {
     rt 'nym-vpnc disconnect >/dev/null 2>&1; sleep 4; nym-vpnc status | head -1'
@@ -15,15 +16,13 @@ scenario_inject() {
         sleep 1; ls /var/run/nym-firewall/'
 }
 scenario_check() {
-    local out
-    out=$(rt 'echo "pid now: $(pidof nym-vpnd)"; nym-vpnc status 2>&1 | head -1 | cut -c1-60
-        iptables -w -C output_rule -j NYM_OUTPUT 2>/dev/null && echo "policy hooked" || echo "policy NOT hooked"
-        echo "emergency chains: $(iptables -w -S | grep -c NYM_EMERGENCY)"; ls /var/run/nym-firewall/
-        logread | grep -E "nym-vpn:|procd.*nym-vpnd" | tail -5 | cut -c1-150')
-    printf '%s\n' "$out"
-    if [ "$(printf '%s\n' "$out" | grep -c '^policy hooked')" -gt 0 ]; then
-        note "recovered: daemon respawned, policy hooked"
+    local st
+    rt 'echo "pid now: $(pidof nym-vpnd)"; nym-vpnc status 2>&1 | head -1 | cut -c1-60; ls /var/run/nym-firewall/
+        logread | grep -E "nym-vpn:|procd.*nym-vpnd" | tail -5 | cut -c1-150'
+    st=$(state); echo "$st"
+    if printf '%s' "$st" | grep -qE 'policy=yes boot=no .*vpnd=[0-9]'; then
+        recovered "daemon respawned, policy hooked"
     else
-        note "NOT recovered: policy not hooked after respawn"
+        not_recovered "after respawn: $st"
     fi
 }

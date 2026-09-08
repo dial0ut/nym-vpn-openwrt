@@ -29,7 +29,17 @@ before_id=$(vpn_account_identity "$OPENWRT_CTID")
 echo "  installed before upgrade: $before_ver (account ${before_id:-none})"
 
 # Sampler inside the router: one line per second, table present or GONE.
-pct_sh "$OPENWRT_CTID" 'rm -f /tmp/ks-poll.log; ( for i in $(seq 1 90); do if nft list table inet nym >/dev/null 2>&1; then echo "$(date +%T) present"; else echo "$(date +%T) GONE"; fi; sleep 1; done > /tmp/ks-poll.log 2>&1 & )'
+# Its pid is recorded so it can be stopped once the new daemon is up; the
+# 300 s bound only guards against a runner that never comes back.
+pct_sh "$OPENWRT_CTID" 'cat > /tmp/ks-poll.sh <<"S"
+#!/bin/sh
+for i in $(seq 1 300); do
+  if nft list table inet nym >/dev/null 2>&1; then echo "$(date +%T) present"; else echo "$(date +%T) GONE"; fi
+  sleep 1
+done
+S
+chmod +x /tmp/ks-poll.sh; rm -f /tmp/ks-poll.log
+( /tmp/ks-poll.sh </dev/null >/tmp/ks-poll.log 2>&1 & echo $! > /tmp/ks-poll.pid )'
 sleep 2
 
 upgrade_ok=true
@@ -43,7 +53,7 @@ fi
 # then stop sampling.
 vpn_daemon_wait "$OPENWRT_CTID" 40 || { echo "  daemon did not answer after upgrade"; upgrade_ok=false; }
 sleep 5
-pct_sh "$OPENWRT_CTID" 'pkill -f "seq 1 90" >/dev/null 2>&1 || true'
+pct_sh "$OPENWRT_CTID" 'kill "$(cat /tmp/ks-poll.pid 2>/dev/null)" >/dev/null 2>&1 || true'
 
 samples=$(pct_sh "$OPENWRT_CTID" 'wc -l < /tmp/ks-poll.log' | tr -d ' ')
 gone=$(pct_sh "$OPENWRT_CTID" 'grep -c GONE /tmp/ks-poll.log' | tr -d ' ')

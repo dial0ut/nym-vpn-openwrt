@@ -236,35 +236,43 @@ the GitHub release notes.
   three hand-maintained copies of that rule text are gone, and the build
   fails if the committed fragment is stale. The include owns chain teardown
   on fw3; `prerm` and the init script go through it under the shared lock.
-- Two device evidence suites are tracked: `tests/leak/` injects failures on an
-  fw3 router (daemon killed mid-transition and while connected, rule
-  application failing, lock lost, firewall reload and restart, interrupted
-  upgrade, reboot) under a WAN packet capture with a positive control, and
-  `tests/recovery/` exercises an fw4 router's recovery and management access
-  (corrupt config, unusable binary, crash loop, reload storms, untrusted
-  runtime directory, kill-switch toggles, WAN flap, interrupted upgrade).
-  Both ran green on 2026-09-07 (one IPv6 scenario skipped: no v6 upstream).
+- One device evidence suite is tracked, `tests/leak/`: it injects failures
+  (daemon killed mid-transition and while connected, rule application
+  failing, lock lost, firewall reload and restart, corrupt config, unusable
+  binary, crash loop, reload storms, untrusted runtime directory,
+  kill-switch toggles, WAN flap, interrupted upgrade, reboot) under a WAN
+  packet capture with a positive control, on an fw3 VM bed or an fw4
+  container bed selected with `BED=`, and records management access (a held
+  ssh session, a wired probe from the hypervisor, LuCI) and a recovery clock
+  for every scenario. Verdicts are gated: a probe that fails for a reason
+  other than being blocked, an empty or tunnel-less capture, a missing
+  positive control or a scenario that was not connected before its injection
+  is `INCONCLUSIVE`, a scenario whose recovery did not complete is `FAIL`,
+  and the run exits non-zero on either. The 2026-09-07 runs of the earlier
+  fw3 and fw4 suites are kept under `docs/evidence/`.
 - New architecture documents: the kill-switch contract (what is protected in
   every state and lifecycle event, how each cell was verified, and which are
   not protected or unverified), a decision record on the fw3 firewall-restart
   window, and a state-ownership table for every runtime file, chain and table.
-- The OpenWrt integration test harness (QEMU multi-architecture runner and
-  Proxmox container harness with kill-switch and DNS cases) is now tracked
-  under `tests/`, and made runnable: pass/fail counters no longer abort the
-  runner, the timeout wrapper works on shell functions, the mnemonic is
-  delivered on stdin, a failed slot fails the run, a case that aborts before
-  recording a result is counted as a failure, the connected-state checks
-  require `State: Connected`, a `nym` interface and a moved egress address,
-  and the QEMU runner starts at all (`-nographic` and `-daemonize` are
-  mutually exclusive; it now uses `-display none` with a serial log). Every
-  selected case ends in exactly one of PASS, FAIL, SKIP (with a reason) or
-  MISSING, and the Proxmox container harness installs the exact release
-  artifacts under procd with an upgrade case that samples the kill-switch
-  every second. Run on 2026-09-07 against 23.05.5, 24.10.0 and 25.12.4: the
-  install, daemon and upgrade cases pass on all three; the account and
-  idle kill-switch cases fail because a fresh install with the default
+- The OpenWrt integration test harness (Proxmox container harness with
+  kill-switch and DNS cases) is now tracked under `tests/harness/`, and made
+  runnable: the mnemonic is delivered on stdin, a failed slot fails the run,
+  a case that aborts before recording a result is counted as a failure, and
+  the connected-state checks require `State: Connected`, a `nym` interface
+  and a moved egress address. Every selected case ends in exactly one of
+  PASS, FAIL, SKIP (with a reason) or MISSING, and the harness installs the
+  exact release artifacts under procd with an upgrade case that samples the
+  kill-switch every second (the sampler is now stopped by pid, so its samples
+  are complete) and a connected-state case whose DNS check fails when a plain
+  DNS query from the router is seen leaving the WAN, whatever the rule set
+  says. Run on 2026-09-07 against 23.05.5, 24.10.0 and 25.12.4: the install,
+  daemon and upgrade cases pass on all three; the account and idle
+  kill-switch cases fail because a fresh install with the default
   kill-switch cannot reach the API until an endpoint cache exists (issue
-  #15), which is the main open item before a release.
+  #15), which is the main open item before a release. The QEMU
+  multi-architecture runner and the single-machine helper scripts that used
+  to sit next to it were removed: the runner could not start under `set -u`
+  and everything it covered the harness covers.
 - The always-on watchdog now reacts to WAN link events instead of only
   noticing a dropped tunnel at its next poll. A hotplug hook wakes it on
   `ifup`/`ifdown` of a WAN-facing interface (`wan`, `wan6`, anything in the

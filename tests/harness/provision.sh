@@ -7,7 +7,8 @@
 #
 # Usage: provision.sh <slot> <openwrt_version>
 #
-# Reads env: PROXMOX_HOST
+# Reads env: PROXMOX_HOST; WAN_CIDR and WAN_GW for a static WAN address
+# instead of DHCP (refused when the address already answers ping)
 # Writes: nothing on disk locally; all state is in Proxmox CTs.
 # Echoes a summary line that the slot runner parses.
 
@@ -36,8 +37,8 @@ trap 'log "provision failed in ${FUNCNAME[0]:-main} at line $LINENO: $BASH_COMMA
 log "ensuring bridge $BRIDGE"
 bridge_ensure "$BRIDGE"
 
-log "creating OpenWrt $VERSION (CT $OPENWRT_CTID, LAN $LAN_CIDR)"
-pct_create_openwrt "$OPENWRT_CTID" "$VERSION" vmbr0 "$BRIDGE" "$LAN_CIDR"
+log "creating OpenWrt $VERSION (CT $OPENWRT_CTID, WAN ${WAN_CIDR:-dhcp}, LAN $LAN_CIDR)"
+pct_create_openwrt "$OPENWRT_CTID" "$VERSION" vmbr0 "$BRIDGE" "$LAN_CIDR" "${WAN_CIDR:-}" "${WAN_GW:-}"
 
 log "creating DNS logger CT $DNS_CTID at $DNS_IP"
 pct_create_alpine "$DNS_CTID" "$BRIDGE" "dns-logger-slot${SLOT}" "$DNS_CIDR"

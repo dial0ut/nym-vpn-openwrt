@@ -136,9 +136,11 @@ router every second, and a state watcher on the router:
 - fw4: OpenWrt 25.12.4 x86_64, LXC 425 (`openwrt25`), LAN client `ubuntu-dev` (VM 114).
 - fw3: OpenWrt 21.02.7 x86_64, VM 902, LAN client LXC 903 (Alpine).
 
-The changelog entry for the unreleased version summarises them. The capture files themselves
-were not committed. The reproducible harness lives in `tests/harness/` (LXC) and `tests/`
-(QEMU); its kill-switch cases are `30-killswitch-disconnected`, `32-killswitch-connected` and
-`33-killswitch-error`. Fault injection (crash mid-apply, interrupted upgrade, failed rule
-application, IPv6 transitions) is not automated; every row marked **unverified** is a candidate
-for it.
+The changelog entry for the unreleased version summarises them; the recorded runs are under
+`docs/evidence/`. The capture files themselves were not committed. The reproducible harness
+lives in `tests/harness/` (LXC); its kill-switch cases are `30-killswitch-disconnected`,
+`32-killswitch-connected` and `33-killswitch-error`. Fault injection under a WAN capture
+(crash mid-apply, interrupted upgrade, failed rule application, corrupt config, crash loop,
+WAN flap, reboot) is `tests/leak/`, run against an fw3 VM or an fw4 container bed; IPv6
+transitions are still not exercised (the beds have no v6 upstream), and every row marked
+**unverified** is a candidate for a new scenario there.

@@ -17,7 +17,7 @@ Per slot (`versions.conf`: 23.05.5, 24.10.0, 25.12.4 on x86-64):
 | `10-upgrade` | with a previous artifact configured: upgrade to the package under test through the package manager while the kill-switch table is sampled every second inside the router — it must never disappear; the new daemon runs under procd, the init script logged the restart keep path, the account survived. Without a previous artifact: SKIP with that reason |
 | `20-connect-random`, `21-connect-country` | tunnel reaches `Connected` |
 | `30-killswitch-disconnected` | kill-switch on: LAN client blocked, router still reaches the API; off: LAN client forwards |
-| `32-killswitch-connected` | LAN client's egress differs from the router's real public address (learned with the kill-switch off), DNS reject rule present |
+| `32-killswitch-connected` | LAN client's egress differs from the router's real public address (learned with the kill-switch off); a plain DNS query from the router to an outside resolver never leaves on the WAN wire (tcpdump on the router's WAN veth on the host) |
 | `33-killswitch-error` | error-state exemptions regression |
 | `40-custom-dns` | configured DNS server actually receives the router's queries |
 
@@ -73,6 +73,12 @@ ssh proxmox 'cd /root/nym-harness/harness && sed -i "s/^PROXMOX_HOST=.*/PROXMOX_
   on demand from downloads.openwrt.org; an Alpine template is used for the
   client and DNS logger.
 - `/dev/net/tun` is bind-mounted into the OpenWrt CT (done by `provision.sh`).
+- `tcpdump` on the host: `32-killswitch-connected` watches the router's WAN
+  veth for plain DNS.
+- The router's WAN is DHCP on `vmbr0` by default. `WAN_CIDR=<ip/prefix>`
+  (with `WAN_GW`, default `192.168.1.1`) in the environment gives it a static
+  address instead; `provision.sh` refuses an address that already answers
+  ping on the host's segment.
 
 ## Prerequisites the results depend on
 
@@ -94,12 +100,12 @@ ssh proxmox 'cd /root/nym-harness/harness && sed -i "s/^PROXMOX_HOST=.*/PROXMOX_
   and reboots: an LXC restart is not a router boot. Use a VM or a device.
 - fw3 (iptables) routers: every slot here is fw4. The fw3 test bed is the
   `openwrt-fw3-x86` VM on the same host (see the project notes).
-- Packet-level leak evidence: the assertions here are reachability checks
-  from inside the containers. WAN captures live in `tests/leak/`.
-- The QEMU runner (`tests/run-tests.sh`) is a separate path: it boots real
-  OpenWrt images per architecture and needs `qemu-system-*` on a Linux host
-  (KVM optional). The build VM has neither, so it has not been run end to end
-  here; its QEMU flag set was verified to daemonize with a local QEMU.
+- Packet-level leak evidence and failure injection: apart from the DNS
+  probe in `32-killswitch-connected`, the assertions here are reachability
+  checks from inside the containers. WAN captures under injected failures
+  live in `tests/leak/`, which also has the fw3 bed.
+- Other architectures: every slot is x86-64. Release packages for the other
+  targets are only build-verified.
 
 ## Teardown
 
