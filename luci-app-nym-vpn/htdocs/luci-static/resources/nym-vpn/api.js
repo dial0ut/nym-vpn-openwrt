@@ -42,6 +42,31 @@ var sameFamily = function(a, b) {
     return !!a && !!b && a.toLowerCase() === b.toLowerCase();
 };
 
+// LuCI's rpc.js bounds every request at L.env.rpctimeout (20 s) with no
+// per-call option, but reads it per request: raise it around one call and
+// put it back once the reply is in. The daemon stop/restart/reset methods
+// block for the init script's real stop (disconnect, SIGTERM, wait for the
+// pid: up to ~35 s with a hung daemon); 60 s is uhttpd's own ubus bound.
+var SLOW_CALL_TIMEOUT_S = 60;
+var withSlowCallTimeout = function(call) {
+    var env = (typeof L !== 'undefined' && L && L.env) ? L.env : null;
+    if (!env) return call();
+    var had = Object.prototype.hasOwnProperty.call(env, 'rpctimeout');
+    var prev = env.rpctimeout;
+    var restore = function() {
+        if (had) env.rpctimeout = prev; else delete env.rpctimeout;
+    };
+    env.rpctimeout = Math.max(prev || 0, SLOW_CALL_TIMEOUT_S);
+    var pending;
+    try {
+        pending = Promise.resolve(call());
+    } catch (e) {
+        restore();
+        return Promise.reject(e);
+    }
+    return pending.then(function(v) { restore(); return v; }, function(e) { restore(); throw e; });
+};
+
 // The daemon's error-state reason for a non-independent pair. The bridge
 // passes the variant name through (error_reason_ident), so match case- and
 // separator-insensitively: both NeedsRelaxedIndependenceCriteria and
@@ -244,14 +269,15 @@ return baseclass.extend({
     accountGet: function() { return rpc.accountGet(); },
     accountSet: function(mnemonic, mode) { return rpc.accountSet(mnemonic, mode); },
     accountForget: function() { return rpc.accountForget(); },
-    accountReset: function() { return rpc.accountReset(); },
+    accountReset: function() { return withSlowCallTimeout(function() { return rpc.accountReset(); }); },
     accountRotateKeys: function() { return rpc.accountRotateKeys(); },
 
     // --- daemon ------------------------------------------------------------
+    SLOW_CALL_TIMEOUT_S: SLOW_CALL_TIMEOUT_S,
     daemonStatus: function() { return rpc.daemonStatus(); },
     daemonStart: function() { return rpc.daemonStart(); },
-    daemonStop: function() { return rpc.daemonStop(); },
-    daemonRestart: function() { return rpc.daemonRestart(); },
+    daemonStop: function() { return withSlowCallTimeout(function() { return rpc.daemonStop(); }); },
+    daemonRestart: function() { return withSlowCallTimeout(function() { return rpc.daemonRestart(); }); },
 
     // --- troubleshooting ---------------------------------------------------
     logsGet: function(lines) { return rpc.logsGet(lines); },
