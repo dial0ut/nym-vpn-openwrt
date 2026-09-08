@@ -301,7 +301,13 @@ mod e2e_tests {
             ],
         };
 
-        let rs = policy::compile(&policy);
+        // Mangle-side WAN rules need the WAN zone; uci/ubus are absent in CI.
+        let wan = vec!["eth1".to_string()];
+        let uplink = policy::Uplink {
+            wan_devices: &wan,
+            route_device: Box::new(|_| None),
+        };
+        let rs = policy::compile_with(&policy, &uplink);
         let nft = render_nft::render(&rs);
         let v4 = render_iptables::render(&rs, render_iptables::AddrFamily::V4);
 
@@ -313,7 +319,6 @@ mod e2e_tests {
         println!("\n--- NFT (inet nym) ---\n{nft}");
         println!("\n--- IPTABLES v4 ---\n{v4}");
 
-        // Mangle-side WAN rules depend on uci/ip route, absent in CI.
         assert!(nft.contains("meta mark 0x14e accept"));
         assert!(v4.contains("-m mark --mark 0x14e -j ACCEPT"));
         assert!(nft.contains("meta skuid 0 ip daddr 198.41.192.167 udp dport 7844 accept"));

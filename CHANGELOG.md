@@ -79,6 +79,14 @@ the GitHub release notes.
   with the kill-switch on, as a fresh config and the boot-time firewall guard
   already treat it; the daemon used to read it as off, so its first policy
   opened the WAN that the guard had blocked.
+- A private custom DNS server was admitted on "every interface except the
+  WAN", with the WAN found by name: a second uplink (mwan3 `wanb`) or a WAN
+  interface not called `wan` could carry the lookup out in the clear, and
+  once connected the last-resort lookup named the tunnel as the WAN. The WAN
+  is now the firewall zone (every device of the `wan` and masquerading
+  zones) and the resolver is admitted only on the one device it is routed
+  on, never a WAN device or the tunnel. Inbound exemptions are now marked on
+  every WAN device as well, so replies on a second uplink stay on it.
 - Installing or upgrading from LuCI's Software page reportedly never finished
   while the same upgrade from a shell worked (#13). Likely cause: the
   package's post-install step restarted rpcd — the service LuCI runs opkg/apk

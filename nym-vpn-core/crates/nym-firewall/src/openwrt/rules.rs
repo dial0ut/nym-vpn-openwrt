@@ -85,7 +85,6 @@ pub struct Match {
     pub iif: Option<String>,
     pub oif: Option<String>,
     pub iif_not: Option<String>,
-    pub oif_not: Option<String>,
     pub saddr: Option<AddrMatch>,
     pub daddr: Option<AddrMatch>,
     pub proto: Option<Proto>,
@@ -139,10 +138,6 @@ impl Rule {
     }
     pub fn iif_not(mut self, iface: impl Into<String>) -> Self {
         self.matches.iif_not = Some(iface.into());
-        self
-    }
-    pub fn oif_not(mut self, iface: impl Into<String>) -> Self {
-        self.matches.oif_not = Some(iface.into());
         self
     }
     pub fn saddr(mut self, addr: impl Into<AddrMatch>) -> Self {

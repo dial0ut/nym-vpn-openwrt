@@ -95,66 +95,168 @@ pub use super::boot_rules::{FW3_HOOK_FORWARD, FW3_HOOK_INPUT, FW3_HOOK_OUTPUT, F
 /// carried in `ct mark` and restored so replies route via the real WAN.
 pub const EXEMPT_FWMARK: u32 = 0x14e;
 
-/// The WAN L3 device packets actually ingress on. For PPPoE/L2TP that is
-/// `pppoe-wan`, not `network.wan.device` (the underlying ethernet), so ubus
-/// `l3_device` is tried first; `ip route get` last, since the default route
-/// points into the tunnel once connected.
-pub fn detect_wan_iface() -> Option<String> {
-    if let Ok(output) = std::process::Command::new("ubus")
-        .args(["call", "network.interface.wan", "status"])
-        .output()
-        && output.status.success()
-        && let Some(dev) =
-            parse_ubus_l3_device(&String::from_utf8_lossy(&output.stdout))
-    {
-        return Some(dev);
-    }
+/// L3 devices of every WAN zone: `uci show firewall` zones with `name='wan'`
+/// or `masq='1'`, their `network` members resolved through `ubus call
+/// network.interface dump` to `l3_device` (`pppoe-wan`, not the underlying
+/// ethernet; `device` when the interface is down), plus raw `device` members.
+/// Empty when either tool fails; callers fail closed on that. A zone, not a
+/// route: `ip route get` points into the tunnel once connected.
+pub fn wan_zone_devices() -> Vec<String> {
+    let Some(uci) = run_stdout("uci", &["show", "firewall"]) else {
+        return Vec::new();
+    };
+    let Some(dump) = run_stdout("ubus", &["call", "network.interface", "dump"]) else {
+        return Vec::new();
+    };
+    resolve_wan_devices(&uci, &dump)
+}
 
-    if let Ok(output) = std::process::Command::new("uci")
-        .args(["get", "network.wan.device"])
-        .output()
-        && output.status.success()
-    {
-        let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !s.is_empty() {
-            return Some(s);
+fn resolve_wan_devices(uci_show: &str, dump: &str) -> Vec<String> {
+    let (networks, mut devices) = wan_zone_members(uci_show);
+    let l3 = interface_l3_devices(dump);
+    for network in networks {
+        if let Some((_, dev)) = l3.iter().find(|(name, _)| *name == network)
+            && !devices.contains(dev)
+        {
+            devices.push(dev.clone());
         }
     }
+    devices
+}
 
-    if let Ok(output) = std::process::Command::new("ip")
-        .args(["-o", "route", "get", "1.1.1.1"])
+/// Device the kernel routes `ip` out on right now (`ip -o route get`): while
+/// connected an address without a more specific route resolves to the
+/// tunnel. `None` when unreachable.
+pub fn route_device(ip: IpAddr) -> Option<String> {
+    let out = run_stdout("ip", &["-o", "route", "get", &ip.to_string()])?;
+    parse_route_get_device(&out)
+}
+
+fn run_stdout(program: &str, args: &[&str]) -> Option<String> {
+    let output = std::process::Command::new(program)
+        .args(args)
         .output()
-        && output.status.success()
-    {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let mut iter = stdout.split_whitespace();
-        while let Some(tok) = iter.next() {
-            if tok == "dev"
-                && let Some(name) = iter.next()
-            {
-                return Some(name.to_string());
-            }
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn parse_route_get_device(route_get: &str) -> Option<String> {
+    let mut iter = route_get.split_whitespace();
+    while let Some(tok) = iter.next() {
+        if tok == "dev" {
+            return iter.next().map(str::to_string);
         }
     }
-
     None
 }
 
-/// Hand-rolled to avoid a JSON dependency for one field; interface names
-/// never contain quotes or escapes.
-fn parse_ubus_l3_device(json: &str) -> Option<String> {
-    let needle = "\"l3_device\"";
-    let after_key = &json[json.find(needle)? + needle.len()..];
-    let after_colon = &after_key[after_key.find(':')? + 1..];
-    let open = after_colon.find('"')?;
-    let value = &after_colon[open + 1..];
-    let close = value.find('"')?;
-    let dev = &value[..close];
-    if dev.is_empty() {
-        None
-    } else {
-        Some(dev.to_string())
+/// `(network members, device members)` of the WAN zones in `uci show
+/// firewall` output. Sections may be anonymous (`@zone[1]`) or named; list
+/// values are space-separated, quoted on current uci and bare on 18.06.
+fn wan_zone_members(uci_show: &str) -> (Vec<String>, Vec<String>) {
+    #[derive(Default)]
+    struct Section {
+        is_zone: bool,
+        name: String,
+        masq: bool,
+        networks: Vec<String>,
+        devices: Vec<String>,
     }
+    let unquote = |v: &str| v.trim().trim_matches('\'').to_string();
+    let list = |v: &str| {
+        v.split_whitespace()
+            .map(unquote)
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+    };
+
+    let mut sections: Vec<(String, Section)> = Vec::new();
+    for line in uci_show.lines() {
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let Some(key) = key.strip_prefix("firewall.") else {
+            continue;
+        };
+        let (id, option) = match key.split_once('.') {
+            Some((id, option)) => (id, Some(option)),
+            None => (key, None),
+        };
+        let idx = match sections.iter().position(|(s, _)| s == id) {
+            Some(i) => i,
+            None => {
+                sections.push((id.to_string(), Section::default()));
+                sections.len() - 1
+            }
+        };
+        let section = &mut sections[idx].1;
+        match option {
+            None => section.is_zone = unquote(value) == "zone",
+            Some("name") => section.name = unquote(value),
+            Some("masq") => section.masq = unquote(value) == "1",
+            Some("network") => section.networks = list(value),
+            Some("device") => section.devices = list(value),
+            Some(_) => {}
+        }
+    }
+
+    let mut networks = Vec::new();
+    let mut devices = Vec::new();
+    for (_, s) in sections {
+        if !s.is_zone || !(s.name == "wan" || s.masq) {
+            continue;
+        }
+        for n in s.networks {
+            if !networks.contains(&n) {
+                networks.push(n);
+            }
+        }
+        for d in s.devices {
+            if !devices.contains(&d) {
+                devices.push(d);
+            }
+        }
+    }
+    (networks, devices)
+}
+
+/// `(interface, l3_device or device)` per entry of `ubus call
+/// network.interface dump`. Hand-rolled to avoid a JSON dependency: names
+/// never contain quotes or escapes, and the array key `"interface": [` is
+/// skipped because its value is not a string.
+fn interface_l3_devices(dump: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut segments = dump.split("\"interface\"");
+    segments.next();
+    for segment in segments {
+        let Some(name) = string_after_colon(segment) else {
+            continue;
+        };
+        let dev = json_string_field(segment, "l3_device")
+            .or_else(|| json_string_field(segment, "device"));
+        if let Some(dev) = dev {
+            out.push((name.to_string(), dev.to_string()));
+        }
+    }
+    out
+}
+
+fn json_string_field<'a>(json: &'a str, key: &str) -> Option<&'a str> {
+    let needle = format!("\"{key}\"");
+    string_after_colon(&json[json.find(&needle)? + needle.len()..])
+}
+
+/// `: "value"` at the start of `s` (whitespace tolerant); `None` for any
+/// other value shape or an empty string.
+fn string_after_colon(s: &str) -> Option<&str> {
+    let s = s.trim_start().strip_prefix(':')?.trim_start();
+    let value = s.strip_prefix('"')?;
+    let close = value.find('"')?;
+    let value = &value[..close];
+    (!value.is_empty()).then_some(value)
 }
 
 /// `Unusable` (IPv6 up, `ip6tables` broken) must not be treated as
@@ -222,35 +324,183 @@ pub fn get_mwan3_track_ips() -> Vec<IpAddr> {
 mod tests {
     use super::*;
 
+    const UCI_FIREWALL_MULTI_WAN: &str = "\
+firewall.@defaults[0]=defaults
+firewall.@defaults[0].input='REJECT'
+firewall.@zone[0]=zone
+firewall.@zone[0].name='lan'
+firewall.@zone[0].input='ACCEPT'
+firewall.@zone[0].network='lan' 'guest'
+firewall.@zone[1]=zone
+firewall.@zone[1].name='wan'
+firewall.@zone[1].input='REJECT'
+firewall.@zone[1].masq='1'
+firewall.@zone[1].mtu_fix='1'
+firewall.@zone[1].network='wan' 'wanb'
+firewall.@forwarding[0]=forwarding
+firewall.@forwarding[0].src='lan'
+firewall.@forwarding[0].dest='wan'
+";
+
+    /// Shape of `ubus call network.interface dump` on OpenWrt 25.12 (tab
+    /// indent, space after the colon), cut to the fields that matter. `wanb`
+    /// is PPPoE, so its `device` is the underlying ethernet.
+    const UBUS_DUMP_MULTI_WAN: &str = "{
+\t\"interface\": [
+\t\t{
+\t\t\t\"interface\": \"loopback\",
+\t\t\t\"up\": true,
+\t\t\t\"l3_device\": \"lo\",
+\t\t\t\"proto\": \"static\",
+\t\t\t\"device\": \"lo\",
+\t\t\t\"data\": {
+\t\t\t}
+\t\t},
+\t\t{
+\t\t\t\"interface\": \"lan\",
+\t\t\t\"up\": true,
+\t\t\t\"l3_device\": \"br-lan\",
+\t\t\t\"proto\": \"static\",
+\t\t\t\"device\": \"br-lan\",
+\t\t\t\"ipv4-address\": [
+\t\t\t\t{
+\t\t\t\t\t\"address\": \"10.0.0.1\",
+\t\t\t\t\t\"mask\": 24
+\t\t\t\t}
+\t\t\t]
+\t\t},
+\t\t{
+\t\t\t\"interface\": \"wan\",
+\t\t\t\"up\": true,
+\t\t\t\"l3_device\": \"eth1\",
+\t\t\t\"proto\": \"dhcp\",
+\t\t\t\"device\": \"eth1\",
+\t\t\t\"route\": [
+\t\t\t\t{
+\t\t\t\t\t\"target\": \"0.0.0.0\",
+\t\t\t\t\t\"nexthop\": \"203.0.113.1\"
+\t\t\t\t}
+\t\t\t]
+\t\t},
+\t\t{
+\t\t\t\"interface\": \"wanb\",
+\t\t\t\"up\": true,
+\t\t\t\"l3_device\": \"pppoe-wanb\",
+\t\t\t\"proto\": \"pppoe\",
+\t\t\t\"device\": \"eth2\"
+\t\t},
+\t\t{
+\t\t\t\"interface\": \"wan6\",
+\t\t\t\"up\": false,
+\t\t\t\"pending\": false,
+\t\t\t\"available\": true,
+\t\t\t\"proto\": \"dhcpv6\",
+\t\t\t\"device\": \"eth1\"
+\t\t}
+\t]
+}
+";
+
     #[test]
-    fn l3_device_pppoe_returns_virtual_netdev() {
-        let json = r#"{"up":true,"l3_device":"pppoe-wan","device":"wan","proto":"pppoe"}"#;
-        assert_eq!(parse_ubus_l3_device(json).as_deref(), Some("pppoe-wan"));
+    fn wan_zone_collects_every_network_of_the_wan_zone() {
+        let (networks, devices) = wan_zone_members(UCI_FIREWALL_MULTI_WAN);
+        assert_eq!(networks, ["wan", "wanb"]);
+        assert!(devices.is_empty());
     }
 
     #[test]
-    fn l3_device_dhcp_equals_ethernet() {
-        let json = r#"{"up":true,"device":"eth1","l3_device":"eth1","proto":"dhcp"}"#;
-        assert_eq!(parse_ubus_l3_device(json).as_deref(), Some("eth1"));
+    fn wan_zone_matches_masq_zones_named_sections_and_bare_lists() {
+        // A second masquerading uplink zone under another name; 18.06 uci
+        // prints list values unquoted; a raw `device` member; a non-zone
+        // section named "wan".
+        let uci = "\
+firewall.lanzone=zone
+firewall.lanzone.name=lan
+firewall.lanzone.network=lan
+firewall.wanzone=zone
+firewall.wanzone.name=wan
+firewall.wanzone.network=wan
+firewall.lte=zone
+firewall.lte.name=mobile
+firewall.lte.masq=1
+firewall.lte.network=wwan
+firewall.lte.device=usb0
+firewall.@rule[0]=rule
+firewall.@rule[0].name=wan
+firewall.@rule[0].network=lan
+";
+        let (networks, devices) = wan_zone_members(uci);
+        assert_eq!(networks, ["wan", "wwan"]);
+        assert_eq!(devices, ["usb0"]);
     }
 
     #[test]
-    fn l3_device_absent_is_none() {
-        let json = r#"{"up":false,"pending":false,"available":true}"#;
-        assert_eq!(parse_ubus_l3_device(json), None);
+    fn dump_resolves_l3_device_with_device_fallback() {
+        let l3 = interface_l3_devices(UBUS_DUMP_MULTI_WAN);
+        let get = |name: &str| l3.iter().find(|(n, _)| n == name).map(|(_, d)| d.as_str());
+        assert_eq!(get("lan"), Some("br-lan"));
+        assert_eq!(get("wan"), Some("eth1"));
+        assert_eq!(
+            get("wanb"),
+            Some("pppoe-wanb"),
+            "PPPoE: the virtual netdev, not eth2"
+        );
+        assert_eq!(
+            get("wan6"),
+            Some("eth1"),
+            "down interface: `device` fallback"
+        );
+        assert_eq!(get("loopback"), Some("lo"));
+        assert_eq!(l3.len(), 5);
     }
 
     #[test]
-    fn l3_device_empty_is_none() {
-        let json = r#"{"up":false,"l3_device":"","device":"wan"}"#;
-        assert_eq!(parse_ubus_l3_device(json), None);
+    fn wan_devices_from_fixtures() {
+        assert_eq!(
+            resolve_wan_devices(UCI_FIREWALL_MULTI_WAN, UBUS_DUMP_MULTI_WAN),
+            ["eth1", "pppoe-wanb"]
+        );
+        // `wan6` shares eth1 with `wan`: no duplicate.
+        let uci = "firewall.@zone[1]=zone\nfirewall.@zone[1].name='wan'\n\
+                   firewall.@zone[1].network='wan' 'wan6'\n";
+        assert_eq!(resolve_wan_devices(uci, UBUS_DUMP_MULTI_WAN), ["eth1"]);
+        assert!(resolve_wan_devices("", UBUS_DUMP_MULTI_WAN).is_empty());
+        assert!(resolve_wan_devices(UCI_FIREWALL_MULTI_WAN, "").is_empty());
     }
 
     #[test]
-    fn l3_device_real_pretty_printed_ubus_output() {
-        // Captured verbatim from OpenWrt 25.12 (tab indent, space after colon).
-        let json = "{\n\t\"up\": true,\n\t\"pending\": false,\n\t\"available\": true,\n\t\"l3_device\": \"eth0\",\n\t\"proto\": \"static\",\n\t\"device\": \"eth0\"\n}\n";
-        assert_eq!(parse_ubus_l3_device(json).as_deref(), Some("eth0"));
+    fn string_field_absent_or_empty_is_none() {
+        assert_eq!(json_string_field(r#"{"up":false}"#, "l3_device"), None);
+        assert_eq!(
+            json_string_field(r#"{"l3_device":"","device":"wan"}"#, "l3_device"),
+            None
+        );
+        assert_eq!(
+            json_string_field(r#"{"l3_device":"pppoe-wan"}"#, "l3_device"),
+            Some("pppoe-wan")
+        );
+        // `"l3_device"` must not satisfy a lookup of `"device"`.
+        assert_eq!(
+            json_string_field(r#"{"l3_device":"pppoe-wan","device":"eth1"}"#, "device"),
+            Some("eth1")
+        );
+    }
+
+    #[test]
+    fn route_get_device_token() {
+        assert_eq!(
+            parse_route_get_device("10.0.0.2 dev br-lan src 10.0.0.1 uid 0 \\    cache \n")
+                .as_deref(),
+            Some("br-lan")
+        );
+        assert_eq!(
+            parse_route_get_device(
+                "1.1.1.1 via 10.64.0.1 dev nym0 src 10.64.0.2 uid 0 \\    cache \n"
+            )
+            .as_deref(),
+            Some("nym0")
+        );
+        assert_eq!(parse_route_get_device(""), None);
     }
 
     fn tmp_root(tag: &str) -> std::path::PathBuf {

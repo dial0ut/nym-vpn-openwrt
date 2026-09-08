@@ -46,21 +46,31 @@ enum DnsAccess {
     RouterAndLan,
 }
 
-/// The WAN interface is looked up only for a private custom DNS server.
+/// What the private-DNS accepts and the exemption mangle rules need to know
+/// about the uplink. Tests inject it; [`compile`] probes the system.
+pub(crate) struct Uplink<'a> {
+    /// L3 devices of every WAN zone ([`common::wan_zone_devices`]). Empty
+    /// means unknown, and everything keyed on it fails closed.
+    pub wan_devices: &'a [String],
+    /// Device an address is routed out on ([`common::route_device`]).
+    pub route_device: Box<dyn Fn(IpAddr) -> Option<String> + 'a>,
+}
+
+/// The WAN zone is probed only when a private custom DNS server or an
+/// inbound exemption needs it.
 pub fn compile(policy: &FirewallPolicy) -> RuleSet {
-    let wan = if policy_has_private_dns(policy) {
-        let wan = common::detect_wan_iface();
-        if wan.is_none() {
-            tracing::warn!(
-                "A private custom DNS server is configured but the WAN interface could not be \
-                 detected; admitting it through the tunnel only (fail closed)"
-            );
-        }
-        wan
+    let wan_devices = if policy_has_private_dns(policy) || policy_has_exemptions(policy) {
+        common::wan_zone_devices()
     } else {
-        None
+        Vec::new()
     };
-    compile_with_wan(policy, wan.as_deref())
+    compile_with(
+        policy,
+        &Uplink {
+            wan_devices: &wan_devices,
+            route_device: Box::new(common::route_device),
+        },
+    )
 }
 
 /// Loopback excluded: a resolver on the router is reached over `lo`, which
@@ -79,9 +89,21 @@ fn policy_has_private_dns(policy: &FirewallPolicy) -> bool {
     }
 }
 
-/// `wan: None` makes private custom DNS servers fall back to the tunnel-only
-/// or daemon-only treatment of their state.
-pub(crate) fn compile_with_wan(policy: &FirewallPolicy, wan: Option<&str>) -> RuleSet {
+fn policy_has_exemptions(policy: &FirewallPolicy) -> bool {
+    match policy {
+        FirewallPolicy::Connecting {
+            inbound_exemptions, ..
+        }
+        | FirewallPolicy::Connected {
+            inbound_exemptions, ..
+        } => !inbound_exemptions.is_empty(),
+        FirewallPolicy::Blocked { .. } => false,
+    }
+}
+
+/// A private custom DNS server whose device cannot be pinned falls back to
+/// the tunnel-only or daemon-only treatment of its state.
+pub(crate) fn compile_with(policy: &FirewallPolicy, uplink: &Uplink<'_>) -> RuleSet {
     let mut rs = RuleSet::default();
 
     base_rules(&mut rs);
@@ -102,8 +124,13 @@ pub(crate) fn compile_with_wan(policy: &FirewallPolicy, wan: Option<&str>) -> Ru
             for ep in allowed_endpoints {
                 allow_endpoint(&mut rs, ep);
             }
+            let tunnel_ifaces: Vec<&str> = tunnel
+                .iter()
+                .flat_map(|t| t.inner_metadatas())
+                .map(|m| m.interface.as_str())
+                .collect();
             for dns in dns_config.non_tunnel_config() {
-                if !allow_private_dns_server(&mut rs, *dns, wan) {
+                if !allow_private_dns_server(&mut rs, *dns, uplink, &tunnel_ifaces) {
                     allow_dns_server_daemon_only(&mut rs, *dns);
                 }
             }
@@ -124,7 +151,7 @@ pub(crate) fn compile_with_wan(policy: &FirewallPolicy, wan: Option<&str>) -> Ru
             if *allow_lan {
                 allow_lan_traffic(&mut rs);
             }
-            exemption_mangle(&mut rs, inbound_exemptions);
+            exemption_mangle(&mut rs, inbound_exemptions, uplink.wan_devices);
         }
 
         FirewallPolicy::Connected {
@@ -146,10 +173,16 @@ pub(crate) fn compile_with_wan(policy: &FirewallPolicy, wan: Option<&str>) -> Ru
                     allow_dns_server(&mut rs, *dns, Some(&m.interface));
                 }
             }
-            // A private resolver with unknown WAN is tunnel-only (fail closed);
-            // public non-tunnel resolvers keep their any-interface accept.
+            // A private resolver whose device cannot be pinned is tunnel-only
+            // (fail closed); public non-tunnel resolvers keep their
+            // any-interface accept.
+            let tunnel_ifaces: Vec<&str> = tunnel
+                .inner_metadatas()
+                .into_iter()
+                .map(|m| m.interface.as_str())
+                .collect();
             for dns in dns_config.non_tunnel_config() {
-                if allow_private_dns_server(&mut rs, *dns, wan) {
+                if allow_private_dns_server(&mut rs, *dns, uplink, &tunnel_ifaces) {
                     continue;
                 }
                 if is_private_dns(dns) {
@@ -175,7 +208,7 @@ pub(crate) fn compile_with_wan(policy: &FirewallPolicy, wan: Option<&str>) -> Ru
             if *allow_lan {
                 allow_lan_traffic(&mut rs);
             }
-            exemption_mangle(&mut rs, inbound_exemptions);
+            exemption_mangle(&mut rs, inbound_exemptions, uplink.wan_devices);
         }
 
         FirewallPolicy::Blocked {
@@ -187,7 +220,7 @@ pub(crate) fn compile_with_wan(policy: &FirewallPolicy, wan: Option<&str>) -> Ru
                 allow_endpoint(&mut rs, ep);
             }
             for dns in dns_servers {
-                if !allow_private_dns_server(&mut rs, *dns, wan) {
+                if !allow_private_dns_server(&mut rs, *dns, uplink, &[]) {
                     allow_dns_server_daemon_only(&mut rs, *dns);
                 }
             }
@@ -332,39 +365,47 @@ fn bypass_mark_forward_accept(rs: &mut RuleSet) {
     rs.filter.forward.push(Rule::accept(Family::Inet).mark_eq(common::EXEMPT_FWMARK));
 }
 
-fn exemption_mangle(rs: &mut RuleSet, exemptions: &[InboundExemption]) {
+fn exemption_mangle(rs: &mut RuleSet, exemptions: &[InboundExemption], wan_devices: &[String]) {
     if exemptions.is_empty() {
         return;
     }
-    let Some(wan_iface) = common::detect_wan_iface() else {
+    if wan_devices.is_empty() {
         tracing::warn!(
-            "Inbound exemptions configured but WAN interface could not be detected. \
+            "Inbound exemptions configured but no WAN zone device could be determined. \
              Exemption mangle rules will not be emitted; reply traffic will leak into the tunnel."
         );
         return;
-    };
-    exemption_mangle_rules(rs, exemptions, &wan_iface);
+    }
+    exemption_mangle_rules(rs, exemptions, wan_devices);
 }
 
-fn exemption_mangle_rules(rs: &mut RuleSet, exemptions: &[InboundExemption], wan_iface: &str) {
+/// One set rule per (WAN device, exemption): a flow arriving on any uplink,
+/// mwan3's `wanb` included, gets its replies pinned to that uplink.
+fn exemption_mangle_rules(
+    rs: &mut RuleSet,
+    exemptions: &[InboundExemption],
+    wan_devices: &[String],
+) {
     // Scoped to the exempt ct mark: an unconditioned `meta mark set ct mark`
     // overwrites the daemon's socket fwmark (0x14d) with zero on its own
     // flows and reroutes its probes off the VPN policy routes.
     let restore = || Rule::restore_mark(Family::Inet).ct_mark_eq(common::EXEMPT_FWMARK);
 
     rs.mangle.prerouting.push(restore());
-    for ex in exemptions {
-        let proto = match ex.proto {
-            TransportProtocol::Tcp => Proto::Tcp,
-            TransportProtocol::Udp => Proto::Udp,
-        };
-        rs.mangle.prerouting.push(
-            Rule::set_ct_mark(Family::Inet, common::EXEMPT_FWMARK)
-                .iif(wan_iface)
-                .proto(proto)
-                .dport(ex.dport)
-                .ct_new(),
-        );
+    for wan in wan_devices {
+        for ex in exemptions {
+            let proto = match ex.proto {
+                TransportProtocol::Tcp => Proto::Tcp,
+                TransportProtocol::Udp => Proto::Udp,
+            };
+            rs.mangle.prerouting.push(
+                Rule::set_ct_mark(Family::Inet, common::EXEMPT_FWMARK)
+                    .iif(wan.as_str())
+                    .proto(proto)
+                    .dport(ex.dport)
+                    .ct_new(),
+            );
+        }
     }
     // Restore again after the sets: `ct mark set` leaves the flow-creating
     // packet's meta mark at 0, so it would hit the terminal reject and the
@@ -410,16 +451,22 @@ fn allow_dns_server(rs: &mut RuleSet, dns: IpAddr, iface: Option<&str>) {
     allow_dns_server_inner(rs, dns, iface, DnsAccess::RouterAndLan);
 }
 
-/// Private custom resolver (a LAN Pi-hole) on every interface but the WAN.
-/// "Private" is not "LAN": behind another router the upstream is 192.168.x.1,
-/// so any-interface would hand every lookup to the ISP path. Unscoped by uid
-/// on purpose (dnsmasq is not root). Returns `false` and emits nothing when
-/// the address is not private or the WAN is unknown.
-fn allow_private_dns_server(rs: &mut RuleSet, dns: IpAddr, wan: Option<&str>) -> bool {
+/// Private custom resolver (a LAN Pi-hole), pinned to the device it is routed
+/// on. "Private" is not "LAN": behind another router the upstream is
+/// 192.168.x.1, so the rule is positive (a device name) rather than "not the
+/// WAN", which iptables cannot express for several WANs. Unscoped by uid on
+/// purpose (dnsmasq is not root). Returns `false` and emits nothing when the
+/// address is not private or [`private_dns_device`] refuses.
+fn allow_private_dns_server(
+    rs: &mut RuleSet,
+    dns: IpAddr,
+    uplink: &Uplink<'_>,
+    tunnel_ifaces: &[&str],
+) -> bool {
     if !is_private_dns(&dns) {
         return false;
     }
-    let Some(wan) = wan else {
+    let Some(dev) = private_dns_device(dns, uplink, tunnel_ifaces) else {
         return false;
     };
     let family = family_of(&dns);
@@ -435,14 +482,14 @@ fn allow_private_dns_server(rs: &mut RuleSet, dns: IpAddr, wan: Option<&str>) ->
                 .proto(proto)
                 .daddr(dns)
                 .dport(port)
-                .oif_not(wan),
+                .oif(dev.as_str()),
         );
         rs.filter.input.push(
             Rule::accept(family)
                 .proto(proto)
                 .saddr(dns)
                 .sport(port)
-                .iif_not(wan),
+                .iif(dev.as_str()),
         );
     }
     // Multi-LAN: same-segment clients never traverse the router.
@@ -452,10 +499,40 @@ fn allow_private_dns_server(rs: &mut RuleSet, dns: IpAddr, wan: Option<&str>) ->
                 .proto(proto)
                 .daddr(dns)
                 .dport(DNS_PORT)
-                .oif_not(wan),
+                .oif(dev.as_str()),
         );
     }
     true
+}
+
+/// Fail closed (the state's tunnel-only or daemon-only treatment) unless the
+/// WAN zone is known and the resolver's route leaves on a device that is
+/// neither a WAN nor the tunnel. The tunnel is the route of any private
+/// address without a connected route once the VPN default route is up.
+fn private_dns_device(dns: IpAddr, uplink: &Uplink<'_>, tunnel_ifaces: &[&str]) -> Option<String> {
+    let fallback = "admitting it through the tunnel only (fail closed)";
+    if uplink.wan_devices.is_empty() {
+        tracing::warn!(
+            "Private custom DNS server {dns} configured but no WAN zone device could be \
+             determined; {fallback}"
+        );
+        return None;
+    }
+    let Some(dev) = (uplink.route_device)(dns) else {
+        tracing::warn!("Private custom DNS server {dns} has no route; {fallback}");
+        return None;
+    };
+    if uplink.wan_devices.contains(&dev) {
+        tracing::warn!("Private custom DNS server {dns} is routed via WAN device {dev}; {fallback}");
+        return None;
+    }
+    if tunnel_ifaces.contains(&dev.as_str()) {
+        tracing::warn!(
+            "Private custom DNS server {dns} has no route outside the tunnel ({dev}); {fallback}"
+        );
+        return None;
+    }
+    Some(dev)
 }
 
 fn allow_dns_server_inner(
@@ -884,7 +961,7 @@ mod tests {
             InboundExemption::new(TransportProtocol::Tcp, 443),
             InboundExemption::new(TransportProtocol::Udp, 51820),
         ];
-        exemption_mangle_rules(&mut rs, &exemptions, "eth1");
+        exemption_mangle_rules(&mut rs, &exemptions, &["eth1".to_string()]);
 
         let pre = &rs.mangle.prerouting.rules;
         let first_set = pre
@@ -962,7 +1039,8 @@ mod tests {
                 InboundExemption::new(TransportProtocol::Udp, 51820),
             ],
         };
-        let rs = compile(&policy);
+        let wan = vec!["eth1".to_string()];
+        let rs = compile_with(&policy, &uplink(&wan, None));
 
         for chain in [&rs.filter.input, &rs.filter.output, &rs.filter.forward] {
             let mark_pos = chain
@@ -1375,21 +1453,55 @@ mod tests {
         ]
     }
 
+    /// Two WAN devices (mwan3: DHCP `wan` on eth1, PPPoE `wanb`) and a fixed
+    /// answer for every route lookup.
+    fn uplink<'a>(wan_devices: &'a [String], route: Option<&str>) -> Uplink<'a> {
+        let route = route.map(str::to_string);
+        Uplink {
+            wan_devices,
+            route_device: Box::new(move |_| route.clone()),
+        }
+    }
+
+    fn multi_wan() -> Vec<String> {
+        vec!["eth1".to_string(), "pppoe-wanb".to_string()]
+    }
+
+    fn pihole_forward_accepts(rs: &RuleSet, pihole: IpAddr) -> Vec<&Rule> {
+        rs.filter
+            .forward
+            .rules
+            .iter()
+            .filter(|r| {
+                r.verdict == Verdict::Accept
+                    && matches!(&r.matches.daddr, Some(AddrMatch::Ip(ip)) if *ip == pihole)
+            })
+            .collect()
+    }
+
     #[test]
-    fn private_custom_dns_is_admitted_off_wan_in_every_state() {
+    fn private_custom_dns_is_pinned_to_its_route_device_in_every_state() {
         let pihole: IpAddr = "10.0.0.2".parse().unwrap();
+        let wan = multi_wan();
         for (name, policy) in states_with_private_dns(pihole) {
-            let rs = compile_with_wan(&policy, Some("eth1"));
+            let rs = compile_with(&policy, &uplink(&wan, Some("br-lan")));
 
             let out = accepts_to(&rs, pihole);
             assert_eq!(out.len(), 4, "{name}: udp/53, tcp/53, DoT, DoH");
             for r in &out {
-                assert_eq!(r.matches.oif_not.as_deref(), Some("eth1"), "{name}");
-                assert!(
-                    r.matches.oif.is_none(),
-                    "{name}: not pinned to an interface"
-                );
+                assert_eq!(r.matches.oif.as_deref(), Some("br-lan"), "{name}");
                 assert!(r.matches.skuid.is_none(), "{name}: dnsmasq is not root");
+            }
+            let inp: Vec<_> = rs
+                .filter
+                .input
+                .rules
+                .iter()
+                .filter(|r| matches!(&r.matches.saddr, Some(AddrMatch::Ip(ip)) if *ip == pihole))
+                .collect();
+            assert_eq!(inp.len(), 4, "{name}");
+            for r in &inp {
+                assert_eq!(r.matches.iif.as_deref(), Some("br-lan"), "{name}");
             }
             let first = rs
                 .filter
@@ -1403,22 +1515,29 @@ mod tests {
                 "{name}: accept precedes block_dns"
             );
 
-            let fwd = rs.filter.forward.rules.iter().any(|r| {
-                r.verdict == Verdict::Accept
-                    && matches!(&r.matches.daddr, Some(AddrMatch::Ip(ip)) if *ip == pihole)
-                    && r.matches.oif_not.as_deref() == Some("eth1")
-            });
-            assert!(fwd, "{name}: LAN clients may reach it, not via the WAN");
+            let fwd = pihole_forward_accepts(&rs, pihole);
+            assert_eq!(
+                fwd.len(),
+                2,
+                "{name}: LAN clients may reach it, udp and tcp"
+            );
+            for r in &fwd {
+                assert_eq!(r.matches.oif.as_deref(), Some("br-lan"), "{name}");
+            }
 
             let nft = super::super::render_nft::render(&rs);
             assert!(
                 nft.lines().any(|l| {
-                    l.contains("oifname != \"eth1\"")
+                    l.contains("oifname \"br-lan\"")
                         && l.contains("ip daddr 10.0.0.2")
                         && l.contains("udp dport 53")
                         && l.trim_end().ends_with("accept")
                 }),
                 "{name}: nft render\n{nft}"
+            );
+            assert!(
+                !nft.contains("oifname !="),
+                "{name}: no negated device match"
             );
             let v4 = super::super::render_iptables::render(
                 &rs,
@@ -1426,69 +1545,146 @@ mod tests {
             );
             assert!(
                 v4.lines().any(|l| {
-                    l.contains("! -o eth1")
+                    l.contains("-o br-lan")
                         && l.contains("-d 10.0.0.2")
                         && l.contains("--dport 53")
                         && l.contains("-j ACCEPT")
                 }),
                 "{name}: iptables render\n{v4}"
             );
+            assert!(!v4.contains("! -o"), "{name}: no negated device match");
 
             let quad9: IpAddr = "9.9.9.9".parse().unwrap();
             for r in accepts_to(&rs, quad9) {
-                assert!(
-                    r.matches.oif_not.is_none(),
-                    "{name}: public resolver untouched"
-                );
                 match name {
                     "connected" => assert_eq!(r.matches.oif.as_deref(), Some("nym0")),
-                    _ => assert_eq!(r.matches.skuid, Some(crate::ROOT_UID)),
+                    _ => {
+                        assert!(r.matches.oif.is_none(), "{name}: public resolver untouched");
+                        assert_eq!(r.matches.skuid, Some(crate::ROOT_UID));
+                    }
                 }
             }
         }
     }
 
+    fn assert_private_dns_fails_closed(name: &str, rs: &RuleSet, pihole: IpAddr) {
+        let out = accepts_to(rs, pihole);
+        assert!(!out.is_empty(), "{name}");
+        for r in &out {
+            match name {
+                "connected" => assert_eq!(r.matches.oif.as_deref(), Some("nym0"), "{name}"),
+                _ => {
+                    assert!(r.matches.oif.is_none(), "{name}");
+                    assert_eq!(r.matches.skuid, Some(crate::ROOT_UID), "{name}");
+                }
+            }
+        }
+        assert!(
+            pihole_forward_accepts(rs, pihole).is_empty(),
+            "{name}: no forward accept"
+        );
+    }
+
     #[test]
-    fn private_custom_dns_falls_back_to_tunnel_only_without_a_wan() {
+    fn private_custom_dns_routed_via_a_wan_device_is_not_admitted() {
+        // The upstream router behind another NAT: 192.168.1.1 out the second
+        // WAN. Every WAN device counts, not only the one named `wan`.
+        let upstream: IpAddr = "192.168.1.1".parse().unwrap();
+        let wan = multi_wan();
+        for (name, policy) in states_with_private_dns(upstream) {
+            let rs = compile_with(&policy, &uplink(&wan, Some("pppoe-wanb")));
+            assert_private_dns_fails_closed(name, &rs, upstream);
+        }
+    }
+
+    #[test]
+    fn private_custom_dns_routed_via_the_tunnel_is_not_admitted() {
+        // No connected route: once the VPN default route is up the lookup
+        // lands on the tunnel, which is not "a non-WAN interface".
         let pihole: IpAddr = "10.0.0.2".parse().unwrap();
+        let wan = multi_wan();
+        let (name, policy) = states_with_private_dns(pihole)
+            .into_iter()
+            .find(|(name, _)| *name == "connected")
+            .unwrap();
+        let rs = compile_with(&policy, &uplink(&wan, Some("nym0")));
+        assert_private_dns_fails_closed(name, &rs, pihole);
+    }
+
+    #[test]
+    fn private_custom_dns_falls_back_when_the_wan_or_route_is_unknown() {
+        let pihole: IpAddr = "10.0.0.2".parse().unwrap();
+        let wan = multi_wan();
+        let no_wan: Vec<String> = Vec::new();
         for (name, policy) in states_with_private_dns(pihole) {
-            let rs = compile_with_wan(&policy, None);
-            let out = accepts_to(&rs, pihole);
-            assert!(!out.is_empty(), "{name}");
-            for r in &out {
-                assert!(r.matches.oif_not.is_none(), "{name}");
-                match name {
-                    "connected" => assert_eq!(r.matches.oif.as_deref(), Some("nym0"), "{name}"),
-                    _ => assert_eq!(r.matches.skuid, Some(crate::ROOT_UID), "{name}"),
-                }
-            }
-            assert!(
-                !rs.filter.forward.rules.iter().any(|r| {
-                    r.verdict == Verdict::Accept
-                        && matches!(&r.matches.daddr, Some(AddrMatch::Ip(ip)) if *ip == pihole)
-                }),
-                "{name}: no forward accept without a WAN"
-            );
+            let rs = compile_with(&policy, &uplink(&no_wan, Some("br-lan")));
+            assert_private_dns_fails_closed(name, &rs, pihole);
+            let rs = compile_with(&policy, &uplink(&wan, None));
+            assert_private_dns_fails_closed(name, &rs, pihole);
         }
     }
 
     #[test]
-    fn private_custom_dns_ipv6_ula_is_admitted_off_wan() {
+    fn private_custom_dns_ipv6_ula_is_pinned_to_its_route_device() {
         let ula: IpAddr = "fd00::53".parse().unwrap();
         let policy = FirewallPolicy::Blocked {
             allow_lan: true,
             allowed_endpoints: vec![],
             dns_servers: vec![ula],
         };
-        let rs = compile_with_wan(&policy, Some("eth1"));
+        let wan = multi_wan();
+        let rs = compile_with(&policy, &uplink(&wan, Some("br-lan")));
         let out = accepts_to(&rs, ula);
         assert_eq!(out.len(), 4);
         for r in &out {
             assert_eq!(r.family, Family::V6);
-            assert_eq!(r.matches.oif_not.as_deref(), Some("eth1"));
+            assert_eq!(r.matches.oif.as_deref(), Some("br-lan"));
         }
         let nft = super::super::render_nft::render(&rs);
-        assert!(nft.contains("oifname != \"eth1\" ip6 daddr fd00::53 udp dport 53 accept"));
+        assert!(nft.contains("oifname \"br-lan\" ip6 daddr fd00::53 udp dport 53 accept"));
+    }
+
+    #[test]
+    fn exemption_mangle_marks_inbound_flows_on_every_wan_device() {
+        let policy = FirewallPolicy::Connected {
+            peer_endpoints: vec![],
+            tunnel: tunnel_iface("wg0", [10, 64, 0, 2]),
+            allow_lan: false,
+            dns_config: dns_config(&[], &[]),
+            allowed_endpoints: vec![],
+            inbound_exemptions: vec![
+                InboundExemption::new(TransportProtocol::Tcp, 443),
+                InboundExemption::new(TransportProtocol::Udp, 51820),
+            ],
+        };
+        let wan = multi_wan();
+        let rs = compile_with(&policy, &uplink(&wan, None));
+        let sets: Vec<_> = rs
+            .mangle
+            .prerouting
+            .rules
+            .iter()
+            .filter(|r| matches!(r.verdict, Verdict::SetCtMark(_)))
+            .collect();
+        assert_eq!(sets.len(), 4, "two exemptions on two WAN devices");
+        for dev in ["eth1", "pppoe-wanb"] {
+            for port in [443, 51820] {
+                assert!(
+                    sets.iter().any(|r| {
+                        r.matches.iif.as_deref() == Some(dev) && r.matches.dport == Some(port)
+                    }),
+                    "missing set rule for {dev}:{port}"
+                );
+            }
+        }
+        let nft = super::super::render_nft::render(&rs);
+        assert!(
+            nft.contains("iifname \"pppoe-wanb\" ct state new tcp dport 443 ct mark set 0x14e"),
+            "{nft}"
+        );
+
+        let rs = compile_with(&policy, &uplink(&[], None));
+        assert!(rs.mangle.is_empty(), "unknown WAN zone: no mangle rules");
     }
 
     #[test]
