@@ -101,12 +101,11 @@ impl super::DnsMonitorT for DnsMonitor {
             return inner.reset_idle(idle).await;
         }
         // Nothing was set since the daemon started (fresh boot, or the user
-        // configured a LAN resolver while disconnected): the dnsmasq actor is
-        // already mirroring the WAN, so hand it the idle resolvers directly.
-        // Only dnsmasq has an idle mode; elsewhere there is nothing to do.
-        if idle.local_resolvers.is_empty() {
-            return Ok(());
-        }
+        // changed the LAN resolvers while disconnected): the dnsmasq actor is
+        // already mirroring, so hand it the idle set directly — including an
+        // empty one, which is how disabling or clearing custom DNS while idle
+        // puts the WAN mirror back. Only dnsmasq has an idle mode; elsewhere
+        // there is nothing to do.
         match Dnsmasq::new() {
             Ok(mut dnsmasq) => dnsmasq.reset_idle(idle).await?,
             Err(dnsmasq::Error::NotOpenWrt) | Err(dnsmasq::Error::NoDnsmasq) => {}
