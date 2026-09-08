@@ -156,8 +156,9 @@ return baseclass.extend({
         };
 
         // Hard account-state reset for the desync where `forget` can't clear
-        // a stranded account. Stops the daemon, wipes the account/key store,
-        // and restarts with a delay (the proven manual recovery). Last resort.
+        // a stranded account. The init script's reset_account action stops
+        // the daemon, wipes the account/key store and starts it again with
+        // the kill-switch kept; the call blocks until then. Last resort.
         var reset = function() {
             modal.confirm(
                 'Reset account state',

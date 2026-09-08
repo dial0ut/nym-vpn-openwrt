@@ -358,7 +358,7 @@ function createEnv(opts) {
     return instance;
   }
 
-  return { window, document, dom, E: dom.create.bind(dom), Class, poll, calls, declared, records, modules, require: (n) => load(n, []), jsdom };
+  return { window, document, dom, E: dom.create.bind(dom), Class, poll, calls, declared, records, modules, L, require: (n) => load(n, []), jsdom };
 }
 
 module.exports = { createEnv, scanRequires, RESOURCES, moduleFile };

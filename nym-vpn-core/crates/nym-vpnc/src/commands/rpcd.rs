@@ -2163,34 +2163,20 @@ fn daemon_stop() -> Value {
     }
 }
 
+/// One init action, not stop/start: only `restart` keeps the kill-switch
+/// armed (init script `keep_killswitch`), and the script's own stop hook
+/// waits for the old pid before the new daemon is launched.
 fn daemon_restart() -> Value {
-    // A plain `restart` relaunches before the old instance releases its
-    // socket/state and wedges the account controller; sequence it with a gap.
-    initd_run("nym-vpnd", "stop");
-    sleep_secs(3);
-    initd_run("nym-vpnd", "start");
-    sleep_secs(3);
+    initd_run("nym-vpnd", "restart");
     daemon_state_json("Daemon restarted successfully", "Daemon failed to start")
 }
 
 /// Hard recovery when `account forget` is rejected because an account error
-/// strands the tunnel outside Disconnected. Wipes only /etc/nym/data; UCI
-/// settings and the global config stay.
+/// strands the tunnel outside Disconnected. The init script's `reset_account`
+/// action stops the daemon, wipes only /etc/nym/data and starts it again
+/// without opening the firewall; UCI settings and the global config stay.
 fn account_reset() -> Value {
-    initd_run("nym-vpnd", "stop");
-    // procd needs time to release the data dir before it is deleted.
-    sleep_secs(3);
-
-    let _ = std::process::Command::new("killall").arg("nym-vpnd").output();
-    sleep_secs(1);
-
-    let _ = std::fs::remove_dir_all("/etc/nym/data");
-    let _ = std::fs::create_dir_all("/etc/nym/data");
-
-    initd_run("nym-vpnd", "start");
-    // Stores must exist again before the UI polls account state.
-    sleep_secs(3);
-
+    initd_run("nym-vpnd", "reset_account");
     daemon_state_json(
         "Account state reset; daemon restarted",
         "Account store wiped but daemon failed to restart",

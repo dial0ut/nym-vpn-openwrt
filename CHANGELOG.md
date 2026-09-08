@@ -137,6 +137,13 @@ the GitHub release notes.
 
 ### Fixed
 
+- The web UI's Restart button and the Account card's hard reset opened the
+  firewall for a few seconds: the bridge ran `stop`, waited and ran `start`,
+  and only `restart` keeps the kill-switch. Both now go through the init
+  script's `restart` and a new `reset_account` action, which keep it armed;
+  `stop` remains the one way to open the router by hand. The daemon's wait
+  for the fw3 state lock is bounded at 10 s instead of hanging on a stuck
+  holder.
 - A daemon settings file with the `killswitch` key removed by hand now loads
   with the kill-switch on, as a fresh config and the boot-time firewall guard
   already treat it; the daemon used to read it as off, so its first policy
