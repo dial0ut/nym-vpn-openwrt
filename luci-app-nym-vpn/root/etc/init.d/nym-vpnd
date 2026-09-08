@@ -3,17 +3,16 @@ START=90
 STOP=10
 USE_PROCD=1
 
-# fw-boot-guard.sh owns the runtime-directory paths and checks. Without it
-# there is no boot-time block either, so the stop marker is not written.
+# fw-boot-guard.sh owns the runtime-directory paths and checks and the
+# fw3/fw4 detection. It ships in the package; without it this script cannot
+# stop the daemon safely, so it refuses to do anything.
 NYM_SHARE_DIR="${NYM_SHARE_DIR:-/usr/share/nym-vpn}"
-if [ -r "$NYM_SHARE_DIR/fw-boot-guard.sh" ]; then
-    # shellcheck source=/dev/null
-    . "$NYM_SHARE_DIR/fw-boot-guard.sh"
-else
-    NYM_RUNTIME_DIR="${NYM_RUNTIME_DIR:-/var/run/nym-firewall}"
-    NYM_VPND_STOPPED="$NYM_RUNTIME_DIR/stopped"
-    nym_runtime_dir_prepare() { return 1; }
-fi
+[ -r "$NYM_SHARE_DIR/fw-boot-guard.sh" ] || {
+    logger -t nym-vpnd -p daemon.err "$NYM_SHARE_DIR/fw-boot-guard.sh is missing; reinstall nym-vpn"
+    exit 1
+}
+# shellcheck source=/dev/null
+. "$NYM_SHARE_DIR/fw-boot-guard.sh"
 
 # Written on explicit stop, cleared on start: while present, a firewall
 # reload must not re-install the boot block. tmpfs, so a reboot re-arms it.
@@ -124,11 +123,9 @@ service_stopped() {
         rm -f /tmp/nym-firewall-v4.rules /tmp/nym-firewall-v6.rules \
             /tmp/nym-firewall.ifaces /tmp/nym-firewall.transition \
             /tmp/nym-firewall.lock /tmp/nym-vpnd.stopped /tmp/nym-vpnd.stop-pid 2>/dev/null
-        if [ -x /usr/share/nym-vpn/fw-backend.sh ] \
-            && [ "$(/usr/share/nym-vpn/fw-backend.sh)" = "fw3" ] \
-            && iptables -L input_rule -n >/dev/null 2>&1 \
-            && [ -x /usr/share/nym-vpn/fw3-include.sh ]; then
-            /usr/share/nym-vpn/fw3-include.sh 2>/dev/null || true
+        if [ "$(nym_fw_backend)" = "fw3" ] \
+            && iptables -L input_rule -n >/dev/null 2>&1; then
+            "$NYM_SHARE_DIR/fw3-include.sh" 2>/dev/null || true
         fi
     )
 }

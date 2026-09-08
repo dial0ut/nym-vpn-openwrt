@@ -914,6 +914,43 @@ mod tests {
         }
     }
 
+    /// Both helpers ship in every package (build-ipk.sh / build-apk.sh fail
+    /// without them), so the include no longer carries stand-in definitions
+    /// for a missing one: it logs CRITICAL and exits, installing nothing.
+    #[test]
+    fn include_script_refuses_to_run_without_its_helpers() {
+        const INCLUDE: &str = include_str!("../../scripts/fw3-include.sh");
+        const GUARD: &str = include_str!("../../scripts/fw-boot-guard.sh");
+        let lines: Vec<&str> = INCLUDE.lines().map(str::trim).collect();
+
+        for helper in ["fw-boot-guard.sh", "fw-rules.sh"] {
+            let check = format!("[ -r \"$NYM_SHARE_DIR/{helper}\" ] || {{");
+            let at = lines
+                .iter()
+                .position(|l| *l == check)
+                .unwrap_or_else(|| panic!("fw3-include.sh must test for {helper}"));
+            assert!(
+                lines[at + 1].contains("CRITICAL") && lines[at + 2] == "exit 1",
+                "a missing {helper} must log CRITICAL and exit"
+            );
+            let source = format!(". \"$NYM_SHARE_DIR/{helper}\"");
+            assert!(lines.iter().skip(at).any(|l| *l == source));
+        }
+        for line in &lines {
+            assert!(
+                !line.contains("nym_runtime_dir_prepare() {")
+                    && !line.contains("nym_boot_block_wanted() {")
+                    && !line.contains("nym_emergency_rules_v4() {")
+                    && !line.contains("nym_boot_block_nft() {"),
+                "fw3-include.sh must not define a stand-in for a helper function: {line}"
+            );
+        }
+        assert!(
+            GUARD.lines().any(|l| l == "nym_fw_backend() {"),
+            "the backend detector lives in the guard"
+        );
+    }
+
     #[test]
     fn include_script_takes_the_shared_state_lock() {
         const INCLUDE: &str = include_str!("../../scripts/fw3-include.sh");

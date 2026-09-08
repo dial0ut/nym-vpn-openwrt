@@ -1,5 +1,8 @@
 #!/bin/sh
-# Boot-time kill-switch guard, sourced by fw3-include.sh and fw4-include.sh.
+# Boot-time kill-switch guard, sourced by fw3-include.sh, fw4-include.sh,
+# the init script, uci-defaults and prerm. Ships in every package; a caller
+# that cannot source it must stop rather than guess.
+#
 # nym_boot_block_wanted() decides from state that exists before the daemon
 # has run since power-on: the daemon's settings file, its rc.d start link,
 # and the init script's stop marker (honoured only inside a private
@@ -8,6 +11,9 @@
 # (kill-switch on, legacy split tunnelling off) so guard and daemon agree;
 # only an explicit "false" opens. A daemon that cannot come up leaves the
 # block until `stop` (docs/architecture/killswitch-contract.md).
+#
+# nym_fw_backend() names the firewall framework this router uses, "fw3" or
+# "fw4", for every script that has to pick an include or a teardown.
 #
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright 2026 Nym Technologies SA <contact@nymtech.net>
@@ -19,6 +25,26 @@ NYM_RC_DIR="${NYM_RC_DIR:-/etc/rc.d}"
 NYM_RUNTIME_DIR="${NYM_RUNTIME_DIR:-/var/run/nym-firewall}"
 NYM_VPND_STOPPED="${NYM_VPND_STOPPED:-$NYM_RUNTIME_DIR/stopped}"
 NYM_BOOT_REASON=""
+
+# Prints "fw4" or "fw3". Live state wins (a vendor image may ship both
+# stacks' binaries); when neither framework is up yet — the boot defaults
+# runner executes before the firewall service — the firewall init script
+# itself says which one will start; binary presence is the last resort.
+nym_fw_backend() {
+    if command -v nft >/dev/null 2>&1 && nft list table inet fw4 >/dev/null 2>&1; then
+        echo fw4
+    elif command -v iptables >/dev/null 2>&1 && iptables -L input_rule -n >/dev/null 2>&1; then
+        echo fw3
+    elif grep -q -w fw4 /etc/init.d/firewall 2>/dev/null; then
+        echo fw4
+    elif grep -q -w fw3 /etc/init.d/firewall 2>/dev/null; then
+        echo fw3
+    elif [ -x /sbin/fw4 ] || [ -x /usr/sbin/fw4 ]; then
+        echo fw4
+    else
+        echo fw3
+    fi
+}
 
 # A real directory (not a symlink), uid 0, mode exactly 0700; anything else,
 # missing included, means "no state".

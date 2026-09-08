@@ -44,36 +44,26 @@ NYM_MANGLE_OUT="NYM_MANGLE_OUTPUT"
 NAT_CHAIN="NYM_POSTROUTING"
 FORWARD_LAN_CHAIN="NYM_FORWARD_LAN"
 
-# A missing guard must fail towards not blocking, never towards a block
-# nothing can lift.
+# Both helpers ship in the package. Without the guard there is no runtime
+# directory check and no boot decision; without the generated rule sets no
+# block can be built. Either way nothing this script could install would
+# be lifted by anything, so it fails towards not blocking, loudly.
 NYM_SHARE_DIR="${NYM_SHARE_DIR:-/usr/share/nym-vpn}"
-if [ -r "$NYM_SHARE_DIR/fw-boot-guard.sh" ]; then
-    # shellcheck source-path=SCRIPTDIR
-    # shellcheck source=fw-boot-guard.sh
-    . "$NYM_SHARE_DIR/fw-boot-guard.sh"
-else
-    nym_boot_block_wanted() {
-        NYM_BOOT_REASON="$NYM_SHARE_DIR/fw-boot-guard.sh is missing; not blocking"
-        return 1
-    }
-    nym_runtime_dir_prepare() { return 1; }
-fi
+[ -r "$NYM_SHARE_DIR/fw-boot-guard.sh" ] || {
+    logger -t nym-vpn "CRITICAL: $NYM_SHARE_DIR/fw-boot-guard.sh is missing; the fw3 include cannot run and installs no block"
+    exit 1
+}
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=fw-boot-guard.sh
+. "$NYM_SHARE_DIR/fw-boot-guard.sh"
 
-# Emergency and boot-time rule sets, generated from boot_rules.rs. Without
-# the file the generators print nothing and no block can be built.
-if [ -r "$NYM_SHARE_DIR/fw-rules.sh" ]; then
-    # shellcheck source-path=SCRIPTDIR
-    # shellcheck source=fw-rules.sh
-    . "$NYM_SHARE_DIR/fw-rules.sh"
-else
-    logger -t nym-vpn "CRITICAL: $NYM_SHARE_DIR/fw-rules.sh is missing; no emergency block can be installed"
-    NYM_EMERGENCY_OUT="NYM_EMERGENCY_OUT"
-    NYM_EMERGENCY_FWD="NYM_EMERGENCY_FWD"
-    NYM_BOOT_TABLE="nym_boot"
-    nym_emergency_rules_v4() { return 1; }
-    nym_emergency_rules_v6() { return 1; }
-    nym_boot_block_nft() { return 1; }
-fi
+[ -r "$NYM_SHARE_DIR/fw-rules.sh" ] || {
+    logger -t nym-vpn "CRITICAL: $NYM_SHARE_DIR/fw-rules.sh is missing; the fw3 include cannot run and installs no block"
+    exit 1
+}
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=fw-rules.sh
+. "$NYM_SHARE_DIR/fw-rules.sh"
 
 EMERGENCY_OUT="$NYM_EMERGENCY_OUT"
 EMERGENCY_FWD="$NYM_EMERGENCY_FWD"

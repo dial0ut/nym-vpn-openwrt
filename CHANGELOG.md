@@ -137,6 +137,12 @@ the GitHub release notes.
 
 ### Fixed
 
+- The firewall helper scripts (`fw3-include.sh`, `fw4-include.sh`,
+  `fw-boot-guard.sh`, `fw-rules.sh`) are shipped unconditionally: the
+  package build fails without any of them, and the includes, init script,
+  uci-defaults and prerm refuse to run instead of falling back to stand-in
+  definitions when one is missing. The separate `fw-backend.sh` detector is
+  folded into the guard.
 - A daemon settings file with the `killswitch` key removed by hand now loads
   with the kill-switch on, as a fresh config and the boot-time firewall guard
   already treat it; the daemon used to read it as off, so its first policy

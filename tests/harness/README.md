@@ -11,7 +11,7 @@ Per slot (`versions.conf`: 23.05.5, 24.10.0, 25.12.4 on x86-64):
 
 | Step / case | Asserts |
 |---|---|
-| `install` | the package under test installs from a local file (`opkg`, after `opkg update`, or `apk`) and leaves `nym-vpnd`/`nym-vpnc` behind |
+| `install` | the package under test installs from a local file (`opkg`, after `opkg update`, or `apk`) and leaves `nym-vpnd`/`nym-vpnc` and the four firewall helpers under `/usr/share/nym-vpn/` behind |
 | `daemon-up` | the daemon answers and **procd** lists it as a running instance |
 | `account-set` | the mnemonic registers and the account reaches `ReadyToConnect` |
 | `10-upgrade` | with a previous artifact configured: upgrade to the package under test through the package manager while the kill-switch table is sampled every second inside the router — it must never disappear; the new daemon runs under procd, the init script logged the restart keep path, the account survived. Without a previous artifact: SKIP with that reason |
