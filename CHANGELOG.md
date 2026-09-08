@@ -238,23 +238,25 @@ the GitHub release notes.
   every state and lifecycle event, how each cell was verified, and which are
   not protected or unverified), a decision record on the fw3 firewall-restart
   window, and a state-ownership table for every runtime file, chain and table.
-- The OpenWrt integration test harness (QEMU multi-architecture runner and
-  Proxmox container harness with kill-switch and DNS cases) is now tracked
-  under `tests/`, and made runnable: pass/fail counters no longer abort the
-  runner, the timeout wrapper works on shell functions, the mnemonic is
-  delivered on stdin, a failed slot fails the run, a case that aborts before
-  recording a result is counted as a failure, the connected-state checks
-  require `State: Connected`, a `nym` interface and a moved egress address,
-  and the QEMU runner starts at all (`-nographic` and `-daemonize` are
-  mutually exclusive; it now uses `-display none` with a serial log). Every
-  selected case ends in exactly one of PASS, FAIL, SKIP (with a reason) or
-  MISSING, and the Proxmox container harness installs the exact release
-  artifacts under procd with an upgrade case that samples the kill-switch
-  every second. Run on 2026-09-07 against 23.05.5, 24.10.0 and 25.12.4: the
-  install, daemon and upgrade cases pass on all three; the account and
-  idle kill-switch cases fail because a fresh install with the default
+- The OpenWrt integration test harness (Proxmox container harness with
+  kill-switch and DNS cases) is now tracked under `tests/harness/`, and made
+  runnable: the mnemonic is delivered on stdin, a failed slot fails the run,
+  a case that aborts before recording a result is counted as a failure, and
+  the connected-state checks require `State: Connected`, a `nym` interface
+  and a moved egress address. Every selected case ends in exactly one of
+  PASS, FAIL, SKIP (with a reason) or MISSING, and the harness installs the
+  exact release artifacts under procd with an upgrade case that samples the
+  kill-switch every second (the sampler is now stopped by pid, so its samples
+  are complete) and a connected-state case whose DNS check fails when a plain
+  DNS query from the router is seen leaving the WAN, whatever the rule set
+  says. Run on 2026-09-07 against 23.05.5, 24.10.0 and 25.12.4: the install,
+  daemon and upgrade cases pass on all three; the account and idle
+  kill-switch cases fail because a fresh install with the default
   kill-switch cannot reach the API until an endpoint cache exists (issue
-  #15), which is the main open item before a release.
+  #15), which is the main open item before a release. The QEMU
+  multi-architecture runner and the single-machine helper scripts that used
+  to sit next to it were removed: the runner could not start under `set -u`
+  and everything it covered the harness covers.
 - The always-on watchdog now reacts to WAN link events instead of only
   noticing a dropped tunnel at its next poll. A hotplug hook wakes it on
   `ifup`/`ifdown` of a WAN-facing interface (`wan`, `wan6`, anything in the
