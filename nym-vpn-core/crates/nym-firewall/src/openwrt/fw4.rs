@@ -359,6 +359,33 @@ mod tests {
         }
     }
 
+    /// Mirrors the fw3 test: no stand-in definitions for a missing helper.
+    #[test]
+    fn include_script_refuses_to_run_without_its_helpers() {
+        let all: Vec<&str> = lines().collect();
+        for helper in ["fw-boot-guard.sh", "fw-rules.sh"] {
+            let check = format!("[ -r \"$NYM_SHARE_DIR/{helper}\" ] || {{");
+            let at = all
+                .iter()
+                .position(|l| *l == check)
+                .unwrap_or_else(|| panic!("fw4-include.sh must test for {helper}"));
+            assert!(
+                all[at + 1].contains("CRITICAL") && all[at + 2] == "exit 1",
+                "a missing {helper} must log CRITICAL and exit"
+            );
+            let source = format!(". \"$NYM_SHARE_DIR/{helper}\"");
+            assert!(all.iter().skip(at).any(|l| *l == source));
+        }
+        for line in &all {
+            assert!(
+                !line.contains("nym_runtime_dir_trusted() {")
+                    && !line.contains("nym_boot_block_wanted() {")
+                    && !line.contains("nym_boot_block_nft() {"),
+                "fw4-include.sh must not define a stand-in for a helper function: {line}"
+            );
+        }
+    }
+
     #[test]
     fn include_script_reads_hints_from_the_runtime_dir_only() {
         let default = format!("NYM_RUNTIME_DIR=\"${{NYM_RUNTIME_DIR:-{RUNTIME_DIR}}}\"");

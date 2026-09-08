@@ -102,10 +102,12 @@ Things that cost a debugging session at least once. Read before changing anythin
   maps onto the stop functions. Without the keep path a reboot opened the firewall for its last
   seconds, and a LAN client's packets left on the WAN.
 - **The include scripts ship in the package, not in the daemon.** `scripts/ipk/build-ipk.sh`
-  copies `nym-firewall/scripts/*.sh` to `/usr/share/nym-vpn/`; the Rust tests `include_str!`
-  them only to pin the contract, and `fw-rules.sh` is rendered from `boot_rules.rs`
-  (`NYM_FW_RULES_REGEN=1 cargo build -p nym-firewall`). Changing a script needs a package
-  rebuild and reinstall.
+  and `scripts/apk/build-apk.sh` copy the four helpers (`fw3-include.sh`, `fw4-include.sh`,
+  `fw-boot-guard.sh`, `fw-rules.sh`) to `/usr/share/nym-vpn/` and fail the build if one is
+  missing; every consumer refuses to run without the ones it sources. The Rust tests
+  `include_str!` them only to pin the contract, and `fw-rules.sh` is rendered from
+  `boot_rules.rs` (`NYM_FW_RULES_REGEN=1 cargo build -p nym-firewall`). Changing a script needs
+  a package rebuild and reinstall.
 - **Stock busybox lacks `stat`, `nohup`, `setsid`, `timeout`.** Use `find -user -perm` for
   ownership checks and `( trap "" HUP; cmd & )` to detach. `pkill -f`/`pgrep -f <name>` from an
   ssh one-liner matches the shell running the one-liner.

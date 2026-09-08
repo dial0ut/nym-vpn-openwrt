@@ -19,7 +19,7 @@ committed fragment is stale).
 | **init** | `/etc/init.d/nym-vpnd` | start, explicit `stop`; `restart` and `shutdown` take the keep path and touch nothing |
 | **prerm** | package pre-removal hook | real removal only; on upgrade it leaves the daemon running and touches no firewall state |
 | **postinst** | package post-install hook | install and upgrade (restarts the daemon through the new init script) |
-| **guard** | `fw-boot-guard.sh`, sourced by the includes and init | read-only helper: runtime-directory trust check, boot-block decision |
+| **guard** | `fw-boot-guard.sh`, sourced by the includes, init, uci-defaults and prerm | read-only helper: runtime-directory trust check, boot-block decision, fw3/fw4 detection (`nym_fw_backend`) |
 
 ## Runtime directory `/var/run/nym-firewall`
 
@@ -65,7 +65,7 @@ already gone.
 | Artefact | Writer | Remover | Readers | Notes |
 |---|---|---|---|---|
 | `/etc/config/firewall` `include 'nym_vpn'` | `uci-defaults/luci-app-nym-vpn`, run by postinst and by the boot-time defaults runner; fails loudly so it is retried | prerm (removal only) | fw3/fw4 | left in place across an interrupted upgrade on purpose |
-| `/usr/share/nym-vpn/{fw3-include,fw4-include,fw-backend,fw-boot-guard,fw-rules}.sh` | package (build-ipk.sh / build-apk.sh copy them from the crate) | package manager | fw3/fw4, init, prerm | `fw-rules.sh` is generated; never edit it by hand |
+| `/usr/share/nym-vpn/{fw3-include,fw4-include,fw-boot-guard,fw-rules}.sh` | package (build-ipk.sh / build-apk.sh copy the fixed list from the crate and fail without any of them) | package manager | fw3/fw4, init, uci-defaults, prerm | every consumer refuses to run without the two it sources; `fw-rules.sh` is generated, never edit it by hand |
 | `/var/run/nym-vpn.rpcd-state` | prerm (upgrade) | postinst (consumed), prerm (removal) | postinst | rpcd refresh decision; root-only parent directory |
 | `/var/run/nym-watchdog.state`, `/tmp/nym-watchdog.state` | retired shell watchdog (packages ≤ 1.34.x) | postinst (upgrade), prerm | nobody | legacy; Always On lives in the daemon config now |
 

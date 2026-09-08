@@ -78,6 +78,10 @@ if ! vpn_daemon_under_procd "$OPENWRT_CTID"; then
     echo "  procd does not list the new daemon as running"
     upgrade_ok=false
 fi
+if ! vpn_fw_helpers_present "$OPENWRT_CTID"; then
+    echo "  the upgraded package lacks a firewall helper under /usr/share/nym-vpn"
+    upgrade_ok=false
+fi
 if ! pct_sh "$OPENWRT_CTID" 'logread 2>/dev/null | grep -q "nym-vpnd restart: leaving the kill-switch armed"'; then
     echo "  init script did not log the restart keep path"
     upgrade_ok=false

@@ -46,13 +46,17 @@ if command -v nft >/dev/null 2>&1; then
     nft delete table inet nym_boot 2>/dev/null
 fi
 
-# Same detector as the include registration, so the two cannot disagree.
-if [ -x /usr/share/nym-vpn/fw-backend.sh ]; then
-    nym_fw_backend="$(/usr/share/nym-vpn/fw-backend.sh)"
-elif [ -x /sbin/fw4 ] || [ -x /usr/sbin/fw4 ]; then
-    nym_fw_backend="fw4"
+# The guard is the one fw3/fw4 detector, shared with the include
+# registration and the init script, so the three cannot disagree. The
+# package's files are still on disk while prerm runs.
+NYM_SHARE_DIR="${NYM_SHARE_DIR:-/usr/share/nym-vpn}"
+if [ -r "$NYM_SHARE_DIR/fw-boot-guard.sh" ]; then
+    # shellcheck source=/dev/null
+    . "$NYM_SHARE_DIR/fw-boot-guard.sh"
+    nym_fw_backend="$(nym_fw_backend)"
 else
-    nym_fw_backend="fw3"
+    logger -t nym-vpn "CRITICAL: $NYM_SHARE_DIR/fw-boot-guard.sh is missing; tearing down the fw3 chains blind"
+    nym_fw_backend=""
 fi
 if [ "$nym_fw_backend" = "fw4" ]; then
     # No lock on fw4: each nft command is one atomic transaction and the
@@ -100,17 +104,15 @@ else
             iptables -t nat -D POSTROUTING "$num" 2>/dev/null
         done
     }
-    if [ -r /usr/share/nym-vpn/fw-boot-guard.sh ] \
-        && [ -x /usr/share/nym-vpn/fw3-include.sh ] \
+    if [ -n "$nym_fw_backend" ] \
+        && [ -x "$NYM_SHARE_DIR/fw3-include.sh" ] \
         && command -v flock >/dev/null 2>&1; then
         (
-            # shellcheck source=/dev/null
-            . /usr/share/nym-vpn/fw-boot-guard.sh
             nym_runtime_dir_prepare || exit 1
             touch "$NYM_VPND_STOPPED" 2>/dev/null || exit 1
             exec 9>"$NYM_RUNTIME_DIR/lock"
             flock 9 || exit 1
-            NYM_FW_LOCKED=1 /usr/share/nym-vpn/fw3-include.sh 2>/dev/null
+            NYM_FW_LOCKED=1 "$NYM_SHARE_DIR/fw3-include.sh" 2>/dev/null
         ) || nym_fw3_teardown_inline
     else
         nym_fw3_teardown_inline

@@ -2,33 +2,33 @@
 # Copyright 2025 - Nym Technologies SA <contact@nymtech.net>
 # SPDX-License-Identifier: GPL-3.0-only
 
+# Exit non-zero on failure so both callers (postinst, the boot-time defaults
+# runner) keep the script for another attempt.
+fail() {
+    echo "nym-vpn: firewall registration failed: $1" >&2
+    logger -t nym-vpn "firewall registration failed: $1"
+    exit 1
+}
+
 /etc/init.d/nym-vpnd enable 2>/dev/null
 
-# The boot-time defaults runner executes before the firewall service, so
-# the detector must resolve with nothing loaded.
-if [ -x /usr/share/nym-vpn/fw-backend.sh ]; then
-    nym_fw_backend="$(/usr/share/nym-vpn/fw-backend.sh)"
-elif grep -q -w fw4 /etc/init.d/firewall 2>/dev/null || [ -x /sbin/fw4 ]; then
-    nym_fw_backend="fw4"
-else
-    nym_fw_backend="fw3"
-fi
-if [ "$nym_fw_backend" = "fw4" ]; then
-    nym_fw_include="/usr/share/nym-vpn/fw4-include.sh"
+# The guard ships in the package and is the one fw3/fw4 detector, shared
+# with prerm and the init script; it resolves with nothing loaded, which is
+# the boot-time runner's situation (it executes before the firewall).
+NYM_SHARE_DIR="${NYM_SHARE_DIR:-/usr/share/nym-vpn}"
+[ -r "$NYM_SHARE_DIR/fw-boot-guard.sh" ] || fail "$NYM_SHARE_DIR/fw-boot-guard.sh is missing"
+# shellcheck source=/dev/null
+. "$NYM_SHARE_DIR/fw-boot-guard.sh"
+if [ "$(nym_fw_backend)" = "fw4" ]; then
+    nym_fw_include="$NYM_SHARE_DIR/fw4-include.sh"
     nym_fw_reload=""
 else
-    nym_fw_include="/usr/share/nym-vpn/fw3-include.sh"
+    nym_fw_include="$NYM_SHARE_DIR/fw3-include.sh"
     nym_fw_reload="1"
 fi
 
 # Reconcile every field: fw4_compatible would make fw4 capture stdout
-# instead of running the include's nft side effects. Exit non-zero on
-# failure so both callers keep the script for another attempt.
-fail() {
-    echo "nym-vpn: firewall include registration failed: $1" >&2
-    logger -t nym-vpn "firewall include registration failed: $1"
-    exit 1
-}
+# instead of running the include's nft side effects.
 uci set firewall.nym_vpn=include || fail "uci set firewall.nym_vpn=include"
 uci set firewall.nym_vpn.type=script || fail "uci set type"
 uci set firewall.nym_vpn.path="$nym_fw_include" || fail "uci set path"

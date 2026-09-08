@@ -256,9 +256,11 @@ flag looks like the obvious fix and quietly breaks the integration.
 The active backend's include is reconciled at install and upgrade time by
 `/etc/uci-defaults/luci-app-nym-vpn` (invoked immediately by package `postinst`), so a fresh install
 does not wait for the next reboot to gain reload protection. Backend detection is shared
-(`/usr/share/nym-vpn/fw-backend.sh`, used by uci-defaults, `prerm` and the init script): live
+(`fw-boot-guard.sh:nym_fw_backend`, sourced by uci-defaults, `prerm` and the init script): live
 state first, then the firewall init script's own backend, then binary presence — so a boot-time
-run on a vendor image shipping both stacks still registers the right include. `prerm` leaves the
+run on a vendor image shipping both stacks still registers the right include. The guard and the
+generated `fw-rules.sh` ship in every package; a consumer that cannot source them stops rather
+than guessing (the includes log CRITICAL and install nothing, the init script refuses to run). `prerm` leaves the
 UCI section alone on upgrades so an interrupted transaction cannot strand the router without it.
 
 ## Inbound service exemptions
