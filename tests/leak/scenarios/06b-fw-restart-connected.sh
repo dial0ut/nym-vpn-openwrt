@@ -7,6 +7,9 @@ scenario_inject() {
     rt 'echo "restart at $(date +%T)"; /etc/init.d/firewall restart >/dev/null 2>&1; echo "restart returned at $(date +%T)"'
 }
 scenario_check() {
+    local st
     rt 'logread | grep -E "nym-vpn:" | tail -3 | cut -c1-140'
-    note "fw3 restart window: see watcher for unhooked samples"
+    note "restart window: see the watcher for unhooked samples"
+    st=$(state); echo "$st"
+    if printf '%s' "$st" | grep -q 'policy=yes'; then recovered "policy hooked after the restart"; else not_recovered "$st"; fi
 }

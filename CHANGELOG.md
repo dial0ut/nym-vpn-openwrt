@@ -220,14 +220,20 @@ the GitHub release notes.
   three hand-maintained copies of that rule text are gone, and the build
   fails if the committed fragment is stale. The include owns chain teardown
   on fw3; `prerm` and the init script go through it under the shared lock.
-- Two device evidence suites are tracked: `tests/leak/` injects failures on an
-  fw3 router (daemon killed mid-transition and while connected, rule
-  application failing, lock lost, firewall reload and restart, interrupted
-  upgrade, reboot) under a WAN packet capture with a positive control, and
-  `tests/recovery/` exercises an fw4 router's recovery and management access
-  (corrupt config, unusable binary, crash loop, reload storms, untrusted
-  runtime directory, kill-switch toggles, WAN flap, interrupted upgrade).
-  Both ran green on 2026-09-07 (one IPv6 scenario skipped: no v6 upstream).
+- One device evidence suite is tracked, `tests/leak/`: it injects failures
+  (daemon killed mid-transition and while connected, rule application
+  failing, lock lost, firewall reload and restart, corrupt config, unusable
+  binary, crash loop, reload storms, untrusted runtime directory,
+  kill-switch toggles, WAN flap, interrupted upgrade, reboot) under a WAN
+  packet capture with a positive control, on an fw3 VM bed or an fw4
+  container bed selected with `BED=`, and records management access (a held
+  ssh session, a wired probe from the hypervisor, LuCI) and a recovery clock
+  for every scenario. Verdicts are gated: a probe that fails for a reason
+  other than being blocked, an empty or tunnel-less capture, a missing
+  positive control or a scenario that was not connected before its injection
+  is `INCONCLUSIVE`, a scenario whose recovery did not complete is `FAIL`,
+  and the run exits non-zero on either. The 2026-09-07 runs of the earlier
+  fw3 and fw4 suites are kept under `docs/evidence/`.
 - New architecture documents: the kill-switch contract (what is protected in
   every state and lifecycle event, how each cell was verified, and which are
   not protected or unverified), a decision record on the fw3 firewall-restart

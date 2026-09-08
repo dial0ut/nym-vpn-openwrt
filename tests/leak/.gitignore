@@ -1,5 +1,0 @@
-# captures and raw logs are large and machine-specific; verdicts and REPORT.md are kept
-results/*/*.pcap
-results/*/*.log
-results/*/*.note
-results/*/*.skip

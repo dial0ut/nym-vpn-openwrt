@@ -1,23 +1,27 @@
 # shellcheck shell=bash disable=SC2034  # sourced by run.sh; scenario_* vars are read there
-# Lock lost: flock is hidden and the firewall is reloaded. Expect: the include
-# logs CRITICAL, leaves the live policy untouched, no leak; flock restored.
+# Lock lost (fw3): flock is hidden and the firewall is reloaded. Expect: the
+# include logs CRITICAL, leaves the live policy untouched, no leak; flock
+# restored.
 scenario_wait=8
 scenario_pre() {
+    if [ "$LEAK_FW" != fw3 ]; then
+        skip "fw3-only: the fw4 include does not take the fw3 state lock"
+        return 1
+    fi
     rt 'mv /usr/bin/flock /tmp/leak/flock.bak && echo "flock hidden"'
 }
 scenario_inject() {
     rt '/etc/init.d/firewall reload >/dev/null 2>&1; echo "firewall reloaded at $(date +%T)"'
 }
 scenario_check() {
-    local out
-    out=$(rt 'logread | grep -E "nym-vpn:" | tail -2 | cut -c1-170
-        iptables -w -C output_rule -j NYM_OUTPUT 2>/dev/null && echo "policy hooked (untouched)" || echo "policy NOT hooked"
-        echo "emergency chains: $(iptables -w -S | grep -c NYM_EMERGENCY)"')
+    local out st
+    out=$(rt 'logread | grep -E "nym-vpn:" | tail -2 | cut -c1-170')
     printf '%s\n' "$out"
-    if [ "$(printf '%s\n' "$out" | grep -c 'CRITICAL')" -gt 0 ] && [ "$(printf '%s\n' "$out" | grep -c '^policy hooked')" -gt 0 ]; then
-        note "CRITICAL logged, live policy untouched"
+    st=$(state); echo "$st"
+    if printf '%s\n' "$out" | grep -q CRITICAL && printf '%s' "$st" | grep -q 'policy=yes'; then
+        recovered "CRITICAL logged, live policy untouched"
     else
-        note "expected CRITICAL log + untouched policy not both observed"
+        not_recovered "expected CRITICAL log + untouched policy not both observed: $st"
     fi
 }
 scenario_post() {
