@@ -4,7 +4,6 @@
 use std::{path::PathBuf, sync::Arc};
 
 use opentelemetry::trace::TracerProvider;
-use sentry::integrations::tracing as sentry_tracing;
 use tokio::{
     sync::{Mutex, mpsc},
     task::JoinHandle,
@@ -49,7 +48,6 @@ pub struct Options {
     pub enable_file_log: bool,
     pub enable_stdout_log: bool,
     pub enable_json_log: bool,
-    pub sentry: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -334,15 +332,6 @@ pub fn setup_logging(options: Options) -> Option<LoggingSetup> {
         } else {
             layers.push(console_layer.boxed());
         }
-    }
-
-    if options.sentry {
-        let layer = sentry_tracing::layer().event_filter(|md| match md.level() {
-            &Level::ERROR | &Level::WARN => sentry_tracing::EventFilter::Event,
-            &Level::TRACE => sentry_tracing::EventFilter::Ignore,
-            _ => sentry_tracing::EventFilter::Breadcrumb,
-        });
-        layers.push(layer.boxed());
     }
 
     let reg = tracing_subscriber::registry().with(layers).with(env_filter);

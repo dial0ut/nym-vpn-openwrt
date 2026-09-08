@@ -1,7 +1,7 @@
 // Copyright 2025 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{fmt, net::IpAddr, ops::RangeInclusive};
+use std::{fmt, net::IpAddr, ops::RangeInclusive, time::Duration};
 
 const LOOP_COVER_DELAY_RANGE: RangeInclusive<u32> = 0..=200;
 const AVG_PACKET_DELAY_RANGE: RangeInclusive<u32> = 0..=200;
@@ -14,7 +14,9 @@ use time::OffsetDateTime;
 #[cfg(feature = "typescript-bindings")]
 use ts_rs::TS;
 
-use crate::{EntryPoint, ExitPoint, NetworkStatisticsConfig, NymNetworkDetails, NymVpnNetwork};
+use crate::{
+    EntryPoint, ErrorStateReason, ExitPoint, GatewayIndependence, NymNetworkDetails, NymVpnNetwork,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(
@@ -40,7 +42,6 @@ pub struct VpnServiceConfig {
     pub custom_dns: Vec<IpAddr>,
     pub enable_ad_blocking: bool,
     pub mixnet_traffic: MixnetTrafficConfig,
-    pub network_stats: NetworkStatisticsConfig,
     pub killswitch: bool,
     /// Hand routing to `luci-app-pbr`: the daemon withholds the default route
     /// into the tunnel. Forces the kill-switch off.
@@ -49,6 +50,14 @@ pub struct VpnServiceConfig {
     /// Front every Nym API request through the cover domains instead of only
     /// on retry. API traffic only, so a change needs no reconnect.
     pub stealth_api: bool,
+    /// Which relations between the entry and the exit gateway rule a pair out
+    /// (same node family, ASN, subnet) and whether to remind the user when the
+    /// pair is not independent. Changing a criterion re-selects the gateways.
+    pub gateway_independence: GatewayIndependence,
+    /// Always On: the daemon connects on start (once a default route exists)
+    /// and keeps retrying error states with backoff until told to disconnect.
+    /// A policy switch, not a tunnel setting: toggling it never reconnects.
+    pub always_on: bool,
 }
 
 /// Observed state, not configuration: whether the configured DNS is in force.
@@ -149,8 +158,9 @@ impl fmt::Display for VpnServiceConfig {
         writeln!(f, "killswitch: {}", self.killswitch)?;
         writeln!(f, "legacy_split_tunnel: {}", self.legacy_split_tunnel)?;
         writeln!(f, "stealth_api: {}", self.stealth_api)?;
+        writeln!(f, "gateway_independence: {}", self.gateway_independence)?;
+        writeln!(f, "always_on: {}", self.always_on)?;
         writeln!(f, "mixnet traffic config: {}", self.mixnet_traffic)?;
-        writeln!(f, "networks stats config: {}", self.network_stats)?;
 
         Ok(())
     }
@@ -178,12 +188,13 @@ impl Default for VpnServiceConfig {
             enable_custom_dns: false,
             custom_dns: vec![],
             enable_ad_blocking: false,
-            network_stats: Default::default(),
             mixnet_traffic: MixnetTrafficConfig::default(),
             killswitch: true,
             legacy_split_tunnel: false,
             inbound_exemptions: Vec::new(),
             stealth_api: false,
+            gateway_independence: GatewayIndependence::default(),
+            always_on: false,
         }
     }
 }
@@ -268,6 +279,53 @@ impl MixnetTrafficConfig {
         }
 
         Ok(())
+    }
+}
+
+/// A snapshot of the daemon's Always On supervisor, polled by clients.
+///
+/// `enabled` is the persisted setting; `active` says the daemon currently
+/// wants the tunnel up (target state Secured); `paused` that the user
+/// disconnected for this session, which suspends the supervisor without
+/// touching the setting. While retrying, `attempt` counts the retries of
+/// the current error series and `next_retry_in` the time to the next one;
+/// `latched_reason` names the terminal error that stopped retries until the
+/// configuration, the account state or the user changes something.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct AlwaysOnStatus {
+    pub enabled: bool,
+    pub active: bool,
+    pub paused: bool,
+    pub attempt: u32,
+    pub next_retry_in: Option<Duration>,
+    pub last_error: Option<ErrorStateReason>,
+    pub latched_reason: Option<String>,
+}
+
+impl fmt::Display for AlwaysOnStatus {
+    /// The one-liner `nym-vpnc status` prints after `State:`.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if !self.enabled {
+            return write!(f, "off");
+        }
+        if self.paused {
+            return write!(f, "paused (disconnected by user)");
+        }
+        if let Some(reason) = &self.latched_reason {
+            return write!(f, "stopped — {reason}");
+        }
+        if let Some(next) = self.next_retry_in {
+            write!(f, "retrying in {} s (attempt {}", next.as_secs(), self.attempt)?;
+            if let Some(err) = &self.last_error {
+                write!(f, ", last error {err:?}")?;
+            }
+            return write!(f, ")");
+        }
+        if !self.active {
+            return write!(f, "on");
+        }
+        write!(f, "active")
     }
 }
 

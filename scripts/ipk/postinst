@@ -64,9 +64,42 @@ fi
 # kill-switch armed across the swap.
 /etc/init.d/nym-vpnd restart
 
-if [ "$(uci -q get nym-vpn.settings.always_on)" = "1" ]; then
-    /etc/init.d/nym-vpn-watchdog enable
-    /etc/init.d/nym-vpn-watchdog start
+# One-shot migration of the retired shell watchdog (<= 1.34.x): its UCI
+# always_on flag becomes the daemon's Always On setting. The old package's
+# prerm has already stopped the watchdog; its files are gone but the rc.d
+# symlinks, pidfile and state file are not. The uci deletes are no-ops on a
+# fresh install. Drop this block two releases on.
+if [ -z "${IPKG_INSTROOT:-}" ]; then
+    if [ "$(uci -q get nym-vpn.settings.always_on)" = "1" ]; then
+        # The setting can only be written once the restarted daemon answers,
+        # and this script must not wait on it (see the rpcd note below), so
+        # the bounded wait runs detached.
+        (
+            trap '' HUP
+            i=0
+            while [ "$i" -lt 30 ] && ! /usr/bin/nym-vpnc tunnel get >/dev/null 2>&1; do
+                sleep 1
+                i=$((i + 1))
+            done
+            if /usr/bin/nym-vpnc tunnel set --always-on on >/dev/null 2>&1; then
+                logger -t nym-vpn "Always On carried over from the watchdog setting"
+            else
+                logger -t nym-vpn "could not enable Always On in the daemon; run: nym-vpnc tunnel set --always-on on"
+            fi
+        ) </dev/null >/dev/null 2>&1 &
+        echo "Always On is being carried over to the daemon setting"
+    fi
+    uci -q delete nym-vpn.settings.always_on
+    uci -q delete nym-vpn.settings.watchdog_interval
+    uci -q delete nym-vpn.settings.watchdog_max_retries
+    uci -q commit nym-vpn
+    # rc.common names the stop link K$((100-START)), so K9 here, not K09.
+    rm -f /etc/rc.d/*nym-vpn-watchdog
+    pid=$(cat /var/run/nym-vpn-watchdog.pid 2>/dev/null)
+    if [ -n "$pid" ] && grep -q nym-vpn-watchdog "/proc/$pid/cmdline" 2>/dev/null; then
+        kill "$pid" 2>/dev/null
+    fi
+    rm -f /var/run/nym-vpn-watchdog.pid /var/run/nym-watchdog.state /tmp/nym-watchdog.state
 fi
 
 # rpcd scans /usr/libexec/rpcd only at start-up and computes ACL grants at

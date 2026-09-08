@@ -230,6 +230,28 @@ impl NymVpnService for CommandInterface {
         Ok(tonic::Response::new(()))
     }
 
+    async fn set_always_on(&self, request: tonic::Request<bool>) -> Result<tonic::Response<()>> {
+        let always_on = request.into_inner();
+
+        self
+            .send_and_wait(VpnServiceCommand::SetAlwaysOn, always_on)
+            .await
+            .map_err(|e| tonic::Status::internal(format!("Failed to set always on: {e}")))?
+            .map_err(tonic::Status::internal)?;
+
+        Ok(tonic::Response::new(()))
+    }
+
+    async fn get_always_on_status(
+        &self,
+        _request: tonic::Request<()>,
+    ) -> Result<tonic::Response<proto::AlwaysOnStatus>> {
+        let status = self
+            .send_and_wait(VpnServiceCommand::GetAlwaysOnStatus, ())
+            .await?;
+        Ok(tonic::Response::new(status.into()))
+    }
+
     async fn set_legacy_split_tunnel(
         &self,
         request: tonic::Request<bool>,
@@ -246,6 +268,35 @@ impl NymVpnService for CommandInterface {
                 tonic::Status::internal(format!("Failed to set legacy split tunnel: {e}"))
             })?
             .map_err(tonic::Status::internal)?;
+
+        Ok(tonic::Response::new(()))
+    }
+
+    async fn set_enable_gateway_independence(
+        &self,
+        request: tonic::Request<bool>,
+    ) -> Result<tonic::Response<()>> {
+        let enabled = request.into_inner();
+
+        self.send_and_wait(VpnServiceCommand::SetEnableGatewayIndependence, enabled)
+            .await?
+            .map_err(tonic::Status::internal)?;
+
+        Ok(tonic::Response::new(()))
+    }
+
+    async fn set_gateway_independence_notifications(
+        &self,
+        request: tonic::Request<bool>,
+    ) -> Result<tonic::Response<()>> {
+        let enabled = request.into_inner();
+
+        self.send_and_wait(
+            VpnServiceCommand::SetGatewayIndependenceNotifications,
+            enabled,
+        )
+        .await?
+        .map_err(tonic::Status::internal)?;
 
         Ok(tonic::Response::new(()))
     }
@@ -492,9 +543,13 @@ impl NymVpnService for CommandInterface {
         Ok(tonic::Response::new(owner.into()))
     }
 
-    async fn connect_tunnel(&self, _request: tonic::Request<()>) -> Result<tonic::Response<bool>> {
+    async fn connect_tunnel(
+        &self,
+        request: tonic::Request<proto::ConnectRequest>,
+    ) -> Result<tonic::Response<bool>> {
+        let relax_independence = request.into_inner().relax_independence;
         let accepted = self
-            .send_and_wait(VpnServiceCommand::SetTargetState, TargetState::Secured)
+            .send_and_wait(VpnServiceCommand::ConnectTunnel, relax_independence)
             .await?;
 
         Ok(tonic::Response::new(accepted))
@@ -591,6 +646,16 @@ impl NymVpnService for CommandInterface {
             })?;
 
         Ok(tonic::Response::new(proto::GatewayTestReport::from(report)))
+    }
+
+    async fn get_tentative_gateways(
+        &self,
+        _request: tonic::Request<()>,
+    ) -> Result<tonic::Response<proto::TentativeGateways>> {
+        let tentative = self
+            .send_and_wait(VpnServiceCommand::GetTentativeGateways, ())
+            .await?;
+        Ok(tonic::Response::new(proto::TentativeGateways::from(tentative)))
     }
 
     async fn list_filtered_gateways(
@@ -945,100 +1010,6 @@ impl NymVpnService for CommandInterface {
         Ok(tonic::Response::new(()))
     }
 
-    async fn is_sentry_enabled(&self, _: tonic::Request<()>) -> Result<tonic::Response<bool>> {
-        let result = self
-            .send_and_wait(VpnServiceCommand::IsSentryEnabled, ())
-            .await?;
-        Ok(tonic::Response::new(result))
-    }
-
-    async fn enable_sentry(&self, _: tonic::Request<()>) -> Result<tonic::Response<()>> {
-        self.send_and_wait(VpnServiceCommand::ToggleSentry, true)
-            .await?
-            .map_err(|err| {
-                tracing::error!("Failed to enable sentry monitoring: {err}");
-                tonic::Status::internal("failed to enable sentry")
-            })?;
-        Ok(tonic::Response::new(()))
-    }
-
-    async fn disable_sentry(&self, _: tonic::Request<()>) -> Result<tonic::Response<()>> {
-        self.send_and_wait(VpnServiceCommand::ToggleSentry, false)
-            .await?
-            .map_err(|err| {
-                tracing::error!("Failed to disable sentry monitoring: {err}");
-                tonic::Status::internal("failed to disable sentry")
-            })?;
-        Ok(tonic::Response::new(()))
-    }
-
-    async fn network_stats_set_enabled(
-        &self,
-        request: tonic::Request<bool>,
-    ) -> Result<tonic::Response<()>> {
-        let enabled = request.into_inner();
-
-        let _ = self
-            .send_and_wait(VpnServiceCommand::EnableNetStats, enabled)
-            .await
-            .map_err(|e| {
-                tonic::Status::internal(format!("Failed to enable/disable network statistics: {e}"))
-            })?;
-
-        Ok(tonic::Response::new(()))
-    }
-
-    async fn network_stats_allow_disconnected(
-        &self,
-        request: tonic::Request<bool>,
-    ) -> std::result::Result<tonic::Response<()>, tonic::Status> {
-        let allow_disconnected = request.into_inner();
-
-        let _ = self
-            .send_and_wait(
-                VpnServiceCommand::AllowDisconnectedNetStats,
-                allow_disconnected,
-            )
-            .await
-            .map_err(|e| {
-                tonic::Status::internal(format!(
-                    "Failed to set network statistics allow_disconnected: {e}"
-                ))
-            })?;
-
-        Ok(tonic::Response::new(()))
-    }
-
-    async fn network_stats_reset_seed(
-        &self,
-        request: tonic::Request<proto::NetworkStatsResetSeedRequest>,
-    ) -> Result<tonic::Response<()>> {
-        let seed = request.into_inner().seed;
-
-        let _ = self
-            .send_and_wait(VpnServiceCommand::ResetNetStatsSeed, seed)
-            .await
-            .map_err(|e| {
-                tonic::Status::internal(format!("Failed to reset network statistics seed: {e}"))
-            })?;
-
-        Ok(tonic::Response::new(()))
-    }
-
-    async fn network_stats_get_seed(
-        &self,
-        _: tonic::Request<()>,
-    ) -> Result<tonic::Response<proto::NetworkStatisticsIdentity>> {
-        let identity = self
-            .send_and_wait(VpnServiceCommand::GetNetStatsSeed, ())
-            .await?
-            .map_err(|e| {
-                tonic::Status::internal(format!("Failed to get network statistics identity: {e}"))
-            })?;
-
-        Ok(tonic::Response::new(identity.into()))
-    }
-
     async fn enable_socks5(
         &self,
         request: tonic::Request<proto::EnableSocks5Request>,
@@ -1148,6 +1119,10 @@ pub async fn start_command_interface(
 
     let socket_path = default_socket_path();
     let (vpn_command_tx, vpn_command_rx) = mpsc::unbounded_channel();
+
+    // Probe the service loop through the same channel the gRPC handlers use;
+    // a daemon that accepts connections but never answers exits for procd.
+    crate::liveness::spawn(vpn_command_tx.clone(), shutdown_token.child_token());
 
     // A crashed prior run may have left the socket file behind.
     remove_previous_socket_file(&socket_path).await;

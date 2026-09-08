@@ -19,14 +19,17 @@ use anyhow::Result;
 use serde_json::{Value, json};
 
 use nym_vpn_lib_types::{
-    AccountControllerErrorStateReason, AccountControllerState, DiagnosticRunParams,
-    DnsUpstreamOwner, EntryPoint, ErrorStateReason, ExitPoint, Gateway, GatewayType,
-    InboundExemption, InboundExemptionProtocol, ListGatewaysOptions, NodeIdentity,
-    StoreAccountRequest, TunnelConnectionData, TunnelState, VpnServiceConfig,
+    AccountControllerErrorStateReason, AccountControllerState, AlwaysOnStatus,
+    DiagnosticRunParams,
+    DnsUpstreamOwner, EntryPoint, ErrorStateReason, ExitPoint, Gateway, GatewayIndependence,
+    GatewayType, InboundExemption, InboundExemptionProtocol, ListGatewaysOptions, NodeIdentity,
+    StoreAccountRequest, TentativeGateways, TunnelConnectionData, TunnelState, VpnServiceConfig,
 };
 use nym_vpn_proto::rpc_client::RpcClient;
 
-use crate::display_helpers::{LEWES_PROTOCOL_LINE, LEWES_PROTOCOL_STATE, display_on_off};
+use crate::display_helpers::{
+    LEWES_PROTOCOL_LINE, LEWES_PROTOCOL_STATE, display_on_off, gateway_independence_summary,
+};
 
 /// Matches the daemon's own directory cache interval.
 const NAME_CACHE_TTL: Duration = Duration::from_secs(5 * 60);
@@ -71,7 +74,7 @@ fn method_signatures() -> Value {
     json!({
         "init": {},
         "status": {},
-        "connect": {},
+        "connect": { "relax_independence": "bool" },
         "disconnect": {},
         "info": {},
         "gateway_get": {},
@@ -82,10 +85,12 @@ fn method_signatures() -> Value {
         "gateway_list_full": { "gateway_type": "str" },
         "gateway_list_countries": { "gateway_type": "str" },
         "gateway_list_by_country": { "gateway_type": "str", "country_code": "str" },
+        "tentative_gateways": {},
         "tunnel_get": {},
         "tunnel_set": {
             "ipv6": "str", "two_hop": "str", "killswitch": "str", "legacy_split_tunnel": "str",
-            "circumvention": "str", "stealth_api": "str", "loop_cover_delay": "str", "packet_delay": "str",
+            "circumvention": "str", "stealth_api": "str", "gateway_independence": "str",
+            "family_reminders": "str", "always_on": "str", "loop_cover_delay": "str", "packet_delay": "str",
             "message_delay": "str", "disable_poisson": "str", "disable_cover": "str"
         },
         "account_get": {},
@@ -103,8 +108,6 @@ fn method_signatures() -> Value {
         "dns_set": { "enabled": "bool", "servers": "str" },
         "ad_block_get": {},
         "ad_block_set": { "enabled": "bool" },
-        "stats_get": {},
-        "stats_set": { "enabled": "bool", "allow_disconnected": "bool" },
         "diagnostic_run": { "skip_dns": "bool", "skip_http": "bool", "gateway": "str" },
         "split_list": {},
         "split_add": { "type": "str", "mac": "str", "domain": "str", "label": "str" },
@@ -117,8 +120,6 @@ fn method_signatures() -> Value {
         "daemon_restart": {},
         "daemon_start": {},
         "daemon_stop": {},
-        "watchdog_get": {},
-        "watchdog_set": { "always_on": "bool", "interval": "int" },
         "logs_get": { "lines": "int" },
     })
 }
@@ -128,7 +129,8 @@ fn method_signatures() -> Value {
 fn method_takes_args(method: &str) -> bool {
     matches!(
         method,
-        "gateway_set"
+        "connect"
+            | "gateway_set"
             | "gateway_list_full"
             | "gateway_list_countries"
             | "gateway_list_by_country"
@@ -140,13 +142,11 @@ fn method_takes_args(method: &str) -> bool {
             | "inbound_del"
             | "dns_set"
             | "ad_block_set"
-            | "stats_set"
             | "diagnostic_run"
             | "logs_get"
             | "split_add"
             | "split_del"
             | "split_set_enabled"
-            | "watchdog_set"
     )
 }
 
@@ -166,7 +166,8 @@ async fn dispatch(method: &str, args: &Value) -> Value {
         "gateway_list_full" => gateway_list_full(args).await,
         "gateway_list_countries" => gateway_list_countries(args).await,
         "gateway_list_by_country" => gateway_list_by_country(args).await,
-        "connect" => connect().await,
+        "tentative_gateways" => tentative_gateways().await,
+        "connect" => connect(args).await,
         "disconnect" => disconnect().await,
         "info" => info().await,
         "tunnel_get" => tunnel_get().await,
@@ -186,8 +187,6 @@ async fn dispatch(method: &str, args: &Value) -> Value {
         "dns_set" => dns_set(args).await,
         "ad_block_get" => ad_block_get().await,
         "ad_block_set" => ad_block_set(args).await,
-        "stats_get" => stats_get().await,
-        "stats_set" => stats_set(args).await,
         "diagnostic_run" => diagnostic_run(args).await,
         "init" => init_batch().await,
         "split_list" => split_list(),
@@ -201,8 +200,6 @@ async fn dispatch(method: &str, args: &Value) -> Value {
         "daemon_stop" => daemon_stop(),
         "daemon_restart" => daemon_restart(),
         "account_reset" => account_reset(),
-        "watchdog_get" => watchdog_get(),
-        "watchdog_set" => watchdog_set(args),
         "logs_get" => logs_get(args),
         other => fail(format!("Unknown method: {other}")),
     }
@@ -327,7 +324,46 @@ fn gateway_json(gw: &Gateway, gw_type: GatewayType) -> Value {
         "location": location_string(gw),
         "performance": performance_string(gw, gw_type),
         "bridges": gw.bridge_params.is_some(),
+        "family": gw.node_family_name,
     })
+}
+
+//-------------------------------------------------------------------------------
+// tentative_gateways — the pair a connect would most likely pick
+//-------------------------------------------------------------------------------
+
+fn tentative_gateway_json(gw: &Gateway) -> Value {
+    json!({
+        "id": gw.identity_key,
+        "name": gw.name,
+        "country": gw.location.as_ref().map(|l| l.two_letter_iso_country_code.clone()),
+        "family": gw.node_family_name,
+    })
+}
+
+/// `status` is "selected", "needs_relaxed" or "none"; entry/exit are present
+/// only when selected.
+fn tentative_json(tentative: &TentativeGateways) -> Value {
+    match tentative {
+        TentativeGateways::Selected { entry, exit } => json!({
+            "status": "selected",
+            "entry": tentative_gateway_json(entry),
+            "exit": tentative_gateway_json(exit),
+        }),
+        TentativeGateways::NeedsRelaxedIndependenceCriteria => json!({ "status": "needs_relaxed" }),
+        TentativeGateways::NoGatewaysAvailable => json!({ "status": "none" }),
+    }
+}
+
+async fn tentative_gateways() -> Value {
+    let mut client = match RpcClient::new().await {
+        Ok(client) => client,
+        Err(err) => return json!({ "status": "none", "error": format!("{err:#}") }),
+    };
+    match client.get_tentative_gateways().await {
+        Ok(tentative) => tentative_json(&tentative),
+        Err(err) => json!({ "status": "none", "error": format!("{err:#}") }),
+    }
 }
 
 async fn gateway_list_full(args: &Value) -> Value {
@@ -638,6 +674,20 @@ async fn status() -> Value {
                     None => format!("{ip} [{id}]"),
                 };
                 out.insert(format!("{side}_gateway"), json!(display));
+
+                // Operator family, straight from the daemon's connection data.
+                // Both flat (matching the other per-side keys) and nested.
+                let family = gw_info.family_name.clone().filter(|f| !f.is_empty());
+                out.insert(format!("{side}_family"), json!(family));
+                out.insert(
+                    side.to_owned(),
+                    json!({
+                        "id": id,
+                        "name": name,
+                        "country": country,
+                        "family": family,
+                    }),
+                );
             }
         }
         TunnelState::Disconnected => {
@@ -668,16 +718,44 @@ async fn status() -> Value {
             out.insert("tunnel_error".into(), json!(error_reason_ident(&reason)));
             emit_account_error(&mut client, &mut out).await;
         }
-        state @ TunnelState::Offline { .. } => {
-            // "unknown" is what the frontend expects for Offline.
-            out.insert("state".into(), json!("unknown"));
-            out.insert("connected".into(), json!(false));
+        state @ TunnelState::Offline { reconnect } => {
+            // No default route. With Always On this is a state users see on
+            // every WAN drop, so it gets its own name; `reconnect` tells the
+            // card "waiting for network" from a plain offline.
+            insert_offline(&mut out, reconnect);
             out.insert("raw_state".into(), json!(format!("State: {state}")));
             emit_account_error(&mut client, &mut out).await;
         }
     }
 
+    // The Always On supervisor's view, for the Tunnel Settings status line.
+    // Absent when the daemon predates it.
+    if let Ok(status) = client.get_always_on_status().await {
+        out.insert("always_on".into(), always_on_json(&status));
+    }
+
     Value::Object(out)
+}
+
+fn insert_offline(out: &mut serde_json::Map<String, Value>, reconnect: bool) {
+    out.insert("state".into(), json!("offline"));
+    out.insert("connected".into(), json!(false));
+    out.insert("reconnect".into(), json!(reconnect));
+}
+
+/// {enabled, active, paused, attempt, next_retry_secs, last_error, latched}:
+/// the supervisor snapshot with error reasons as the idents the frontend's
+/// copy tables key on.
+fn always_on_json(status: &AlwaysOnStatus) -> Value {
+    json!({
+        "enabled": status.enabled,
+        "active": status.active,
+        "paused": status.paused,
+        "attempt": status.attempt,
+        "next_retry_secs": status.next_retry_in.map(|d| d.as_secs()),
+        "last_error": status.last_error.as_ref().map(error_reason_ident),
+        "latched": status.latched_reason,
+    })
 }
 
 //-------------------------------------------------------------------------------
@@ -800,12 +878,18 @@ async fn gateway_get() -> Value {
 // Tunnel control + info
 //-------------------------------------------------------------------------------
 
-async fn connect() -> Value {
+async fn connect(args: &Value) -> Value {
+    // "Connect anyway": run this session with the gateway independence
+    // criteria relaxed; the persisted setting is untouched.
+    let relax_independence = arg_flag(args, "relax_independence");
     let mut client = match RpcClient::new().await {
         Ok(client) => client,
         Err(err) => return fail(format!("{err:#}")),
     };
-    match client.connect_tunnel().await {
+    match client.connect_tunnel(relax_independence).await {
+        Ok(_) if relax_independence => {
+            ok_msg("Connection initiated with relaxed gateway independence")
+        }
         Ok(_) => ok_msg("Connection initiated"),
         Err(err) => fail(format!("{err:#}")),
     }
@@ -919,6 +1003,19 @@ fn opt_u32_string(value: Option<u32>) -> String {
     value.map(|v| v.to_string()).unwrap_or_default()
 }
 
+/// `enabled` is whether any criterion is active; the three criteria and the
+/// reminder switch follow individually.
+fn gateway_independence_json(gateway_independence: &GatewayIndependence) -> Value {
+    json!({
+        "enabled": gateway_independence.active(),
+        "notifications": gateway_independence.enable_notifications,
+        "different_node_family": gateway_independence.different_node_family,
+        "different_asn": gateway_independence.different_asn,
+        "different_subnet": gateway_independence.different_subnet,
+    })
+}
+
+/// The core on/off flags shared by tunnel_get and tunnel_set's config echo.
 fn tunnel_flags_json(config: &VpnServiceConfig) -> serde_json::Map<String, Value> {
     let mut out = serde_json::Map::new();
     out.insert("ipv6".into(), json!(display_on_off(!config.disable_ipv6)));
@@ -937,6 +1034,11 @@ fn tunnel_flags_json(config: &VpnServiceConfig) -> serde_json::Map<String, Value
         "stealth_api".into(),
         json!(display_on_off(config.stealth_api)),
     );
+    out.insert(
+        "gateway_independence".into(),
+        gateway_independence_json(&config.gateway_independence),
+    );
+    out.insert("always_on".into(), json!(display_on_off(config.always_on)));
     out
 }
 
@@ -971,8 +1073,8 @@ fn degraded_tunnel_config(err: String) -> Value {
     json!({
         "ipv6": "", "two_hop": "", "netstack": "", "lewes_protocol": "",
         "circumvention_transports": "", "killswitch": "", "legacy_split_tunnel": "",
-        "stealth_api": "", "stealth_api_note": "",
-        "loop_cover_delay": "", "packet_delay": "", "message_delay": "",
+        "stealth_api": "", "stealth_api_note": "", "gateway_independence": {},
+        "always_on": "", "loop_cover_delay": "", "packet_delay": "", "message_delay": "",
         "disable_poisson": "", "disable_cover": "",
         "raw_config": err,
     })
@@ -1017,7 +1119,7 @@ async fn tunnel_get() -> Value {
             .join(", ")
     };
     let raw_config = format!(
-        "IPv6: {}\nTwo-hop: {}\n{}\nNetstack: {}\nCircumvention transports: {}\nKill-switch: {}\nLegacy-split-tunnel: {}\nStealth API connect: {}{}\nInbound exemptions: {}\nMixnet traffic configuration: {}",
+        "IPv6: {}\nTwo-hop: {}\n{}\nNetstack: {}\nCircumvention transports: {}\nKill-switch: {}\nLegacy-split-tunnel: {}\nStealth API connect: {}{}\nGateway independence: {}\nFamily reminders: {}\nAlways on: {}\nInbound exemptions: {}\nMixnet traffic configuration: {}",
         display_on_off(!config.disable_ipv6),
         display_on_off(config.enable_two_hop),
         LEWES_PROTOCOL_LINE,
@@ -1031,6 +1133,9 @@ async fn tunnel_get() -> Value {
         } else {
             " (no cover domains available)"
         },
+        gateway_independence_summary(&config.gateway_independence),
+        display_on_off(config.gateway_independence.enable_notifications),
+        display_on_off(config.always_on),
         inbound,
         config.mixnet_traffic,
     );
@@ -1046,7 +1151,10 @@ async fn tunnel_set(args: &Value) -> Value {
     let legacy_split_tunnel = arg_onoff(args, "legacy_split_tunnel");
     let circumvention = arg_onoff(args, "circumvention");
     let stealth_api = arg_onoff(args, "stealth_api");
-    // Ranges mirror the daemon-side validation.
+    let gateway_independence = arg_onoff(args, "gateway_independence");
+    let family_reminders = arg_onoff(args, "family_reminders");
+    let always_on = arg_onoff(args, "always_on");
+    // Numeric ranges mirror the shell (and daemon-side) validation.
     let loop_cover_delay = arg_u32(args, "loop_cover_delay").filter(|v| *v <= 200);
     let packet_delay = arg_u32(args, "packet_delay").filter(|v| *v <= 200);
     let message_delay = arg_u32(args, "message_delay").filter(|v| (5..=50).contains(v));
@@ -1065,6 +1173,9 @@ async fn tunnel_set(args: &Value) -> Value {
         && legacy_split_tunnel.is_none()
         && circumvention.is_none()
         && stealth_api.is_none()
+        && gateway_independence.is_none()
+        && family_reminders.is_none()
+        && always_on.is_none()
         && !any_mixnet
     {
         return fail("No tunnel parameters specified");
@@ -1095,6 +1206,15 @@ async fn tunnel_set(args: &Value) -> Value {
         }
         if let Some(stealth_api) = stealth_api {
             client.set_stealth_api(stealth_api).await?;
+        }
+        if let Some(enabled) = gateway_independence {
+            client.set_enable_gateway_independence(enabled).await?;
+        }
+        if let Some(enabled) = family_reminders {
+            client.set_gateway_independence_notifications(enabled).await?;
+        }
+        if let Some(enabled) = always_on {
+            client.set_always_on(enabled).await?;
         }
         if any_mixnet {
             let mut config = client.get_config().await?;
@@ -1518,70 +1638,6 @@ async fn ad_block_set(args: &Value) -> Value {
 }
 
 //-------------------------------------------------------------------------------
-// stats_get / stats_set — anonymous network statistics (`nym-vpnc network-stats`)
-//-------------------------------------------------------------------------------
-
-fn stats_json(config: &VpnServiceConfig) -> Value {
-    json!({
-        "enabled": config.network_stats.enabled,
-        "allow_disconnected": config.network_stats.allow_disconnected,
-    })
-}
-
-fn degraded_stats(err: String) -> Value {
-    json!({ "enabled": false, "allow_disconnected": false, "error": err })
-}
-
-async fn stats_get() -> Value {
-    let mut client = match RpcClient::new().await {
-        Ok(client) => client,
-        Err(err) => return degraded_stats(format!("{err:#}")),
-    };
-    match client.get_config().await {
-        Ok(config) => stats_json(&config),
-        Err(err) => degraded_stats(format!("{err:#}")),
-    }
-}
-
-async fn stats_set(args: &Value) -> Value {
-    let enabled = arg_flag_present(args, "enabled");
-    let allow_disconnected = arg_flag_present(args, "allow_disconnected");
-    if enabled.is_none() && allow_disconnected.is_none() {
-        return fail("Nothing to set: pass enabled and/or allow_disconnected");
-    }
-
-    let mut client = match RpcClient::new().await {
-        Ok(client) => client,
-        Err(err) => return fail(format!("{err:#}")),
-    };
-    if let Some(enabled) = enabled
-        && let Err(err) = client.network_stats_set_enabled(enabled).await
-    {
-        return fail(format!("{err:#}"));
-    }
-    if let Some(allow) = allow_disconnected
-        && let Err(err) = client.network_stats_allow_disconnected(allow).await
-    {
-        return fail(format!("{err:#}"));
-    }
-
-    let mut parts = Vec::new();
-    if let Some(enabled) = enabled {
-        parts.push(format!(
-            "Anonymous statistics {}",
-            if enabled { "enabled" } else { "disabled" }
-        ));
-    }
-    if let Some(allow) = allow_disconnected {
-        parts.push(format!(
-            "Disconnected reporting {}",
-            if allow { "enabled" } else { "disabled" }
-        ));
-    }
-    ok_msg(parts.join(", "))
-}
-
-//-------------------------------------------------------------------------------
 // diagnostic_run
 //-------------------------------------------------------------------------------
 
@@ -1771,112 +1827,6 @@ fn clients_list() -> Value {
         .map(|leases| parse_dhcp_leases(&leases))
         .unwrap_or_default();
     json!({ "clients": clients })
-}
-
-/// Under root-owned /var/run, not /tmp: nothing unprivileged may plant a file
-/// for this root-run bridge to read.
-const WATCHDOG_STATE_PATH: &str = "/var/run/nym-watchdog.state";
-
-/// No-follow and non-blocking, then insist on a regular file: a planted
-/// symlink or FIFO must not be followed or block.
-fn read_watchdog_state() -> std::io::Result<String> {
-    use std::os::unix::fs::OpenOptionsExt;
-
-    let mut file = std::fs::File::options()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(WATCHDOG_STATE_PATH)?;
-    if !file.metadata()?.file_type().is_file() {
-        return Err(std::io::Error::other(
-            "watchdog state is not a regular file",
-        ));
-    }
-    let mut content = String::new();
-    file.read_to_string(&mut content)?;
-    Ok(content)
-}
-
-/// The watchdog state file is a shell-sourceable KEY=value file.
-fn parse_state_file(content: &str) -> BTreeMap<String, String> {
-    content
-        .lines()
-        .filter_map(|line| {
-            let (key, value) = line.split_once('=')?;
-            Some((
-                key.trim().to_owned(),
-                value.trim().trim_matches(|c| c == '\'' || c == '"').to_owned(),
-            ))
-        })
-        .collect()
-}
-
-fn watchdog_json(include_details: bool) -> Value {
-    let mut out = serde_json::Map::new();
-    out.insert(
-        "always_on".into(),
-        json!(uci_get("nym-vpn.settings.always_on").as_deref() == Some("1")),
-    );
-    out.insert(
-        "interval".into(),
-        json!(
-            uci_get("nym-vpn.settings.watchdog_interval")
-                .and_then(|v| v.parse::<i64>().ok())
-                .unwrap_or(30)
-        ),
-    );
-    if include_details {
-        out.insert(
-            "max_retries".into(),
-            json!(
-                uci_get("nym-vpn.settings.watchdog_max_retries")
-                    .and_then(|v| v.parse::<i64>().ok())
-                    .unwrap_or(3)
-            ),
-        );
-    }
-    out.insert(
-        "service".into(),
-        json!(if initd_running("nym-vpn-watchdog") { "running" } else { "stopped" }),
-    );
-
-    match read_watchdog_state() {
-        Ok(content) => {
-            let state = parse_state_file(&content);
-            let get = |k: &str| state.get(k).cloned();
-            out.insert(
-                "state".into(),
-                json!(get("state").unwrap_or_else(|| "unknown".into())),
-            );
-            out.insert(
-                "failures".into(),
-                json!(get("failures").and_then(|v| v.parse::<i64>().ok()).unwrap_or(0)),
-            );
-            if include_details {
-                out.insert(
-                    "last_action".into(),
-                    json!(get("last_action").unwrap_or_else(|| "none".into())),
-                );
-                out.insert(
-                    "timestamp".into(),
-                    json!(get("timestamp").and_then(|v| v.parse::<i64>().ok()).unwrap_or(0)),
-                );
-            }
-        }
-        Err(_) => {
-            out.insert("state".into(), json!("inactive"));
-            out.insert("failures".into(), json!(0));
-            if include_details {
-                out.insert("last_action".into(), json!("none"));
-                out.insert("timestamp".into(), json!(0));
-            }
-        }
-    }
-
-    Value::Object(out)
-}
-
-fn watchdog_get() -> Value {
-    watchdog_json(true)
 }
 
 fn strip_ansi(input: &str) -> String {
@@ -2180,7 +2130,7 @@ fn split_set_enabled(args: &Value) -> Value {
 }
 
 //-------------------------------------------------------------------------------
-// Daemon lifecycle / watchdog / account hard-reset
+// Daemon lifecycle / account hard-reset
 //-------------------------------------------------------------------------------
 
 fn sleep_secs(secs: u64) {
@@ -2247,57 +2197,6 @@ fn account_reset() -> Value {
     )
 }
 
-fn watchdog_set(args: &Value) -> Value {
-    let always_on = match args.get("always_on") {
-        Some(Value::Bool(b)) => Some(*b),
-        Some(Value::Number(n)) if n.as_i64() == Some(0) => Some(false),
-        Some(Value::Number(n)) if n.as_i64() == Some(1) => Some(true),
-        Some(Value::String(s)) if s == "0" => Some(false),
-        Some(Value::String(s)) if s == "1" => Some(true),
-        _ => None,
-    };
-    let Some(always_on) = always_on else {
-        return fail("Invalid value (must be 0 or 1)");
-    };
-
-    if let Some(interval) = args.get("interval").filter(|v| !v.is_null()) {
-        let interval = match interval {
-            Value::Number(n) => n.as_i64(),
-            Value::String(s) => s.parse().ok(),
-            _ => None,
-        };
-        match interval {
-            Some(1 | 5 | 15 | 30 | 60 | 120) => {
-                uci_run(&[
-                    "set",
-                    &format!("nym-vpn.settings.watchdog_interval={}", interval.unwrap()),
-                ]);
-            }
-            _ => return fail("Invalid interval (must be 1, 5, 15, 30, 60, or 120)"),
-        }
-    }
-
-    uci_run(&[
-        "set",
-        &format!("nym-vpn.settings.always_on={}", if always_on { 1 } else { 0 }),
-    ]);
-    uci_run(&["commit", "nym-vpn"]);
-
-    if always_on {
-        initd_run("nym-vpn-watchdog", "enable");
-        initd_run("nym-vpn-watchdog", "start");
-    } else {
-        initd_run("nym-vpn-watchdog", "stop");
-        initd_run("nym-vpn-watchdog", "disable");
-        let _ = std::fs::remove_file(WATCHDOG_STATE_PATH);
-    }
-
-    ok_msg(format!(
-        "Always-on {}",
-        if always_on { "enabled" } else { "disabled" }
-    ))
-}
-
 //-------------------------------------------------------------------------------
 // init — the dashboard's batch bootstrap call
 //-------------------------------------------------------------------------------
@@ -2359,7 +2258,6 @@ async fn init_batch() -> Value {
                         "ad_block".into(),
                         json!({ "enabled": config.enable_ad_blocking }),
                     );
-                    out.insert("stats".into(), stats_json(&config));
                     out.insert("dns".into(), dns_json_with_owner(&mut client, &config).await);
                 }
                 Err(err) => insert_degraded_config_members(&mut out, format!("{err:#}")),
@@ -2415,7 +2313,6 @@ async fn init_batch() -> Value {
     );
     out.insert("clients".into(), clients_list()["clients"].clone());
     out.insert("daemon".into(), daemon_status());
-    out.insert("watchdog".into(), watchdog_json(false));
 
     Value::Object(out)
 }
@@ -2425,7 +2322,6 @@ fn insert_degraded_config_members(out: &mut serde_json::Map<String, Value>, err:
         "gateway_config".into(),
         json!({ "entry_point": "", "exit_point": "", "residential_exit": "" }),
     );
-    out.insert("stats".into(), degraded_stats(err.clone()));
     out.insert("tunnel_config".into(), degraded_tunnel_config(err));
     out.insert("lan".into(), json!({ "policy": "" }));
     out.insert("inbound_exemptions".into(), json!([]));
@@ -2469,7 +2365,59 @@ mod tests {
             exit_ipv6s: vec![],
             build_version: None,
             lewes_protocol_details: None,
+            node_family_name: None,
         }
+    }
+
+    #[test]
+    fn gateway_rows_carry_the_family() {
+        let mut gw = gateway("id1", "gw1", Some("DE"), Score::High);
+        assert_eq!(gateway_json(&gw, GatewayType::Wg)["family"], Value::Null);
+        gw.node_family_name = Some("Acme".to_owned());
+        assert_eq!(gateway_json(&gw, GatewayType::Wg)["family"], json!("Acme"));
+    }
+
+    #[test]
+    fn tentative_json_shapes() {
+        let mut entry = gateway("e", "entry", Some("DE"), Score::High);
+        entry.node_family_name = Some("Acme".to_owned());
+        let exit = gateway("x", "exit", None, Score::High);
+        let selected = tentative_json(&TentativeGateways::Selected {
+            entry: Box::new(entry),
+            exit: Box::new(exit),
+        });
+        assert_eq!(selected["status"], json!("selected"));
+        assert_eq!(selected["entry"]["id"], json!("e"));
+        assert_eq!(selected["entry"]["country"], json!("DE"));
+        assert_eq!(selected["entry"]["family"], json!("Acme"));
+        assert_eq!(selected["exit"]["country"], Value::Null);
+        assert_eq!(selected["exit"]["family"], Value::Null);
+
+        let relaxed = tentative_json(&TentativeGateways::NeedsRelaxedIndependenceCriteria);
+        assert_eq!(relaxed, json!({ "status": "needs_relaxed" }));
+        let none = tentative_json(&TentativeGateways::NoGatewaysAvailable);
+        assert_eq!(none, json!({ "status": "none" }));
+    }
+
+    #[test]
+    fn gateway_independence_json_reports_enabled_from_criteria() {
+        let on = gateway_independence_json(&GatewayIndependence::default());
+        assert_eq!(on["enabled"], json!(true));
+        assert_eq!(on["notifications"], json!(true));
+        let off = gateway_independence_json(&GatewayIndependence::disabled());
+        assert_eq!(off["enabled"], json!(false));
+        assert_eq!(off["different_asn"], json!(false));
+        assert_eq!(off["notifications"], json!(true));
+        let flags = tunnel_flags_json(&VpnServiceConfig::default());
+        assert_eq!(flags["gateway_independence"]["enabled"], json!(true));
+    }
+
+    #[test]
+    fn error_reason_ident_names_the_relax_case() {
+        assert_eq!(
+            error_reason_ident(&ErrorStateReason::NeedsRelaxedIndependenceCriteria),
+            "NeedsRelaxedIndependenceCriteria"
+        );
     }
 
     #[test]
@@ -2680,11 +2628,70 @@ nym-vpn.broken.mac='11:22:33:44:55:66'
     }
 
     #[test]
-    fn state_file_parsing() {
-        let state = parse_state_file("state=connected\nfailures=2\nlast_action='restart'\n");
-        assert_eq!(state.get("state").map(String::as_str), Some("connected"));
-        assert_eq!(state.get("failures").map(String::as_str), Some("2"));
-        assert_eq!(state.get("last_action").map(String::as_str), Some("restart"));
+    fn always_on_status_shapes() {
+        let off = always_on_json(&AlwaysOnStatus::default());
+        assert_eq!(
+            off,
+            json!({ "enabled": false, "active": false, "paused": false, "attempt": 0,
+                    "next_retry_secs": null, "last_error": null, "latched": null })
+        );
+
+        let retrying = always_on_json(&AlwaysOnStatus {
+            enabled: true,
+            active: true,
+            paused: false,
+            attempt: 3,
+            next_retry_in: Some(Duration::from_secs(42)),
+            last_error: Some(ErrorStateReason::SetRouting),
+            latched_reason: None,
+        });
+        assert_eq!(retrying["attempt"], 3);
+        assert_eq!(retrying["next_retry_secs"], 42);
+        assert_eq!(retrying["last_error"], "SetRouting");
+        assert!(retrying["latched"].is_null());
+
+        let latched = always_on_json(&AlwaysOnStatus {
+            enabled: true,
+            active: true,
+            paused: false,
+            attempt: 0,
+            next_retry_in: None,
+            last_error: Some(ErrorStateReason::Internal("boom".into())),
+            latched_reason: Some("Internal".into()),
+        });
+        assert_eq!(latched["latched"], "Internal");
+        assert_eq!(latched["last_error"], "Internal");
+
+        let paused = always_on_json(&AlwaysOnStatus {
+            enabled: true,
+            active: false,
+            paused: true,
+            ..AlwaysOnStatus::default()
+        });
+        assert_eq!(paused["enabled"], true);
+        assert_eq!(paused["active"], false);
+        assert_eq!(paused["paused"], true);
+    }
+
+    #[test]
+    fn offline_state_mapping() {
+        let mut out = serde_json::Map::new();
+        insert_offline(&mut out, true);
+        assert_eq!(out["state"], "offline");
+        assert_eq!(out["connected"], false);
+        assert_eq!(out["reconnect"], true);
+        let mut out = serde_json::Map::new();
+        insert_offline(&mut out, false);
+        assert_eq!(out["reconnect"], false);
+    }
+
+    #[test]
+    fn tunnel_flags_carry_always_on() {
+        let mut config = VpnServiceConfig::default();
+        assert_eq!(tunnel_flags_json(&config)["always_on"], "off");
+        config.always_on = true;
+        assert_eq!(tunnel_flags_json(&config)["always_on"], "on");
+        assert!(degraded_tunnel_config("x".into())["always_on"].is_string());
     }
 
     #[test]

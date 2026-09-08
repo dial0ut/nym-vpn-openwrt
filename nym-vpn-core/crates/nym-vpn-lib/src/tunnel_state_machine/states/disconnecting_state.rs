@@ -76,7 +76,8 @@ impl TunnelStateHandler for DisconnectingState {
             Some(command) = command_rx.recv() => {
                 tracing::debug!("DisconnectingState received command: {command:?}");
                 match command {
-                    TunnelCommand::Connect => {
+                    TunnelCommand::Connect { relax_independence } => {
+                        shared_state.relax_independence = relax_independence;
                         self.after_disconnect = match self.after_disconnect {
                             PrivateActionAfterDisconnect::Offline { gateways,  .. } => {
                                 PrivateActionAfterDisconnect::Offline { reconnect: true, gateways }

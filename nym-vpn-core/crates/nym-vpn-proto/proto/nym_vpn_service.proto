@@ -60,6 +60,7 @@ message Location {
 message GatewayLightInfo {
   string id = 1;
   optional string country_code = 2;
+  optional string family_name = 3;
 }
 
 message EntryNode {
@@ -119,6 +120,22 @@ message DnsUpstreamOwnerResponse {
     OWNER_NOT_APPLICABLE = 3;
   }
   Owner owner = 1;
+}
+
+// Snapshot of the daemon's Always On supervisor. Polled; no event carries it.
+message AlwaysOnStatus {
+  // The persisted setting.
+  bool enabled = 1;
+  // The daemon wants the tunnel up (target state Secured).
+  bool active = 2;
+  // The user disconnected for this session; the setting is untouched.
+  bool paused = 3;
+  // Retries scheduled in the current error series.
+  uint32 attempt = 4;
+  optional uint32 next_retry_in_secs = 5;
+  optional TunnelState.Error last_error = 6;
+  // Terminal error holding retries until the configuration or account changes.
+  optional string latched_reason = 7;
 }
 
 message ApiUrl {
@@ -283,13 +300,53 @@ message VpnServiceConfig {
   bool enable_custom_dns = 17;
   IpAddrList custom_dns = 16;
   optional uint32 min_gateway_vpn_performance = 10;
-  NetworkStatsConfig network_stats = 18;
+  reserved 18;
   MixnetTrafficConfig mixnet_traffic = 25;
   bool enable_ad_blocking = 27;
   bool killswitch = 28;
   repeated InboundExemption inbound_exemptions = 29;
   bool legacy_split_tunnel = 30;
   bool stealth_api = 31;
+  GatewayIndependence gateway_independence = 32;
+  // Connect on daemon start and keep retrying error states (see AlwaysOnStatus).
+  bool always_on = 33;
+}
+
+// Which relations between the entry and the exit gateway rule a pair out.
+// Every criterion is on by default; enable_notifications is a hint for user
+// interfaces and does not affect selection.
+message GatewayIndependence {
+  bool different_node_family = 1;
+  bool different_asn = 2;
+  bool different_subnet = 3;
+  bool enable_notifications = 4;
+}
+
+// Connect request. An empty message (older clients) connects with the
+// persisted settings.
+message ConnectRequest {
+  // Select gateways with the independence criteria switched off for this
+  // connect session only (until the next disconnect). The persisted
+  // setting is untouched.
+  bool relax_independence = 1;
+}
+
+// The entry and exit gateways a connect would most likely pick right now.
+message TentativeGateways {
+  message Selected {
+    GatewayResponse entry = 1;
+    GatewayResponse exit = 2;
+  }
+  // A pair exists only once the independence criteria are relaxed.
+  message NeedsRelaxedIndependenceCriteria {}
+  // No pair satisfies the settings even with the criteria relaxed.
+  message NoGatewaysAvailable {}
+
+  oneof tentative_gateways {
+    Selected selected = 1;
+    NeedsRelaxedIndependenceCriteria needs_relaxed_independence_criteria = 2;
+    NoGatewaysAvailable no_gateways_available = 3;
+  }
 }
 
 enum InboundExemptionProtocol {
@@ -306,11 +363,6 @@ message InboundExemption {
 
 message InboundExemptionList {
   repeated InboundExemption exemptions = 1;
-}
-
-message NetworkStatsConfig {
-  bool enabled = 1;
-  bool allow_disconnected = 2;
 }
 
 message AsEntry {
@@ -366,6 +418,7 @@ message GatewayResponse {
   repeated string exit_ipv6s = 8;
   optional string build_version = 9;
   optional LewesProtocolDetails lp_details = 13;
+  optional string node_family_name = 14;
 }
 
 message KemKeyDigests {
@@ -528,6 +581,7 @@ message TunnelState {
     DEVICE_TIME_OUT_OF_SYNC = 15;
     DEVICE_LOGGED_OUT = 16;
     INTERNAL = 17;
+    NEEDS_RELAXED_INDEPENDENCE_CRITERIA = 22;
   }
 
   enum ActionAfterDisconnect {
@@ -921,16 +975,6 @@ message HttpRpcSettings {
   string listen_address = 1;  // e.g., "127.0.0.1:8545"
 }
 
-message NetworkStatsResetSeedRequest {
-  // this doesn't need to be cryptographically secure, so anything will do
-  optional string seed = 1;
-}
-
-message NetworkStatisticsIdentity {
-  string seed = 1;
-  string id = 2;
-}
-
 message PrivyDerivationMessage {
   string message = 1;
 }
@@ -1049,6 +1093,13 @@ service NymVpnService {
   rpc SetKillswitch (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
   rpc SetLegacySplitTunnel (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
   rpc SetStealthApi (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
+  // Always On: connect on daemon start and keep the tunnel up until told otherwise
+  rpc SetAlwaysOn (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
+  rpc GetAlwaysOnStatus (google.protobuf.Empty) returns (AlwaysOnStatus) {}
+  // Switch every gateway independence criterion on or off at once
+  rpc SetEnableGatewayIndependence (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
+  // Remind the user when the selected pair is not independent
+  rpc SetGatewayIndependenceNotifications (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
   rpc SetInboundExemptions (InboundExemptionList) returns (google.protobuf.Empty) {}
   rpc GetInboundExemptions (google.protobuf.Empty) returns (InboundExemptionList) {}
 
@@ -1072,7 +1123,7 @@ service NymVpnService {
   rpc GetDnsUpstreamOwner (google.protobuf.Empty) returns (DnsUpstreamOwnerResponse) {}
 
   // Connect the tunnel
-  rpc ConnectTunnel (google.protobuf.Empty) returns (google.protobuf.BoolValue) {}
+  rpc ConnectTunnel (ConnectRequest) returns (google.protobuf.BoolValue) {}
 
   // Reconnect the tunnel if it had been established.
   rpc ReconnectTunnel (google.protobuf.Empty) returns (google.protobuf.BoolValue) {}
@@ -1094,6 +1145,10 @@ service NymVpnService {
 
   // Probe gateways for latency and packet loss
   rpc TestGateways (GatewayTestParams) returns (GatewayTestReport) {}
+
+  // Preview the entry and exit gateways a connect would most likely pick,
+  // from the live settings, without creating key material
+  rpc GetTentativeGateways (google.protobuf.Empty) returns (TentativeGateways) {}
 
   // Store the recovery phrase, which is also the account identity and authentication
   rpc StoreAccount (StoreAccountRequest) returns (AccountCommandResponse) {}
@@ -1160,27 +1215,6 @@ service NymVpnService {
 
   // Delete the log file
   rpc DeleteLogFile (google.protobuf.Empty) returns (google.protobuf.Empty) {}
-
-  // Check if Sentry error monitoring is enabled
-  rpc IsSentryEnabled (google.protobuf.Empty) returns (google.protobuf.BoolValue) {}
-
-  // Enable Sentry error monitoring (requires daemon restart)
-  rpc EnableSentry (google.protobuf.Empty) returns (google.protobuf.Empty) {}
-
-  // Disable Sentry error monitoring (requires daemon restart)
-  rpc DisableSentry (google.protobuf.Empty) returns (google.protobuf.Empty) {}
-
-  // Enable/disable network statistics collection
-  rpc NetworkStatsSetEnabled (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
-
-  // Allow/disallow disconnected network statistics collection sending
-  rpc NetworkStatsAllowDisconnected (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
-
-  // Reset seed used for network statistics id
-  rpc NetworkStatsResetSeed (NetworkStatsResetSeedRequest) returns (google.protobuf.Empty) {}
-
-  // Get seed and Id used for network statistics
-  rpc NetworkStatsGetSeed (google.protobuf.Empty) returns (NetworkStatisticsIdentity) {}
 
   // Enable socks5 proxy
   rpc EnableSocks5 (EnableSocks5Request) returns (google.protobuf.Empty) {}

@@ -19,10 +19,10 @@ use tokio_util::sync::CancellationToken;
 
 use super::{
     Socks5Error, Socks5Service, Socks5Status,
+    always_on::{self, AlwaysOn},
     config::{NetworkEnvironments, VpnServiceConfigManager},
     error::{
-        AccountLinksError, Error, GatewayTestError, GlobalConfigError, ListGatewaysError, Result,
-        SetNetworkError,
+        AccountLinksError, Error, GatewayTestError, ListGatewaysError, Result, SetNetworkError,
     },
     gateway_test::{self, GatewayTestContext, GatewayTestSlot},
     socks5::Socks5EnableConfig,
@@ -31,28 +31,30 @@ use super::{
 use crate::{config::GlobalConfig, logging::LogFileRemoverHandle};
 use nym_common::trace_err_chain;
 use nym_gateway_directory::{GatewayFilter, GatewayFilters};
-use nym_statistics::{
-    StatisticsCommandsSender, StatisticsController, StatisticsControllerError, StatisticsSender,
-};
 use nym_vpn_account_controller::{
     AccountCommandSender, AccountController, AccountControllerConfig, AccountRefreshMode,
     AccountStateReceiver, AvailableTicketbooks, NyxdClient,
 };
 use nym_vpn_api_client::api_urls_to_urls;
 use nym_vpn_lib::{
-    DEFAULT_DNS_SERVERS, NodeIdentity, UserAgent, VpnTopologyService,
-    gateway_directory::{self, GatewayCache, GatewayCacheHandle, GatewayClient},
-    tunnel_state_machine::{NymConfig, TunnelCommand, TunnelConstants, TunnelStateMachine},
+    DEFAULT_DNS_SERVERS, GatewayDirectoryError, NodeIdentity, UserAgent, VpnTopologyService,
+    gateway_directory::{
+        self, BlacklistedGateways, GatewayCache, GatewayCacheHandle, GatewayClient,
+    },
+    tunnel_state_machine::{
+        NymConfig, TunnelCommand, TunnelConstants, TunnelStateMachine, tunnel::select_gateway_pair,
+    },
 };
 use nym_vpn_lib_types::{
-    AccountBalanceResponse, AccountCommandError, AccountControllerState,
+    AccountBalanceResponse, AccountCommandError, AccountControllerState, AlwaysOnStatus,
     DecentralisedObtainTicketbooksRequest, DeeplinkClient, DeeplinkKind, DiagnosticRegisterParams,
     DiagnosticReport, DiagnosticRunParams, DnsUpstreamOwner, EnableSocks5Request, EntryPoint,
     ExitPoint, FeatureFlags, Gateway, GatewayTestParams, GatewayTestReport, GetDeeplinkParams,
     ListGatewaysOptions, LogPath, LookupGatewayFilters, MixnetTrafficConfig, NetworkCompatibility,
-    NetworkStatisticsIdentity, NymNetworkDetails, NymVpnDevice, NymVpnNetwork, NymVpnUsage,
+    NymNetworkDetails, NymVpnDevice, NymVpnNetwork, NymVpnUsage,
     ParsedAccountLinks, RegistrationReport, StoreAccountRequest, SystemMessage, TargetState,
-    TunnelEvent, TunnelState, VpnAccountSummary, VpnServiceConfig, VpnServiceInfo,
+    TentativeGateways, TunnelEvent, TunnelState, VpnAccountSummary, VpnServiceConfig,
+    VpnServiceInfo,
 };
 use nym_vpn_network_config::{
     DiscoveryRefresher, DiscoveryRefresherCommand, DiscoveryRefresherEvent, Network,
@@ -61,6 +63,10 @@ use nym_vpn_store::types::{StorableAccount, StoredAccountMode};
 
 // Seed used to generate device identity keys
 type Seed = [u8; 32];
+
+/// Upper bound on a tentative gateway lookup, so a stalled directory refresh
+/// turns into "no gateways available" instead of a hung RPC.
+const TENTATIVE_GATEWAYS_TIMEOUT: Duration = Duration::from_secs(5);
 
 type Locale = String;
 
@@ -79,6 +85,11 @@ pub enum VpnServiceCommand {
     SetKillswitch(oneshot::Sender<Result<(), String>>, bool),
     SetLegacySplitTunnel(oneshot::Sender<Result<(), String>>, bool),
     SetStealthApi(oneshot::Sender<Result<(), String>>, bool),
+    SetAlwaysOn(oneshot::Sender<Result<(), String>>, bool),
+    GetAlwaysOnStatus(oneshot::Sender<AlwaysOnStatus>, ()),
+    SetEnableGatewayIndependence(oneshot::Sender<Result<(), String>>, bool),
+    SetGatewayIndependenceNotifications(oneshot::Sender<Result<(), String>>, bool),
+    GetTentativeGateways(oneshot::Sender<TentativeGateways>, ()),
     SetInboundExemptions(
         oneshot::Sender<Result<(), String>>,
         Vec<nym_vpn_lib_types::InboundExemption>,
@@ -114,6 +125,9 @@ pub enum VpnServiceCommand {
     DisableSocks5(oneshot::Sender<Result<(), Socks5Error>>, ()),
     GetSocks5Status(oneshot::Sender<Result<Socks5Status, Socks5Error>>, ()),
     SetTargetState(oneshot::Sender<bool>, TargetState),
+    /// Connect; the flag relaxes the gateway independence criteria for this
+    /// connect session only.
+    ConnectTunnel(oneshot::Sender<bool>, bool),
     Reconnect(oneshot::Sender<bool>, ()),
     GetTunnelState(oneshot::Sender<TunnelState>, ()),
     StoreAccount(
@@ -173,18 +187,6 @@ pub enum VpnServiceCommand {
     DeeplinkStoreAccount(oneshot::Sender<Result<(), AccountCommandError>>, String),
     GetLogPath(oneshot::Sender<Option<LogPath>>, ()),
     DeleteLogFile(oneshot::Sender<()>, ()),
-    IsSentryEnabled(oneshot::Sender<bool>, ()),
-    ToggleSentry(oneshot::Sender<Result<(), GlobalConfigError>>, bool),
-    AllowDisconnectedNetStats(oneshot::Sender<()>, bool),
-    EnableNetStats(oneshot::Sender<()>, bool),
-    ResetNetStatsSeed(
-        oneshot::Sender<Result<(), StatisticsControllerError>>,
-        Option<String>,
-    ),
-    GetNetStatsSeed(
-        oneshot::Sender<Result<NetworkStatisticsIdentity, StatisticsControllerError>>,
-        (),
-    ),
     RunDiagnostic(oneshot::Sender<DiagnosticReport>, DiagnosticRunParams),
     RegisterDiagnostic(
         oneshot::Sender<RegistrationReport>,
@@ -210,7 +212,6 @@ fn warn_if_no_cover_domains(network: &Network) {
 pub struct NymVpnServiceParameters {
     pub log_path: Option<LogPath>,
     pub network_env: Box<Network>,
-    pub sentry_enabled: bool,
     pub user_agent: UserAgent,
 }
 
@@ -240,6 +241,12 @@ pub struct NymVpnService {
     // Throttles tunnel settings changes.
     tunnel_settings_update_timer: Pin<Box<Fuse<tokio::time::Sleep>>>,
 
+    // Always On policy: connect at start, retry error states, re-select after
+    // a long Connecting. Pure; this loop feeds it events and owns its timer.
+    always_on: AlwaysOn,
+    always_on_timer: Pin<Box<Fuse<tokio::time::Sleep>>>,
+
+    // Command channel for state machine
     command_sender: mpsc::UnboundedSender<TunnelCommand>,
 
     event_receiver: mpsc::UnboundedReceiver<TunnelEvent>,
@@ -248,8 +255,7 @@ pub struct NymVpnService {
 
     account_controller_handle: JoinHandle<()>,
 
-    statistics_controller_handle: JoinHandle<()>,
-
+    // Topology service join handle
     topology_service_join_handle: JoinHandle<()>,
 
     topology_service_handle: nym_vpn_lib::VpnTopologyServiceHandle,
@@ -258,6 +264,16 @@ pub struct NymVpnService {
 
     gateway_cache_join_handle: JoinHandle<()>,
 
+    // Entry gateways the state machine has given up on for a while. Shared
+    // with it so a preview of the probable pair skips them as a connect would.
+    blacklisted_entry_gateways: BlacklistedGateways,
+
+    // Whether the current connect session runs with the gateway independence
+    // criteria relaxed ("connect anyway"); a reconnect keeps it, a disconnect
+    // ends it. The persisted setting is never touched.
+    relax_independence: bool,
+
+    // Gateway cache handle
     gateway_cache_handle: GatewayCacheHandle,
 
     gateway_test_slot: GatewayTestSlot,
@@ -277,15 +293,10 @@ pub struct NymVpnService {
 
     state_machine_shutdown_token: CancellationToken,
 
-    // For services that are safe to exit altogether.
+    // Shutdown token used for the account controller and other services that are safe to exit altogether.
     services_shutdown_token: CancellationToken,
 
-    sentry_enabled: bool,
-
-    statistics_event_sender: StatisticsSender,
-
-    stats_control_commands_sender: StatisticsCommandsSender,
-
+    // Lazy SOCKS5 proxy service handle
     socks5_service: Socks5Service,
 }
 
@@ -408,29 +419,6 @@ impl NymVpnService {
         let wireguard_keys_db = account_controller.get_wireguard_keys_storage();
         let account_controller_handle = tokio::task::spawn(account_controller.run());
 
-        let statistics_controller_config = config_manager.config().network_stats;
-
-        let statistics_api_url = parameters
-            .network_env
-            .system_configuration
-            .as_ref()
-            .and_then(|config| config.statistics_api.clone());
-
-        let stats_api_client = statistics_api_url.and_then(|url| nym_statistics_api_client::StatisticsApiClient::new(url.clone(), parameters.user_agent.clone()).inspect_err(|e| tracing::error!("Failed to build Statistics API client. Statistics collection will be disabled : {e}")).ok());
-
-        // Statistics are not operation critical; a failure just disables them.
-        let statistics_controller = StatisticsController::new(
-            statistics_controller_config,
-            stats_api_client,
-            network_data_dir.clone(),
-            services_shutdown_token.child_token(),
-        )
-        .await;
-
-        let statistics_event_sender = statistics_controller.get_statistics_sender();
-        let stats_control_commands_sender = statistics_controller.get_commands_sender();
-        let statistics_controller_handle = tokio::task::spawn(statistics_controller.run());
-
         let tunnel_state = Arc::new(RwLock::new(TunnelState::Disconnected));
 
         let socks5_service = Socks5Service::new(tunnel_state.clone());
@@ -501,6 +489,9 @@ impl NymVpnService {
         .await
         .map_err(Error::StartDiscoveryRefresh)?;
 
+        let blacklisted_entry_gateways = BlacklistedGateways::new();
+        let always_on = AlwaysOn::with_random_jitter(config_manager.config().always_on);
+
         let state_machine_handle = TunnelStateMachine::spawn(
             command_receiver,
             event_sender,
@@ -509,12 +500,12 @@ impl NymVpnService {
             tunnel_constants,
             account_command_tx.clone(),
             account_state_rx.clone(),
-            statistics_event_sender.clone(),
             gateway_cache_handle.clone(),
             topology_service.clone(),
             connectivity_handle,
             discovery_refresher_command_tx.clone(),
             wireguard_keys_db,
+            blacklisted_entry_gateways.clone(),
             route_handler,
             parameters.user_agent.clone(),
             state_machine_shutdown_token.child_token(),
@@ -535,9 +526,10 @@ impl NymVpnService {
             target_state: TargetState::Unsecured,
             tunnel_state,
             tunnel_settings_update_timer: Box::pin(Fuse::terminated()),
+            always_on,
+            always_on_timer: Box::pin(Fuse::terminated()),
             state_machine_handle: Some(state_machine_handle),
             account_controller_handle,
-            statistics_controller_handle,
             topology_service_join_handle,
             topology_service_handle: topology_service,
             config_manager,
@@ -549,13 +541,12 @@ impl NymVpnService {
             gateway_cache_handle,
             gateway_cache_join_handle,
             gateway_test_slot: GatewayTestSlot::new(),
+            blacklisted_entry_gateways,
+            relax_independence: false,
             discovery_refresher_event_rx,
             discovery_refresher_join_handle,
             discovery_refresher_command_tx,
             idle: false,
-            sentry_enabled: parameters.sentry_enabled,
-            statistics_event_sender,
-            stats_control_commands_sender,
             socks5_service,
         })
     }
@@ -568,6 +559,16 @@ impl NymVpnService {
         // Nothing has asked for the tunnel yet: side-services start on their idle cadence.
         let tunnel_state = self.tunnel_state.read().await.clone();
         self.update_idle_hint(&tunnel_state);
+
+        // Always On: the state machine is up and the offline monitor with it,
+        // so a Connect now either starts Connecting or arms Offline{reconnect}
+        // to fire the moment a default route appears. Never relaxed: a pinned
+        // pair that fails the independence criteria latches with the usual
+        // error instead of silently downgrading at boot.
+        if self.always_on.enabled() {
+            tracing::info!("always-on: connecting at start");
+            self.set_target_state(TargetState::Secured, false).await;
+        }
 
         loop {
             tokio::select! {
@@ -585,6 +586,10 @@ impl NymVpnService {
                 }
                 _ = &mut self.tunnel_settings_update_timer => {
                     self.update_tunnel_settings();
+                }
+                _ = &mut self.always_on_timer => {
+                    let action = self.always_on.poll(std::time::Instant::now());
+                    self.apply_always_on(action);
                 }
                 _ = self.shutdown_token.cancelled() => {
                     tracing::info!("Received shutdown signal");
@@ -626,10 +631,6 @@ impl NymVpnService {
             tracing::error!("Failed to join on account controller handle: {e}");
         }
 
-        if let Err(e) = self.statistics_controller_handle.await {
-            tracing::error!("Failed to join on statistics controller handle: {e}");
-        }
-
         if let Err(e) = self.gateway_cache_join_handle.await {
             tracing::error!("Failed to join on gateway cache handle: {e}");
         }
@@ -639,7 +640,7 @@ impl NymVpnService {
         }
 
         if let Err(e) = self.topology_service_join_handle.await {
-            tracing::error!("Failed to join on statistics controller handle: {e}");
+            tracing::error!("Failed to join on topology service handle: {e}");
         }
 
         tracing::info!("Exiting vpn service run loop");
@@ -647,23 +648,34 @@ impl NymVpnService {
         Ok(())
     }
 
-    async fn set_target_state(&mut self, new_state: TargetState) -> bool {
+    async fn set_target_state(&mut self, new_state: TargetState, relax_independence: bool) -> bool {
         if self.target_state != new_state || self.tunnel_state.read().await.is_error_state() {
             tracing::debug!("Set target state {} => {}", self.target_state, new_state);
             self.target_state = new_state;
+            self.relax_independence = relax_independence && new_state == TargetState::Secured;
+            if self.relax_independence {
+                tracing::info!(
+                    "Connecting with the gateway independence criteria relaxed for this session"
+                );
+            }
 
             // Before Connect, so the account controller leaves its idle cadence
             // ahead of the tunnel monitor asking for it.
             let tunnel_state = self.tunnel_state.read().await.clone();
             self.update_idle_hint(&tunnel_state);
 
+            // A user connect starts a fresh retry series and clears a latch; a
+            // user disconnect pauses the supervisor for the session.
+            self.always_on.on_target_state(new_state);
+            self.rearm_always_on_timer();
+
             match new_state {
                 TargetState::Secured => {
-                    self.statistics_event_sender.report_connection_request();
-                    let _ = self.command_sender.send(TunnelCommand::Connect);
+                    let _ = self
+                        .command_sender
+                        .send(TunnelCommand::Connect { relax_independence });
                 }
                 TargetState::Unsecured => {
-                    self.statistics_event_sender.report_disconnection_request();
                     let _ = self.command_sender.send(TunnelCommand::Disconnect);
                 }
             }
@@ -683,8 +695,9 @@ impl NymVpnService {
                     self.tunnel_settings_update_timer.set(Fuse::terminated());
                     self.update_tunnel_settings();
                 }
-                self.statistics_event_sender.report_connection_request();
-                let _ = self.command_sender.send(TunnelCommand::Connect);
+                let _ = self.command_sender.send(TunnelCommand::Connect {
+                    relax_independence: self.relax_independence,
+                });
                 true
             }
             TargetState::Unsecured => false,
@@ -705,6 +718,51 @@ impl NymVpnService {
                 self.tunnel_settings_update_timer.set(timer);
             }
             TargetState::Unsecured => self.update_tunnel_settings(),
+        }
+        // The user changed something the tunnel depends on: a latched or
+        // backed-off Always On retries at once with the new settings.
+        let action = self.always_on.on_config_or_account_changed();
+        self.apply_always_on(action);
+    }
+
+    /// Carry out a supervisor decision, then re-arm its timer.
+    fn apply_always_on(&mut self, action: always_on::Action) {
+        match action {
+            always_on::Action::Nothing => {}
+            always_on::Action::Exit(code) => {
+                // Deliberately not the shutdown path: Error/Offline shutdown
+                // reset the firewall policy, which would open the router for
+                // the seconds until procd respawns us. An abrupt exit leaves
+                // the nftables/iptables policy in place and the fresh daemon
+                // re-applies Blocked on entry.
+                tracing::error!("always-on: exiting with code {code} for procd to restart the daemon");
+                std::thread::sleep(Duration::from_millis(200));
+                std::process::exit(code);
+            }
+            always_on::Action::Connect => {
+                // Same as reconnect_tunnel(): flush a throttled settings update
+                // first so the Connect does not run with stale settings, and
+                // keep this session's independence relaxation.
+                if !self.tunnel_settings_update_timer.is_terminated() {
+                    self.tunnel_settings_update_timer.set(Fuse::terminated());
+                    self.update_tunnel_settings();
+                }
+                let _ = self.command_sender.send(TunnelCommand::Connect {
+                    relax_independence: self.relax_independence,
+                });
+            }
+        }
+        self.rearm_always_on_timer();
+    }
+
+    fn rearm_always_on_timer(&mut self) {
+        match self.always_on.next_deadline() {
+            Some(deadline) => {
+                let deadline = tokio::time::Instant::from_std(deadline);
+                self.always_on_timer
+                    .set(tokio::time::sleep_until(deadline).fuse());
+            }
+            None => self.always_on_timer.set(Fuse::terminated()),
         }
     }
 
@@ -744,6 +802,12 @@ impl NymVpnService {
             }
             self.update_idle_hint(new_state);
 
+            let action = self
+                .always_on
+                .on_tunnel_state(new_state, std::time::Instant::now());
+            self.apply_always_on(action);
+
+            // Auto-disable SOCKS5 when VPN disconnects
             if matches!(new_state, TunnelState::Disconnected | TunnelState::Error(_))
                 && self.socks5_service.is_enabled()
             {
@@ -771,6 +835,12 @@ impl NymVpnService {
     }
 
     fn handle_account_state_change(&mut self, account_state: AccountControllerState) {
+        // A renewed subscription or a re-registered device lifts an account
+        // error the tunnel latched on.
+        if account_state == AccountControllerState::ReadyToConnect {
+            let action = self.always_on.on_config_or_account_changed();
+            self.apply_always_on(action);
+        }
         if self
             .tunnel_event_tx
             .send(TunnelEvent::AccountState(account_state))
@@ -862,6 +932,27 @@ impl NymVpnService {
                 let result = self.handle_set_stealth_api(stealth_api).await;
                 let _ = tx.send(result);
             }
+            VpnServiceCommand::SetAlwaysOn(tx, always_on) => {
+                let result = self.handle_set_always_on(always_on).await;
+                let _ = tx.send(result);
+            }
+            VpnServiceCommand::GetAlwaysOnStatus(tx, ()) => {
+                let _ = tx.send(self.always_on.status(std::time::Instant::now()));
+            }
+            VpnServiceCommand::SetEnableGatewayIndependence(tx, enabled) => {
+                let result = self.handle_set_enable_gateway_independence(enabled).await;
+                let _ = tx.send(result);
+            }
+            VpnServiceCommand::SetGatewayIndependenceNotifications(tx, enabled) => {
+                let result = self
+                    .config_manager
+                    .set_gateway_independence_notifications(enabled)
+                    .await;
+                let _ = tx.send(result);
+            }
+            VpnServiceCommand::GetTentativeGateways(tx, ()) => {
+                self.handle_get_tentative_gateways(tx).await;
+            }
             VpnServiceCommand::SetInboundExemptions(tx, exemptions) => {
                 let result = self.handle_set_inbound_exemptions(exemptions).await;
                 let _ = tx.send(result);
@@ -926,7 +1017,13 @@ impl NymVpnService {
                 self.handle_list_filtered_gateways(filters, tx).await;
             }
             VpnServiceCommand::SetTargetState(tx, target_state) => {
-                let accepted = self.set_target_state(target_state).await;
+                let accepted = self.set_target_state(target_state, false).await;
+                let _ = tx.send(accepted);
+            }
+            VpnServiceCommand::ConnectTunnel(tx, relax_independence) => {
+                let accepted = self
+                    .set_target_state(TargetState::Secured, relax_independence)
+                    .await;
                 let _ = tx.send(accepted);
             }
             VpnServiceCommand::Reconnect(tx, ()) => {
@@ -1004,31 +1101,6 @@ impl NymVpnService {
             VpnServiceCommand::DeleteLogFile(tx, ()) => {
                 self.handle_delete_log_file().await;
                 let _ = tx.send(());
-            }
-            VpnServiceCommand::IsSentryEnabled(tx, ()) => {
-                let enabled = self.handle_is_sentry_enabled().await;
-                let _ = tx.send(enabled);
-            }
-            VpnServiceCommand::ToggleSentry(tx, enable) => {
-                let result = self.handle_toggle_sentry(enable).await;
-                let _ = tx.send(result);
-            }
-            VpnServiceCommand::EnableNetStats(tx, enabled) => {
-                self.handle_enable_network_stats(enabled).await;
-                let _ = tx.send(());
-            }
-            VpnServiceCommand::AllowDisconnectedNetStats(tx, allow_disconnected) => {
-                self.handle_allow_disconnected_network_stats(allow_disconnected)
-                    .await;
-                let _ = tx.send(());
-            }
-            VpnServiceCommand::ResetNetStatsSeed(tx, seed) => {
-                let result = self.handle_reset_network_stats_seed(seed).await;
-                let _ = tx.send(result);
-            }
-            VpnServiceCommand::GetNetStatsSeed(tx, ()) => {
-                let identity = self.handle_get_network_stats_seed().await;
-                let _ = tx.send(identity);
             }
             VpnServiceCommand::EnableSocks5(tx, enable_socks5_request) => {
                 let result = self.handle_enable_socks5(enable_socks5_request).await;
@@ -1149,6 +1221,91 @@ impl NymVpnService {
             warn_if_no_cover_domains(&self.network_tx.borrow());
         }
         self.config_manager.set_stealth_api(stealth_api).await
+    }
+
+    async fn handle_set_always_on(&mut self, always_on: bool) -> Result<(), String> {
+        // A policy switch for the service loop: persisted, never a reconnect
+        // of a running tunnel.
+        let was_on = self.config_manager.config().always_on;
+        self.config_manager.set_always_on(always_on).await?;
+        self.always_on.set_enabled(always_on);
+        if always_on && !was_on {
+            if self.target_state == TargetState::Unsecured {
+                // "Connected whenever the daemon runs" starts now, not at the
+                // next boot.
+                self.set_target_state(TargetState::Secured, false).await;
+            } else {
+                // Already wanted up: adopt an error state the machine is
+                // sitting in so the retry series starts from it.
+                let state = self.tunnel_state.read().await.clone();
+                let action = self
+                    .always_on
+                    .on_tunnel_state(&state, std::time::Instant::now());
+                self.apply_always_on(action);
+            }
+        }
+        self.rearm_always_on_timer();
+        Ok(())
+    }
+
+    async fn handle_set_enable_gateway_independence(
+        &mut self,
+        enabled: bool,
+    ) -> Result<(), String> {
+        // The criteria decide which pairs are acceptable, so the state machine
+        // gets new settings and re-selects if needed. The reminder switch is
+        // persisted only.
+        let result = self
+            .config_manager
+            .set_gateway_independence_enabled(enabled)
+            .await;
+        self.update_tunnel_settings_with_throttle();
+        result
+    }
+
+    /// Preview the pair a connect would pick from the live settings and the
+    /// state machine's entry blacklist. Identity selection only: no key
+    /// material is created and the tunnel is untouched. Bounded so a slow
+    /// directory cannot hang the caller; any failure reads as "no gateways".
+    async fn handle_get_tentative_gateways(
+        &self,
+        completion_tx: oneshot::Sender<TentativeGateways>,
+    ) {
+        let gateway_cache = self.gateway_cache_handle.clone();
+        let blacklisted_entry_gateways = self.blacklisted_entry_gateways.clone();
+        let tunnel_settings = self.config_manager.generate_tunnel_settings();
+
+        tokio::spawn(async move {
+            let criteria = tunnel_settings.gateway_independence;
+            let selection = tokio::time::timeout(
+                TENTATIVE_GATEWAYS_TIMEOUT,
+                select_gateway_pair(
+                    &gateway_cache,
+                    &blacklisted_entry_gateways,
+                    &tunnel_settings,
+                    criteria,
+                ),
+            )
+            .await;
+            let result = match selection {
+                Ok(Ok((entry, exit))) => TentativeGateways::Selected {
+                    entry: Box::new(Gateway::from(entry)),
+                    exit: Box::new(Gateway::from(exit)),
+                },
+                Ok(Err(GatewayDirectoryError::NeedsRelaxedIndependenceCriteria { .. })) => {
+                    TentativeGateways::NeedsRelaxedIndependenceCriteria
+                }
+                Ok(Err(err)) => {
+                    tracing::info!("No tentative gateway pair: {err}");
+                    TentativeGateways::NoGatewaysAvailable
+                }
+                Err(_) => {
+                    tracing::warn!("Tentative gateway selection timed out");
+                    TentativeGateways::NoGatewaysAvailable
+                }
+            };
+            completion_tx.send(result).ok();
+        });
     }
 
     async fn handle_set_inbound_exemptions(
@@ -1733,12 +1890,6 @@ impl NymVpnService {
             data_dir.display()
         );
 
-        let _ = self
-            .stats_control_commands_sender
-            .reset_seed(None)
-            .await
-            .inspect_err(|e| tracing::error!("Failed to reset networks stats seed: {e}"));
-
         self.account_command_tx.forget_account().await
     }
 
@@ -1809,12 +1960,6 @@ impl NymVpnService {
         }
 
         self.account_command_tx.reset_device_identity(seed).await?;
-
-        let _ = self
-            .stats_control_commands_sender
-            .reset_seed(None)
-            .await
-            .inspect_err(|e| tracing::error!("Failed to reset networks stats seed: {e}"));
 
         Ok(())
     }
@@ -1904,64 +2049,6 @@ impl NymVpnService {
         if let Some(remove_log_file_handle) = self.log_file_remover_handle.as_ref() {
             remove_log_file_handle.remove_log_file();
         }
-    }
-
-    async fn handle_is_sentry_enabled(&self) -> bool {
-        GlobalConfig::read_from_default_config_dir()
-            .await
-            .inspect_err(|e| {
-                tracing::error!("Failed to read global config file: {}", e);
-            })
-            .ok()
-            .map(|c| c.sentry_monitoring)
-            .unwrap_or(self.sentry_enabled)
-    }
-
-    async fn handle_toggle_sentry(&self, enable: bool) -> Result<(), GlobalConfigError> {
-        let mut config = GlobalConfig::read_from_default_config_dir()
-            .await
-            .map_err(|e| GlobalConfigError::ReadConfig(e.to_string()))?;
-        config.sentry_monitoring = enable;
-        if enable {
-            tracing::info!("Sentry monitoring enabled, daemon needs to be restarted");
-        } else {
-            if let Some(client) = sentry::Hub::current().client() {
-                client.close(Some(Duration::from_secs(1)));
-                tracing::debug!("Sentry client closed");
-            }
-            tracing::info!("Sentry monitoring disabled, daemon needs to be restarted");
-        }
-        GlobalConfig::write_to_default_config_dir(&config)
-            .await
-            .map_err(|e| GlobalConfigError::WriteConfig(e.to_string()))?;
-        Ok(())
-    }
-
-    async fn handle_enable_network_stats(&mut self, enabled: bool) {
-        self.config_manager.set_netstats_enabled(enabled).await;
-        self.stats_control_commands_sender
-            .set_enable_collection(enabled);
-    }
-
-    async fn handle_allow_disconnected_network_stats(&mut self, allow_disconnected: bool) {
-        self.config_manager
-            .set_netstats_allow_disconnected(allow_disconnected)
-            .await;
-        self.stats_control_commands_sender
-            .set_allow_direct_sending(allow_disconnected);
-    }
-
-    async fn handle_reset_network_stats_seed(
-        &mut self,
-        seed: Option<String>,
-    ) -> Result<(), StatisticsControllerError> {
-        self.stats_control_commands_sender.reset_seed(seed).await
-    }
-
-    async fn handle_get_network_stats_seed(
-        &mut self,
-    ) -> Result<NetworkStatisticsIdentity, StatisticsControllerError> {
-        self.stats_control_commands_sender.get_seed().await
     }
 
     async fn handle_run_diagnostic(&self, params: DiagnosticRunParams) -> DiagnosticReport {

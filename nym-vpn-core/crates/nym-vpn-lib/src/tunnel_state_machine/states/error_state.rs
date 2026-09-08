@@ -55,7 +55,8 @@ impl TunnelStateHandler for ErrorState {
             Some(command) = command_rx.recv() => {
                 tracing::debug!("ErrorState received command: {command:?}");
                 match command {
-                    TunnelCommand::Connect => {
+                    TunnelCommand::Connect { relax_independence } => {
+                        shared_state.relax_independence = relax_independence;
                         Self::reset_dns(shared_state).await;
 
                         if shared_state.connectivity_handle.connectivity().await.is_offline() {

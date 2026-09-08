@@ -2,13 +2,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use nym_vpn_lib_types::{
-    AccountBalanceResponse, AccountCommandResponse, AccountControllerState, AvailableTickets,
+    AccountBalanceResponse, AccountCommandResponse, AccountControllerState, AlwaysOnStatus,
+    AvailableTickets,
     DiagnosticReport, DnsUpstreamOwner, EntryPoint, ExitPoint, FeatureFlags, Gateway,
     GatewayTestParams, GatewayTestReport, GetDeeplinkParams, HttpRpcSettings, ListGatewaysOptions,
-    LogPath, LookupGatewayFilters, NetworkCompatibility, NetworkStatisticsIdentity, NymVpnDevice,
+    LogPath, LookupGatewayFilters, NetworkCompatibility, NymVpnDevice,
     NymVpnUsage, ParsedAccountLinks, PrivyDerivationMessage, RegistrationReport, Socks5Settings,
-    Socks5Status, StoreAccountRequest, SystemMessage, TunnelEvent, TunnelState, VpnAccountSummary,
-    VpnServiceConfig, VpnServiceInfo,
+    Socks5Status, StoreAccountRequest, SystemMessage, TentativeGateways, TunnelEvent, TunnelState,
+    VpnAccountSummary, VpnServiceConfig, VpnServiceInfo,
 };
 use std::{net::IpAddr, path::PathBuf};
 use tokio_stream::{Stream, StreamExt};
@@ -166,6 +167,43 @@ impl RpcClient {
             .map_err(Error::Rpc)?
             .into_inner();
         Ok(())
+    }
+
+    pub async fn set_always_on(&mut self, always_on: bool) -> Result<()> {
+        self.0
+            .set_always_on(always_on)
+            .await
+            .map_err(Error::Rpc)?
+            .into_inner();
+        Ok(())
+    }
+
+    pub async fn set_enable_gateway_independence(&mut self, enabled: bool) -> Result<()> {
+        self.0
+            .set_enable_gateway_independence(enabled)
+            .await
+            .map_err(Error::Rpc)?
+            .into_inner();
+        Ok(())
+    }
+
+    pub async fn set_gateway_independence_notifications(&mut self, enabled: bool) -> Result<()> {
+        self.0
+            .set_gateway_independence_notifications(enabled)
+            .await
+            .map_err(Error::Rpc)?
+            .into_inner();
+        Ok(())
+    }
+
+    pub async fn get_tentative_gateways(&mut self) -> Result<TentativeGateways> {
+        let response = self
+            .0
+            .get_tentative_gateways(())
+            .await
+            .map_err(Error::Rpc)?
+            .into_inner();
+        TentativeGateways::try_from(response).map_err(Error::InvalidResponse)
     }
 
     pub async fn set_inbound_exemptions(
@@ -334,6 +372,16 @@ impl RpcClient {
         Ok(ip_vec)
     }
 
+    pub async fn get_always_on_status(&mut self) -> Result<AlwaysOnStatus> {
+        let response = self
+            .0
+            .get_always_on_status(())
+            .await
+            .map_err(Error::Rpc)?
+            .into_inner();
+        Ok(AlwaysOnStatus::from(response))
+    }
+
     pub async fn get_dns_upstream_owner(&mut self) -> Result<DnsUpstreamOwner> {
         let response = self
             .0
@@ -344,9 +392,11 @@ impl RpcClient {
         Ok(DnsUpstreamOwner::from(response))
     }
 
-    pub async fn connect_tunnel(&mut self) -> Result<bool> {
+    /// Connect; `relax_independence` switches the gateway independence
+    /// criteria off for this connect session only.
+    pub async fn connect_tunnel(&mut self, relax_independence: bool) -> Result<bool> {
         self.0
-            .connect_tunnel(())
+            .connect_tunnel(proto::ConnectRequest { relax_independence })
             .await
             .map(|v| v.into_inner())
             .map_err(Error::Rpc)
@@ -699,58 +749,6 @@ impl RpcClient {
             .map_err(Error::Rpc)
     }
 
-    pub async fn is_sentry_enabled(&mut self) -> Result<bool> {
-        self.0
-            .is_sentry_enabled(())
-            .await
-            .map(|v| v.into_inner())
-            .map_err(Error::Rpc)
-    }
-
-    pub async fn enable_sentry(&mut self) -> Result<()> {
-        self.0
-            .enable_sentry(())
-            .await
-            .map(|v| v.into_inner())
-            .map_err(Error::Rpc)
-    }
-
-    pub async fn disable_sentry(&mut self) -> Result<()> {
-        self.0
-            .disable_sentry(())
-            .await
-            .map(|v| v.into_inner())
-            .map_err(Error::Rpc)
-    }
-
-    pub async fn network_stats_set_enabled(&mut self, enabled: bool) -> Result<()> {
-        self.0
-            .network_stats_set_enabled(enabled)
-            .await
-            .map(|v| v.into_inner())
-            .map_err(Error::Rpc)
-    }
-
-    pub async fn network_stats_allow_disconnected(
-        &mut self,
-        allow_disconnected: bool,
-    ) -> Result<()> {
-        self.0
-            .network_stats_allow_disconnected(allow_disconnected)
-            .await
-            .map(|v| v.into_inner())
-            .map_err(Error::Rpc)
-    }
-
-    pub async fn network_stats_reset_seed(&mut self, seed: Option<String>) -> Result<()> {
-        let request = proto::NetworkStatsResetSeedRequest { seed };
-        self.0
-            .network_stats_reset_seed(request)
-            .await
-            .map(|v| v.into_inner())
-            .map_err(Error::Rpc)
-    }
-
     pub async fn enable_socks5(
         &mut self,
         socks5_settings: Socks5Settings,
@@ -797,16 +795,6 @@ impl RpcClient {
             .into_inner();
 
         Socks5Status::try_from(response).map_err(Error::InvalidResponse)
-    }
-
-    pub async fn network_stats_get_seed(&mut self) -> Result<NetworkStatisticsIdentity> {
-        let response = self
-            .0
-            .network_stats_get_seed(())
-            .await
-            .map(|v| v.into_inner())
-            .map_err(Error::Rpc)?;
-        Ok(NetworkStatisticsIdentity::from(response))
     }
 
     pub async fn get_privy_derivation_message(&mut self) -> Result<PrivyDerivationMessage> {

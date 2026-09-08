@@ -5,7 +5,6 @@ mod config_manager;
 mod entry_exit;
 mod legacy;
 mod mixnet_traffic;
-mod network_stats;
 mod v1;
 mod v2;
 mod v3;
@@ -33,7 +32,6 @@ use tokio::{
 use crate::service::config::{
     entry_exit::v2::{EntryPoint, ExitPoint},
     mixnet_traffic::v5::MixnetTrafficConfig,
-    network_stats::v1::NetworkStatisticsConfig,
 };
 use std::os::unix::fs::PermissionsExt;
 
@@ -186,8 +184,6 @@ impl TryFrom<&nym_vpn_lib_types::VpnServiceConfig> for VpnServiceConfigExt {
 
         let mixnet_traffic = MixnetTrafficConfig::from(&value.mixnet_traffic);
 
-        let network_stats = NetworkStatisticsConfig::from(&value.network_stats);
-
         let inbound_exemptions = value
             .inbound_exemptions
             .iter()
@@ -220,11 +216,12 @@ impl TryFrom<&nym_vpn_lib_types::VpnServiceConfig> for VpnServiceConfigExt {
             custom_dns,
             enable_ad_blocking: value.enable_ad_blocking,
             mixnet_traffic,
-            network_stats,
             killswitch: value.killswitch,
             legacy_split_tunnel: value.legacy_split_tunnel,
             inbound_exemptions,
             stealth_api: value.stealth_api,
+            gateway_independence: v8::GatewayIndependence::from(&value.gateway_independence),
+            always_on: value.always_on,
         };
 
         Ok(VpnServiceConfigExt::V8(v8))

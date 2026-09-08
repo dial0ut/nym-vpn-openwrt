@@ -115,6 +115,7 @@ fn test_matching_residential() {
                 kind: AsnKind::Residential,
                 asn: "".to_owned(),
                 name: "".to_owned(),
+                route: None,
             }),
             ..Default::default()
         })
@@ -132,6 +133,7 @@ fn test_matching_residential() {
                 kind: AsnKind::Other,
                 asn: "".to_owned(),
                 name: "".to_owned(),
+                route: None,
             }),
             ..Default::default()
         })
@@ -390,6 +392,7 @@ fn sample_gateway_list(gw_type: GatewayType) -> GatewayList {
     let asn = Asn {
         asn: "AS12345".to_string(),
         name: "Test ASN".to_string(),
+        route: None,
         kind: AsnKind::Residential,
     };
     let addr = "MNrmKzuKjNdbEhfPUzVNfjw63oBQNSayqoQKGL4JjAV.6fDcSN6faGpvA3pd3riCwjpzXc7RQfWmGMa82UVoEwKE@d5adfJNtcdZW2XwK85JAAU8nXAs9JCPYn2RNvDLZn4e";
@@ -486,6 +489,8 @@ fn sample_gateway_list(gw_type: GatewayType) -> GatewayList {
                 }),
                 version: None,
                 lewes_protocol_details: None,
+                staking_data: None,
+                family_data: None,
             }
         })
         .collect();
@@ -520,6 +525,8 @@ fn create_test_gateway(identity: &str, country: &str, score: ScoreValue) -> Gate
         }),
         version: None,
         lewes_protocol_details: None,
+        staking_data: None,
+        family_data: None,
     }
 }
 
@@ -580,5 +587,7 @@ fn create_response_nym_gateway(
         }),
         build_information: None,
         lewes_protocol_details: None,
+        staking_data: None,
+        family_data: None,
     }
 }
