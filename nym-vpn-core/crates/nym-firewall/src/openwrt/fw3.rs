@@ -1055,6 +1055,85 @@ mod tests {
         }
     }
 
+    /// The guard decides the boot block from the daemon's settings file, so
+    /// it must read `killswitch` exactly as the daemon does: an absent file,
+    /// an absent key and an explicit value each land on the same answer. The
+    /// daemon side cannot be linked from here, so its verdicts are literals:
+    /// a missing file is `nym_vpn_lib_types::VpnServiceConfig::default()`
+    /// and a missing key `nym-vpnd`'s `config::v8::default_killswitch`, both
+    /// on. Exercises the guard's text-scan path (no `jsonfilter` off OpenWrt).
+    #[cfg(unix)]
+    #[test]
+    fn boot_guard_reads_killswitch_like_the_daemon() {
+        use std::os::unix::fs::PermissionsExt;
+
+        const GUARD: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/fw-boot-guard.sh");
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "nym-firewall-boot-guard-{}-{nonce}",
+            std::process::id()
+        ));
+        let rc_dir = dir.join("rc.d");
+        std::fs::create_dir_all(&rc_dir).unwrap();
+        // An enabled daemon: the guard wants an executable S-link.
+        let init = dir.join("nym-vpnd.init");
+        std::fs::write(&init, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&init, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::os::unix::fs::symlink(&init, rc_dir.join("S90nym-vpnd")).unwrap();
+
+        let v8 = |killswitch_line: &str| {
+            format!(
+                "{{\n  \"version\": \"v8\",\n  \"allow_lan\": true,\n{killswitch_line}  \"legacy_split_tunnel\": false,\n  \"inbound_exemptions\": [],\n  \"stealth_api\": false\n}}\n"
+            )
+        };
+        let cases = [
+            ("absent-file", None, "absent", true),
+            ("true", Some(v8("  \"killswitch\": true,\n")), "true", true),
+            (
+                "false",
+                Some(v8("  \"killswitch\": false,\n")),
+                "false",
+                false,
+            ),
+            ("no-key", Some(v8("")), "absent", true),
+        ];
+        for (name, content, read_as, daemon_killswitch) in cases {
+            let config = dir.join(format!("{name}.json"));
+            if let Some(content) = content {
+                std::fs::write(&config, content).unwrap();
+            }
+            let run = |body: &str| {
+                let out = Command::new("sh")
+                    .arg("-c")
+                    .arg(format!(". \"$1\"; {body}"))
+                    .arg("sh")
+                    .arg(GUARD)
+                    .env("NYM_VPND_CONFIG", &config)
+                    .env("NYM_RC_DIR", &rc_dir)
+                    .env("NYM_RUNTIME_DIR", dir.join("missing-runtime-dir"))
+                    .output()
+                    .unwrap();
+                (
+                    out.status.success(),
+                    String::from_utf8(out.stdout).unwrap().trim().to_owned(),
+                )
+            };
+            let (ok, value) = run("nym_config_bool killswitch");
+            assert!(ok, "{name}: nym_config_bool must succeed");
+            assert_eq!(value, read_as, "{name}: nym_config_bool killswitch");
+            let (block_wanted, reason) =
+                run("nym_boot_block_wanted; rc=$?; echo \"$NYM_BOOT_REASON\"; exit $rc");
+            assert_eq!(
+                block_wanted, daemon_killswitch,
+                "{name}: the guard's verdict ({reason}) must match what nym-vpnd loads"
+            );
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn state_file_write_refuses_a_planted_temp_path() {
         let nonce = SystemTime::now()

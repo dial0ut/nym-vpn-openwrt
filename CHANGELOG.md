@@ -75,6 +75,10 @@ the GitHub release notes.
 
 ### Fixed
 
+- A daemon settings file with the `killswitch` key removed by hand now loads
+  with the kill-switch on, as a fresh config and the boot-time firewall guard
+  already treat it; the daemon used to read it as off, so its first policy
+  opened the WAN that the guard had blocked.
 - With the kill switch on, the daemon's API clients are now pinned to the
   admitted addresses whenever it sits in Disconnected or Error with a live
   resolution, instead of only right after a resolution; the Error state also
