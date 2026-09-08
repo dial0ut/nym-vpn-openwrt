@@ -100,6 +100,26 @@ if [ -z "${IPKG_INSTROOT:-}" ]; then
         kill "$pid" 2>/dev/null
     fi
     rm -f /var/run/nym-vpn-watchdog.pid /var/run/nym-watchdog.state /tmp/nym-watchdog.state
+
+    # Daemons up to 1.34.0_p24 installed masquerade and LAN forwarding for
+    # the tunnel into fw3/fw4's own tables; the nym zone now renders them.
+    # fw4 reload keeps foreign chains (empty), fw3 reload keeps them whole.
+    # Drop this block two releases on.
+    for chain in nym_forward_lan nym_postrouting; do
+        nft delete chain inet fw4 "$chain" 2>/dev/null
+    done
+    for ipt in iptables ip6tables; do
+        command -v "$ipt" >/dev/null 2>&1 || continue
+        for chain in NYM_FORWARD_LAN NYM_POSTROUTING; do
+            for table in filter nat mangle; do
+                "$ipt" -t "$table" -S 2>/dev/null | grep -- "-j $chain" | sed 's/^-A /-D /' | while read -r rule; do
+                    # shellcheck disable=SC2086  # the rule is a word list from iptables -S
+                    "$ipt" -t "$table" $rule 2>/dev/null
+                done
+                "$ipt" -t "$table" -F "$chain" 2>/dev/null && "$ipt" -t "$table" -X "$chain" 2>/dev/null
+            done
+        done
+    done
 fi
 
 # rpcd scans /usr/libexec/rpcd only at start-up and computes ACL grants at
