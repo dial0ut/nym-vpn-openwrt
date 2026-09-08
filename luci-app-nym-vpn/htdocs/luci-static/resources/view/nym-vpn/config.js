@@ -11,8 +11,7 @@
 
 return view.extend({
     load: function() {
-        // Single batch RPC call replaces 11 separate calls.
-        // Gateway country lists are deferred until user interaction.
+        // Gateway lists are loaded lazily by the pickers.
         return rpc.init().catch(function(err) {
             console.error('Failed to load Nym VPN data:', err);
             return {};
@@ -45,7 +44,6 @@ return view.extend({
             return el;
         };
 
-        // Initialize UI managers
         var modalManager = nymUI.createModalManager();
         var toastManager = nymUI.createToastManager();
         var showToast = toastManager.show.bind(toastManager);
@@ -56,7 +54,6 @@ return view.extend({
         var setModalSuccess = modalManager.setSuccess;
         var confirmModal = modalManager.confirm;
 
-        // State references
         var statusHero, statusLabel, uptimeDisplay;
         var actionBtn;
         var entryGatewayDisplay, exitGatewayDisplay, connectionChain, modeLabel;
@@ -64,19 +61,12 @@ return view.extend({
         var entryGatewayContainer, exitGatewayContainer;
         var isTwoHopMode = tunnel_config.two_hop === 'on';
         var previousState = status.state || 'unknown';
-        // Signature of the last connected-state render (gateway identity + hop
-        // count). The status poll fires every 5s, but none of this changes for
-        // the life of a connection, so we only rebuild the gateway panels and
-        // the connection chain when the signature actually changes. This avoids
-        // tearing down and recreating the animated chain elements every poll.
+        // Gateway panels and the animated chain are rebuilt only when this
+        // changes, not on every 5s poll.
         var lastConnectedSig = null;
-        // Last account error_reason seen from status polling. When it changes
-        // (e.g. a Device-Time-Desynced error clears after recovery) we re-fetch
-        // account state and rebuild the card so it doesn't stay stale until a
-        // manual page reload.
+        // Account card is rebuilt when this changes.
         var prevErrorReason = (status && status.error_reason) || '';
-        // Last tunnel_error seen from status polling, so we notify once per
-        // occurrence instead of re-toasting on every 5s poll.
+        // Tunnel errors toast once per occurrence, not every poll.
         var prevTunnelError = (status && status.tunnel_error) || '';
         var actionInProgress = false;
         var daemonStatusBadge;
@@ -84,28 +74,19 @@ return view.extend({
         var serviceInfoFrame;
         var daemonStartBtn;
         var daemonStopBtn;
-        // Whether nym-vpnd has its boot symlink. Defaults to true so an older
-        // bridge that omits the field never shows a spurious warning.
+        // Defaults to true so an older bridge that omits the field shows no
+        // spurious warning.
         var lastDaemonEnabled = daemon_status.enabled !== false;
-        // Last account availability seen from status polling, so the Account
-        // card is rebuilt when the daemon comes back or goes away.
         var prevAccountUnavailable = (status && status.available === false) || false;
-        // Inbound-exemptions section, mounted inside the Tunnel Settings card
-        // under the Kill-Switch toggle and shown only while kill-switch is on.
         var inboundMount;
         var splitMount;
 
-        // Uptime tracking
         var connectionStartTime = null;
         var uptimeInterval = null;
 
-        // The session duration is anchored to the router-reported elapsed
-        // seconds (status.connected_seconds) instead of a per-browser
-        // localStorage timestamp — that old timer drifted between
-        // browsers/sessions and was meaningless when the router clock itself
-        // was desynced. connectionStartTime is a *virtual* start expressed in
-        // the local clock (now - elapsed) used only to drive a smooth 1s tick;
-        // the authoritative base comes from the router on every poll.
+        // Uptime is anchored to the router's connected_seconds on every poll;
+        // connectionStartTime is a virtual local-clock start that only drives
+        // the 1s tick.
         var renderUptime = function() {
             if (uptimeDisplay && connectionStartTime) {
                 var elapsed = Math.floor((Date.now() - connectionStartTime) / 1000);
@@ -114,10 +95,7 @@ return view.extend({
             }
         };
 
-        // Re-anchor the virtual start on every poll (cheap), but keep a single
-        // 1s ticker for the connection's lifetime instead of tearing it down
-        // and rebuilding it each poll (which churned a timer and could stutter
-        // the display).
+        // One ticker for the connection's lifetime; re-anchored each poll.
         var syncUptime = function(elapsedSeconds) {
             var base = (typeof elapsedSeconds === 'number' && isFinite(elapsedSeconds) && elapsedSeconds >= 0)
                 ? elapsedSeconds : 0;
@@ -136,9 +114,8 @@ return view.extend({
             if (uptimeDisplay) uptimeDisplay.textContent = '--:--';
         };
 
-        // Error reason → (severity, heading, detail, target card). Keys match
-        // rpcd/nym-vpn:emit_account_error(). Missing 'detail' falls back to
-        // result.error_message from the RPC.
+        // Keys match rpcd/nym-vpn:emit_account_error(); a null detail falls
+        // back to result.error_message.
         var ERROR_COPY = {
             device_time_desynced:      { sev: 'warning', heading: 'CLOCK DESYNC',           detail: 'Router time is off by more than 60 seconds. Ensure NTP is running.', target: null },
             inactive_subscription:     { sev: 'error',   heading: 'NO ACTIVE SUBSCRIPTION', detail: 'Renew at nymvpn.com to resume service.',                               target: 'account' },
@@ -149,8 +126,6 @@ return view.extend({
             logged_out:                { sev: 'error',   heading: 'NO ACCOUNT CONFIGURED',  detail: 'Add your NymVPN mnemonic in the Account card.',                        target: 'account' }
         };
 
-        // Build a toast message for an account error from ERROR_COPY +
-        // optional rpcd-supplied error_message.
         var accountErrorToast = function(result) {
             var reason = result && result.error_reason;
             if (!reason) return false;
@@ -164,16 +139,13 @@ return view.extend({
             return true;
         };
 
-        // User-facing copy for tunnel (state-machine) errors. Keyed by the
-        // variant rpcd parses out of "State: Error state: <Reason>".
+        // Keyed by the variant rpcd parses out of "State: Error state: <Reason>".
         var TUNNEL_ERROR_COPY = {
             PerformantEntryGatewayUnavailable: 'Entry gateway unavailable — switch gateways.',
             PerformantExitGatewayUnavailable: 'Exit gateway unavailable — switch gateways.'
         };
 
-        // Toast for a tunnel error. Returns true if one was shown. `force`
-        // bypasses the once-per-occurrence guard (used in the connect flow,
-        // where the user is actively waiting on a result).
+        // `force` bypasses the once-per-occurrence guard (connect flow).
         var tunnelErrorToast = function(result, force) {
             var reason = result && result.tunnel_error;
             if (!reason) return false;
@@ -182,9 +154,7 @@ return view.extend({
             return true;
         };
 
-        // Update status display
         var updateStatus = function() {
-            // Block background polls while a connect/disconnect action owns the UI
             if (actionInProgress) return Promise.resolve();
 
             return rpc.status().then(function(result) {
@@ -202,9 +172,6 @@ return view.extend({
                 if (statusLabel) {
                     if (state === 'connected') {
                         statusLabel.textContent = 'Connected';
-                        // Re-anchor to the router's elapsed seconds each poll so
-                        // the timer self-corrects and stays consistent across
-                        // browsers; falls back to a local count if absent.
                         var secs = parseInt(result.connected_seconds, 10);
                         if (!isNaN(secs)) {
                             syncUptime(secs);
@@ -215,14 +182,12 @@ return view.extend({
                         statusLabel.textContent = 'Connecting';
                         stopUptimeTimer();
                     } else if (state === 'disconnecting') {
-                        // An account-level error often strands the tunnel in
-                        // Disconnecting; the error strip shows why, so the
-                        // label switches to Halted to stop implying progress.
+                        // An account error often strands the tunnel in
+                        // Disconnecting; 'Halted' stops implying progress.
                         statusLabel.textContent = result.error_reason ? 'Halted' : 'Disconnecting';
                     } else if (result.tunnel_error) {
-                        // Persistent cue once the toast has faded: the tunnel
-                        // bounced to Error (e.g. gateway unavailable), not a
-                        // clean user disconnect.
+                        // Persistent cue after the toast fades: not a clean
+                        // user disconnect.
                         statusLabel.textContent = 'Gateway unavailable';
                         stopUptimeTimer();
                     } else {
@@ -249,16 +214,12 @@ return view.extend({
                         actionBtn.disabled = false;
                         actionBtn.onclick = handleCancel;
                     } else {
-                        // disconnecting — keep disabled
                         actionBtn.textContent = 'Disconnecting';
                         actionBtn.disabled = true;
                     }
                 }
 
                 if (state === 'connected') {
-                    // Only rebuild the gateway panels and chain when something
-                    // actually changed — the poll fires every 5s but this data
-                    // is fixed for the connection's lifetime.
                     var hops = isTwoHopMode ? 2 : 5;
                     var sig = [result.entry_name, result.entry_id, result.entry_ip, result.entry_country,
                                result.exit_name, result.exit_id, result.exit_ip, result.exit_country,
@@ -280,34 +241,21 @@ return view.extend({
                         buildConnectionChain(hops);
                     }
 
-                    // The pickers are hidden while connected and their saved
-                    // state now lives on the daemon, so any in-flight prefill
-                    // is stale and the dirty flag has served its purpose.
-                    // Deliberately NOT resetting the picker contents here: they
-                    // sit invisibly under the connection info (grid overlay in
-                    // theme.js) and blanking them would flash mid-dissolve and
-                    // change the panel footprint. The disconnect-time restore
-                    // below re-syncs them from the daemon config regardless.
+                    // Picker contents are deliberately left alone: they sit
+                    // under the connection info overlay and blanking them
+                    // would flash mid-dissolve.
                     restoreGeneration++;
                     pickersDirty = false;
                 } else if (state === 'disconnected' || state === 'connecting') {
-                    // Only clear gateway info when fully disconnected or connecting fresh
                     if (entryGatewayDisplay) entryGatewayDisplay.innerHTML = '<div class="nym-gateway-empty">—</div>';
                     if (exitGatewayDisplay) exitGatewayDisplay.innerHTML = '<div class="nym-gateway-empty">—</div>';
-                    // Force a fresh render on the next connect.
                     lastConnectedSig = null;
-                    // The tunnel just dropped: refill the pickers from the
-                    // saved daemon config so reconnecting doesn't force a
-                    // re-pick of both sides.
+                    // Refill the pickers so reconnecting doesn't force a re-pick.
                     if (state === 'disconnected' && previousState !== 'disconnected') {
                         restoreGatewaySelection();
                     }
                 }
-                // Keep gateway info visible during 'disconnecting' state
 
-                // Re-render the account card when the account error situation
-                // changes, so a recovered account (or a newly-failed one)
-                // reflects live instead of waiting for a page reload.
                 var curErrorReason = result.error_reason || '';
                 if (curErrorReason !== prevErrorReason) {
                     prevErrorReason = curErrorReason;
@@ -315,24 +263,19 @@ return view.extend({
                 }
 
                 // The daemon appearing or disappearing produces no
-                // error_reason of its own, so track it separately: without
-                // this the Account card keeps showing the stale panel until
-                // the page is reloaded.
+                // error_reason of its own, so track it separately.
                 var curUnavailable = result.available === false;
                 if (curUnavailable !== prevAccountUnavailable) {
                     prevAccountUnavailable = curUnavailable;
                     if (typeof refreshAccountCard === 'function') refreshAccountCard();
                 }
 
-                // Surface tunnel errors (e.g. gateway unavailable) once, when
-                // they first appear, so the user knows to switch gateways.
                 var curTunnelError = result.tunnel_error || '';
                 if (curTunnelError && curTunnelError !== prevTunnelError) {
                     tunnelErrorToast(result);
                 }
                 prevTunnelError = curTunnelError;
 
-                // Update previous state for next poll
                 previousState = state;
 
             }).catch(function(err) {
@@ -340,24 +283,20 @@ return view.extend({
             });
         };
 
-        // Build connection chain visualization
         var buildConnectionChain = function(hopCount) {
             if (!connectionChain) return;
             connectionChain.innerHTML = '';
 
-            // Set mode label
             if (modeLabel) {
                 modeLabel.textContent = hopCount === 2 ? 'Fast Mode' : 'Anonymous Mode';
             }
 
-            // Entry node
             connectionChain.appendChild(E('div', { 'class': 'nym-chain-node' }));
 
             if (hopCount === 2) {
                 // Two-hop: longer line to match 5-hop total distance
                 connectionChain.appendChild(E('div', { 'class': 'nym-chain-line long' }));
             } else {
-                // Mixnet (5-hop): 3 middle nodes with lines
                 for (var i = 0; i < 3; i++) {
                     connectionChain.appendChild(E('div', { 'class': 'nym-chain-line' }));
                     connectionChain.appendChild(E('div', { 'class': 'nym-chain-node mixnet' }));
@@ -365,29 +304,22 @@ return view.extend({
                 connectionChain.appendChild(E('div', { 'class': 'nym-chain-line' }));
             }
 
-            // Exit node
             connectionChain.appendChild(E('div', { 'class': 'nym-chain-node' }));
         };
 
-        // Connection handlers
         var handleConnect = function() {
-            // Whatever the pickers show right now is what connects — abort any
-            // in-flight prefill so it can't mutate them mid-flow.
+            // Abort any in-flight prefill so it can't mutate the pickers mid-flow.
             restoreGeneration++;
 
-            // Get selected gateway settings
             var entry_country = entryCountrySelect ? entryCountrySelect.value : 'none';
             var exit_country = exitCountrySelect ? exitCountrySelect.value : 'none';
 
-            // Get selected gateway IDs from radio buttons
             var entryRadio = entryGatewayContainer ? entryGatewayContainer.querySelector('input[name="entry_gateway_id"]:checked') : null;
             var exitRadio = exitGatewayContainer ? exitGatewayContainer.querySelector('input[name="exit_gateway_id"]:checked') : null;
             var entry_id = entryRadio ? entryRadio.value : null;
             var exit_id = exitRadio ? exitRadio.value : null;
 
-            // Require an explicit choice for both entry and exit. 'none' means
-            // the user has not picked anything, and we must not silently fall
-            // back to whatever was last saved on the daemon.
+            // 'none' must not silently fall back to what was last saved on the daemon.
             var entryMissing = (entry_country === 'none') && !entry_id;
             var exitMissing = (exit_country === 'none') && !exit_id;
             if (entryMissing || exitMissing) {
@@ -419,7 +351,6 @@ return view.extend({
             if (entry_id) entry_country = null;
             if (exit_id) exit_country = null;
 
-            // Save gateway settings first, then connect
             rpc.gatewaySet(entry_country, exit_country, entry_id || null, exit_id || null, entry_random, exit_random, null)
                 .then(function(gwResult) {
                     if (!gwResult || !gwResult.success) {
@@ -435,11 +366,8 @@ return view.extend({
                         return;
                     }
 
-                    // Poll until daemon reaches connected state. Fast cadence
-                    // (250ms) for the first 5s so the UI confirms within one
-                    // beat of the daemon (~2.5s connects), then 1s up to the
-                    // same ~60s ceiling. A status call is ~10ms via the Rust
-                    // rpcd bridge, so the fast phase costs nothing.
+                    // 250ms for the first 5s (connects take ~2.5s), then 1s;
+                    // a status call is ~10ms via the Rust rpcd bridge.
                     var pollCount = 0;
                     var maxPolls = 75;
                     var nextDelay = function() { return pollCount < 20 ? 250 : 1000; };
@@ -447,9 +375,8 @@ return view.extend({
                     var pollStatus = function() {
                         pollCount++;
                         rpc.status().then(function(st) {
-                            // Account-controller error during a connect attempt:
-                            // surface it, then ensure the daemon comes back to
-                            // a clean disconnected state instead of spinning.
+                            // Account error mid-connect: bring the daemon back
+                            // to disconnected rather than leave it spinning.
                             if (st && st.error_reason) {
                                 accountErrorToast(st);
                                 rpc.disconnect().then(function() {
@@ -461,9 +388,7 @@ return view.extend({
                                 });
                                 return;
                             }
-                            // Tunnel bounced to Error during the connect attempt
-                            // (e.g. selected gateway unavailable). Surface it and
-                            // stop cleanly so the user can switch gateways.
+                            // Tunnel bounced to Error mid-connect (e.g. gateway unavailable).
                             if (st && st.tunnel_error) {
                                 tunnelErrorToast(st, true);
                                 prevTunnelError = st.tunnel_error;
@@ -483,7 +408,6 @@ return view.extend({
                                     updateStatus();
                                 }
                             } else {
-                                // Disconnected or unknown — give up cleanly
                                 actionInProgress = false;
                                 updateStatus();
                             }
@@ -543,8 +467,6 @@ return view.extend({
                     return;
                 }
 
-                // Poll until daemon reaches disconnected state — same adaptive
-                // cadence as the connect path.
                 var pollCount = 0;
                 var maxPolls = 75;
                 var nextDelay = function() { return pollCount < 20 ? 250 : 1000; };
@@ -576,17 +498,13 @@ return view.extend({
             });
         };
 
-        // Toggle card expand/collapse
         var toggleCard = function(card) {
             card.classList.toggle('expanded');
         };
 
-        // --- Gateway directory (session cache) ---------------------------
-        // One gateway_list_full call per type (served by the Rust rpcd
-        // bridge from the daemon's directory cache) feeds both the country
-        // dropdown and every per-country list for the rest of the session.
-        // The old per-country RPCs stay as a fallback for a backend without
-        // the bridge, so a version-skewed install degrades instead of dying.
+        // One gateway_list_full call per type feeds the country dropdown and
+        // every per-country list; the per-country RPCs remain as a fallback
+        // for a backend without the Rust bridge.
         var gatewayListCache = {};
 
         var getGatewayList = function(gwType) {
@@ -606,17 +524,13 @@ return view.extend({
             return gatewayListCache[gwType];
         };
 
-        // Warm the picker data shortly after load instead of on first click:
-        // the transfer happens while the user is still looking at the
-        // dashboard, and a daemon whose directory cache is still cold (e.g.
-        // right after a restart) gets its fetch out of the way early. Errors
-        // are swallowed — the pickers retry on interaction.
+        // Warm the picker data while the user is still on the dashboard;
+        // errors are swallowed, the pickers retry on interaction.
         window.setTimeout(function() {
             getGatewayList('mixnet-entry').catch(function() {});
             getGatewayList('mixnet-exit').catch(function() {});
         }, 1500);
 
-        // Load gateways for selected country
         var loadGatewaysForCountry = function(country, type, container) {
             if (!country || country === 'none') {
                 dom.content(container, E('div', { 'class': 'nym-gateway-loading' }, 'Select a country above'));
@@ -642,12 +556,8 @@ return view.extend({
                 }
 
                 var inputName = type === 'mixnet-entry' ? 'entry_gateway_id' : 'exit_gateway_id';
-                // Circumvention Transports gating: when CT is on, only bridge-
-                // capable gateways are valid ENTRY gateways. Read the live toggle
-                // (falling back to saved config); for the entry picker only, sink
-                // incompatible gateways and disable selecting them below. gw.bridges
-                // is only present when the daemon reports it, so treat strictly
-                // === false to stay graceful against an older daemon.
+                // With CT on, only bridge-capable gateways are valid entries.
+                // gw.bridges is absent on an older daemon, so test === false.
                 var ctEl = document.getElementById('circumvention-toggle');
                 var ctOn = ctEl ? ctEl.checked : (tunnel_config.circumvention_transports === 'on');
                 var ctFilter = (inputName === 'entry_gateway_id') && ctOn;
@@ -707,8 +617,8 @@ return view.extend({
                         E('input', inputAttrs),
                         iconDiv,
                         E('div', { 'class': 'nym-gateway-option-info' }, [
-                            // Array-wrap: gateway name/perf come from the directory
-                            // (operator-controlled) and must render as text, not innerHTML.
+                            // Array-wrap: a bare string child goes through innerHTML,
+                            // and these are operator-controlled.
                             E('div', { 'class': 'nym-gateway-option-name' }, nameChildren),
                             E('div', { 'class': 'nym-gateway-option-perf' }, [String(perf)])
                         ])
@@ -736,13 +646,11 @@ return view.extend({
             });
         };
 
-        // Create country select
         var populateCountrySelect = function(select, countryList) {
             while (select.options.length > 0) select.remove(0);
             select.appendChild(E('option', { 'value': 'none' }, '— Select Country —'));
             select.appendChild(E('option', { 'value': 'random' }, '🌐 Random'));
-            // The directory returns countries in ISO-code order; sort by the
-            // displayed name so the dropdown reads alphabetically.
+            // Directory order is ISO code; sort by displayed name.
             var sorted = countryList.slice().sort(function(a, b) {
                 return countries.getDisplay(a.code).name.localeCompare(countries.getDisplay(b.code).name);
             });
@@ -753,7 +661,6 @@ return view.extend({
             });
         };
 
-        // Cache for loaded country lists
         var countryCache = {};
 
         var createCountrySelect = function(gwType, name, onSelect) {
@@ -763,11 +670,8 @@ return view.extend({
                 'change': onSelect
             }, [E('option', { 'value': 'none' }, '— Select Country —')]);
 
-            // Populate options on demand: first focus, or a programmatic
-            // prefill via ensureLoaded(). The promise is cached so the options
-            // are only built once; a failed load clears it so the next attempt
-            // retries. Countries are derived from the shared full list; the
-            // per-country-counts RPC is only a fallback for older backends.
+            // Options are built once, on first focus or ensureLoaded(); a
+            // failed load clears the promise so the next attempt retries.
             var loadPromise = null;
             select.ensureLoaded = function() {
                 if (!loadPromise) {
@@ -801,15 +705,9 @@ return view.extend({
             return select;
         };
 
-        // --- Remember last gateway selection ---------------------------------
-        // The daemon persists entry/exit points across disconnects, but these
-        // pickers used to come back empty, forcing a full re-pick before every
-        // reconnect. restoreGatewaySelection() prefills them from the saved
-        // daemon config, so the explicit-choice guard in handleConnect passes
-        // with the previous selection visible instead of silently falling back
-        // to invisible state. pickersDirty stops a restore from stomping on
-        // picks the user is making right now; restoreGeneration aborts stale
-        // in-flight restores when the state moves on (connect, reconnect).
+        // Pickers are prefilled from the saved daemon config. pickersDirty
+        // stops a restore from stomping on picks in progress; restoreGeneration
+        // aborts stale in-flight restores when the state moves on.
         var pickersDirty = false;
         var restoreGeneration = 0;
         var markPickersDirty = function() { pickersDirty = true; };
@@ -820,11 +718,8 @@ return view.extend({
             return false;
         };
 
-        // Prefill one side. saved = {type, country, id} from gateway_get:
-        // type 'random' selects the Random option; 'country' opens the saved
-        // country with the default "Any Gateway" radio; 'gateway' additionally
-        // checks the saved gateway's radio, degrading to country-level when the
-        // gateway is gone from the directory or CT-disabled.
+        // saved = {type, country, id} from gateway_get. 'gateway' degrades to
+        // country-level when the gateway is gone from the directory or CT-disabled.
         var restoreSide = function(select, container, listType, saved, gen) {
             if (!select || !saved || !saved.type) return Promise.resolve();
             var stale = function() { return gen !== restoreGeneration || pickersDirty; };
@@ -865,7 +760,6 @@ return view.extend({
             }).catch(function() {});
         };
 
-        // Gateway update handler
         var handleGatewayUpdate = function(ev) {
             ev.preventDefault();
             var form = ev.target;
@@ -899,7 +793,6 @@ return view.extend({
                 });
         };
 
-        // Save all tunnel toggles immediately
         var saveTunnelSettings = function() {
             var ipv6El = document.getElementById('ipv6-toggle');
             var twoHopEl = document.getElementById('two-hop-toggle');
@@ -912,9 +805,8 @@ return view.extend({
             var ipv6 = ipv6El.checked ? 'on' : 'off';
             var two_hop = twoHopEl.checked ? 'on' : 'off';
             var legacy_split_tunnel = legacySplitEl && legacySplitEl.checked ? 'on' : 'off';
-            // Legacy split tunneling and the kill-switch are mutually exclusive.
-            // When legacy mode is on the daemon forces the kill-switch off anyway,
-            // but send 'off' so the stored value and the (greyed) toggle agree.
+            // Legacy split and the kill-switch are mutually exclusive; send 'off'
+            // so the stored value and the greyed toggle agree.
             var killswitch = (legacy_split_tunnel === 'on') ? 'off' : (killswitchEl.checked ? 'on' : 'off');
             var circumvention = circumventionEl.checked ? 'on' : 'off';
             var stealth_api = stealthApiEl && stealthApiEl.checked ? 'on' : 'off';
@@ -931,8 +823,7 @@ return view.extend({
             });
         };
 
-        // Save mixnet tuning knobs. Numeric fields are optional: empty input
-        // means "leave as-is" (the daemon keeps its current/default value).
+        // Empty numeric input means "leave as-is".
         var saveMixnetTuning = function() {
             var poissonEl = document.getElementById('tuning-poisson-toggle');
             var coverEl = document.getElementById('tuning-cover-toggle');
@@ -956,7 +847,6 @@ return view.extend({
                 return;
             }
 
-            // disable_poisson = toggle says "disable Poisson delays"
             var disable_poisson = poissonEl.checked ? 'on' : 'off';
             var disable_cover = coverEl.checked ? 'on' : 'off';
 
@@ -972,13 +862,11 @@ return view.extend({
                 });
         };
 
-        // Account handlers
         var handleAccountLogin = function(ev) {
             ev.preventDefault();
             var fd = new FormData(ev.target);
-            // Collapse whitespace: the field is a textarea, so a pasted phrase
-            // can carry newlines and double spaces, and the daemon-side
-            // validator only accepts lowercase letters and single spaces.
+            // The daemon-side validator accepts only lowercase letters and
+            // single spaces; a pasted textarea phrase can carry newlines.
             var mnemonic = (fd.get('mnemonic') || '').replace(/\s+/g, ' ').trim();
             var mode = fd.get('mode') || 'api';
 
@@ -991,7 +879,6 @@ return view.extend({
 
             rpc.accountSet(mnemonic, mode).then(function(result) {
                 if (result && result.success) {
-                    // Poll for ReadyToConnect status
                     var pollCount = 0;
                     var maxPolls = 30; // 30 seconds max
 
@@ -1012,7 +899,6 @@ return view.extend({
                                 hideModal();
                                 showToast('Account error: ' + (accState || accIdentity), 'error');
                             } else if (pollCount < maxPolls) {
-                                // Update modal message with progress
                                 updateModal(accState || 'Please wait...');
                                 setTimeout(pollAccountStatus, 1000);
                             } else {
@@ -1029,7 +915,6 @@ return view.extend({
                         });
                     };
 
-                    // Start polling after a brief delay
                     setTimeout(pollAccountStatus, 1000);
                 } else {
                     hideModal();
@@ -1047,7 +932,6 @@ return view.extend({
                 'This will disconnect and remove your account. You will need your recovery phrase to log back in.',
                 '⚠',
                 function() {
-                    // User confirmed - proceed with logout
                     showModal('Logging Out', 'Please wait...');
 
                     var doLogout = function() {
@@ -1070,12 +954,10 @@ return view.extend({
                         });
                     };
 
-                    // Check if connected, disconnect first
                     rpc.status().then(function(st) {
                         if (st && (st.state === 'connected' || st.state === 'connecting')) {
                             updateModal('Disconnecting...');
                             rpc.disconnect().then(function() {
-                                // Poll until disconnected
                                 var pollCount = 0;
                                 var pollDisconnect = function() {
                                     pollCount++;
@@ -1105,9 +987,8 @@ return view.extend({
             );
         };
 
-        // Hard account-state reset for the desync where `forget` can't clear a
-        // stranded account. Stops the daemon, wipes the account/key store, and
-        // restarts with a delay (the proven manual recovery). Last resort.
+        // Last resort for a stranded account `forget` can't clear: stops the
+        // daemon, wipes the account/key store, restarts.
         var handleAccountReset = function() {
             confirmModal(
                 'Reset account state',
@@ -1180,14 +1061,12 @@ return view.extend({
             done(legacyCopy(text));
         };
 
-        // Custom DNS — managed as a list, added/removed one server at a time.
-        // The daemon replaces the whole set per call (dns set <list>, or dns
-        // clear when empty), so every add/remove re-sends the joined list.
+        // The daemon replaces the whole DNS set per call, so every add/remove
+        // re-sends the joined list.
         var dnsServersList = (dns_config.servers || '').split(/\s+/).filter(Boolean);
         var dnsListEl = E('div', { 'class': 'nym-dns-list' });
 
-        // Light client check (IPv4 dotted-quad, or anything colon-bearing for
-        // IPv6); the daemon validates strictly before applying.
+        // Light check; the daemon validates strictly.
         var isValidDnsIp = function(s) {
             if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(s)) {
                 return s.split('.').every(function(o) { return +o >= 0 && +o <= 255; });
@@ -1216,7 +1095,6 @@ return view.extend({
             dnsServersList.forEach(function(ip) { dnsListEl.appendChild(renderDnsRow(ip)); });
         };
 
-        // Push the current enabled state + full server list to the daemon.
         var persistDns = function() {
             var dnsToggle = document.getElementById('dns-toggle');
             var enabled = dnsToggle ? dnsToggle.checked : false;
@@ -1293,7 +1171,6 @@ return view.extend({
             });
         };
 
-        // Ad-blocking handler
         var handleAdBlock = function(enabled) {
             rpc.adBlockSet(enabled).then(function(result) {
                 if (result && result.success) {
@@ -1304,7 +1181,6 @@ return view.extend({
                     if (toggle) toggle.checked = enabled;
                 } else {
                     showToast('Failed: ' + (result.error || 'Unknown'), 'error');
-                    // Revert toggle
                     var toggle = document.getElementById('adblock-toggle');
                     if (toggle) toggle.checked = !enabled;
                 }
@@ -1315,7 +1191,6 @@ return view.extend({
             });
         };
 
-        // Anonymous statistics handler (Privacy card)
         var handleStatsToggle = function(enabled) {
             var revert = function() {
                 var toggle = document.getElementById('stats-toggle');
@@ -1334,22 +1209,17 @@ return view.extend({
             });
         };
 
-        // Derive account flags from an `account get` result. A leftover device
-        // identity paired with a LoggedOut/cleared state must NOT read as
-        // logged in — that is the 1.27.1 desync where the Account card offered
-        // "Sign out" while the status strip simultaneously said "no account
-        // configured". State is authoritative; a stale identity does not count.
+        // State is authoritative: a leftover device identity with a LoggedOut
+        // state must not read as logged in.
         var computeAccountFlags = function(acct) {
             acct = acct || {};
             var identity = acct.identity || '';
             var rawState = acct.state || '';
             var state = rawState.replace(/([a-z])([A-Z])/g, '$1 $2');
             var invalidIdentities = ['', 'Not set', 'LoggedOut', 'unset', 'none'];
-            // The daemon never answered — either it said so (`available:false`)
-            // or, on an older bridge, both fields came back empty, which no
-            // real reply produces. This outranks every other flag: showing the
-            // login form for a question we never got to ask is what made the
-            // 1.33.1 upgrade look like it had wiped the stored account.
+            // No answer from the daemon (or, on an older bridge, both fields
+            // empty) outranks every other flag: showing the login form for a
+            // question never asked looks like a wiped account.
             var isUnavailable = acct.available === false || (!identity && !rawState);
             var hasError = state.indexOf('Error') >= 0 || identity.indexOf('Error') >= 0;
             var isLoggedOut = (rawState || '').trim() === 'LoggedOut';
@@ -1367,7 +1237,6 @@ return view.extend({
         var container = E('div', { 'class': 'nym-container' }, [
             E('style', {}, theme.css || ''),
 
-            // Header
             (function() {
                 var header = E('div', { 'class': 'nym-header' });
                 var logoDiv = E('div', { 'class': 'nym-logo' });
@@ -1376,16 +1245,10 @@ return view.extend({
                 return header;
             })(),
 
-            // Status Hero with integrated gateway selection
             statusHero = E('div', { 'class': 'nym-status-hero disconnected' }, [
-                // Three-column layout. Each side column hosts BOTH a picker
-                // (.nym-panel-picker, shown while disconnected) and the live
-                // connection info (.nym-panel-info, shown while connected) for
-                // that hop, so the same columns are reused in both states — the
-                // connected view fills the width instead of stranding the
-                // gateway info in a separate row below the ring.
+                // Each side column hosts both the picker (disconnected) and the
+                // live info (connected), so the connected view fills the width.
                 E('div', { 'class': 'nym-hero-gateway-row' }, [
-                    // LEFT: Entry — picker + connected info
                     E('div', { 'class': 'nym-hero-gateway-panel' }, [
                         E('div', { 'class': 'nym-panel-picker' }, [
                             E('div', { 'class': 'nym-gateway-box-title' }, 'Entry Gateway'),
@@ -1396,9 +1259,8 @@ return view.extend({
                                     loadGatewaysForCountry(ev.target.value, 'mixnet-entry', entryGatewayContainer);
                                 })
                             ]),
-                            // 'change' only fires on user interaction (radio
-                            // clicks bubble; programmatic prefill doesn't), so
-                            // it is exactly the dirty signal we want.
+                            // 'change' fires on user interaction only, not on
+                            // programmatic prefill, so it is the dirty signal.
                             entryGatewayContainer = E('div', { 'class': 'nym-form-group', 'style': 'margin-bottom: 0', 'change': markPickersDirty },
                                 E('div', { 'class': 'nym-gateway-loading' }, 'Select a country'))
                         ]),
@@ -1410,7 +1272,6 @@ return view.extend({
                         ])
                     ]),
 
-                    // CENTER: Status Ring + Uptime + connection chain
                     E('div', { 'class': 'nym-hero-center' }, [
                         E('div', { 'class': 'nym-status-ring' }, [
                             E('div', { 'class': 'nym-status-ring-pulse' }),
@@ -1429,7 +1290,6 @@ return view.extend({
                         ])
                     ]),
 
-                    // RIGHT: Exit — picker + connected info
                     E('div', { 'class': 'nym-hero-gateway-panel' }, [
                         E('div', { 'class': 'nym-panel-picker' }, [
                             E('div', { 'class': 'nym-gateway-box-title' }, 'Exit Gateway'),
@@ -1461,7 +1321,6 @@ return view.extend({
             ])
         ]);
 
-        // Tunnel Settings Card
         var tunnelCard = E('div', { 'class': 'nym-card' }, [
             E('div', { 'class': 'nym-card-header', 'click': function() { toggleCard(tunnelCard); } }, [
                 E('div', { 'class': 'nym-card-title' }, [
@@ -1521,9 +1380,8 @@ return view.extend({
                         E('div', { 'class': 'nym-toggle-info' }, [
                             E('div', { 'class': 'nym-toggle-title' }, 'Stealth API Connect'),
                             E('div', { 'class': 'nym-toggle-desc' }, 'Reach the Nym API through cover domains on every request, not only after a direct request fails. Helps where the API is blocked; API calls get slower. Applies immediately, no reconnect.'),
-                            // The daemon reports whether the network environment
-                            // publishes cover domains at all; without them the
-                            // toggle has nothing to route through.
+                            // Without cover domains in the network environment
+                            // the toggle has nothing to route through.
                             E('div', {
                                 'class': 'nym-toggle-warning',
                                 'style': 'color: #e67e22; font-size: 11px; margin-top: 4px; display: ' + (tunnel_config.stealth_api_note ? 'block' : 'none')
@@ -1697,8 +1555,6 @@ return view.extend({
         ]);
         container.appendChild(tunnelCard);
 
-        // Mixnet Tuning Card — Sphinx traffic knobs (mixnet/5-hop mode).
-        // These trade anonymity for performance; the daemon validates ranges.
         var mixnetTuningCard = E('div', { 'class': 'nym-card' }, [
             E('div', { 'class': 'nym-card-header', 'click': function() { toggleCard(mixnetTuningCard); } }, [
                 E('div', { 'class': 'nym-card-title' }, [
@@ -1781,7 +1637,6 @@ return view.extend({
         ]);
         container.appendChild(mixnetTuningCard);
 
-        // Inbound Services Card
         var inboundState = inbound_exemptions.slice();
 
         var renderExemptionRow = function(ex) {
@@ -1914,10 +1769,8 @@ return view.extend({
             });
         };
 
-        // Inbound exemptions render inside the Tunnel Settings card, beneath the
-        // Kill-Switch toggle (they only matter while the kill-switch is on). The
-        // daemon stores exemptions independently of the kill-switch, so toggling
-        // it off/on never loses them — see handle_inbound_* vs handle_tunnel_set.
+        // The daemon stores exemptions independently of the kill-switch, so
+        // toggling it never loses them.
         dom.content(inboundMount, [
             E('div', { 'class': 'nym-divider' }),
             E('div', { 'class': 'nym-toggle-title', 'style': 'margin-bottom: 6px' }, 'Inbound Services'),
@@ -1960,12 +1813,8 @@ return view.extend({
         ]);
         redrawInboundList();
 
-        // Split Tunneling — carve specific devices/domains out of the tunnel,
-        // straight to the WAN. Mounts in the Tunnel Settings card beneath inbound
-        // services. Exclusions are marked with fwmark 0x14e and only take effect
-        // while the kill-switch is OFF (when ON the firewall drops non-tunnel
-        // egress). Stored in UCI independently, so toggling the kill-switch keeps
-        // them. See docs/guide/split-tunneling.md and handle_split_* in the rpcd.
+        // Exclusions are marked fwmark 0x14e and only take effect while the
+        // kill-switch is off; stored in UCI independently so toggling keeps them.
         var splitState = split_exclusions.slice();
         var nftsetSupported = !!split_status.nftset_supported;
 
@@ -2108,14 +1957,12 @@ return view.extend({
             if (ev.key === 'Enter') { ev.preventDefault(); addSplit('domain'); }
         };
 
-        // Device dropdown options from current DHCP leases.
         var clientOptions = [E('option', { 'value': '' }, lan_clients.length ? 'Select a device…' : 'No DHCP leases found')];
         lan_clients.forEach(function(c) {
             var name = (c.hostname ? c.hostname + ' — ' : '') + (c.ip ? c.ip + ' — ' : '') + c.mac;
             clientOptions.push(E('option', { 'value': c.mac }, name));
         });
 
-        // Domain add row — disabled with a hint when dnsmasq lacks nftset support.
         var domainAddRow = nftsetSupported
             ? E('div', { 'class': 'nym-exemption-addrow' }, [
                 E('input', {
@@ -2161,13 +2008,11 @@ return view.extend({
         ]);
         redrawSplitList();
 
-        // DNS & Ad Blocking Card
         var adBlockEnabled = ad_block.enabled ? true : false;
         var dnsEnabled = dns_config.enabled ? true : false;
 
-        // The daemon steps aside when dnsmasq has noresolv set (AdGuard Home,
-        // https-dns-proxy, stubby), so the servers below are configured but not
-        // in force. Say so rather than letting the card imply otherwise.
+        // With noresolv set (AdGuard Home, https-dns-proxy, stubby) the daemon
+        // steps aside and these servers are not in force.
         var dnsUserManagedNotice = dns_config.user_managed
             ? E('div', { 'class': 'nym-card-description', 'style': 'color: #e67e22' }, [
                 E('strong', {}, 'Not in effect: '),
@@ -2179,8 +2024,7 @@ return view.extend({
                 E('code', {}, 'noresolv'),
                 ' if you want the VPN to supply DNS instead.'
             ])
-            // null (not '') — LuCI's dom.append skips null children outright
-            // rather than inserting an empty text node.
+            // null, not '': LuCI's dom.append skips null children.
             : null;
 
         var dnsCard = E('div', { 'class': 'nym-card' }, [
@@ -2196,7 +2040,6 @@ return view.extend({
                     'Configure custom DNS servers and block ads at the DNS level.'),
                 dnsUserManagedNotice,
 
-                // Custom DNS toggle
                 E('div', { 'class': 'nym-toggle-row' }, [
                     E('div', { 'class': 'nym-toggle-info' }, [
                         E('div', { 'class': 'nym-toggle-title' }, 'Custom DNS'),
@@ -2215,8 +2058,6 @@ return view.extend({
                     ])
                 ]),
 
-                // Current servers list (above) + single-server add panel (below),
-                // mirroring the Inbound exemptions add-one-at-a-time layout.
                 dnsListEl,
                 E('div', { 'class': 'nym-form-panel' }, [
                     E('div', { 'class': 'nym-form-label' }, 'Add DNS Server'),
@@ -2239,10 +2080,8 @@ return view.extend({
                     ])
                 ]),
 
-                // Divider
                 E('div', { 'class': 'nym-divider' }),
 
-                // Ad Blocking toggle
                 E('div', { 'class': 'nym-toggle-row' }, [
                     E('div', { 'class': 'nym-toggle-info' }, [
                         E('div', { 'class': 'nym-toggle-title' }, 'Ad Blocking'),
@@ -2265,10 +2104,8 @@ return view.extend({
         container.appendChild(dnsCard);
         redrawDnsList();
 
-        // Privacy Card — the daemon's anonymous statistics switch, CLI-only until
-        // now (`nym-vpnc network-stats`). Reports leave only through the tunnel
-        // unless disconnected reporting was turned on from the CLI; the card
-        // says so when that is the case rather than implying otherwise.
+        // Reports leave only through the tunnel unless disconnected reporting
+        // was turned on from the CLI.
         var statsEnabled = stats_config.enabled ? true : false;
         var statsDesc = stats_config.allow_disconnected
             ? 'Send anonymous, aggregated usage statistics to Nym. Disconnected reporting is on (set from the CLI), so reports can also leave outside the tunnel.'
@@ -2304,10 +2141,7 @@ return view.extend({
         ]);
         container.appendChild(privacyCard);
 
-        // Account Card. The body is rebuilt from a fresh `account get` each
-        // time refreshAccountCard() runs, so a recovered account clears the
-        // error panel without a manual page reload (the 1.27.1 "error stays
-        // until refresh" report).
+        // Body is rebuilt from a fresh `account get` on each refreshAccountCard().
         var accountBodyEl;
 
         var buildAccountBody = function(flags) {
@@ -2315,8 +2149,6 @@ return view.extend({
             var state = flags.state;
             var accountStatusLabel = (state || '').trim() || 'Active';
 
-            // Checked before anything else: with no answer from the daemon we
-            // know nothing about the account, so say that instead of guessing.
             if (flags.isUnavailable) {
                 var unavailableBody = [
                     E('div', { 'class': 'nym-account-state', 'style': 'background: var(--danger-dim); color: var(--danger)' },
@@ -2400,12 +2232,9 @@ return view.extend({
                     'Enter your Nym account recovery phrase to connect.'),
                 E('div', { 'class': 'nym-form-group' }, [
                     E('label', { 'class': 'nym-form-label' }, 'Recovery Phrase'),
-                    // A textarea, not a text input: browsers ignore
-                    // autocomplete="off" on inputs and helpfully autofill the
-                    // saved LuCI login here (users see the word "root" appear
-                    // in the field). Password managers do not autofill
-                    // textareas, and a 24-word phrase wraps instead of
-                    // scrolling. FormData.get('mnemonic') is unchanged.
+                    // A textarea: browsers autofill the saved LuCI login into
+                    // inputs despite autocomplete="off"; password managers
+                    // leave textareas alone.
                     E('textarea', {
                         'class': 'nym-input',
                         'name': 'mnemonic',
@@ -2421,9 +2250,7 @@ return view.extend({
                 E('button', { 'class': 'nym-btn nym-btn-primary', 'type': 'submit', 'style': 'width: 100%' }, 'Login')
             ]);
 
-            // Desync recovery: the daemon reports LoggedOut yet still has a
-            // leftover device identity (the "says not set but won't forget"
-            // case). Offer the hard reset so the user isn't stuck.
+            // LoggedOut with a leftover device identity: offer the hard reset.
             if (flags.isLoggedOut && flags.identity) {
                 return E('div', {}, [
                     form,
@@ -2435,7 +2262,6 @@ return view.extend({
             return form;
         };
 
-        // Re-fetch live account state and rebuild the card body in place.
         var refreshAccountCard = function() {
             return rpc.accountGet().then(function(acct) {
                 if (accountBodyEl) {
@@ -2460,11 +2286,9 @@ return view.extend({
         ]);
         container.appendChild(accountCard);
 
-        // Daemon action helpers
-        // `enabled` is optional: pass undefined to leave the boot-time part of
-        // the badge as it was. Running-but-not-enabled is a state users end up
-        // in after a bad upgrade and everything looks fine until they reboot,
-        // so it gets said out loud rather than inferred.
+        // `enabled` undefined leaves the boot-time part of the badge as it
+        // was. Running-but-not-enabled happens after a bad upgrade and looks
+        // fine until reboot, so it is said out loud.
         var refreshDaemonUi = function(running, enabled) {
             if (enabled !== undefined) lastDaemonEnabled = !!enabled;
             if (daemonStatusBadge) {
@@ -2496,8 +2320,7 @@ return view.extend({
                 info.rpcCall().then(function(result) {
                     var running = result && result.status === 'running';
                     refreshDaemonUi(running, result ? result.enabled : undefined);
-                    // The Account card may be sitting on the "service not
-                    // reachable" panel; re-ask now that the daemon moved.
+                    // The Account card may be on the "service not reachable" panel.
                     if (typeof refreshAccountCard === 'function') refreshAccountCard();
                     if (result && result.success) {
                         setModalSuccess('Done', 'Daemon ' + info.pastTense, '✓');
@@ -2539,7 +2362,6 @@ return view.extend({
             }).catch(execute);
         };
 
-        // Update daemon status display (called by status poller)
         var updateDaemonStatus = function() {
             return rpc.daemonStatus().then(function(result) {
                 if (!result) return;
@@ -2549,7 +2371,6 @@ return view.extend({
             });
         };
 
-        // Service Management Card
         var initialDaemonRunning = !!daemon_status.running;
 
         daemonStartBtn = E('button', {
@@ -2618,8 +2439,6 @@ return view.extend({
         ]);
         container.appendChild(serviceCard);
 
-        // Logs Card — tail of `logread -e nym-vpn`. Auto-refreshes every 5s
-        // while the card is expanded and not paused by the user.
         var logViewer = E('div', { 'class': 'nym-log-viewer empty' }, 'Expand to load logs.');
         var logLinesSelect = E('select', { 'class': 'nym-select' }, [
             E('option', { 'value': '100' }, '100 lines'),
@@ -2633,9 +2452,6 @@ return view.extend({
             E('option', { 'value': '10' }, 'Every 10s'),
             E('option', { 'value': '30' }, 'Every 30s')
         ]);
-        // Error-context filter: collapse the buffer to just error/warn lines
-        // plus a window of surrounding lines, so info/debug noise is only kept
-        // where it gives context to a failure.
         var logFilterSelect = E('select', { 'class': 'nym-select', 'title': 'Filter log level' }, [
             E('option', { 'value': 'all', 'selected': 'selected' }, 'All levels'),
             E('option', { 'value': 'err0' }, 'Errors only'),
@@ -2659,14 +2475,13 @@ return view.extend({
             logStatus.className = 'nym-log-status ' + cls;
         };
 
-        // ANSI escape stripping (server already does this, kept as a safety net).
+        // The server already strips ANSI; safety net.
         var ansiRe = /\x1b\[[0-9;]*m/g;
         var escapeHtml = function(s) {
             return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         };
-        // Match the tracing level keyword that follows an ISO-8601 timestamp.
-        // Anchoring on the timestamp keeps us from accidentally coloring the
-        // word "INFO" / "ERROR" if it happens to appear inside a message body.
+        // Anchored on the timestamp so a level word inside a message body
+        // is not coloured.
         var levelRe = /(\d{4}-\d{2}-\d{2}T[\d:.]+Z\s+)(INFO|WARN|WARNING|ERROR|DEBUG|TRACE)\b/;
         var levelClass = { INFO: 'info', WARN: 'warn', WARNING: 'warn', ERROR: 'error', DEBUG: 'debug', TRACE: 'trace' };
         var renderColoredLogs = function(cleaned) {
@@ -2688,15 +2503,11 @@ return view.extend({
             return out;
         };
 
-        // A line is an "error anchor" if it carries an ERROR/WARN tracing level
-        // (after the ISO-8601 timestamp) or a syslog daemon.{err,warn,crit,…}
-        // facility from logread. Anchoring avoids matching the words in a body.
+        // Anchored on the timestamp or syslog facility so words in a message
+        // body do not match.
         var errLineRe = /\d{4}-\d{2}-\d{2}T[\d:.]+Z\s+(?:ERROR|WARN(?:ING)?)\b|daemon\.(?:err(?:or)?|warn(?:ing)?|crit|alert|emerg)\b/;
         var lastLogsDisplay = '';
 
-        // Reduce the buffer to error/warn lines plus a +/-N line context window.
-        // Skipped runs are collapsed to a single ellipsis marker. mode is one of
-        // all | err0 | err10 | err30.
         var applyLogFilter = function(text) {
             var mode = logFilterSelect.value;
             if (mode === 'all') return text;
@@ -2724,8 +2535,6 @@ return view.extend({
             return out.join('\n');
         };
 
-        // Render lastLogsClean through the active filter. Called both on fetch
-        // and on filter change (no refetch needed — filtering is client-side).
         var renderLogView = function(cleaned) {
             var display = applyLogFilter(cleaned);
             lastLogsDisplay = display;
@@ -2766,8 +2575,7 @@ return view.extend({
         };
 
         var copyLogs = function() {
-            // Copy what's shown — when a filter is active this is the focused
-            // error-context view, which is what users want to share.
+            // Copy what's shown, filter included.
             var text = lastLogsDisplay || lastLogsClean || '';
             if (!text) {
                 showToast('No logs to copy', 'warning');
@@ -2776,8 +2584,8 @@ return view.extend({
             var done = function(ok) {
                 showToast(ok ? 'Logs copied to clipboard' : 'Copy failed', ok ? 'success' : 'error');
             };
-            // Prefer the async clipboard API (HTTPS / localhost). Fall back to
-            // the legacy textarea + execCommand path for plain-HTTP LuCI.
+            // The async clipboard API needs a secure context; plain-HTTP LuCI
+            // falls back to execCommand.
             if (navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) {
                 navigator.clipboard.writeText(text).then(function() { done(true); })
                     .catch(function() { done(legacyCopy(text)); });
@@ -2833,7 +2641,6 @@ return view.extend({
         };
         logLinesSelect.addEventListener('change', function() { if (!logsPaused) fetchLogs(); });
         logIntervalSelect.addEventListener('change', function() { if (!logsPaused) startLogTimer(); });
-        // Re-filter in place from the buffer we already have — no refetch.
         logFilterSelect.addEventListener('change', function() { renderLogView(lastLogsClean); });
 
         var logsCard = E('div', { 'class': 'nym-card' }, [
@@ -2841,7 +2648,6 @@ return view.extend({
                 toggleCard(logsCard);
                 logsExpanded = logsCard.classList.contains('expanded');
                 if (logsExpanded) {
-                    // Start live by default when the user opens the card.
                     logsPaused = false;
                     setPlayPauseUi();
                     fetchLogs();
@@ -2872,14 +2678,9 @@ return view.extend({
                 logViewer
             ])
         ]);
-        // Troubleshooting group appended last (Diagnostics → Logs); logsCard is
-        // appended after diagCard below.
 
-        // Diagnostics Card — surfaces the daemon's connectivity self-test
-        // (`nym-vpnc diagnostic run`): DNS resolution, VPN API reachability over
-        // HTTP, and the selected gateway's TCP/WebSocket handshake. The report is
-        // rendered as PASS/FAIL rows; the JSON is treated as opaque so new daemon
-        // probes appear automatically without touching this view.
+        // The diagnostic JSON is treated as opaque so new daemon probes appear
+        // without touching this view.
         var diagResults = E('div', { 'class': 'nym-diag-results empty' },
             'Run a diagnostic to test DNS, API, and gateway connectivity.');
         var diagSkipDns = E('input', { 'type': 'checkbox', 'id': 'diag-skip-dns' });
@@ -2894,10 +2695,8 @@ return view.extend({
             return E('div', { 'class': 'nym-diag-row' }, [
                 diagChip(ok),
                 E('div', { 'class': 'nym-diag-row-body' }, [
-                    // Array-wrap so LuCI's dom.append renders these as text nodes
-                    // (createTextNode); a bare string child is assigned via innerHTML,
-                    // which would execute markup in untrusted report fields (gateway
-                    // operator name, X-Cable-Routing-Id, daemon error strings).
+                    // Array-wrap: a bare string child goes through innerHTML, and
+                    // these report fields are untrusted (operator name, error strings).
                     E('div', { 'class': 'nym-diag-row-label' }, [String(label)]),
                     detail ? E('div', { 'class': 'nym-diag-row-detail' }, [String(detail)]) : ''
                 ])
@@ -2921,7 +2720,6 @@ return view.extend({
         var renderDiagnosticReport = function(report) {
             var groups = [];
 
-            // DNS resolution — host resolvers plus each configured nameserver.
             if (report.dns) {
                 var dnsRows = [];
                 var sys = report.dns.system;
@@ -2937,7 +2735,6 @@ return view.extend({
                 groups.push(diagGroup('DNS Resolution', dnsRows));
             }
 
-            // HTTP — VPN API time skew, health endpoint, node count.
             if (report.http) {
                 var httpRows = [];
                 var h = report.http;
@@ -2984,7 +2781,6 @@ return view.extend({
                 }
             }
 
-            // Gateway — selection plus TCP/WebSocket reachability.
             if (report.gateway) {
                 var gwRows = [];
                 var g = report.gateway;
@@ -3085,7 +2881,6 @@ return view.extend({
         container.appendChild(diagCard);
         container.appendChild(logsCard);
 
-        // Footer
         var footer = E('div', { 'class': 'nym-footer' }, [
             E('div', { 'class': 'nym-footer-info' }, [
                 E('div', { 'class': 'nym-footer-item' }, [
@@ -3100,7 +2895,6 @@ return view.extend({
         ]);
         container.appendChild(footer);
 
-        // Set initial status and button handler
         if (status.state) {
             statusHero.className = 'nym-status-hero ' + status.state;
             statusLabel.textContent = status.state.charAt(0).toUpperCase() + status.state.slice(1);
@@ -3128,30 +2922,25 @@ return view.extend({
                 actionBtn.className = 'nym-btn nym-btn-danger';
                 actionBtn.onclick = handleCancel;
             } else {
-                // Disconnected or other state - set Connect handler
                 actionBtn.textContent = 'Connect';
                 actionBtn.className = 'nym-btn nym-btn-primary';
                 actionBtn.onclick = handleConnect;
             }
         } else {
-            // No status yet - default to Connect
             actionBtn.onclick = handleConnect;
         }
 
-        // Start uptime if connected, anchored to the router's elapsed seconds.
         if (status.state === 'connected') {
             var initSecs = parseInt(status.connected_seconds, 10);
             syncUptime(isNaN(initSecs) ? 0 : initSecs);
         }
 
-        // Prefill the pickers from the saved daemon config on first render.
-        // While connected/connecting they are hidden and reset anyway; the
-        // poll's disconnected transition handles later drops.
+        // While connected/connecting the pickers are hidden; the poll's
+        // disconnected transition handles later drops.
         if (!status.state || status.state === 'disconnected' || status.state === 'unknown') {
             restoreGatewaySelection();
         }
 
-        // Start polling
         poll.add(updateStatus, 5);
         poll.add(updateDaemonStatus, 10);
 

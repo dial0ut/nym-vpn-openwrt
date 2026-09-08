@@ -20,9 +20,8 @@ pub const DEFAULT_TOP_CANDIDATES: u32 = 5;
 pub const MAX_PROBE_COUNT: u32 = 20;
 pub const MAX_PROBE_TIMEOUT_MS: u32 = 10_000;
 pub const MAX_TOP_CANDIDATES: u32 = 20;
-/// Most explicit gateway identities one request may name. Unlike the knobs
-/// above this is not clamped: a longer list is a mistake, not a preference,
-/// and each unknown identity costs the daemon a directory round trip.
+/// Rejected rather than clamped: each unknown identity costs the daemon a
+/// directory round trip.
 pub const MAX_EXPLICIT_GATEWAYS: usize = 20;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -80,15 +79,13 @@ impl GatewayTestParams {
         self.entry.is_none() && self.exit.is_none() && !self.gateways.is_empty()
     }
 
-    /// Drop repeated identities from `gateways`, keeping first-seen order, so
-    /// `--id A --id A` probes A once and yields one row.
+    /// Keeps first-seen order.
     pub fn dedup_gateways(&mut self) {
         let mut seen = HashSet::with_capacity(self.gateways.len());
         self.gateways.retain(|id| seen.insert(id.clone()));
     }
 
-    /// Reject what cannot be clamped: an explicit list longer than
-    /// [`MAX_EXPLICIT_GATEWAYS`]. Call after [`Self::dedup_gateways`].
+    /// Call after [`Self::dedup_gateways`].
     pub fn validate(&self) -> Result<(), GatewayTestParamsError> {
         if self.gateways.len() > MAX_EXPLICIT_GATEWAYS {
             return Err(GatewayTestParamsError::TooManyGateways {
@@ -179,9 +176,8 @@ impl GatewayTestReport {
     }
 }
 
-/// Combine every reachable entry with every reachable exit, ordered by summed
-/// average RTT. Gateways probed without a role take no part, and a gateway
-/// is never paired with itself.
+/// Every reachable entry with every reachable exit, best summed RTT first.
+/// Role-less gateways take no part; a gateway is never paired with itself.
 pub fn pair_results(results: &[GatewayTestResult]) -> Vec<GatewayPairResult> {
     let with_role = |role: GatewayTestRole| {
         results

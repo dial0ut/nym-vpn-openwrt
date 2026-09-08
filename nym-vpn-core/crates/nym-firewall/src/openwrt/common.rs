@@ -7,74 +7,46 @@ use std::path::Path;
 
 use super::{Error, Result};
 
-/// Root-owned private directory for every piece of kill-switch runtime
-/// state shared between the daemon, the firewall includes (`fw3-include.sh`,
-/// `fw4-include.sh`, `fw-boot-guard.sh`), the init script and the package
-/// hooks. It lives under `/var/run` (OpenWrt: a root-owned, 0755 tmpfs
-/// directory that exists before the firewall starts, so a reboot clears it)
-/// rather than `/tmp`, which is world-writable: the includes run as root and
-/// act on what they find here — a rules file is fed to `iptables-restore`,
-/// the stop marker suppresses the boot-time block — so an unprivileged
-/// local process must not be able to plant any of it. Only root can create
-/// entries in `/var/run`; [`ensure_runtime_dir`] additionally refuses to use
-/// the directory unless it is a real directory owned by uid 0 with no
-/// group/other permission bits, and the scripts perform the same check
-/// before trusting a file in it. The path is a contract with those scripts:
-/// each derives its file names from one `NYM_RUNTIME_DIR` variable whose
-/// default the tests pin to this constant.
+/// Root-only runtime state shared with the includes, init script and package
+/// hooks. Under `/var/run` (root-owned tmpfs, cleared on reboot), not the
+/// world-writable `/tmp`: the includes run as root and act on what they find
+/// here, so nothing unprivileged may plant files in it. The scripts derive
+/// their paths from `NYM_RUNTIME_DIR`, which the tests pin to this constant.
 pub const RUNTIME_DIR: &str = "/var/run/nym-firewall";
 
-/// Persisted fw3 state, consumed by `fw3-include.sh` to re-apply the
-/// kill-switch after an fw3 restart has flushed the iptables tables (an fw3
-/// *reload* leaves foreign chains alone; the include then only reconciles).
-/// The file names are part of the contract with that script and with the
-/// package prerm — keep them in sync when renaming.
+/// Persisted fw3 state, replayed by `fw3-include.sh` after an fw3 restart
+/// flushes the tables (a reload leaves foreign chains alone). File names are
+/// a contract with that script and `prerm`.
 pub const FW3_RULES_V4_PATH: &str = "/var/run/nym-firewall/v4.rules";
 pub const FW3_RULES_V6_PATH: &str = "/var/run/nym-firewall/v6.rules";
-/// Present for the full duration of any fw3 state transition. The reload
-/// include treats its presence as an instruction to install an emergency
-/// OUTPUT/FORWARD block instead of reading or cleaning partially-updated
-/// persisted state. A crash deliberately leaves it behind; a later successful
-/// apply/reset or an explicit daemon stop removes it.
+/// Present for the whole of an fw3 state transition; the include installs
+/// the emergency block instead of reading half-written state while it exists.
+/// A crash leaves it behind on purpose.
 pub const FW3_TRANSITION_PATH: &str = "/var/run/nym-firewall/transition";
-/// Advisory `flock(2)` file serializing every writer of fw3 state: this
-/// backend's apply/forwarding-only/reset, `fw3-include.sh` (run by fw3 on
-/// every reload) and the init script's stop-time teardown. The transition
-/// marker alone cannot exclude a concurrent include: it could test the marker,
-/// lose the CPU while the daemon finished and lifted its block, then install
-/// an emergency block nobody removes. Each writer holds the lock for its whole
-/// mutation, so the include observes fw3 state only between complete
-/// transitions. Never deleted while the package is installed.
+/// `flock(2)` file serializing every writer of fw3 state (backend, include,
+/// init-script stop). The transition marker alone races: the include could
+/// test it, lose the CPU while the daemon lifted its block, then install an
+/// emergency block nobody removes. Never deleted while installed.
 pub const FW3_LOCK_PATH: &str = "/var/run/nym-firewall/lock";
-/// Tunnel interface list (one name per line) for masquerade restore. Shared
-/// naming with the fw4 include script, which reads it as an optional hint.
+/// Tunnel interface list (one per line) for masquerade restore; the fw4
+/// include reads it as an optional hint.
 pub const IFACES_PATH: &str = "/var/run/nym-firewall/ifaces";
-/// Optional saved nftables policy the fw4 include would replay. The fw4
-/// backend does not write it today (it pipes its ruleset to `nft -f -`); the
-/// name is reserved so the include's forward-compatible read stays inside
-/// the trusted directory instead of taking an `nft -f` input from `/tmp`.
-/// Consumed by the shell side only; the tests pin the script to it.
+/// Reserved: nothing writes it (fw4 pipes to `nft -f -`). Named so the
+/// include's forward-compatible read stays inside the trusted directory.
 #[allow(dead_code)]
 pub const FW4_POLICY_PATH: &str = "/var/run/nym-firewall/policy.nft";
-/// Stop marker written by the init script on an explicit `stop` and read by
-/// `fw-boot-guard.sh`: while present, no boot-time block is installed
-/// because the administrator asked for the network back and no daemon is
-/// coming to lift one. The daemon never touches it; the constant exists so
-/// the tests can pin the scripts to the same name.
+/// Written by the init script on explicit `stop`, read by `fw-boot-guard.sh`
+/// to skip the boot block. The daemon never touches it.
 #[allow(dead_code)]
 pub const STOP_MARKER_PATH: &str = "/var/run/nym-firewall/stopped";
 
-/// Make sure [`RUNTIME_DIR`] exists and can be trusted, failing closed
-/// otherwise. Creates it 0700 when missing; then requires a real directory
-/// (not a symlink), owned by root, with no group/other permission bits.
-/// Anything else means the state files in it could have been planted or
-/// read by an unprivileged process, and no policy is applied on top of that.
+/// Create [`RUNTIME_DIR`] 0700 if missing and refuse to proceed unless it is
+/// a real directory (not a symlink), root-owned, with no group/other bits.
 pub fn ensure_runtime_dir() -> Result<()> {
     ensure_runtime_dir_at(Path::new(RUNTIME_DIR), 0)
 }
 
-/// [`ensure_runtime_dir`] for an arbitrary path and expected owner uid, so
-/// the checks can be exercised in tests as an unprivileged user.
+/// [`ensure_runtime_dir`] parameterised so tests can run unprivileged.
 pub fn ensure_runtime_dir_at(dir: &Path, expected_uid: u32) -> Result<()> {
     use std::os::unix::fs::{DirBuilderExt, MetadataExt};
 
@@ -91,8 +63,7 @@ pub fn ensure_runtime_dir_at(dir: &Path, expected_uid: u32) -> Result<()> {
         Err(e) => return Err(refuse(format!("cannot create: {e}"))),
     }
 
-    // symlink_metadata: a symlink planted at this path must be seen as a
-    // symlink, not as whatever it points at.
+    // symlink_metadata so a planted symlink is seen as one.
     let meta = std::fs::symlink_metadata(dir).map_err(|e| refuse(format!("cannot stat: {e}")))?;
     if meta.file_type().is_symlink() {
         return Err(refuse("is a symlink".into()));
@@ -115,41 +86,19 @@ pub fn ensure_runtime_dir_at(dir: &Path, expected_uid: u32) -> Result<()> {
     Ok(())
 }
 
-/// Names shared with the shell includes — the fw3 hook chains our jumps
-/// lead, and the `inet nym_boot` table `fw4-include.sh` installs at firewall
-/// start when the kill-switch is armed and no `inet nym` table exists yet
-/// (the window between network-up and this daemon's first policy; the fw4
-/// backend deletes it as the last step of every apply and reset, the init
-/// script and package prerm on explicit stop and removal). Defined once in
-/// [`super::boot_rules`], which also renders the shell side, so the names
-/// cannot drift between Rust and the scripts.
+/// Chain and table names shared with the shell includes. Defined in
+/// [`super::boot_rules`], whose generated `fw-rules.sh` carries the same
+/// values to the scripts; the other runtime paths above are pinned by tests.
 pub use super::boot_rules::{FW3_HOOK_FORWARD, FW3_HOOK_INPUT, FW3_HOOK_OUTPUT, FW4_BOOT_TABLE};
 
-/// Firewall mark used for inbound-exemption reply pinning. Distinct from the
-/// tunnel fwmark (`0x14d`). Carried in `ct mark` for the connection lifetime
-/// and restored onto packet mark so reply traffic hits `ip rule fwmark` and
-/// routes via the real WAN instead of the tunnel.
+/// Inbound-exemption reply mark (distinct from the tunnel fwmark `0x14d`),
+/// carried in `ct mark` and restored so replies route via the real WAN.
 pub const EXEMPT_FWMARK: u32 = 0x14e;
 
-/// Detect the active WAN interface name. Used to anchor inbound-exemption
-/// rules so we only mark new flows arriving from the WAN side.
-///
-/// The name we need is the **L3 device** packets actually ingress on. For a
-/// plain DHCP/static WAN that equals `network.wan.device`, but for tunnelled
-/// WAN protocols (PPPoE, L2TP, …) the L3 device is a virtual netdev such as
-/// `pppoe-wan`, while `network.wan.device` is the *underlying* ethernet/bridge.
-/// Anchoring the `iif` match on the wrong one silently drops every inbound
-/// mark, so the exemption never fires.
-///
-/// Strategy (most authoritative first):
-/// 1. `ubus call network.interface.wan status` → `l3_device`. Correct for
-///    both tunnelled and plain WANs, and independent of the current default
-///    route (which points into the VPN tunnel once connected).
-/// 2. Read `uci get network.wan.device` — right for plain DHCP/static WANs.
-/// 3. Parse `ip -o route get 1.1.1.1` for the `dev <name>` token. Last resort:
-///    may return the tunnel device if the VPN default route is already up.
-///
-/// Returns `None` only if all three fail (very unusual on a router).
+/// The WAN L3 device packets actually ingress on. For PPPoE/L2TP that is
+/// `pppoe-wan`, not `network.wan.device` (the underlying ethernet), so ubus
+/// `l3_device` is tried first; `ip route get` last, since the default route
+/// points into the tunnel once connected.
 pub fn detect_wan_iface() -> Option<String> {
     if let Ok(output) = std::process::Command::new("ubus")
         .args(["call", "network.interface.wan", "status"])
@@ -191,11 +140,8 @@ pub fn detect_wan_iface() -> Option<String> {
     None
 }
 
-/// Extract the `l3_device` string from `ubus call network.interface.wan status`
-/// JSON output. Kept as a tiny hand-rolled extractor so the crate needn't pull
-/// in a JSON parser for one field; interface names never contain quotes or
-/// escapes, so this is sufficient. Returns `None` if the field is absent or
-/// empty (e.g. WAN link down).
+/// Hand-rolled to avoid a JSON dependency for one field; interface names
+/// never contain quotes or escapes.
 fn parse_ubus_l3_device(json: &str) -> Option<String> {
     let needle = "\"l3_device\"";
     let after_key = &json[json.find(needle)? + needle.len()..];
@@ -211,20 +157,12 @@ fn parse_ubus_l3_device(json: &str) -> Option<String> {
     }
 }
 
-/// Whether the kernel's IPv6 stack is up and, if so, whether `ip6tables`
-/// can actually filter it. The distinction matters for fail-closed behavior:
-/// "kernel IPv6 off" legitimately needs no v6 rules, while "kernel IPv6 on
-/// but ip6tables broken" means v6 traffic flows and CANNOT be firewalled —
-/// treating that as "disabled" would install a v4-only kill-switch with a
-/// silent IPv6 bypass.
+/// `Unusable` (IPv6 up, `ip6tables` broken) must not be treated as
+/// `Disabled`: that would install a v4-only kill-switch with an IPv6 bypass.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Ipv6Status {
-    /// IPv6 is disabled in (or absent from) the kernel: nothing to filter.
     Disabled,
-    /// IPv6 is up and `ip6tables` works.
     Enabled,
-    /// IPv6 is up but `ip6tables` is missing or broken (no binary, no
-    /// kernel module): v6 traffic flows unfiltered.
     Unusable,
 }
 
@@ -238,19 +176,15 @@ pub fn ipv6_status() -> Ipv6Status {
     {
         return Ipv6Status::Disabled;
     }
-    // Smoke-test ip6tables: present-but-broken (missing ip6_tables kernel
-    // module) exits non-zero, and a missing binary fails the spawn.
+    // A missing ip6_tables kernel module exits non-zero; no binary fails the spawn.
     match std::process::Command::new("ip6tables").args(["-L", "-n"]).output() {
         Ok(output) if output.status.success() => Ipv6Status::Enabled,
         _ => Ipv6Status::Unusable,
     }
 }
 
-/// Read mwan3 tracking IPs from UCI config.
-///
-/// mwan3 pings these IPs to determine WAN liveness. If our kill-switch
-/// blocks them, mwan3 declares WAN down and triggers a firewall reload
-/// cascade that kills VPN connections — so we always allow them.
+/// mwan3's liveness ping targets. Blocking them makes mwan3 declare WAN down
+/// and trigger a firewall reload cascade, so they are always allowed.
 pub fn get_mwan3_track_ips() -> Vec<IpAddr> {
     let output = match std::process::Command::new("uci").args(["show", "mwan3"]).output() {
         Ok(o) if o.status.success() => o,
@@ -261,7 +195,7 @@ pub fn get_mwan3_track_ips() -> Vec<IpAddr> {
     let mut ips = Vec::new();
 
     for line in stdout.lines() {
-        // Lines look like: mwan3.wan.track_ip='1.1.1.1' '8.8.8.8' ...
+        // mwan3.wan.track_ip='1.1.1.1' '8.8.8.8'
         if !line.contains(".track_ip=") {
             continue;
         }
@@ -290,8 +224,6 @@ mod tests {
 
     #[test]
     fn l3_device_pppoe_returns_virtual_netdev() {
-        // The regression case: a PPPoE WAN. `device` is the underlying
-        // ethernet ("wan"), but inbound packets ingress on `pppoe-wan`.
         let json = r#"{"up":true,"l3_device":"pppoe-wan","device":"wan","proto":"pppoe"}"#;
         assert_eq!(parse_ubus_l3_device(json).as_deref(), Some("pppoe-wan"));
     }
@@ -304,7 +236,6 @@ mod tests {
 
     #[test]
     fn l3_device_absent_is_none() {
-        // WAN link down: status omits l3_device.
         let json = r#"{"up":false,"pending":false,"available":true}"#;
         assert_eq!(parse_ubus_l3_device(json), None);
     }
@@ -317,10 +248,7 @@ mod tests {
 
     #[test]
     fn l3_device_real_pretty_printed_ubus_output() {
-        // Exact shape emitted by `ubus call network.interface.wan status` on
-        // OpenWrt 25.12 (tab indent, space after the colon), captured from a
-        // live router. Guards against the compact-JSON tests masking a real
-        // formatting mismatch.
+        // Captured verbatim from OpenWrt 25.12 (tab indent, space after colon).
         let json = "{\n\t\"up\": true,\n\t\"pending\": false,\n\t\"available\": true,\n\t\"l3_device\": \"eth0\",\n\t\"proto\": \"static\",\n\t\"device\": \"eth0\"\n}\n";
         assert_eq!(parse_ubus_l3_device(json).as_deref(), Some("eth0"));
     }
@@ -350,7 +278,6 @@ mod tests {
         let meta = std::fs::metadata(&dir).unwrap();
         assert!(meta.is_dir());
         assert_eq!(meta.mode() & 0o777, 0o700);
-        // Idempotent on the directory it just created.
         ensure_runtime_dir_at(&dir, my_uid()).unwrap();
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -391,9 +318,7 @@ mod tests {
 
     #[test]
     fn runtime_dir_rejects_a_foreign_owner() {
-        // Cannot chown to another user without privileges, so ask for an
-        // owner the directory is not: the check must fail the same way it
-        // would for a directory root did not create.
+        // Cannot chown unprivileged, so ask for an owner the directory is not.
         let root = tmp_root("rtdir-owner");
         let dir = root.join("state");
         let err = ensure_runtime_dir_at(&dir, my_uid().wrapping_add(1))

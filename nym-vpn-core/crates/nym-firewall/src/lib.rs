@@ -47,10 +47,8 @@ const DHCPV6_CLIENT_PORT: u16 = 546;
 
 const ROOT_UID: u32 = 0;
 
-/// Firewall mark the daemon sets (`SO_MARK`) on sockets whose traffic must
-/// bypass the tunnel: the WireGuard transport, gateway control connections
-/// and the gateway latency probes. Must equal `nym_vpn_lib::TUNNEL_FWMARK`,
-/// which nym-vpn-lib asserts at compile time.
+/// `SO_MARK` on sockets that bypass the tunnel. Must equal
+/// `nym_vpn_lib::TUNNEL_FWMARK`, asserted there at compile time.
 pub const TUNNEL_FWMARK: u32 = 0x14d;
 
 /// Allowed TCP ports to DNS servers when connecting.
@@ -95,8 +93,7 @@ pub enum FirewallPolicy {
         allow_lan: bool,
         /// Servers that are allowed to respond to DNS requests.
         dns_config: ResolvedDnsConfig,
-        /// Hosts that should be reachable while connected (e.g. cloudflared,
-        /// frp client, ntfy push). Symmetric with `Connecting.allowed_endpoints`.
+        /// Hosts that should be reachable while connected.
         allowed_endpoints: Vec<AllowedEndpoint>,
         /// Inbound services exempted from the tunnel.
         inbound_exemptions: Vec<InboundExemption>,
@@ -108,9 +105,7 @@ pub enum FirewallPolicy {
         allow_lan: bool,
         /// Hosts that should be reachable while in the blocked state.
         allowed_endpoints: Vec<AllowedEndpoint>,
-        /// DNS resolvers reachable from the host while in the blocked state.
-        /// Empty = full DNS lockdown; non-empty = allow DNS queries to these
-        /// servers so allowed-endpoint hostnames can still resolve.
+        /// Resolvers the daemon may query while blocked; empty is full lockdown.
         dns_servers: Vec<IpAddr>,
     },
 }
@@ -412,17 +407,13 @@ impl Firewall {
         })
     }
 
-    /// Update whether the kill-switch (blocking rules) is enforced. The value
-    /// is read on every `apply_policy` call, so callers must sync this from the
-    /// live tunnel settings whenever they change — the constructor value is
-    /// only the initial state.
+    /// Read on every `apply_policy`; callers must sync it from the live
+    /// tunnel settings.
     pub fn set_killswitch(&mut self, on: bool) {
         self.killswitch = on;
     }
 
-    /// Creates a new firewall instance. `fwmark` is accepted for API
-    /// compatibility but unused on OpenWrt — routers don't do split tunneling
-    /// or fwmark-based filtering.
+    /// `fwmark` is accepted for API compatibility but unused on OpenWrt.
     pub fn new(_fwmark: u32) -> Result<Self, Error> {
         Ok(Firewall {
             inner: openwrt::Firewall::new()?,
@@ -434,11 +425,8 @@ impl Firewall {
     /// until this method is called again with another policy, or until `reset_policy` is called.
     pub fn apply_policy(&mut self, policy: FirewallPolicy) -> Result<(), Error> {
         if !self.killswitch {
-            // Kill-switch off: don't install the blocking rules, but DO install
-            // the LAN↔tunnel forwarding plane (masquerade + forward accepts).
-            // Routing into the tunnel is unconditional (see route_handler), so
-            // without NAT the exit gateway drops LAN-sourced packets. The
-            // kill-switch governs *blocking* non-tunnel egress, not forwarding.
+            // Routing into the tunnel is unconditional, so the forwarding
+            // plane (masquerade + accepts) is needed even with blocking off.
             tracing::info!("Kill-switch disabled: installing tunnel forwarding plane only (no blocking)");
             return self.inner.apply_forwarding_only(policy);
         }

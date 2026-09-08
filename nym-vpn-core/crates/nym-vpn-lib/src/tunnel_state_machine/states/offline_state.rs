@@ -14,9 +14,7 @@ use crate::tunnel_state_machine::{
     tunnel::SelectedGateways,
 };
 
-/// Firewall policy parameters used by [`OfflineState`]. While the device has
-/// no network connectivity there is nothing useful to whitelist, so this
-/// applies a fully-locked `Blocked` policy.
+/// Offline has nothing useful to whitelist: fully locked `Blocked`.
 #[derive(Debug, Clone)]
 struct BlockedPolicyParameters {
     allow_lan: bool,
@@ -74,9 +72,7 @@ impl OfflineState {
     ) -> Result<()> {
         let policy = params.as_policy();
 
-        // The firewall caches the kill-switch flag; sync it from live settings
-        // so a runtime toggle (LuCI / `tunnel set`) takes effect without a
-        // daemon restart.
+        // The firewall caches the kill-switch flag; sync a runtime toggle.
         shared_state
             .firewall
             .set_killswitch(shared_state.tunnel_settings.killswitch);
@@ -138,9 +134,7 @@ impl TunnelStateHandler for OfflineState {
                             self.selected_gateways = None;
                         };
 
-                        // Assign before re-applying so the firewall sync below
-                        // (inside set_firewall_policy) picks up the new
-                        // killswitch/allow_lan values, not the stale ones.
+                        // Assign first: set_firewall_policy reads the killswitch flag.
                         shared_state.tunnel_settings = tunnel_settings;
 
                         if diff.allow_lan_changed() {
@@ -164,11 +158,9 @@ impl TunnelStateHandler for OfflineState {
                     Self::reset_dns(shared_state).await;
 
                     if self.reconnect {
-                        // Same shield as ConnectedState::handle_tunnel_down: the route
-                        // just came back, but connectivity often lags it (PPPoE session
-                        // up while the upstream still converges), so a failed reconnect
-                        // right now says nothing about the gateway. Anchor the grace at
-                        // resume time — time spent offline is not the gateway's fault.
+                        // Connectivity often lags the route (PPPoE up, upstream still
+                        // converging), so a failed reconnect now says nothing about the
+                        // gateway; anchor the grace at resume time.
                         if let Some(ref gateways) = self.selected_gateways {
                             shared_state.entry_gateway_grace = Some((
                                 gateways.entry_gateway().identity,

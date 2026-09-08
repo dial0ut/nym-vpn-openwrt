@@ -79,9 +79,7 @@ pub(super) struct GatewayTestContext {
     pub active: Option<(String, String)>,
 }
 
-/// How the gateways for one role are chosen.
 enum Candidates {
-    /// One gateway by identity.
     Gateway(String),
     /// The best-scored gateways matching the filters.
     Filtered(Vec<GatewayFilter>),
@@ -249,9 +247,7 @@ pub(super) async fn run(
     Ok(GatewayTestReport::new(results))
 }
 
-/// Turn a candidate description into concrete targets, looking the gateways
-/// up in the `gw_type` list and, for identities not in that list, in the
-/// wider directory.
+/// Identities not in the `gw_type` list fall back to the wider directory.
 async fn resolve(
     cache: &GatewayCacheHandle,
     gw_type: GatewayType,

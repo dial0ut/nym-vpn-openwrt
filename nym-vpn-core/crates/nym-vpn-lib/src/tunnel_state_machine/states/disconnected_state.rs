@@ -22,18 +22,10 @@ use nym_gateway_directory::ResolvedConfig;
 type ResolveApiAddrsFuture = BoxFuture<'static, Result<ResolvedConfig>>;
 type RefreshTimerFuture = BoxFuture<'static, ()>;
 
-/// Idle between tunnel sessions.
-///
-/// With the kill-switch on this state keeps the firewall Blocked and owns the
-/// API allow-list while idle: on entry, and every
-/// [`crate::tunnel_state_machine::API_ENDPOINT_REFRESH_INTERVAL`] after
-/// that, it resolves the API hostnames through the daemon's DNS hatch with
-/// the same resolver Connecting uses, re-applies Blocked with those endpoints
-/// admitted (daemon only) and pins the HTTP clients to them. Until a
-/// resolution succeeds the firewall stays Blocked with whatever the on-disk
-/// cache offered, which on a fresh install is nothing: fail closed, never
-/// open. The resolution runs as a future inside the event loop, so commands
-/// keep being served while it is in flight.
+/// Idle between tunnel sessions. With the kill-switch on it keeps the
+/// firewall Blocked and refreshes the API allow-list every
+/// [`crate::tunnel_state_machine::API_ENDPOINT_REFRESH_INTERVAL`]; until a
+/// resolution succeeds it stays Blocked with whatever the cache offered.
 pub struct DisconnectedState {
     resolve_api_addrs_fut: Fuse<ResolveApiAddrsFuture>,
     refresh_timer_fut: Fuse<RefreshTimerFuture>,
@@ -44,24 +36,21 @@ impl DisconnectedState {
         tombstone: Option<Tombstone>,
         shared_state: &mut SharedState,
     ) -> (Box<dyn TunnelStateHandler>, PrivateTunnelState) {
-        // The post-drop gateway grace window is scoped to a connect session.
+        // The gateway grace window is scoped to a connect session.
         shared_state.entry_gateway_grace = None;
 
-        // Drop tombstone to close tunnel devices.
         drop(tombstone);
 
-        // A failed apply must not be shrugged off into a state that
-        // announces unrestricted networking: with the kill-switch enabled
-        // the user believes traffic is fenced while nothing enforces it.
-        // Surface it as an error state instead so the UI shows the problem.
+        // A failed apply must surface as an error state, not as Disconnected
+        // with the kill-switch supposedly on.
         if let Err(e) = shared_state.apply_killswitch_policy() {
             trace_err_chain!(e, "Failed to apply kill-switch policy on disconnect");
             return ErrorState::enter(ErrorStateReason::SetFirewallPolicy, shared_state).await;
         }
 
-        // Cached addresses come without the resolver overrides the HTTP
-        // clients need to hit exactly the admitted IPs, so they are cleared
-        // here and re-installed by the first live resolution below.
+        // Overrides are cleared here and only come back with the next live
+        // resolution: at once after a cold start, otherwise when the current
+        // allow-list ages out.
         shared_state.reset_resolver_overrides().await;
         shared_state.allow_networking().await;
         Self::reset_dns(shared_state).await;
@@ -75,8 +64,6 @@ impl DisconnectedState {
         (Box::new(state), PrivateTunnelState::Disconnected)
     }
 
-    /// Start a resolution now if the allow-list is missing, cache-only or
-    /// aged out; otherwise arm the timer for when it will be.
     fn schedule_api_endpoint_refresh(&mut self, shared_state: &SharedState) {
         if !shared_state.tunnel_settings.killswitch {
             self.resolve_api_addrs_fut = Fuse::terminated();
@@ -129,10 +116,6 @@ impl DisconnectedState {
         NextTunnelState::SameState(self)
     }
 
-    /// Point dnsmasq at what is usable while idle: the LAN custom resolvers
-    /// the kill-switch admits, plus the WAN resolvers only when the
-    /// kill-switch is off. Re-run whenever the DNS or kill-switch settings
-    /// change while disconnected so the change takes effect at once.
     async fn reset_dns(shared_state: &mut SharedState) {
         let idle = shared_state.tunnel_settings.idle_dns();
         if let Err(error) = shared_state.dns_handler.reset_idle(idle).await {
@@ -164,17 +147,12 @@ impl TunnelStateHandler for DisconnectedState {
                         if idle_dns_changed {
                             Self::reset_dns(shared_state).await;
                         }
-                        // Re-apply so enabling/disabling the kill-switch while
-                        // disconnected installs/removes the Blocked table now,
-                        // instead of silently waiting for the next connect.
                         if let Err(e) = shared_state.apply_killswitch_policy() {
                             trace_err_chain!(e, "Failed to apply kill-switch policy on settings change");
                             NextTunnelState::NewState(
                                 ErrorState::enter(ErrorStateReason::SetFirewallPolicy, shared_state).await,
                             )
                         } else {
-                            // Turning the kill-switch on needs the allow-list;
-                            // turning it off cancels any pending resolution.
                             self.schedule_api_endpoint_refresh(shared_state);
                             NextTunnelState::SameState(self)
                         }

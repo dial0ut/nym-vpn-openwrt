@@ -123,10 +123,8 @@ impl VpnApiClient {
         })
     }
 
-    /// Like [`Self::new`], but pins an explicit, client-local domain-fronting
-    /// policy at build time. Such a client is detached from the shared policy
-    /// (see [`crate::set_shared_front_policy`]); the diagnostic uses this to
-    /// build an always-fronted client for reachability testing.
+    /// Like [`Self::new`] with a client-local fronting policy, detached from
+    /// the shared one (see [`crate::set_shared_front_policy`]).
     pub async fn new_with_front_policy(
         urls: Vec<Url>,
         user_agent: UserAgent,
@@ -204,11 +202,8 @@ impl VpnApiClient {
         self.client()
     }
 
-    /// The inner client, ready to send: under Stealth API (`Always`) it is
-    /// first moved onto a base URL with cover domains, because the
-    /// http-api-client fronts only through the current base URL and the
-    /// discovery lists the plain host first. Every request goes through here so
-    /// a policy switched on at runtime reaches long-lived clients too.
+    /// Every request goes through here so a policy switched on at runtime
+    /// reaches this long-lived client (see `prefer_fronted_base_url`).
     fn client(&self) -> &Client {
         prefer_fronted_base_url(&self.inner);
         &self.inner

@@ -243,11 +243,8 @@ impl GatewayClient {
             .and_then(|min_performance| min_performance.vpn_min_performance)
     }
 
-    /// The nym-api client, ready to send. This client lives as long as the
-    /// daemon, so under Stealth API it is first moved onto a base URL with
-    /// cover domains (the http-api-client fronts only through its current base
-    /// URL). Every nym-api request goes through here so a policy switched on
-    /// at runtime reaches it too, exactly like `VpnApiClient::client`.
+    /// Every nym-api request goes through here so a policy switched on at
+    /// runtime reaches this long-lived client, like `VpnApiClient::client`.
     fn api_client(&self) -> &nym_http_api_client::Client {
         prefer_fronted_base_url(&self.api_client);
         &self.api_client

@@ -180,20 +180,15 @@ impl TunnelSettings {
             .collect()
     }
 
-    /// The daemon's own resolvers plus any *private* custom DNS server the
-    /// user configured (a LAN Pi-hole). The idle and connecting policies
-    /// admit the former to the daemon only and the latter on every
-    /// interface but the WAN, so a LAN resolver keeps working while the
-    /// tunnel is down.
+    /// The daemon's own resolvers plus any private custom DNS server (a LAN
+    /// Pi-hole); the idle policies admit the latter on every interface but WAN.
     pub fn idle_dns_ips(&self) -> Vec<IpAddr> {
         let mut ips = self.default_dns_ips();
         ips.extend(self.local_custom_dns_ips());
         ips
     }
 
-    /// The user's custom DNS servers on private addresses (a LAN Pi-hole),
-    /// which are never routed through the tunnel. Empty unless custom DNS is
-    /// enabled.
+    /// Custom DNS servers on private addresses, never routed through the tunnel.
     pub fn local_custom_dns_ips(&self) -> Vec<IpAddr> {
         match self.dns {
             DnsOptions::Custom(_) => self
@@ -205,9 +200,6 @@ impl TunnelSettings {
         }
     }
 
-    /// What dnsmasq should use while the tunnel is down: the LAN custom
-    /// resolvers (admitted by the kill-switch on every interface but the WAN)
-    /// and, only when they are reachable, the WAN-provided ones.
     pub fn idle_dns(&self) -> IdleDns {
         IdleDns {
             local_resolvers: self.local_custom_dns_ips(),
@@ -345,10 +337,7 @@ impl TunnelSettingsDiff {
         self.only_field_changed(&TunnelSettingsDiffFields::InboundExemptions)
     }
 
-    /// True when the diff is a non-empty subset of fields the state machine
-    /// can re-apply in place (firewall ± exempt routing rule) without
-    /// disconnecting the tunnel. Use to decide whether a `SetTunnelSettings`
-    /// can stay in the current state vs. force a reconnect.
+    /// Non-empty diff of only fields re-appliable without a reconnect.
     pub fn only_hot_appliable_changed(&self) -> bool {
         if self.0.is_empty() {
             return false;
@@ -375,17 +364,9 @@ impl TunnelSettingsDiff {
         self.only_field_changed(&TunnelSettingsDiffFields::MixnetPerformanceOptions)
     }
 
-    /// True when the change can invalidate an already-resolved gateway pair.
-    ///
-    /// A settings change that forces a reconnect must not silently move the
-    /// user to a different server, so the reconnect reuses the pair it was
-    /// running on — except for the inputs `select_gateways` actually reads:
-    /// the entry/exit points themselves, the tunnel type (mixnet and
-    /// wireguard draw from different gateway sets), QUIC/bridges (entry
-    /// gateways are filtered to those advertising bridge params),
-    /// residential exit (exit filter), and the min-performance thresholds
-    /// (applied to the directory lookup). Anything else — IPv6, DNS,
-    /// kill-switch, split tunnel — leaves the current pair perfectly valid.
+    /// Whether the change touches an input `select_gateways` reads. A forced
+    /// reconnect reuses the running pair otherwise, so the user is not
+    /// silently moved to another server.
     pub fn affects_gateway_selection(&self) -> bool {
         self.0.iter().any(|f| {
             matches!(
@@ -608,13 +589,9 @@ impl From<TunnelInterface> for nym_firewall::TunnelInterface {
     }
 }
 
-/// How long after losing a viable session its entry gateway is shielded from
-/// blame while the local network is down: reconnect failures inside this
-/// window (with the VPN API also unreachable) keep retrying the same gateway
-/// instead of blacklisting it and re-selecting. Sized to outlast routine WAN
-/// blips (DSL/PPPoE resync, cable/LTE hiccups); it only bounds the corner
-/// where gateway and API are unreachable at once, since a reachable API
-/// proves the network is up and ends the shield early.
+/// How long after a drop reconnect failures are blamed on the local network
+/// rather than the entry gateway (no blacklist, no re-selection). Sized to
+/// outlast a PPPoE/LTE resync; a reachable API ends the shield early.
 const GATEWAY_BLAME_GRACE: std::time::Duration = std::time::Duration::from_secs(120);
 
 pub struct SharedState {
@@ -635,49 +612,29 @@ pub struct SharedState {
     wg_keys_db: WireguardKeysDb,
     user_agent: UserAgent,
     blacklisted_entry_gateways: BlacklistedGateways,
-    /// Grace window for the entry gateway of a previously viable session, set
-    /// when the tunnel drops. Until the deadline passes, failed reconnects to
-    /// this gateway are forgiven and retried against the same gateway: right
-    /// after a drop the local network is usually the culprit, and blaming the
-    /// gateway (blacklist + re-selection) would switch the user's server on
-    /// every WAN blip.
+    /// Entry gateway shielded from blame after a drop; see [`GATEWAY_BLAME_GRACE`].
     entry_gateway_grace: Option<(NodeIdentity, std::time::Instant)>,
-    /// Nym VPN API socket addresses (nyxd, nym-api, nym-vpn-api and their
-    /// cover domains) from the most recent resolution, whether that happened
-    /// in Connecting or in an idle state. The kill-switch Blocked policy
-    /// admits exactly these, root-scoped, so the account controller, the
-    /// gateway directory and discovery keep working between tunnel sessions.
+    /// API socket addresses from the most recent resolution; the Blocked
+    /// policy admits exactly these, root-scoped.
     api_endpoints: Vec<SocketAddr>,
-    /// When `api_endpoints` was last resolved live. `None` after a cold start
-    /// (the on-disk cache carries addresses but not the resolver overrides
-    /// the HTTP clients need), so idle states resolve again as soon as they
-    /// are entered.
+    /// `None` after a cold start: the on-disk cache carries addresses but
+    /// not the resolver overrides, so idle states resolve again on entry.
     api_endpoints_resolved_at: Option<Instant>,
 }
 
-/// How long a live API endpoint resolution stays trusted while the daemon is
-/// idle with the kill-switch on. Well inside the cache's seven-day bound, so a
-/// router that stays disconnected for weeks keeps its allow-list current.
+/// Well inside the cache's seven-day bound.
 pub(crate) const API_ENDPOINT_REFRESH_INTERVAL: Duration = Duration::from_secs(60 * 60);
-/// Retry cadence after a failed idle resolution (no upstream, cold clock).
 pub(crate) const API_ENDPOINT_RETRY_DELAY: Duration = Duration::from_secs(60);
-/// Upper bound on one resolution: the DNS hatch is open, but nothing else is,
-/// and a state must not sit on this forever.
 pub(crate) const API_ENDPOINT_RESOLVE_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Resolve every API hostname the daemon talks to (nyxd, nym-api, nym-vpn-api
-/// and, when discovery lists them, the cover domains) through the daemon's own
-/// root-scoped DNS hatch. The one resolver for both Connecting and the idle
-/// states: any change to what the kill-switch admits goes through here.
+/// The one resolver for Connecting and the idle states: anything that changes
+/// what the kill-switch admits goes through here.
 pub(crate) fn resolve_api_endpoints(
     gateway_config: GatewayDirectoryConfig,
 ) -> BoxFuture<'static, Result<ResolvedConfig>> {
     async move {
-        // With the kill switch up nothing else on the router can fix a cold
-        // clock (sysntpd's pool lookup dies with the rest of dnsmasq's
-        // upstream traffic), and a clock that predates this binary fails
-        // every TLS handshake that follows. Daemon-owned bootstrap; no-op
-        // when the clock is sane.
+        // With the kill switch up sysntpd cannot fix a cold clock, and a clock
+        // predating this binary fails every TLS handshake. No-op when sane.
         #[cfg(target_os = "linux")]
         crate::clock_bootstrap::ensure_sane_clock().await;
 
@@ -696,10 +653,6 @@ pub(crate) fn resolve_api_endpoints(
     .boxed()
 }
 
-/// Whether the idle allow-list must be (re)resolved: the kill-switch is on
-/// and either nothing is known, the addresses came from the on-disk cache
-/// rather than a live resolution, or the last resolution is older than
-/// [`API_ENDPOINT_REFRESH_INTERVAL`].
 pub(crate) fn api_endpoints_need_refresh(
     killswitch: bool,
     endpoints_known: bool,
@@ -715,10 +668,8 @@ pub(crate) fn api_endpoints_need_refresh(
     }
 }
 
-/// The between-sessions Blocked policy: LAN per settings, the daemon's default
-/// resolvers through the root-scoped DNS hatch, and the resolved API endpoints
-/// admitted for the daemon only. With no endpoints it is Blocked with none —
-/// never anything wider.
+/// The between-sessions Blocked policy. With no endpoints it is Blocked with
+/// none, never anything wider.
 pub(crate) fn idle_blocked_policy(
     tunnel_settings: &TunnelSettings,
     api_endpoints: &[SocketAddr],
@@ -797,21 +748,11 @@ impl SharedState {
         }
     }
 
-    /// Apply the between-sessions kill-switch policy used by idle states
-    /// (Disconnected, Error). When the user opted in, always lock the
-    /// firewall to a Blocked policy. Cached API endpoints are optional
-    /// additions to the allow-list: on a fresh install the daemon-scoped DNS
-    /// and NTP bootstrap exceptions are sufficient to resolve them without
-    /// opening the router or its LAN in the meantime.
-    ///
-    /// Failures propagate: an unenforced kill-switch is not something to
-    /// merely log while the daemon reports unrestricted-but-protected
-    /// networking. `DisconnectedState` escalates to the error state;
-    /// `ErrorState` (already there) logs.
+    /// Idle-state policy: Blocked whenever the kill-switch is on (API
+    /// endpoints are an optional addition), reset otherwise. Failures
+    /// propagate; `DisconnectedState` escalates, `ErrorState` logs.
     fn apply_killswitch_policy(&mut self) -> Result<(), nym_firewall::Error> {
-        // The firewall caches the kill-switch flag; sync it from live settings
-        // so a runtime toggle (LuCI / `tunnel set`) takes effect without a
-        // daemon restart.
+        // The firewall caches the kill-switch flag; sync a runtime toggle.
         self.firewall.set_killswitch(self.tunnel_settings.killswitch);
         if self.tunnel_settings.killswitch {
             let policy = idle_blocked_policy(&self.tunnel_settings, &self.api_endpoints);
@@ -821,7 +762,6 @@ impl SharedState {
         }
     }
 
-    /// Whether an idle state should (re)resolve the API endpoints now.
     fn api_endpoints_need_refresh(&self) -> bool {
         api_endpoints_need_refresh(
             self.tunnel_settings.killswitch,
@@ -831,7 +771,6 @@ impl SharedState {
         )
     }
 
-    /// When the current allow-list is due for a refresh, for the idle timer.
     fn api_endpoints_refresh_due(&self) -> Instant {
         match self.api_endpoints_resolved_at {
             Some(at) if !self.api_endpoints.is_empty() => at + API_ENDPOINT_REFRESH_INTERVAL,
@@ -839,19 +778,15 @@ impl SharedState {
         }
     }
 
-    /// Take a live resolution as the current allow-list and persist it. Both
-    /// Connecting and the idle states funnel through here, so the on-disk
-    /// cache and the in-memory set never disagree.
+    /// The one path that updates the allow-list, so cache and memory agree.
     fn adopt_resolved_api_endpoints(&mut self, resolved: &ResolvedConfig) {
         self.api_endpoints = resolved.all_socket_addrs();
         self.api_endpoints_resolved_at = Some(Instant::now());
         api_endpoints_cache::save(self.nym_config.data_path.as_deref(), &self.api_endpoints);
     }
 
-    /// Idle counterpart of Connecting's `handle_resolved_gateway_config`:
-    /// adopt the resolution, re-apply Blocked with the endpoints admitted, and
-    /// pin the HTTP clients to those same addresses so what they connect to is
-    /// what the firewall lets through.
+    /// Idle counterpart of Connecting's `handle_resolved_gateway_config`: the
+    /// HTTP clients are pinned to exactly what the firewall admits.
     async fn install_idle_api_access(
         &mut self,
         resolved: &ResolvedConfig,
@@ -869,13 +804,9 @@ impl SharedState {
         Ok(())
     }
 
-    /// Shutdown counterpart of [`Self::apply_killswitch_policy`]. With the
-    /// kill-switch on, the Blocked policy stays in place after the daemon
-    /// exits: a restart or package upgrade must not open WAN egress for the
-    /// seconds until the next daemon's first apply, and a crash-looping or
-    /// missing daemon must not either. Only an explicit `/etc/init.d/nym-vpnd
-    /// stop` opens the router, from the init script, once the process is
-    /// gone. With the kill-switch off there is nothing to keep.
+    /// With the kill-switch on the Blocked policy outlives the daemon: a
+    /// restart, upgrade or crash loop must not open WAN egress. Only an
+    /// explicit init-script `stop` opens the router.
     fn release_firewall_on_shutdown(&mut self) -> Result<(), nym_firewall::Error> {
         if self.tunnel_settings.killswitch {
             tracing::info!("Kill-switch on: leaving the firewall policy in place on shutdown");
@@ -940,11 +871,7 @@ impl TunnelStateMachine {
         })
         .map_err(Error::CreateFirewall)?;
 
-        // Restore the previously-resolved API allow-list so DisconnectedState
-        // can apply the kill-switch Blocked policy immediately on cold boot.
-        // A fresh resolution still happens on every Connecting attempt via
-        // ConnectingState::handle_resolved_gateway_config; the on-disk cache
-        // only covers the gap before that runs.
+        // The cache only covers the gap until the first live resolution.
         let api_endpoints =
             api_endpoints_cache::load(nym_config.data_path.as_deref());
 
@@ -1294,10 +1221,6 @@ mod tests {
         old.diff(&new).expect("settings must differ")
     }
 
-    /// The reported bug: toggling IPv6 forces a reconnect, and that reconnect
-    /// used to re-run gateway selection — moving a `Country`/`Random` user to
-    /// a different server pair. IPv6 is not an input to selection, so the
-    /// running pair must survive it.
     fn ep(a: [u8; 4], port: u16) -> SocketAddr {
         SocketAddr::from((a, port))
     }
@@ -1305,14 +1228,10 @@ mod tests {
     #[test]
     fn idle_refresh_is_needed_when_nothing_is_known_or_only_cached() {
         let now = Instant::now();
-        // Kill-switch off: nothing to admit, never resolve.
         assert!(!api_endpoints_need_refresh(false, false, None, now));
-        // Fresh install: no endpoints, no live resolution.
         assert!(api_endpoints_need_refresh(true, false, None, now));
-        // Cold start from the on-disk cache: addresses known, but never
-        // resolved live in this process.
+        // Cold start from the on-disk cache: known, but never resolved live.
         assert!(api_endpoints_need_refresh(true, true, None, now));
-        // A live resolution that produced nothing usable must be retried.
         assert!(api_endpoints_need_refresh(true, false, Some(now), now));
     }
 
@@ -1336,8 +1255,6 @@ mod tests {
 
     #[test]
     fn idle_policy_without_endpoints_is_blocked_with_none() {
-        // A failed or pending resolution leaves nothing admitted: Blocked, no
-        // endpoints, never anything wider.
         let mut s = settings();
         s.killswitch = true;
         match idle_blocked_policy(&s, &[]) {
@@ -1364,7 +1281,6 @@ mod tests {
             FirewallPolicy::Blocked {
                 allowed_endpoints, ..
             } => {
-                // IPv6 is filtered out while disabled; the rest are root-scoped TCP.
                 assert_eq!(allowed_endpoints.len(), 2);
                 for ep in &allowed_endpoints {
                     assert_eq!(ep.clients, AllowedClients::Root);
@@ -1375,6 +1291,8 @@ mod tests {
         }
     }
 
+    /// Toggling IPv6 forces a reconnect; it is not a selection input, so the
+    /// running pair must survive it.
     #[test]
     fn ipv6_toggle_does_not_affect_gateway_selection() {
         assert!(!diff_of(|s| s.enable_ipv6 = true).affects_gateway_selection());
@@ -1411,9 +1329,6 @@ mod tests {
         );
     }
 
-    /// The two predicates gate different halves of the same decision, so a
-    /// change that can be applied without dropping the tunnel must never be
-    /// one that invalidates the selection.
     #[test]
     fn hot_appliable_changes_never_force_reselection() {
         for diff in [

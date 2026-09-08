@@ -25,8 +25,7 @@ use tracing::warn;
 ///
 /// Possible next state :
 /// - SyncingState : We go into that state on a timer, to see if the problem persists. The refresh account commands allows for manually go there.
-///   The timer always runs on the normal cadence, whatever refresh mode the daemon set: idle backoff must not slow error recovery
-///   (an API outage or a boot-time clock skew fixed later by NTP should clear within minutes, not half an hour).
+///   The timer ignores the daemon's refresh mode: idle backoff must not slow error recovery.
 /// - OfflineState : the connectivity monitor is telling we're not connected
 /// - LoggedOutState : We successfully handled a forget_account command
 pub struct ErrorState {
@@ -122,8 +121,7 @@ impl<C: ConnectivityMonitor> AccountControllerStateHandler<C> for ErrorState {
                         shared_state.firewall_active = true;
                         return_sender.send(Ok(()));
                     },
-                    // Recorded for the ReadyState we hope to reach; the error retry timer itself
-                    // stays on the normal cadence.
+                    // Recorded for ReadyState; the error retry timer ignores it.
                     AccountCommand::SetRefreshMode(mode) => {
                         shared_state.refresh_mode = mode;
                     },
@@ -164,9 +162,6 @@ mod tests {
     use super::*;
     use crate::state_machine::{ACCOUNT_IDLE_UPDATE_INTERVAL, ACCOUNT_UPDATE_INTERVAL};
 
-    /// Idle backoff applies to `ReadyState` only: an error retry is never further away than the
-    /// normal cadence, so a boot-time clock skew or API outage clears within minutes even when
-    /// the daemon has declared itself idle.
     #[tokio::test(start_paused = true)]
     async fn error_retry_stays_on_the_normal_cadence() {
         assert!(ACCOUNT_IDLE_UPDATE_INTERVAL > ACCOUNT_UPDATE_INTERVAL);

@@ -1,12 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! Keeps `scripts/fw-rules.sh` — the shell fragment both firewall includes
-//! source for the emergency and boot-time rule sets — identical to what
-//! `src/openwrt/boot_rules.rs` renders. The module is compiled into this
-//! build script directly (it is `std`-only for that reason), the fragment is
-//! rendered, and the build fails while the committed file differs, the way
-//! checked-in generated code is usually guarded. Set `NYM_FW_RULES_REGEN=1`
-//! to rewrite the file instead; commit the result.
+//! Fails the build while `scripts/fw-rules.sh` differs from what
+//! `src/openwrt/boot_rules.rs` renders (compiled in via `#[path]`, hence
+//! `std`-only). `NYM_FW_RULES_REGEN=1` rewrites the file instead.
 
 use std::env;
 use std::fs;

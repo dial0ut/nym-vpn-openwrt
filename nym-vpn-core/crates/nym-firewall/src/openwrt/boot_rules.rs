@@ -1,82 +1,50 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! The one definition of the emergency and boot-time kill-switch rule sets.
+//! The one definition of the emergency and boot-time kill-switch rule sets,
+//! installed by the fw3 backend (transition mode), `fw3-include.sh`
+//! (transition after a daemon crash, boot at firewall start) and
+//! `fw4-include.sh` (`inet nym_boot` at firewall start). `build.rs` renders
+//! [`shell_fragment`] into `scripts/fw-rules.sh` and fails while it is stale.
 //!
-//! Three consumers install these rules: the fw3 backend ([`super::fw3`],
-//! transition mode, while it builds a family's chains for the first time),
-//! `fw3-include.sh` (transition mode after a daemon crash, boot mode at
-//! firewall start) and `fw4-include.sh` (the `inet nym_boot` table at
-//! firewall start). They used to carry three hand-maintained copies of the
-//! same rules, held together by tests that scanned the shell text. Now the
-//! shell side is generated from this module: `build.rs` renders
-//! [`shell_fragment`] into `scripts/fw-rules.sh`, which both includes source,
-//! and refuses to build while the committed file is stale.
+//! Compiled twice — in the crate and via `#[path]` inside `build.rs` — so it
+//! must stay `std`-only with no `super::` imports.
 //!
-//! This file is compiled twice — as part of the crate and, via `#[path]`,
-//! inside `build.rs` — so it must stay free of dependencies and of `super::`
-//! imports: `std` only, and every name it needs defined here. Other modules
-//! import the shared names (chain and table names, LAN network lists) from
-//! here rather than repeating them.
+//! Both modes hook the egress path ahead of everything else and end in an
+//! unconditional drop; INPUT is never touched. Transition (fw3 only) passes
+//! reply-direction packets (fw3 runs `output_rule` before its own
+//! established-accept, so management sessions would otherwise die) and IPv6
+//! neighbour discovery. Boot adds loopback, DHCP/DHCPv6 both ways, router
+//! solicitation, multicast and LAN/link-local/ULA destinations.
 //!
-//! # What the rule sets guarantee
-//!
-//! Both modes hook dedicated `NYM_EMERGENCY_OUT` / `NYM_EMERGENCY_FWD`
-//! chains (fw3) or an `inet nym_boot` table (fw4) ahead of everything else
-//! on the egress path and end in an unconditional drop. INPUT is never
-//! touched: the router stays reachable through whatever the platform
-//! firewall allows.
-//!
-//! * **Transition** (fw3 only): reply-direction packets of established
-//!   flows pass, so SSH/LuCI sessions to the router survive — fw3 runs
-//!   `output_rule` *before* its own established-accept — and IPv6 neighbour
-//!   discovery passes. Everything else the router originates or forwards
-//!   is dropped. Meant to last the milliseconds of a policy apply, or the
-//!   time until an administrator notices a crashed daemon.
-//! * **Boot**: the transition set plus what a router needs to come up and
-//!   stay manageable from the LAN — loopback, DHCP/DHCPv6 as client and
-//!   server, IPv6 router solicitation, multicast, and LAN, link-local and
-//!   ULA destinations. Meant to hold from firewall start until the daemon's
-//!   first policy, however long that takes.
-//!
-//! Rule order is part of the guarantee. As in the daemon's Blocked policy
-//! (`block_dns` before `allow_lan_traffic`), DNS is **rejected before the
-//! LAN-destination accepts**: a private address is not a LAN interface — a
-//! router behind another router has its upstream resolver at 192.168.x.1 —
-//! so without that ordering dnsmasq's forwarded lookups and LAN clients'
-//! direct queries would leave in plaintext during the boot window. The
-//! reject follows the loopback and reply-direction accepts so the router's
-//! own dnsmasq keeps answering the LAN. The reject verdict (not drop) makes
-//! resolvers fail fast instead of timing out.
+//! DNS is rejected before the LAN-destination accepts: a router behind
+//! another router has its upstream resolver at 192.168.x.1, and that
+//! ordering is what keeps dnsmasq's forwards from leaving in plaintext. The
+//! reject follows the loopback and reply accepts so dnsmasq still answers
+//! the LAN; reject rather than drop so resolvers fail fast.
 
-/// fw3 hook chains: user chains in the `filter` table that fw3 preserves on
-/// reload and recreates empty on restart. Our chains are jumped to from the
-/// front of these.
+/// fw3 user chains in `filter`, preserved on reload and recreated empty on
+/// restart; our chains are jumped to from position 1 of these.
 pub const FW3_HOOK_INPUT: &str = "input_rule";
 pub const FW3_HOOK_OUTPUT: &str = "output_rule";
 pub const FW3_HOOK_FORWARD: &str = "forwarding_rule";
 
-/// Dedicated fail-closed fw3 chains, shared by the fw3 backend (which lifts
-/// them as the last step of every apply and reset) and `fw3-include.sh`
-/// (which installs them). Also torn down by `scripts/ipk/prerm`.
+/// Fail-closed fw3 chains: installed by the backend and `fw3-include.sh`,
+/// lifted as the last step of every apply/reset, torn down by `prerm`.
 pub const EMERGENCY_OUTPUT_CHAIN: &str = "NYM_EMERGENCY_OUT";
 pub const EMERGENCY_FORWARD_CHAIN: &str = "NYM_EMERGENCY_FWD";
 
-/// nftables table holding the fw4 boot-time block. `fw4-include.sh` creates
-/// it; the fw4 backend deletes it as the last step of every apply and reset;
-/// the init script and `prerm` delete it on explicit stop and removal.
+/// fw4 boot-time block table: created by `fw4-include.sh`, deleted as the
+/// last step of every apply/reset and on explicit stop and removal.
 pub const FW4_BOOT_TABLE: &str = "nym_boot";
 
-/// LAN destinations the daemon's Blocked policy lets through
-/// (`allow_lan_traffic`): RFC1918 and, for IPv6, link-local and ULA.
+/// LAN destinations the daemon's Blocked policy lets through.
 pub const LAN_NETS_V4: &[&str] = &["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"];
 pub const LAN_NETS_V6: &[&str] = &["fe80::/10", "fc00::/7"];
-/// IPv4 link-local. The boot-time block lets it through in addition to
-/// [`LAN_NETS_V4`] (a router coming up may only have an APIPA neighbour);
-/// the daemon's Blocked policy does not, and never has.
+/// Accepted by the boot block only (a router coming up may have just an
+/// APIPA neighbour); the Blocked policy does not accept it.
 #[allow(dead_code)] // consumed by the tests that check BOOT_LAN_NETS_V4
 pub const LINK_LOCAL_V4: &str = "169.254.0.0/16";
-/// Multicast, accepted for router-originated traffic only (OUTPUT, never
-/// FORWARD): mDNS, SSDP and the like on the LAN.
+/// Multicast is accepted in OUTPUT only, never FORWARD.
 pub const MULTICAST_V4: &str = "224.0.0.0/4";
 pub const MULTICAST_V6: &str = "ff00::/8";
 
@@ -112,12 +80,9 @@ pub enum Mode {
     Boot,
 }
 
-/// The `iptables-restore` / `ip6tables-restore` script installing the
-/// emergency block for one family: creates and flushes both chains, fills
-/// them, and inserts the hook jumps at position 1 — one atomic restore,
-/// applied with `--noflush`. Duplicate jumps from an earlier crashed attempt
-/// are harmless; the fw3 backend removes them exhaustively when it lifts the
-/// block.
+/// `iptables-restore --noflush` script installing the emergency block for one
+/// family. Duplicate hook jumps from an earlier crashed attempt are harmless;
+/// the fw3 backend removes them exhaustively when it lifts the block.
 pub fn iptables_emergency_rules(family: Family, mode: Mode) -> String {
     let out = EMERGENCY_OUTPUT_CHAIN;
     let fwd = EMERGENCY_FORWARD_CHAIN;
@@ -189,11 +154,9 @@ pub fn iptables_emergency_rules(family: Family, mode: Mode) -> String {
     s
 }
 
-/// The `nft -f` input installing the fw4 boot-time block as an atomic
-/// replace of the `inet nym_boot` table (create, delete, create). Its chains
-/// hook at `filter - 20`, ahead of both the daemon's `inet nym` (filter -10)
-/// and `inet fw4` (filter), so "accept" here only means "let the next table
-/// decide". Same allowances and order as the boot-mode iptables set.
+/// `nft -f` input atomically replacing the `inet nym_boot` table. Hooks at
+/// `filter - 20`, ahead of `inet nym` (-10) and `inet fw4`, so "accept" only
+/// means "let the next table decide".
 #[allow(dead_code)] // rendered by build.rs into scripts/fw-rules.sh
 pub fn nft_boot_block() -> String {
     let t = FW4_BOOT_TABLE;
@@ -233,10 +196,8 @@ pub fn nft_boot_block() -> String {
     )
 }
 
-/// `scripts/fw-rules.sh`: the POSIX sh fragment both firewall includes
-/// source. Variables for the shared names and lists, and one function per
-/// rule set printing the restore text on stdout. Rendered and checked by
-/// `build.rs`; never edit the file by hand.
+/// `scripts/fw-rules.sh`: the POSIX sh fragment both includes source.
+/// Rendered and checked by `build.rs`; never edit the file by hand.
 #[allow(dead_code)] // build.rs and the tests are its callers
 pub fn shell_fragment() -> String {
     let mut s = String::new();
@@ -321,8 +282,6 @@ mod tests {
             .unwrap_or_else(|| panic!("missing rule: {needle}"))
     }
 
-    /// The committed fragment is exactly what this module renders. build.rs
-    /// enforces the same, but a test names the failure for CI logs too.
     #[test]
     fn committed_shell_fragment_is_current() {
         assert_eq!(FRAGMENT, shell_fragment(), "regenerate scripts/fw-rules.sh");

@@ -196,10 +196,8 @@ pub enum VpnServiceCommand {
     ),
 }
 
-/// Stealth API connect routes every API request through the cover domains the
-/// environment lists for its API URLs. An environment that publishes none
-/// leaves the setting with nothing to act on; say so instead of silently
-/// going direct.
+/// An environment with no cover domains leaves Stealth API nothing to act
+/// on; say so instead of silently going direct.
 fn warn_if_no_cover_domains(network: &Network) {
     if !network.has_api_cover_domains() {
         tracing::warn!(
@@ -217,109 +215,77 @@ pub struct NymVpnServiceParameters {
 }
 
 pub struct NymVpnService {
-    // The network environment
     network_tx: watch::Sender<Box<Network>>,
 
-    // The user agent used for HTTP request
     user_agent: UserAgent,
 
-    // Listen for commands from the command interface, like the grpc listener that listens user
-    // commands.
     vpn_command_rx: mpsc::UnboundedReceiver<VpnServiceCommand>,
 
-    // Send command to delete and recreate logging file
     log_file_remover_handle: Option<LogFileRemoverHandle>,
 
-    // Send commands to the account controller
     account_command_tx: AccountCommandSender,
 
-    // Receive state from account controller,
     account_state_rx: AccountStateReceiver,
 
-    // Path to the data directory
     data_dir: PathBuf,
 
-    // If log to file is enabled, path to the log directory and log filename
     log_path: Option<LogPath>,
 
-    // Broadcast channel for sending tunnel events to the outside world
     tunnel_event_tx: broadcast::Sender<TunnelEvent>,
 
-    // Target state
     target_state: TargetState,
 
-    // Last known tunnel state
     tunnel_state: Arc<RwLock<TunnelState>>,
 
-    // Timer used to throttle changes to tunnel settings
+    // Throttles tunnel settings changes.
     tunnel_settings_update_timer: Pin<Box<Fuse<tokio::time::Sleep>>>,
 
-    // Command channel for state machine
     command_sender: mpsc::UnboundedSender<TunnelCommand>,
 
-    // Event channel for receiving events from state machine
     event_receiver: mpsc::UnboundedReceiver<TunnelEvent>,
 
-    // Tunnel state machine handle
     state_machine_handle: Option<JoinHandle<()>>,
 
-    // Account controller handle
     account_controller_handle: JoinHandle<()>,
 
-    // Statistics controller handle
     statistics_controller_handle: JoinHandle<()>,
 
-    // Topology service join handle
     topology_service_join_handle: JoinHandle<()>,
 
-    // Topology service handle
     topology_service_handle: nym_vpn_lib::VpnTopologyServiceHandle,
 
-    // Configuration Manager
     config_manager: VpnServiceConfigManager,
 
-    // Gateway cache join handle
     gateway_cache_join_handle: JoinHandle<()>,
 
-    // Gateway cache handle
     gateway_cache_handle: GatewayCacheHandle,
 
-    // Permission for the one gateway test that may run at a time
     gateway_test_slot: GatewayTestSlot,
 
-    // Discovery refresher event receiver
     discovery_refresher_event_rx: mpsc::UnboundedReceiver<DiscoveryRefresherEvent>,
 
-    // Discovery refresher join handle
     discovery_refresher_join_handle: JoinHandle<()>,
 
-    // Discovery refresher command channel, used for the idle hint (the tunnel state machine
-    // holds its own clone for firewall pause/resume)
+    // Idle hint only; the tunnel state machine holds its own clone for
+    // firewall pause/resume.
     discovery_refresher_command_tx: mpsc::UnboundedSender<DiscoveryRefresherCommand>,
 
-    // Whether the account controller and discovery refresher have been told the daemon is idle:
-    // tunnel down and nobody asking for it
+    // Whether the side-services have been told the daemon is idle.
     idle: bool,
 
-    // VPN service shutdown token.
     shutdown_token: CancellationToken,
 
-    // Shutdown token used by state machine
     state_machine_shutdown_token: CancellationToken,
 
-    // Shutdown token used for account and statistics controllers and other services that are safe to exit altogether.
+    // For services that are safe to exit altogether.
     services_shutdown_token: CancellationToken,
 
-    // Sentry client has been initialized and is enabled
     sentry_enabled: bool,
 
-    // The statistics channel sender
     statistics_event_sender: StatisticsSender,
 
-    // The stats control command channel,
     stats_control_commands_sender: StatisticsCommandsSender,
 
-    // Lazy SOCKS5 proxy service handle
     socks5_service: Socks5Service,
 }
 
@@ -379,13 +345,12 @@ impl NymVpnService {
 
         let storage = nym_vpn_lib::storage::VpnClientOnDiskStorage::new(network_data_dir.clone());
 
-        // Make sure the data dir exists
         super::config::create_data_dir(&data_dir, &network_name)
             .await
             .map_err(Error::ConfigSetup)?;
 
-        // Read the service config before any API client exists: loading it
-        // also installs the persisted API fronting policy (Stealth API).
+        // Before any API client exists: loading also installs the persisted
+        // fronting policy.
         let config_manager =
             VpnServiceConfigManager::new(&config_dir, Some(tunnel_event_tx.clone())).await?;
         if config_manager.config().stealth_api {
@@ -438,13 +403,11 @@ impl NymVpnService {
         .await
         .map_err(Error::CreateAccountController)?;
 
-        // These are used to interact with the account controller
         let account_command_tx = account_controller.get_command_sender();
         let account_state_rx = account_controller.get_state_receiver();
         let wireguard_keys_db = account_controller.get_wireguard_keys_storage();
         let account_controller_handle = tokio::task::spawn(account_controller.run());
 
-        // Statistics collection setup
         let statistics_controller_config = config_manager.config().network_stats;
 
         let statistics_api_url = parameters
@@ -455,7 +418,7 @@ impl NymVpnService {
 
         let stats_api_client = statistics_api_url.and_then(|url| nym_statistics_api_client::StatisticsApiClient::new(url.clone(), parameters.user_agent.clone()).inspect_err(|e| tracing::error!("Failed to build Statistics API client. Statistics collection will be disabled : {e}")).ok());
 
-        // Statistics collection can technically fail, but if it's the case, we just disable it as it is not operation critical.
+        // Statistics are not operation critical; a failure just disables them.
         let statistics_controller = StatisticsController::new(
             statistics_controller_config,
             stats_api_client,
@@ -470,10 +433,8 @@ impl NymVpnService {
 
         let tunnel_state = Arc::new(RwLock::new(TunnelState::Disconnected));
 
-        // Initialize lazy SOCKS5 service (disabled by default)
         let socks5_service = Socks5Service::new(tunnel_state.clone());
 
-        // These used to interact with the tunnel state machine
         let (command_sender, command_receiver) = mpsc::unbounded_channel();
         let (event_sender, event_receiver) = mpsc::unbounded_channel();
 
@@ -600,13 +561,11 @@ impl NymVpnService {
     }
 
     pub async fn run(mut self) -> anyhow::Result<()> {
-        // Restore ad-blocking if it was enabled in config
         crate::adblocker::restore_if_enabled(self.config_manager.config()).await;
 
-        // Skip the initial account state value
         let mut account_state_rx = WatchStream::new(self.account_state_rx.subscribe()).skip(1);
 
-        // Nothing has asked for the tunnel yet: start the side-services on their idle cadence.
+        // Nothing has asked for the tunnel yet: side-services start on their idle cadence.
         let tunnel_state = self.tunnel_state.read().await.clone();
         self.update_idle_hint(&tunnel_state);
 
@@ -634,11 +593,10 @@ impl NymVpnService {
             }
         }
 
-        // Cancel state machine first and wait for it to complete
+        // State machine first, draining its events until it quits.
         self.state_machine_shutdown_token.cancel();
 
         if let Some(state_machine_handle) = self.state_machine_handle.take() {
-            // Drain tunnel events channel and wait for the tunnel state machine to quit
             let fused_state_machine_handle = state_machine_handle.fuse();
             pin_mut!(fused_state_machine_handle);
 
@@ -648,7 +606,6 @@ impl NymVpnService {
                         if let Err(e) = result {
                             tracing::error!("Failed to join on state machine handle: {}", e);
                         }
-                        // The loop will continue until `event_receiver` is fully drained
                         self.event_receiver.close();
                     }
                     event = self.event_receiver.recv() => {
@@ -661,10 +618,8 @@ impl NymVpnService {
             }
         }
 
-        // Cancel all other services and wait for them to complete
         self.services_shutdown_token.cancel();
 
-        // Shutdown SOCKS5 service
         self.socks5_service.shutdown().await;
 
         if let Err(e) = self.account_controller_handle.await {
@@ -697,9 +652,8 @@ impl NymVpnService {
             tracing::debug!("Set target state {} => {}", self.target_state, new_state);
             self.target_state = new_state;
 
-            // Before the tunnel state machine is told to connect, so the account controller can
-            // leave its idle cadence (and re-sync a stale account state) ahead of the tunnel
-            // monitor asking for it.
+            // Before Connect, so the account controller leaves its idle cadence
+            // ahead of the tunnel monitor asking for it.
             let tunnel_state = self.tunnel_state.read().await.clone();
             self.update_idle_hint(&tunnel_state);
 
@@ -723,10 +677,8 @@ impl NymVpnService {
     async fn reconnect_tunnel(&mut self) -> bool {
         match self.target_state {
             TargetState::Secured => {
-                // Flush any settings update that is still pending behind the
-                // throttle timer so the upcoming Connect uses the latest config.
-                // Otherwise a reconnect can race ahead of the throttled
-                // SetTunnelSettings and re-run with stale settings
+                // Flush a throttled settings update first, or the reconnect
+                // races ahead of it and re-runs with stale settings.
                 if !self.tunnel_settings_update_timer.is_terminated() {
                     self.tunnel_settings_update_timer.set(Fuse::terminated());
                     self.update_tunnel_settings();
@@ -756,10 +708,8 @@ impl NymVpnService {
         }
     }
 
-    /// Tell the account controller and the discovery refresher whether anyone needs them fresh.
-    /// The daemon is idle while the tunnel is down and nobody has asked for it: the account
-    /// controller then drops to a slow sync heartbeat and the discovery refresher stops its
-    /// hourly check. Both catch up when a connect is requested (issue #9).
+    /// Idle (tunnel down, nobody asking for it) drops the account controller
+    /// to a slow heartbeat and stops the discovery refresher's hourly check.
     fn update_idle_hint(&mut self, tunnel_state: &TunnelState) {
         let tunnel_down = matches!(
             tunnel_state,
@@ -794,7 +744,6 @@ impl NymVpnService {
             }
             self.update_idle_hint(new_state);
 
-            // Auto-disable SOCKS5 when VPN disconnects
             if matches!(new_state, TunnelState::Disconnected | TunnelState::Error(_))
                 && self.socks5_service.is_enabled()
             {
@@ -807,8 +756,7 @@ impl NymVpnService {
                 });
             }
 
-            // When VPN connects, if SOCKS5 is already enabled, warn that it may not work
-            // because SOCKS5 might be using a different gateway than VPN
+            // SOCKS5 enabled before the VPN may sit on a different gateway.
             if matches!(new_state, TunnelState::Connected { .. })
                 && self.socks5_service.is_enabled()
             {
@@ -838,7 +786,6 @@ impl NymVpnService {
                 tracing::info!("Network environment updated");
                 let _ = self.network_tx.send_replace(new_network.clone());
 
-                // Update gateway cache and topology cache for new environment
                 nym_vpn_lib::cache_refresh::update_caches_for_network(
                     &new_network,
                     &self.gateway_cache_handle,
@@ -853,7 +800,6 @@ impl NymVpnService {
         }
     }
 
-    // Wrap handle_service_command in timing code to log long-running commands
     async fn handle_service_command_timed(&mut self, command: VpnServiceCommand) {
         let start = Instant::now();
         let command_str = command.to_string();
@@ -1127,9 +1073,8 @@ impl NymVpnService {
         self.config_manager.config().clone()
     }
 
-    // The handle_set_* functions apply the setting to the live tunnel even
-    // when persisting it fails (the in-memory config did change); the
-    // returned error tells the client the setting won't survive a restart.
+    // handle_set_* apply the setting even when persisting fails; the error
+    // tells the client it won't survive a restart.
 
     async fn handle_set_entry_point(&mut self, entry_point: EntryPoint) -> Result<(), String> {
         let result = self.config_manager.set_entry_point(entry_point).await;
@@ -1198,9 +1143,8 @@ impl NymVpnService {
     }
 
     async fn handle_set_stealth_api(&mut self, stealth_api: bool) -> Result<(), String> {
-        // API transport only. The shared fronting policy is consulted on every
-        // request, so the change is live at once and the tunnel is left alone:
-        // no settings update, no reconnect, no gateway re-selection.
+        // Consulted per request via the shared fronting policy: no settings
+        // update, no reconnect.
         if stealth_api {
             warn_if_no_cover_domains(&self.network_tx.borrow());
         }
@@ -1239,10 +1183,9 @@ impl NymVpnService {
             .config_manager
             .set_enable_custom_dns(enable_custom_dns)
             .await;
-        // A save error still means the value changed in memory: apply it.
         if !matches!(result, Ok(false)) {
             let config = self.config_manager.config();
-            // Ignore reconnect if custom DNS is enabled but custom DNS addresses aren't set
+            // No reconnect for "enabled" with no addresses to use.
             if !enable_custom_dns || !config.custom_dns.is_empty() {
                 self.update_tunnel_settings_with_throttle();
             }
@@ -1259,10 +1202,8 @@ impl NymVpnService {
         }
 
         let result = self.config_manager.set_custom_dns(custom_dns).await;
-        // A save error still means the value changed in memory: apply it.
         if !matches!(result, Ok(false)) {
             let config = self.config_manager.config();
-            // Only issue reconnect if custom DNS is enabled
             if config.enable_custom_dns {
                 self.update_tunnel_settings_with_throttle();
             }
@@ -1413,14 +1354,10 @@ impl NymVpnService {
             active,
         };
 
-        // Probing takes seconds; keep the service loop free for status polls,
-        // so the run is spawned rather than awaited here. Two things bound
-        // it: a deadline computed from the request, and the caller. The gRPC
-        // handler holds the receiving end of `completion_tx` inside its own
-        // future; when the client disconnects tonic drops that future, the
-        // receiver goes with it, `closed()` resolves and the probes are
-        // dropped mid-flight. The permit travels with the task, so the slot
-        // frees up on every exit path.
+        // Spawned to keep the service loop free. Bounded by the deadline and
+        // by the caller: tonic drops the gRPC handler's future on client
+        // disconnect, the receiver goes with it and `closed()` aborts the run.
+        // The permit travels with the task.
         let deadline = gateway_test::deadline(&params);
         tokio::spawn(async move {
             let _permit = permit;
@@ -1468,8 +1405,7 @@ impl NymVpnService {
     ) -> Result<(), Socks5Error> {
         tracing::info!("Enabling SOCKS5 client: {:?}", enable_socks5_request);
 
-        // Get gateways from VPN API with SOCKS5 probe data
-        // This includes all VPN gateways (Wg type) with SOCKS5 scores, not just MixnetExit
+        // All Wg gateways with SOCKS5 probe data, not just MixnetExit.
         let exit_gateways: nym_gateway_directory::GatewayList = self
             .gateway_cache_handle
             .lookup_nymnodes_for_socks5()
@@ -1481,13 +1417,11 @@ impl NymVpnService {
                 ))
             })?;
 
-        // Filter for gateways that support SOCKS5 (exit-capable with probe data)
         let exit_gateways = gateway_directory::GatewayList::new(
             None, // Mixed types (Wg gateways from VPN API)
             exit_gateways
                 .into_iter()
                 .filter(|gateway| {
-                    // Must be exit-capable and have SOCKS5 probe data
                     gateway
                         .last_probe
                         .as_ref()
@@ -1498,17 +1432,14 @@ impl NymVpnService {
                 .collect(),
         );
 
-        // Get exit node's identity depending on the exit point
         let exit_point = &enable_socks5_request.exit_point;
         let gateway_identity: NodeIdentity = match exit_point {
             ExitPoint::Address { address } => NodeIdentity::from(*address.gateway().inner()),
             ExitPoint::Gateway { identity } => NodeIdentity::from(*identity.inner()),
             ExitPoint::Random => {
-                // Random exit point: Always do random selection, ignoring VPN's exit gateway.
-                // This preserves anonymity through rotation - using VPN's exit gateway would
-                // always route through the same gateway, reducing anonymity benefits.
-                // Note: Entry gateway still uses VPN's entry gateway (for firewall compatibility),
-                // but exit gateway (Network Requester) rotates for anonymity.
+                // Random ignores the VPN's exit gateway on purpose: the Network
+                // Requester rotates for anonymity; only the entry stays on the
+                // VPN's entry gateway (firewall compatibility).
                 tracing::debug!("Selecting random SOCKS5 exit gateway (for rotation/anonymity)");
 
                 let exit_point: nym_gateway_directory::ExitPoint = exit_point.clone().into();
@@ -1538,25 +1469,22 @@ impl NymVpnService {
                 selected_gateway.identity()
             }
             ExitPoint::Country { .. } | ExitPoint::Region { .. } => {
-                // For location-based exit points, check if VPN is connected first
-                // If connected, use VPN's actual gateway to avoid firewall routing issues
-                // (but only if it supports SOCKS5 - otherwise fall back to location-based selection)
+                // While connected, prefer the VPN's own exit gateway (avoids
+                // firewall routing issues) if it supports SOCKS5.
                 let tunnel_state = self.tunnel_state.read().await.clone();
 
                 let selected_identity = if let TunnelState::Connected { connection_data } =
                     tunnel_state
                 {
-                    // VPN is connected - try to use its actual exit gateway
                     let vpn_gateway_id = &connection_data.exit_gateway.id;
                     tracing::info!(
                         "VPN is connected to exit gateway {}, checking if it supports SOCKS5",
                         vpn_gateway_id
                     );
 
-                    // Validate that VPN's gateway supports SOCKS5 and has nr_address
                     match NodeIdentity::from_base58_string(vpn_gateway_id) {
                         Ok(vpn_gateway_identity) => {
-                            // Look up the gateway directly (VPN uses Wg type, but gateway might also support MixnetExit)
+                            // Direct lookup: a Wg gateway may also be MixnetExit-capable.
                             let gateway_full = self
                                 .gateway_cache_handle
                                 .lookup_nymnode_by_identity(vpn_gateway_identity)
@@ -1564,21 +1492,17 @@ impl NymVpnService {
                                 .ok();
 
                             if let Some(gateway_full) = gateway_full {
-                                // Check if gateway supports SOCKS5
-                                // Prefer VPN API's socks5 data when available (more accurate),
-                                // otherwise fall back to checking nr_address and can_connect
+                                // VPN API socks5 data when present, else nr_address + can_connect.
                                 let supports_socks5 = gateway_full
                                     .last_probe
                                     .as_ref()
                                     .and_then(|probe| probe.outcome.as_exit.as_ref())
                                     .and_then(|exit| exit.socks5.as_ref())
                                     .map(|socks5| {
-                                        // Use VPN API's SOCKS5 data - check if it has a valid score
-                                        // (score being Some indicates it was probed and works)
+                                        // Some(score) means probed and working.
                                         socks5.score.is_some()
                                     })
                                     .unwrap_or_else(|| {
-                                        // Fallback: check nr_address and can_connect (for gateways without VPN API data yet)
                                         gateway_full.nr_address.is_some()
                                             && gateway_full
                                                 .last_probe
@@ -1589,13 +1513,10 @@ impl NymVpnService {
                                     });
 
                                 if supports_socks5 {
-                                    // Gateway supports SOCKS5 - use it directly even if not in filtered MixnetExit list
-                                    // (VPN uses Wg gateways, but they may also support MixnetExit/SOCKS5)
                                     tracing::info!(
                                         "Using VPN's exit gateway {} for SOCKS5 (same gateway, firewall rules should allow connection)",
                                         vpn_gateway_id
                                     );
-                                    // Use VPN's gateway identity - skip selection
                                     Some(vpn_gateway_identity)
                                 } else {
                                     tracing::debug!(
@@ -1625,14 +1546,11 @@ impl NymVpnService {
                     None
                 };
 
-                // Use VPN's gateway if available, otherwise do selection
                 if let Some(gateway_identity) = selected_identity {
                     gateway_identity
                 } else {
-                    // VPN not connected or gateway doesn't support SOCKS5 - do selection
                     tracing::debug!("Selecting SOCKS5 exit node for exit point: {exit_point:?}",);
 
-                    // Convert to gateway_directory types for lookup
                     let exit_point: nym_gateway_directory::ExitPoint = exit_point.clone().into();
 
                     let exit_filters = if self.config_manager.config().residential_exit {
@@ -1662,8 +1580,7 @@ impl NymVpnService {
             }
         };
 
-        // Verify the selected gateway supports SOCKS5 (has Network Requester address)
-        // Note: We don't use this NR address directly - we use random selection for privacy
+        // The NR address is only checked, not used: the NR is picked at random.
         let gateway = self
             .gateway_cache_handle
             .lookup_nymnode_by_identity(gateway_identity)
@@ -1675,7 +1592,6 @@ impl NymVpnService {
                 ))
             })?;
 
-        // Verify gateway has Network Requester support (required for SOCKS5)
         if gateway.nr_address.is_none() {
             return Err(Socks5Error::GatewayNotSupported);
         }
@@ -1683,14 +1599,13 @@ impl NymVpnService {
         let request_timeout = socks5_request_timeout();
         let idle_timeout = socks5_idle_timeout();
 
-        // Enable Network Requester rotation for privacy - rotates every 15 minutes
-        // Rotation only occurs when WireGuard VPN is connected and there are no active SOCKS5 connections
-        // For privacy, start with random Network Requester (None) instead of using exit gateway's NR
-        // This avoids correlation between VPN traffic and SOCKS5 traffic
+        // NR rotation only happens while the VPN is connected and no SOCKS5
+        // connection is active. Starting from a random NR (None) avoids
+        // correlating VPN and SOCKS5 traffic.
         let network_requester_rotation_interval = Some(Duration::from_secs(15 * 60)); // 15 minutes
         let gateway_cache_handle = Some(self.gateway_cache_handle.clone());
 
-        // Get current VPN exit gateway identity to exclude during random selection for privacy
+        // Excluded from the random selection.
         let vpn_exit_gateway_identity = {
             let tunnel_state = self.tunnel_state.read().await;
             if let TunnelState::Connected {
@@ -1703,8 +1618,7 @@ impl NymVpnService {
             }
         };
 
-        // Get network details from current network environment to ensure SOCKS5 uses correct network
-        // Clone immediately to avoid holding watch::Ref across await (not Send)
+        // Clone at once: watch::Ref is not Send and must not cross an await.
         let network_details = Some(self.network_tx.borrow().nym_network_details().clone());
 
         tracing::info!(
@@ -1802,11 +1716,8 @@ impl NymVpnService {
     }
 
     async fn handle_forget_account(&mut self) -> Result<(), AccountCommandError> {
-        // Permit forget from Disconnected *and* Error: an account problem (e.g.
-        // DeviceTimeDesynced) strands the tunnel in Error, and the old
-        // `!= Disconnected` guard then rejected forget — leaving the user
-        // unable to clear the account without manually wiping the data dir.
-        // Only an actively-establishing/up tunnel should block it.
+        // Error is allowed: an account problem (e.g. DeviceTimeDesynced)
+        // strands the tunnel there, and forget is the way out.
         if !matches!(
             *self.tunnel_state.read().await,
             TunnelState::Disconnected | TunnelState::Error(_)
@@ -2003,7 +1914,6 @@ impl NymVpnService {
             })
             .ok()
             .map(|c| c.sentry_monitoring)
-            // if something goes wrong with the config file, fallback to the real state of Sentry client
             .unwrap_or(self.sentry_enabled)
     }
 

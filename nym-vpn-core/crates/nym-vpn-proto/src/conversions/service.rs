@@ -186,8 +186,7 @@ impl From<proto::DnsUpstreamOwnerResponse> for nym_vpn_lib_types::DnsUpstreamOwn
         match Owner::try_from(value.owner) {
             Ok(Owner::Vpn) => nym_vpn_lib_types::DnsUpstreamOwner::Vpn,
             Ok(Owner::User) => nym_vpn_lib_types::DnsUpstreamOwner::User,
-            // An unspecified owner means a daemon too old to report this, or a
-            // host where the question is moot. Both are "nothing to warn about".
+            // Unspecified: a daemon too old to report this. Nothing to warn about.
             Ok(Owner::NotApplicable) | Ok(Owner::Unspecified) | Err(_) => {
                 nym_vpn_lib_types::DnsUpstreamOwner::NotApplicable
             }
@@ -211,9 +210,7 @@ mod tests {
         }
     }
 
-    /// A daemon predating this field leaves the enum at its zero value. That
-    /// must read as "nothing to report", never as "your DNS is being ignored" —
-    /// a false warning on every older daemon would be worse than silence.
+    /// An older daemon's zero value must never read as "your DNS is ignored".
     #[test]
     fn unset_owner_reads_as_not_applicable() {
         let unset = proto::DnsUpstreamOwnerResponse { owner: 0 };

@@ -2,43 +2,27 @@
 # Copyright 2025 - Nym Technologies SA <contact@nymtech.net>
 # SPDX-License-Identifier: GPL-3.0-only
 #
-# NymVPN Always-On Watchdog
-#
-# Polls the tunnel state and automatically reconnects when the VPN drops.
-# Uses escalating recovery: soft reconnect → hard recovery (daemon restart).
-# Managed by procd as a standalone service. Controlled via UCI config.
-#
-# The poll is also woken by WAN link events: the hotplug hook
-# (/etc/hotplug.d/iface/90-nym-vpn-watchdog) sends SIGUSR1 on ifup and
-# SIGUSR2 on ifdown of a WAN-facing interface, which cuts the current sleep
-# short so the tunnel is checked right away instead of at the next tick.
+# NymVPN always-on watchdog: polls the tunnel and reconnects with escalating
+# recovery (soft reconnect, then daemon restart). The hotplug hook sends
+# SIGUSR1/SIGUSR2 on WAN ifup/ifdown to cut the current sleep short.
 
 VPNC="/usr/bin/nym-vpnc"
 UCI_SECTION="nym-vpn.settings"
 LOGPREFIX="nym-watchdog"
-# Under /var/run (root-owned 0755), not /tmp: the rpcd bridge reads this file
-# as root, so it must live where nothing unprivileged can pre-create it.
+# Under /var/run, not /tmp: the rpcd bridge reads this as root.
 STATEFILE="/var/run/nym-watchdog.state"
 
-# Default values (overridden by UCI)
 DEFAULT_INTERVAL=30
 DEFAULT_MAX_RETRIES=3
 MAX_BACKOFF=300
-# Treat a tunnel that has been connecting this long as stuck
 STUCK_CONNECTING_SECS=180
-# After a link-up event the daemon needs a moment to notice: follow the
-# immediate check with a few quick ones before returning to the poll interval
+# Quick re-checks after link-up, before returning to the poll interval.
 LINK_RECHECKS=3
 LINK_RECHECK_INTERVAL=5
 
-#-------------------------------------------------------------------------------
-# Link-event wake-up. Installed first: procd publishes our pid the moment we
-# are forked, and an untrapped SIGUSR1/2 would kill the script.
-#-------------------------------------------------------------------------------
-
-# Set by the traps, consumed by the main loop ("up" or "down")
+# Traps first: procd publishes the pid at fork, and an untrapped SIGUSR1/2
+# would kill the script.
 link_event=""
-# pid of the background sleep the loop is currently waiting on, if any
 sleep_pid=""
 
 on_link_event() {
@@ -48,14 +32,12 @@ on_link_event() {
 trap 'on_link_event up' USR1
 trap 'on_link_event down' USR2
 
-# Sleep that a link event cuts short. A foreground sleep would defer the trap
-# until it finished; a background sleep plus wait lets the trap run at once
-# and kill the sleep. wait returns early on a trapped signal, so loop until
-# the child is really gone rather than leave it as a zombie.
+# A foreground sleep would defer the trap until it finished. wait returns
+# early on a trapped signal, so loop until the child is really gone.
 nap() {
     sleep "$1" &
     sleep_pid=$!
-    # An event that landed before $sleep_pid was recorded
+    # An event that landed before $sleep_pid was recorded.
     [ -n "$link_event" ] && kill "$sleep_pid" 2>/dev/null
     while kill -0 "$sleep_pid" 2>/dev/null; do
         wait "$sleep_pid" 2>/dev/null
@@ -75,14 +57,12 @@ log_err() {
     logger -t "$LOGPREFIX" -p user.err "$1"
 }
 
-# Read a UCI option with a default fallback
 uci_get() {
     local val
     val=$(uci -q get "$1" 2>/dev/null)
     echo "${val:-$2}"
 }
 
-# Write state to a file so RPC/LuCI can read it
 write_state() {
     local state="$1"
     local failures="$2"
@@ -95,19 +75,16 @@ timestamp=$(date +%s)
 STATE
 }
 
-# Check if always_on is enabled
 is_enabled() {
     local enabled
     enabled=$(uci_get "${UCI_SECTION}.always_on" "0")
     [ "$enabled" = "1" ]
 }
 
-# Check if the VPN daemon is running
 daemon_running() {
     /etc/init.d/nym-vpnd status 2>&1 | grep -q "running"
 }
 
-# Get the current tunnel state from nym-vpnc
 get_tunnel_state() {
     local raw
     raw=$($VPNC status 2>&1)
@@ -125,13 +102,11 @@ get_tunnel_state() {
     fi
 }
 
-# Soft reconnect: just issue connect
 soft_reconnect() {
     log_info "Attempting soft reconnect"
     $VPNC connect-v2 2>&1
 }
 
-# Hard recovery: disconnect → restart daemon → reconnect
 hard_recovery() {
     log_warn "Performing hard recovery (daemon restart)"
     $VPNC disconnect 2>/dev/null
@@ -139,7 +114,6 @@ hard_recovery() {
     /etc/init.d/nym-vpnd restart >/dev/null 2>&1
     sleep 5
 
-    # Wait for daemon to come up
     local tries=0
     while [ $tries -lt 6 ]; do
         if daemon_running; then
@@ -157,17 +131,11 @@ hard_recovery() {
     $VPNC connect-v2 2>&1
 }
 
-#-------------------------------------------------------------------------------
-# Main loop
-#-------------------------------------------------------------------------------
-
 log_info "Watchdog started"
 write_state "started" 0 "none"
 
 failures=0
-# Seconds the tunnel has been observed in the connecting state
 connecting_secs=0
-# Quick re-checks still owed after a link-up event
 quick_checks=0
 
 while true; do
@@ -185,7 +153,6 @@ while true; do
     event=$link_event
     link_event=""
 
-    # Re-check on each iteration — user can toggle at runtime
     if ! is_enabled; then
         if [ $failures -gt 0 ]; then
             log_info "Always-on disabled, resetting state"
@@ -197,8 +164,7 @@ while true; do
         continue
     fi
 
-    # Woken by the hotplug hook. A WAN link change invalidates whatever
-    # failure series was building up, so start over and look right away.
+    # A WAN link change invalidates the failure series so far.
     if [ -n "$event" ]; then
         log_info "WAN link $event, checking tunnel now"
         failures=0
@@ -211,7 +177,6 @@ while true; do
         fi
     fi
 
-    # Ensure daemon is running
     if ! daemon_running; then
         log_warn "Daemon not running, starting"
         /etc/init.d/nym-vpnd start >/dev/null 2>&1
@@ -237,8 +202,7 @@ while true; do
             ;;
 
         connecting)
-            # Allow some time for the connection to establish: at least
-            # three polls, and about three minutes at short intervals.
+            # Stuck after at least three polls and STUCK_CONNECTING_SECS.
             connecting_secs=$((connecting_secs + slept))
             stuck_after=$((interval * 3))
             [ $stuck_after -lt $STUCK_CONNECTING_SECS ] && stuck_after=$STUCK_CONNECTING_SECS
@@ -255,7 +219,7 @@ while true; do
             ;;
 
         disconnecting)
-            # Briefly wait — might be a user-initiated disconnect
+            # Might be a user-initiated disconnect.
             write_state "disconnecting" "$failures" "waiting"
             ;;
 
@@ -264,12 +228,10 @@ while true; do
             connecting_secs=0
 
             if [ $failures -le "$max_retries" ]; then
-                # Soft retry
                 log_info "Tunnel down ($state), soft reconnect (attempt $failures/$max_retries)"
                 write_state "recovering" "$failures" "soft_reconnect"
                 soft_reconnect
             else
-                # Hard recovery with backoff
                 hard_failures=$((failures - max_retries))
                 backoff=$((interval * hard_failures))
                 [ $backoff -gt $MAX_BACKOFF ] && backoff=$MAX_BACKOFF
@@ -278,7 +240,6 @@ while true; do
                 write_state "recovering" "$failures" "hard_recovery"
                 hard_recovery
 
-                # A link-up event cuts the backoff short too
                 if [ $backoff -gt 0 ]; then
                     nap "$backoff"
                 fi

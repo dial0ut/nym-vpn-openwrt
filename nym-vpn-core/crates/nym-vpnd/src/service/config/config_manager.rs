@@ -30,8 +30,7 @@ pub struct VpnServiceConfigManager {
     json_config_path: PathBuf,
     config: nym_vpn_lib_types::VpnServiceConfig,
 
-    // Used to send `ConfigChanged` events when the config is updated.
-    // It's only optional to simplify testing.
+    // Optional only to simplify testing.
     tunnel_event_tx: Option<broadcast::Sender<nym_vpn_lib_types::TunnelEvent>>,
 }
 
@@ -51,9 +50,7 @@ impl VpnServiceConfigManager {
                         "Failed to read service config file {}; using default",
                         json_config_path.display()
                     );
-                    // Stash the unreadable file instead of overwriting it
-                    // below: the user's settings stay recoverable and the
-                    // corrupt content survives as evidence of what happened.
+                    // Stash rather than overwrite: settings stay recoverable.
                     if json_config_path.exists() {
                         let backup_path = json_config_path.with_extension("json.bak");
                         match fs::rename(&json_config_path, &backup_path).await {
@@ -78,18 +75,14 @@ impl VpnServiceConfigManager {
             tunnel_event_tx,
         };
 
-        // The fronting policy is process-wide state, not something the tunnel
-        // settings carry: put the persisted choice in force before the daemon
-        // builds its API clients.
+        // Process-wide state; must be in force before any API client is built.
         apply_front_policy(config_manager.config.stealth_api);
 
-        // If we didn't read the latest version then write the config straight back to file
         if version != Some(VpnServiceConfigVersion::latest()) {
             // Failure is already logged; at startup there is no client to report to
             let _ = config_manager.write_to_file().await;
         }
 
-        // If the deprecated TOML file exists then remove it
         if toml_config_path.exists() {
             tracing::info!(
                 "Removing deprecated config file {}",
@@ -232,8 +225,6 @@ impl VpnServiceConfigManager {
         }
     }
 
-    /// Stealth API connect: front every Nym API request through the cover
-    /// domains (on) or only after a direct request fails (off, the default).
     /// Takes effect on the next API request; the tunnel is not touched.
     pub async fn set_stealth_api(&mut self, stealth_api: bool) -> Result<(), String> {
         if self.config.stealth_api != stealth_api {
@@ -261,10 +252,8 @@ impl VpnServiceConfigManager {
         &self.config.inbound_exemptions
     }
 
-    /// Enable or disable custom DNS servers
-    ///
-    /// Returns true if the setting has changed, otherwise false if it's the same.
-    /// An error means the setting changed in memory but could not be persisted.
+    /// Returns whether the setting changed. An error means it changed in
+    /// memory but could not be persisted.
     pub async fn set_enable_custom_dns(&mut self, enable_custom_dns: bool) -> Result<bool, String> {
         if self.config.enable_custom_dns == enable_custom_dns {
             Ok(false)
@@ -274,10 +263,8 @@ impl VpnServiceConfigManager {
         }
     }
 
-    /// Update custom DNS servers
-    ///
-    /// Returns true if custom DNS servers have changed, otherwise false if they're the same.
-    /// An error means the setting changed in memory but could not be persisted.
+    /// Returns whether the servers changed. An error means they changed in
+    /// memory but could not be persisted.
     pub async fn set_custom_dns(&mut self, custom_dns: Vec<IpAddr>) -> Result<bool, String> {
         if self.config.custom_dns == custom_dns {
             Ok(false)
@@ -326,12 +313,9 @@ impl VpnServiceConfigManager {
     }
 
     async fn save_config_and_send_event(&self) -> Result<(), String> {
-        // This function already logs
         let write_result = self.write_to_file().await;
 
-        // Notify all clients that the config has changed. Do this even when
-        // the write failed: the in-memory config did change and is what the
-        // tunnel runs with.
+        // Notified even when the write failed: the in-memory config did change.
         if let Some(tx) = self.tunnel_event_tx.as_ref() {
             match tx.send(nym_vpn_lib_types::TunnelEvent::ConfigChanged(Box::new(
                 self.config.clone(),
@@ -346,8 +330,7 @@ impl VpnServiceConfigManager {
         }
 
         write_result.map_err(|e| {
-            // Flatten the source chain ("config setup error" alone tells the
-            // user nothing; the io error carries the ENOSPC/EROFS detail).
+            // The io error underneath carries the ENOSPC/EROFS detail.
             let mut msg = format!("setting applied but not saved to disk (lost on reboot): {e}");
             let mut source = std::error::Error::source(&e);
             while let Some(s) = source {
@@ -435,9 +418,7 @@ impl VpnServiceConfigManager {
     pub fn generate_tunnel_settings(&self) -> TunnelSettings {
         tracing::info!("Using config: {:?}", self.config);
 
-        // `stealth_api` is deliberately absent from TunnelSettings: it is an
-        // API-transport switch applied through the shared fronting policy, so
-        // changing it must not force a reconnect.
+        // `stealth_api` is deliberately absent: changing it must not reconnect.
 
         let gateway_options = GatewayPerformanceOptions {
             mixnet_min_performance: self.config.mixnet_traffic.min_gateway_mixnet_performance,
@@ -500,9 +481,7 @@ impl VpnServiceConfigManager {
             tunnel_type,
             mixnet_tunnel_options: MixnetTunnelOptions { mtu: None },
             wireguard_tunnel_options: WireguardTunnelOptions {
-                // netstack is no longer a separate mode; always use TunTun.
-                // The `netstack` config field is preserved for backward compatibility
-                // but has no effect.
+                // The `netstack` config field is kept for compatibility but has no effect.
                 multihop_mode: WireguardMultihopMode::TunTun,
                 enable_bridges: self.config.enable_bridges,
             },
@@ -511,11 +490,8 @@ impl VpnServiceConfigManager {
             entry_point: Box::new(self.config.entry_point.clone()),
             exit_point: Box::new(self.config.exit_point.clone()),
             dns,
-            // Legacy split tunneling and the kill-switch are mutually exclusive:
-            // in legacy/PBR mode the daemon must not block non-tunnel WAN egress
-            // (that traffic is the whole point), so force the effective kill-switch
-            // off regardless of the stored value. The UI also greys out the toggle,
-            // but this is the authoritative backstop.
+            // Legacy/PBR mode needs non-tunnel WAN egress, so the effective
+            // kill-switch is forced off whatever is stored.
             killswitch: self.config.killswitch && !self.config.legacy_split_tunnel,
             legacy_split_tunnel: self.config.legacy_split_tunnel,
             inbound_exemptions: self
@@ -542,13 +518,9 @@ impl VpnServiceConfigManager {
     }
 }
 
-/// Put the persisted Stealth API choice in force before anything talks to the
-/// network. The daemon discovers its environment before the service (and its
-/// config manager) exists, and that discovery may fetch over HTTPS; without
-/// this the first request of every start-up would go direct even with Stealth
-/// API on. Reads the same file the same way as [`VpnServiceConfigManager::new`],
-/// falling back to the same default, so both installs agree. Unlike the
-/// manager it never touches the file.
+/// Environment discovery fetches over HTTPS before the config manager exists;
+/// without this the first request of every start-up would go direct. Reads
+/// the file the same way as [`VpnServiceConfigManager::new`], never writes it.
 pub async fn install_persisted_front_policy(network_config_dir: &Path) {
     let toml_config_path = network_config_dir.join(DEFAULT_CONFIG_FILE_TOML);
     let json_config_path = network_config_dir.join(DEFAULT_CONFIG_FILE_JSON);
@@ -560,8 +532,6 @@ pub async fn install_persisted_front_policy(network_config_dir: &Path) {
     apply_front_policy(stealth_api);
 }
 
-/// Map the Stealth API switch onto the shared domain-fronting policy that every
-/// fronting-capable API client in this process follows.
 fn apply_front_policy(stealth_api: bool) {
     let policy = if stealth_api {
         FrontPolicy::Always

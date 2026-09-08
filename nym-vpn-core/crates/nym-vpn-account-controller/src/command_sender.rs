@@ -251,8 +251,7 @@ impl AccountCommandSender {
         rx.await.map_err(AccountCommandError::internal)?
     }
 
-    /// Fire-and-forget: the controller records the mode and re-arms its refresh timer. There is
-    /// nothing to wait for, and the caller sits on the tunnel-event path.
+    /// Fire-and-forget: the caller sits on the tunnel-event path.
     #[instrument]
     pub fn set_refresh_mode(&self, mode: AccountRefreshMode) -> Result<(), AccountCommandError> {
         self.command_tx

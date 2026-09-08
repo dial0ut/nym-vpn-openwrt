@@ -54,8 +54,7 @@ pub enum AccountCommand {
     /// Tells the AC free to go ahead
     VpnApiFirewallDown(ReturnSender<(), AccountCommandError>),
 
-    /// Tells the AC how often to re-sync on its own. A hint sent from the tunnel-event path,
-    /// hence no return channel: the daemon must never wait on the AC there.
+    /// No return channel: sent from the tunnel-event path, which must never wait on the AC.
     SetRefreshMode(AccountRefreshMode),
 
     /// Upgrade mode-related commands

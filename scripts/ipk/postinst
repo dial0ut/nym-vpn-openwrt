@@ -1,18 +1,15 @@
 #!/bin/sh
 # Post-installation script for nym-vpn IPK package
 
-# Create TUN device if needed
 [ -e /dev/net/tun ] || {
     mkdir -p /dev/net
     mknod /dev/net/tun c 10 200
     chmod 0666 /dev/net/tun
 }
 
-# Register package feed for updates
 FEED_BASE="https://packages.dial0ut.org"
 
-# Detect architecture (openwrt_release first, os-release as fallback —
-# not all OpenWrt/apk images ship both)
+# Not all OpenWrt/apk images ship both release files.
 ARCH=""
 if [ -f /etc/openwrt_release ]; then
     ARCH=$(. /etc/openwrt_release; echo "$DISTRIB_ARCH")
@@ -23,14 +20,11 @@ fi
 
 if [ -n "$ARCH" ]; then
     if command -v apk >/dev/null 2>&1; then
-        # OpenWrt 24.10+ (apk package manager)
         APK_REPO="/etc/apk/repositories.d/nym-vpn.list"
         APK_LINE="${FEED_BASE}/apk/${ARCH}/packages.adb"
         mkdir -p /etc/apk/repositories.d
-        # Scrub stale feed lines outside our canonical file. Pre-1.30.1
-        # installs wrote a bare directory URL, which makes apk fall back to
-        # legacy Alpine resolution (<url>/<arch>/APKINDEX.tar.gz) and 404
-        # on every apk operation.
+        # A bare directory URL elsewhere makes apk fall back to Alpine-style
+        # APKINDEX.tar.gz resolution and 404 on every operation.
         for f in /etc/apk/repositories /etc/apk/repositories.d/*.list; do
             [ -f "$f" ] || continue
             [ "$f" = "$APK_REPO" ] && continue
@@ -39,15 +33,12 @@ if [ -n "$ARCH" ]; then
                 echo "Removed stale nym-vpn feed line from $f"
             fi
         done
-        # OpenWrt apk expects the repo line to point directly at the
-        # packages.adb index (matching its own distfeeds.list, e.g.
-        # .../<arch>/base/packages.adb).
+        # OpenWrt apk wants the repo line to point at packages.adb itself.
         if [ "$(cat "$APK_REPO" 2>/dev/null)" != "$APK_LINE" ]; then
             echo "$APK_LINE" > "$APK_REPO"
             echo "Package feed registered: $APK_LINE"
         fi
     elif [ -f /etc/opkg.conf ]; then
-        # OpenWrt <=23.05 (opkg package manager)
         FEED_CONF="/etc/opkg/customfeeds.conf"
         if ! grep -q "nym-vpn" "$FEED_CONF" 2>/dev/null; then
             echo "src/gz nym-vpn ${FEED_BASE}/opkg/${ARCH}" >> "$FEED_CONF"
@@ -56,12 +47,9 @@ if [ -n "$ARCH" ]; then
     fi
 fi
 
-# Apply backend-aware firewall include registration now. Custom IPK/APK
-# packaging does not get OpenWrt's generated postinst wrapper that normally
-# executes /etc/uci-defaults, and prerm removes the old section during an
-# upgrade. Registering before the daemon starts closes the install-time
-# reload gap. On failure the script stays in place for the boot defaults
-# runner to retry.
+# Our packaging lacks OpenWrt's generated wrapper that runs /etc/uci-defaults,
+# so run it here, before the daemon starts. On failure it stays for the boot
+# defaults runner to retry.
 if [ -z "${IPKG_INSTROOT:-}" ] && [ -x /etc/uci-defaults/luci-app-nym-vpn ]; then
     if /etc/uci-defaults/luci-app-nym-vpn; then
         rm -f /etc/uci-defaults/luci-app-nym-vpn
@@ -71,45 +59,24 @@ if [ -z "${IPKG_INSTROOT:-}" ] && [ -x /etc/uci-defaults/luci-app-nym-vpn ]; the
 fi
 
 /etc/init.d/nym-vpnd enable
-# restart, not start: on an upgrade the previous daemon is still running
-# (prerm leaves it up) and procd's start is a no-op for a running instance.
-# This is the freshly installed init script, so its restart path keeps the
-# kill-switch armed while the binary is swapped. On a fresh install restart
-# is just a start.
+# restart, not start: on an upgrade the old daemon is still running and
+# procd's start is a no-op. The new init script's restart path keeps the
+# kill-switch armed across the swap.
 /etc/init.d/nym-vpnd restart
 
-# Enable watchdog if always_on was previously set (e.g. upgrade)
 if [ "$(uci -q get nym-vpn.settings.always_on)" = "1" ]; then
     /etc/init.d/nym-vpn-watchdog enable
     /etc/init.d/nym-vpn-watchdog start
 fi
 
-# LuCI plumbing. Clear the menu/module caches so the new menu entry and
-# views are picked up, then refresh rpcd: it scans /usr/libexec/rpcd only
-# at start-up and computes a session's ACL grants at login, so a fresh
-# install needs a restart before the NymVPN page can work.
-#
-# The refresh must not run inside this transaction. LuCI's Software page
-# drives opkg/apk through rpcd itself (ubus file exec), so restarting rpcd
-# here kills the request the page is waiting on and every login session:
-# the page never gets its reply and the user ends up logged out (#13).
-# The job below is detached — a subshell with every fd on /dev/null, so
-# neither opkg (waitpid on this script) nor apk (which also reads the
-# script's stdout/stderr pipes to EOF) waits for it — and it waits for the
-# package manager process itself to exit before touching rpcd, bounded so
-# a stuck transaction cannot defer the refresh forever. Once opkg/apk has
-# exited, rpcd has delivered the transaction's reply to the page.
-#
-# Upgrades pick the least disruptive refresh from the checksums prerm
-# stashed: nothing when neither the exported rpcd method list nor the ACL
-# file changed, a reload (SIGHUP: rpcd re-executes itself and keeps its
-# sessions) when only the method list changed, and a restart — a forced
-# re-login, which is what makes new grants take effect — when the ACL file
-# changed or the stash is missing (fresh install, or an upgrade from a
-# package whose prerm predates it). The method list is what rpcd caches at
-# start-up; it comes from `nym-vpnc rpcd list` behind the fixed plugin
-# wrapper, so the wrapper file itself is never a useful signal. An empty
-# hash (list failed) counts as changed.
+# rpcd scans /usr/libexec/rpcd only at start-up and computes ACL grants at
+# login. The refresh must not run inside this transaction: LuCI's Software
+# page drives opkg/apk through rpcd, so restarting it here kills the reply
+# the page is waiting on and logs the user out (#13). Upgrades pick the
+# refresh from the hashes prerm stashed: nothing if neither the method list
+# nor the ACL changed, reload (SIGHUP keeps sessions) for the method list
+# alone, restart (forced re-login, which is what applies new grants) for the
+# ACL or a missing stash. An empty hash counts as changed.
 rm -f /tmp/luci-indexcache* 2>/dev/null
 rm -rf /tmp/luci-modulecache/ 2>/dev/null
 
@@ -130,21 +97,17 @@ if [ -f "$nym_rpcd_state" ]; then
     fi
 fi
 rm -f "$nym_rpcd_state"
-# Image builds (IPKG_INSTROOT) have no rpcd to talk to and must not leave
-# background processes behind.
+# Image builds have no rpcd and must not leave background processes behind.
 [ -z "${IPKG_INSTROOT:-}" ] || nym_rpcd_action=""
 
-# Pid of the opkg/apk process running this script. postinst is a child of
-# the package manager directly or of a sh wrapper it spawned, so walk the
-# parent chain (bounded) for a comm of opkg or apk and fall back to the
-# direct parent. NYM_PROC lets the walk be tested on hosts without /proc.
+# postinst may be a child of the package manager or of a sh wrapper it
+# spawned, so walk the parent chain for opkg/apk. NYM_PROC is for tests.
 NYM_PROC="${NYM_PROC:-/proc}"
 proc_comm() {
     cat "$NYM_PROC/$1/comm" 2>/dev/null
 }
 proc_ppid() {
-    # /proc/<pid>/stat is "pid (comm) state ppid ..."; comm may contain
-    # spaces, so cut after the last ')'.
+    # comm may contain spaces; cut after the last ')'.
     sed 's/.*) //' "$NYM_PROC/$1/stat" 2>/dev/null | cut -d' ' -f2
 }
 find_package_manager_pid() {
@@ -165,14 +128,14 @@ find_package_manager_pid() {
 if [ -n "$nym_rpcd_action" ]; then
     nym_pm_pid=$(find_package_manager_pid "$PPID")
     nym_pm_comm=$(proc_comm "$nym_pm_pid")
+    # Detached with every fd on /dev/null: opkg waits on this script and apk
+    # also reads its stdout/stderr to EOF. Waits for the package manager to
+    # exit so rpcd has delivered the transaction's reply first.
     (
-        # Survive the caller's terminal going away (SSH session closed
-        # right after a CLI upgrade); INT is already ignored for the
-        # background jobs of a non-interactive shell.
+        # SSH session may close right after a CLI upgrade.
         trap '' HUP
-        # Wait for the package manager to exit. A changed comm means the
-        # pid was reused; the bound keeps a wedged transaction from
-        # blocking the refresh for good.
+        # A changed comm means the pid was reused; the bound keeps a wedged
+        # transaction from deferring the refresh forever.
         i=0
         while kill -0 "$nym_pm_pid" 2>/dev/null \
             && [ "$(proc_comm "$nym_pm_pid")" = "$nym_pm_comm" ]; do
@@ -183,12 +146,10 @@ if [ -n "$nym_rpcd_action" ]; then
             sleep 1
             i=$((i + 1))
         done
-        # Let apk finish tearing down the script's pipes and rpcd hand the
-        # reply to the page.
         sleep 1
         /etc/init.d/rpcd "$nym_rpcd_action"
         # rpcd builds without a SIGHUP handler exit on reload instead of
-        # re-executing. Whatever happened, leave LuCI with a running rpcd.
+        # re-executing.
         sleep 2
         pidof rpcd >/dev/null || /etc/init.d/rpcd start
     ) </dev/null >/dev/null 2>&1 &

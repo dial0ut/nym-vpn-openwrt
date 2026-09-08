@@ -57,7 +57,7 @@ pub(crate) struct SharedAccountState<C: ConnectivityMonitor> {
     /// Firewall status
     pub(crate) firewall_active: bool,
 
-    /// How often the timed states re-sync on their own; set by the daemon from the tunnel state
+    /// Set by the daemon from the tunnel state.
     pub(crate) refresh_mode: AccountRefreshMode,
 
     /// Channel to send storage operation to the AccountController

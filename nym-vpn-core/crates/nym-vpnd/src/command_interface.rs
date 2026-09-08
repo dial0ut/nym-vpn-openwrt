@@ -30,10 +30,8 @@ use crate::service::{GatewayTestError, SetNetworkError, Socks5Error, VpnServiceC
 pub type Result<T> = std::result::Result<T, tonic::Status>;
 
 pub struct CommandInterface {
-    // Send commands to the VPN service
     vpn_command_tx: UnboundedSender<VpnServiceCommand>,
 
-    // Broadcast tunnel events to our API endpoint listeners
     tunnel_event_rx: broadcast::Receiver<TunnelEvent>,
 }
 
@@ -585,8 +583,6 @@ impl NymVpnService for CommandInterface {
                 GatewayTestError::InvalidGatewayId(_)
                 | GatewayTestError::NoTargets
                 | GatewayTestError::Params(_) => tonic::Status::invalid_argument(err.chain()),
-                // The single run slot is a per-daemon resource; the client
-                // can retry once the other test has finished.
                 GatewayTestError::AlreadyRunning => tonic::Status::resource_exhausted(err.chain()),
                 GatewayTestError::Timeout(_) => tonic::Status::deadline_exceeded(err.chain()),
                 GatewayTestError::GetGateways { .. } | GatewayTestError::Probe(_) => {
@@ -1094,7 +1090,6 @@ impl NymVpnService for CommandInterface {
                 tonic::Status::internal(format!("Failed to get SOCKS5 status: {err}"))
             })?;
 
-        // Convert from lib type to proto type using From trait
         let proto_status = proto::Socks5Status::from(status);
 
         Ok(tonic::Response::new(proto_status))
@@ -1154,11 +1149,10 @@ pub async fn start_command_interface(
     let socket_path = default_socket_path();
     let (vpn_command_tx, vpn_command_rx) = mpsc::unbounded_channel();
 
-    // Remove previous socket file in case if the daemon crashed in the prior run and could not clean up the socket file.
+    // A crashed prior run may have left the socket file behind.
     remove_previous_socket_file(&socket_path).await;
     tracing::info!("Starting socket listener on: {}", socket_path.display());
 
-    // Wrap the unix socket or named pipe into a stream that can be used by tonic
     let incoming = nym_ipc::server::create_incoming(socket_path.clone())?;
 
     let server_handle = tokio::spawn(async move {

@@ -1,15 +1,10 @@
 // Copyright 2026 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! ICMP echo probes towards gateways, sent by the daemon.
-//!
-//! Backs `nym-vpnc gateway test`. The probe socket carries
-//! [`TUNNEL_FWMARK`](crate::TUNNEL_FWMARK), like the WireGuard transport, so
-//! its packets are policy-routed out the real WAN even while a tunnel is up,
-//! and so the OpenWrt kill switch's probe hatch (`probe_escape_hatch` in
-//! nym-firewall) lets them out. Neither is available to an unprivileged
-//! `nym-vpnc`: `SO_MARK` needs `CAP_NET_ADMIN`, and unmarked ICMP is rejected
-//! while the kill switch is on.
+//! ICMP echo probes towards gateways, backing `nym-vpnc gateway test`. Sent
+//! by the daemon because the socket carries [`TUNNEL_FWMARK`](crate::TUNNEL_FWMARK)
+//! (needs `CAP_NET_ADMIN`) so packets leave via the real WAN and through the
+//! kill switch's probe hatch.
 
 use std::{net::IpAddr, os::fd::BorrowedFd, sync::Arc, time::Duration};
 
@@ -23,16 +18,14 @@ const _: () = assert!(crate::TUNNEL_FWMARK == nym_firewall::TUNNEL_FWMARK);
 /// Gap between consecutive probes to the same target.
 pub const PROBE_INTERVAL: Duration = Duration::from_millis(200);
 
-/// Targets probed at the same time. Together with [`PROBE_INTERVAL`] this
-/// caps the packet rate at about 40/s, under the firewall hatch's limit —
-/// for one run. The daemon serializes runs for the same reason.
+/// With [`PROBE_INTERVAL`] this caps one run at about 40 packets/s, under
+/// the firewall hatch's limit; the daemon serializes runs for the same reason.
 pub const MAX_CONCURRENT_TARGETS: usize = 8;
 
-/// Same payload size as `ping(8)`: 56 bytes after the 8-byte ICMP header.
+/// Same payload size as `ping(8)`.
 const PAYLOAD: [u8; 56] = [0; 56];
 
-/// Identifier base for the probe pingers. Only used on raw sockets; on Linux
-/// `SOCK_DGRAM` ICMP sockets the kernel assigns the identifier.
+/// Only used on raw sockets; on `SOCK_DGRAM` ICMP the kernel assigns it.
 const IDENT_BASE: u16 = 0x4e00;
 
 #[derive(Debug, Clone, Copy)]
@@ -69,8 +62,7 @@ impl ProbeOutcome {
         Some(self.rtts.iter().sum::<Duration>() / n)
     }
 
-    /// Account for one echo request. Returns `false` when probing this target
-    /// should stop.
+    /// Returns `false` when probing this target should stop.
     fn record(&mut self, target: IpAddr, attempt: Result<Duration, SurgeError>) -> bool {
         match attempt {
             Ok(rtt) => {
@@ -79,16 +71,12 @@ impl ProbeOutcome {
                 self.rtts.push(rtt);
                 true
             }
-            // The request went out and nothing came back: that is loss.
             Err(SurgeError::Timeout { .. }) => {
                 self.sent += 1;
                 true
             }
-            // surge-ping poisons the shared reply map when any `Client` clone
-            // is dropped. `probe_targets` keeps the client alive until every
-            // probe is done, so this cannot happen unless that invariant is
-            // broken. Report it as the bug it is instead of as packet loss,
-            // and stop: every further request would fail the same way.
+            // Only possible if the `ProbeClient` invariant is broken; a bug,
+            // not loss, and every further request would fail the same way.
             Err(SurgeError::ClientDestroyed) => {
                 tracing::error!(
                     "ICMP client dropped while probing {target}; this is a bug in gateway_probe"
@@ -96,8 +84,7 @@ impl ProbeOutcome {
                 self.error = Some("internal error: ICMP client dropped while probing".to_owned());
                 false
             }
-            // Nothing was sent (socket error, e.g. no route), or the reply
-            // channel broke. Report it, but it is not loss on the path.
+            // Nothing was sent (e.g. no route): reported, but not path loss.
             Err(err) => {
                 tracing::debug!("Gateway probe to {target} failed: {err}");
                 self.error = Some(err.to_string());
@@ -107,13 +94,9 @@ impl ProbeOutcome {
     }
 }
 
-/// The ICMP socket for one address family, alive for one probe run.
-///
-/// Deliberately not `Clone`: dropping *any* clone of a surge-ping `Client`
-/// marks its shared reply map destroyed, so a fast target finishing first
-/// would fail the remaining probes of a slower one with `ClientDestroyed`
-/// (the bug fixed in f5f5f6be). Sharing goes through `Arc<ProbeClient>`;
-/// the type makes an accidental `.clone()` of the inner client impossible.
+/// Deliberately not `Clone`: dropping any clone of a surge-ping `Client`
+/// poisons its shared reply map, failing the other targets' probes with
+/// `ClientDestroyed`. Share through `Arc<ProbeClient>` only.
 struct ProbeClient(Client);
 
 #[derive(Debug, thiserror::Error)]
@@ -125,22 +108,15 @@ pub enum ProbeError {
     SetMark(#[source] nix::Error),
 }
 
-/// Probe every address in `targets`, returning one outcome per address in the
-/// same order. Targets are probed concurrently (bounded), each one
-/// sequentially with [`PROBE_INTERVAL`] between requests.
+/// One outcome per target, in order. Bounded concurrency across targets,
+/// sequential probes per target.
 pub async fn probe_targets(
     targets: &[IpAddr],
     params: ProbeParams,
 ) -> Result<Vec<ProbeOutcome>, ProbeError> {
-    // One socket per family, opened only when needed: an IPv6 socket can be
-    // refused outright on a kernel built without IPv6.
-    //
-    // The `Arc<ProbeClient>`s outlive the whole probe run — they drop at the
-    // end of this function, after `collect()` has awaited every probe,
-    // timeouts included (see `ProbeClient` for why the client itself is
-    // never cloned). Nothing here is spawned: every probe is a future inside
-    // `buffered`, so dropping this function's future — a deadline or a
-    // cancelled RPC — drops the in-flight probes and the sockets with it.
+    // Sockets are opened only when needed: an IPv6 socket can be refused on a
+    // kernel without IPv6. They must outlive every probe (see `ProbeClient`);
+    // nothing is spawned, so cancelling this future drops probes and sockets.
     let v4 = targets
         .iter()
         .any(IpAddr::is_ipv4)
@@ -154,8 +130,6 @@ pub async fn probe_targets(
         .transpose()?
         .map(Arc::new);
 
-    // Owned items: a closure over `&IpAddr` makes the spawned future's
-    // lifetime bounds too specific for `tokio::spawn`.
     let outcomes = stream::iter(targets.iter().copied().enumerate())
         .map(|(idx, addr)| {
             let client = match addr {
@@ -172,14 +146,11 @@ pub async fn probe_targets(
     Ok(outcomes)
 }
 
-/// Open an ICMP socket and put the tunnel fwmark on it so its packets take
-/// the main routing table and the kill switch's probe hatch.
 fn marked_client(kind: ICMP) -> Result<ProbeClient, ProbeError> {
     let client =
         Client::new(&Config::builder().kind(kind).build()).map_err(ProbeError::OpenSocket)?;
     let raw_fd = client.get_socket().get_native_sock();
-    // SAFETY: the descriptor is owned by `client`, which is alive for the
-    // whole borrow.
+    // SAFETY: `client` owns the descriptor and outlives the borrow.
     let fd = unsafe { BorrowedFd::borrow_raw(raw_fd) };
     Mark.set(&fd, &crate::TUNNEL_FWMARK)
         .map_err(ProbeError::SetMark)?;
@@ -296,8 +267,7 @@ mod tests {
             count: 1,
             timeout: ms(10),
         };
-        // Would need CAP_NET_RAW or an open ping_group_range if a socket were
-        // created; an empty target list must not touch the network at all.
+        // A socket would need CAP_NET_RAW or an open ping_group_range.
         let outcomes = runtime
             .block_on(probe_targets(&[], params))
             .expect("no socket needed");

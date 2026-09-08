@@ -42,27 +42,18 @@ pub struct VpnServiceConfig {
     pub mixnet_traffic: MixnetTrafficConfig,
     pub network_stats: NetworkStatisticsConfig,
     pub killswitch: bool,
-    /// Legacy (inclusive) split tunneling: hand routing to `luci-app-pbr`.
-    /// When enabled, the daemon withholds the default route into the tunnel so
-    /// only PBR-selected traffic is routed in. Mutually exclusive with the
-    /// kill-switch (which is forced off in this mode).
+    /// Hand routing to `luci-app-pbr`: the daemon withholds the default route
+    /// into the tunnel. Forces the kill-switch off.
     pub legacy_split_tunnel: bool,
     pub inbound_exemptions: Vec<InboundExemption>,
-    /// "Stealth API connect": send every Nym API request through the cover
-    /// domains (domain fronting) instead of only retrying through them after a
-    /// direct request fails. Slower, but works where the API hosts are blocked.
-    /// Applies to API traffic only, so a change needs no reconnect.
+    /// Front every Nym API request through the cover domains instead of only
+    /// on retry. API traffic only, so a change needs no reconnect.
     pub stealth_api: bool,
 }
 
-/// Whether the DNS servers in [`VpnServiceConfig`] actually reach the system
-/// resolver, or whether the daemon has deliberately stepped aside.
-///
-/// This is observed state, not configuration: `enable_custom_dns` says what the
-/// user asked for, this says whether it is in force. The two disagree whenever
-/// the router's dnsmasq has a committed `noresolv` (AdGuard Home,
-/// https-dns-proxy, stubby), because then the daemon leaves dnsmasq's upstreams
-/// alone and the user's own forwards do the resolving.
+/// Observed state, not configuration: whether the configured DNS is in force.
+/// `User` whenever dnsmasq has a committed `noresolv` (AdGuard Home,
+/// https-dns-proxy, stubby); the daemon then leaves its upstreams alone.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(
     feature = "typescript-bindings",
@@ -72,12 +63,9 @@ pub struct VpnServiceConfig {
 )]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum DnsUpstreamOwner {
-    /// The daemon manages the resolver's upstreams; configured DNS is applied.
     Vpn,
-    /// The user manages upstreams themselves; configured DNS is **not** applied.
-    /// Their own forwards resolve, riding the tunnel while connected.
+    /// Configured DNS is **not** applied; the user's own forwards resolve.
     User,
-    /// No daemon-managed resolver on this host, so the distinction is moot.
     NotApplicable,
 }
 
@@ -178,13 +166,8 @@ impl Default for VpnServiceConfig {
                 two_letter_iso_country_code: "CH".to_owned(),
             },
             allow_lan: true,
-            // OpenWrt port default: IPv6-into-tunnel OFF. On dual-stack WANs
-            // where the exit gateway has no IPv6 egress, accepted-then-dropped
-            // IPv6 leaves LAN clients waiting out an IPv6 timeout before every
-            // IPv4 fallback; with it off, forwarded IPv6 is rejected fast and
-            // clients use IPv4 immediately. Re-enable via LuCI or
-            // `nym-vpnc tunnel set --ipv6 on`. Existing config files keep their
-            // stored value — this only affects fresh installs.
+            // OpenWrt default: off. Exits without IPv6 egress would leave LAN
+            // clients waiting out an IPv6 timeout before every IPv4 fallback.
             disable_ipv6: true,
             enable_two_hop: true,
             enable_bridges: false,
@@ -338,9 +321,8 @@ pub struct VpnServiceInfo {
 }
 
 impl VpnServiceInfo {
-    /// Whether any Nym API URL in the active network environment carries cover
-    /// domains. Stealth API connect (always-on domain fronting) can only route
-    /// through those; without them the setting has nothing to act on.
+    /// Whether any Nym API URL carries cover domains; Stealth API has nothing
+    /// to act on without them.
     pub fn has_api_cover_domains(&self) -> bool {
         let has_front = |api_url: &crate::ApiUrl| {
             api_url

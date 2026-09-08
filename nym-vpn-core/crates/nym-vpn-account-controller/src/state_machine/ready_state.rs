@@ -24,7 +24,7 @@ use tracing::warn;
 ///
 /// Possible next state :
 /// - SyncingState : We go into that state on a timer, to make sure the above still holds. The refresh account commands allows for manually go there.
-///   The timer's interval follows the refresh mode set by the daemon: slow while the tunnel is idle, normal otherwise.
+///   The interval follows the daemon's refresh mode: slow while idle.
 /// - OfflineState : the connectivity monitor is telling we're not connected
 /// - LoggedOutState : We successfully handled a forget_account command
 pub struct ReadyState {

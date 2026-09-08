@@ -1,24 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! Backend-neutral firewall rule AST.
-//!
-//! A single representation that both the iptables-restore and nft renderers
-//! emit from. Keeps policy logic in one place ([`super::policy`]) and the
-//! two backends as thin syntactic translations.
+//! Backend-neutral firewall rule AST shared by both renderers.
 
 use std::net::IpAddr;
 
 use ipnetwork::IpNetwork;
 
-/// Address family a rule applies to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Family {
-    /// IPv4-only. iptables: emit only in the v4 file. nft: emit with `ip` qualifier.
     V4,
-    /// IPv6-only. iptables: emit only in the v6 file. nft: emit with `ip6` qualifier.
     V6,
-    /// Family-agnostic (e.g. loopback, ct state). iptables: emit in both files. nft:
-    /// emit without an address-family qualifier.
+    /// Emitted in both iptables files and without an nft family qualifier.
     Inet,
 }
 
@@ -27,12 +19,9 @@ pub enum Verdict {
     Accept,
     Drop,
     Reject,
-    /// Non-terminal: set the conntrack mark. Used by the inbound-exemption
-    /// path in the mangle prerouting chain.
+    /// Non-terminal `ct mark set`.
     SetCtMark(u32),
-    /// Non-terminal: copy `ct mark` onto the packet mark so it can be used
-    /// for `ip rule fwmark` routing decisions. Used in mangle prerouting
-    /// (forwarded replies) and mangle output (router-originated replies).
+    /// Non-terminal `meta mark set ct mark`, for `ip rule fwmark` routing.
     RestoreMark,
 }
 
@@ -47,8 +36,6 @@ pub enum Proto {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CtState {
     EstablishedRelated,
-    /// New connection. Used to gate `ct mark set` on the very first packet
-    /// of an inbound-exempted flow, so subsequent packets don't redo the work.
     New,
 }
 
@@ -97,10 +84,7 @@ impl From<IpNetwork> for AddrMatch {
 pub struct Match {
     pub iif: Option<String>,
     pub oif: Option<String>,
-    /// `iifname != "X"` / `! -i X` — used for CVE-2019-14899 protection.
     pub iif_not: Option<String>,
-    /// `oifname != "X"` / `! -o X` — used to admit private custom DNS
-    /// servers on every interface except the WAN.
     pub oif_not: Option<String>,
     pub saddr: Option<AddrMatch>,
     pub daddr: Option<AddrMatch>,
@@ -111,19 +95,11 @@ pub struct Match {
     pub icmpv4_type: Option<IcmpV4Type>,
     pub icmpv6_type: Option<IcmpV6Type>,
     pub rate_limit: Option<RateLimit>,
-    /// Match on packet (meta) mark. nft: `meta mark <N>`; iptables: `-m mark --mark <N>`.
+    /// Packet (meta) mark.
     pub mark: Option<u32>,
-    /// Match on the conntrack mark. nft: `ct mark <N>`; iptables:
-    /// `-m connmark --mark <N>` (ships with the CONNMARK target in
-    /// iptables-mod-conntrack-extra). Used to scope mark restores to
-    /// exempted flows only — an unconditioned restore overwrites the
-    /// daemon's own SO_MARK (0x14d) with the zero ct mark of its flows,
-    /// knocking its packets off the VPN policy routes.
+    /// Conntrack mark; `-m connmark` ships in iptables-mod-conntrack-extra.
     pub ct_mark: Option<u32>,
-    /// Match on the owning socket's uid. nft: `meta skuid <N>`; iptables:
-    /// `-m owner --uid-owner <N>`. OUTPUT-chain only: input/forward packets
-    /// have no local socket, so the match never fires there (nft) or is
-    /// rejected outright by the kernel (iptables).
+    /// Owning socket uid. OUTPUT only: iptables rejects it on other chains.
     pub skuid: Option<u32>,
 }
 
@@ -205,31 +181,25 @@ impl Rule {
         self.matches.ct_mark = Some(mark);
         self
     }
-    /// Match on the owning socket's uid. Only valid on OUTPUT-chain rules —
-    /// see [`Match::skuid`].
+    /// OUTPUT only; see [`Match::skuid`].
     pub fn skuid(mut self, uid: u32) -> Self {
         self.matches.skuid = Some(uid);
         self
     }
-    /// Build a non-terminal `ct mark set <N>` rule (mangle prerouting).
     pub fn set_ct_mark(family: Family, mark: u32) -> Self {
         Self::new(family, Verdict::SetCtMark(mark))
     }
-    /// Build a non-terminal `meta mark set ct mark` rule (mangle prerouting/output).
     pub fn restore_mark(family: Family) -> Self {
         Self::new(family, Verdict::RestoreMark)
     }
-    /// An ICMP type match implies the ICMP protocol — set it here so no
-    /// backend has to guess. nft doesn't need the proto (`icmp type` carries
-    /// it), but iptables-restore rejects `--icmp-type` without `-p icmp` on
-    /// the line, and a builder that constructs proto-less ICMP rules shipped
-    /// that exact bug to every fw3 router from v1.27.0 to v1.33.1.
+    /// Sets the protocol too: iptables-restore rejects `--icmp-type`
+    /// without `-p icmp` on the same line.
     pub fn icmpv4_type(mut self, t: IcmpV4Type) -> Self {
         self.matches.proto = Some(Proto::Icmp);
         self.matches.icmpv4_type = Some(t);
         self
     }
-    /// See [`Self::icmpv4_type`]: implies `Proto::IcmpV6`.
+    /// See [`Self::icmpv4_type`].
     pub fn icmpv6_type(mut self, t: IcmpV6Type) -> Self {
         self.matches.proto = Some(Proto::IcmpV6);
         self.matches.icmpv6_type = Some(t);
@@ -241,7 +211,6 @@ impl Rule {
     }
 }
 
-/// Per-direction list of rules; renderers walk these in order.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Chain {
     pub rules: Vec<Rule>,
@@ -257,8 +226,6 @@ impl Chain {
     }
 }
 
-/// Filter-table chains: kill-switch policy with terminal accept/reject/drop
-/// verdicts.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FilterRules {
     pub input: Chain,
@@ -266,9 +233,7 @@ pub struct FilterRules {
     pub forward: Chain,
 }
 
-/// Mangle-table chains: mark setting and conntrack-mark restoration. Renderers
-/// emit nothing when both chains are empty, so existing all-filter policies
-/// produce byte-identical output.
+/// Renderers emit nothing for the mangle table when both chains are empty.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MangleRules {
     pub prerouting: Chain,
@@ -281,27 +246,21 @@ impl MangleRules {
     }
 }
 
-/// The full compiled policy: filter chains, mangle chains (for inbound
-/// service exemption), and the list of tunnel interfaces that need
-/// backend-specific NAT/forward integration.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RuleSet {
     pub filter: FilterRules,
     pub mangle: MangleRules,
-    /// Tunnel interfaces that need masquerade (fw3 + fw4) and forward_lan
-    /// integration (fw4). Empty in `Blocked` policies.
+    /// Interfaces needing masquerade/forward integration; empty in `Blocked`.
     pub tunnel_interfaces: Vec<String>,
 }
 
 impl RuleSet {
-    /// True if any rule carries a socket-uid match.
     pub fn has_skuid(&self) -> bool {
         self.all_chains().any(|c| c.rules.iter().any(|r| r.matches.skuid.is_some()))
     }
 
-    /// A copy with socket-uid-scoped exception rules removed. This is the
-    /// secure fw3 fallback when `-m owner` is unavailable: daemon reconnect
-    /// DNS may fail, but an unscoped DNS accept is never installed.
+    /// fw3 fallback without `-m owner`: the scoped exceptions are dropped,
+    /// never widened into unscoped accepts.
     pub fn without_skuid_rules(&self) -> RuleSet {
         let mut rs = self.clone();
         let chains = [
@@ -317,13 +276,8 @@ impl RuleSet {
         rs
     }
 
-    /// A copy with the mangle chains emptied. This is the fw3 fallback when
-    /// the iptables `CONNMARK` target is unavailable: every mangle rule we
-    /// emit is a CONNMARK set/restore, and one unparseable rule fails the
-    /// whole restore — taking the entire kill-switch (and the tunnel) down
-    /// with it. Inbound exemptions stop working; nothing else degrades. The
-    /// filter-side mark accepts stay: `-m mark` is a separate extension and
-    /// they are inert while nothing sets the mark.
+    /// fw3 fallback without the `CONNMARK` target. The filter-side mark
+    /// accepts stay: `-m mark` is a separate extension, inert while unset.
     pub fn without_mangle_rules(&self) -> RuleSet {
         let mut rs = self.clone();
         rs.mangle = MangleRules::default();
@@ -341,9 +295,6 @@ impl RuleSet {
         .into_iter()
     }
 
-    /// True if every rule that lacks a verdict-bearing match (the catch-all
-    /// final rules in OUTPUT and FORWARD) is `Reject` or `Drop`. Used by
-    /// tests to verify the kill-switch invariant.
     #[cfg(test)]
     pub fn output_terminates_in_block(&self) -> bool {
         matches!(
@@ -374,8 +325,6 @@ mod tests {
 
         let stripped = rs.without_mangle_rules();
         assert!(stripped.mangle.is_empty());
-        // Filter-side mark accepts survive — `-m mark` is a separate
-        // extension and inert while nothing sets the mark.
         assert_eq!(stripped.filter, rs.filter);
     }
 
@@ -389,7 +338,6 @@ mod tests {
 
         let stripped = rs.without_skuid_rules();
         assert!(!stripped.has_skuid());
-        // The scoped exception is removed, while unrelated rules are untouched.
         assert_eq!(stripped.filter.output.rules.len(), 1);
         assert_eq!(stripped.filter.output.rules[0].verdict, Verdict::Reject);
         assert_eq!(stripped.filter.input, rs.filter.input);

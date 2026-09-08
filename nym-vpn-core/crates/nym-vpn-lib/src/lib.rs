@@ -61,9 +61,8 @@ pub static DEFAULT_DNS_SERVERS: LazyLock<Vec<IpAddr>> = LazyLock::new(|| {
         .collect()
 });
 
-/// Who currently owns the system resolver's upstreams, i.e. whether the
-/// configured DNS servers are actually applied or the daemon has stepped aside
-/// for a user-managed resolver. See [`DnsUpstreamOwner`].
+/// Whether the daemon's DNS servers are applied or it has stepped aside for
+/// a user-managed resolver. See [`DnsUpstreamOwner`].
 pub fn dns_upstream_owner() -> DnsUpstreamOwner {
     match nym_dns::current_upstream_owner() {
         nym_dns::UpstreamOwner::Vpn => DnsUpstreamOwner::Vpn,

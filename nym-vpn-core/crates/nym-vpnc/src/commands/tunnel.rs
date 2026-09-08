@@ -120,8 +120,7 @@ impl Command {
                     "Legacy-split-tunnel: {}",
                     display_on_off(config.legacy_split_tunnel)
                 );
-                // Fronting needs cover domains published by the network
-                // environment; without them the setting has nothing to act on.
+                // Without published cover domains the setting has nothing to act on.
                 let cover_domains = match rpc_client.get_info().await {
                     Ok(info) => info.has_api_cover_domains(),
                     Err(_) => true,

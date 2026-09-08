@@ -72,9 +72,7 @@ impl TryFrom<proto::GatewayTestParams> for GatewayTestParams {
             timeout_ms: value.timeout_ms,
             top: value.top,
         };
-        // The explicit list is the one knob that is rejected rather than
-        // clamped; do it here so the daemon answers INVALID_ARGUMENT before
-        // any work starts.
+        // Validated here so the daemon answers INVALID_ARGUMENT before any work.
         params.dedup_gateways();
         params
             .validate()

@@ -280,9 +280,8 @@ async fn ready_state_command() -> anyhow::Result<()> {
         .assert_state(AccountControllerState::ReadyToConnect)
         .await;
 
-    // Switching refresh mode right after a sync only re-arms the timer: the account state is
-    // fresh, so neither direction triggers a sync. The awaited command after it proves both
-    // hints were consumed (same channel, in order).
+    // Fresh state: neither mode switch triggers a sync. The awaited command
+    // after them proves both hints were consumed (same channel, in order).
     assert_eq!(
         test_bench
             .command_sender

@@ -1,30 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! fw4 (nftables) backend for OpenWrt.
-//!
-//! Hosts kill-switch rules in its own `inet nym` table (priority `filter -10`
-//! so it runs before fw4) and integrates with fw4 via two owned chains in
-//! `inet fw4`:
-//!
-//! - `nym_postrouting` — jumped to from `srcnat`, holds the masquerade
-//!   rules for tunnel interfaces.
-//! - `nym_forward_lan` — jumped to from `forward_lan`, holds the accepts
-//!   that let fw4 forward traffic between LAN and the tunnel.
-//!
-//! Owning the chains means re-applies are atomic: flush + repopulate, no
-//! risk of stomping on user rules in fw4's own chains.
-//!
-//! A third table, `inet nym_boot`, is not ours to create: the fw4 include
-//! script installs it at firewall start to cover the window before this
-//! daemon's first policy (see [`FW4_BOOT_TABLE`]). Every apply and reset
-//! lifts it last, once the live state has converged.
-//!
-//! This backend keeps no persisted state of its own, but every entry point
-//! first makes sure the shared runtime directory
-//! ([`RUNTIME_DIR`](super::common::RUNTIME_DIR)) exists
-//! and is private to root: the init script's stop marker and the include's
-//! optional hints live there, and the include trusts them only from a
-//! directory that passes the same checks.
+//! fw4 (nftables) backend: kill-switch rules in an own `inet nym` table at
+//! `filter - 10` (ahead of fw4), plus two owned chains inside `inet fw4`
+//! (`nym_postrouting` from `srcnat`, `nym_forward_lan` from `forward_lan`).
+//! `inet nym_boot` is the include's to create; every apply and reset lifts
+//! it last. No persisted state, but the runtime directory is still verified
+//! because the include trusts hints there only from a directory that passes.
 
 use std::io::Write as IoWrite;
 use std::process::{Command, Stdio};
@@ -34,17 +15,12 @@ use super::render_nft;
 use super::rules::RuleSet;
 use super::{Error, Result};
 
-/// Chain in `inet fw4` that hosts our masquerade rules.
 const NAT_CHAIN: &str = "nym_postrouting";
-/// Chain in `inet fw4` that hosts our LAN↔tunnel forward accepts.
 const FORWARD_CHAIN: &str = "nym_forward_lan";
-/// fw4's parent chains we jump into.
 const FW4_SRCNAT: &str = "srcnat";
 const FW4_FORWARD_LAN: &str = "forward_lan";
 
-/// Apply the [`RuleSet`] to fw4. Order is deliberate: install the kill-switch
-/// table first (fail-closed) before touching fw4's chains for masquerade, and
-/// lift the boot-time block only once both are in place.
+/// Kill-switch table first, then fw4 integration, then lift the boot block.
 pub fn apply(rs: &RuleSet) -> Result<()> {
     tracing::debug!("Applying firewall policy via fw4/nftables backend");
     ensure_runtime_dir()?;
@@ -60,32 +36,23 @@ pub fn apply(rs: &RuleSet) -> Result<()> {
     Ok(())
 }
 
-/// Install only the LAN↔tunnel forwarding plane (masquerade + forward accepts),
-/// dropping any kill-switch blocking table. Used when the kill-switch is off:
-/// routing into the tunnel is unconditional, so the tunnel must still NAT and
-/// forward LAN traffic, but nothing is fenced off from the WAN.
+/// Kill-switch off: forwarding plane only, blocking table removed.
 pub fn apply_forwarding_only(rs: &RuleSet) -> Result<()> {
     tracing::debug!("Applying tunnel forwarding plane (kill-switch off) via fw4/nftables");
     ensure_runtime_dir()?;
 
-    // Lift any blocking left over from a previous kill-switch-on state.
     delete_nym_table();
 
     integrate_with_fw4(&rs.tunnel_interfaces)?;
 
-    // Kill-switch off means no boot-time block either; the include reads
-    // the same setting and would remove it on the next reload, but the user
-    // asked for an open firewall now.
     remove_boot_block()?;
 
     tracing::debug!("Tunnel forwarding plane applied successfully");
     Ok(())
 }
 
-/// Remove our kill-switch table and integration chains. Best-effort: any
-/// step that fails because state is already absent is logged and ignored.
-/// The one exception is a boot-time block that exists and cannot be removed
-/// — that is reported, since it would leave WAN egress blackholed.
+/// Best-effort, except a boot block that exists and cannot be removed: that
+/// would leave WAN egress blackholed, so it is reported.
 pub fn reset() -> Result<()> {
     tracing::debug!("Resetting firewall policy via fw4/nftables backend");
     ensure_runtime_dir()?;
@@ -98,14 +65,8 @@ pub fn reset() -> Result<()> {
     Ok(())
 }
 
-/// Lift the boot-time kill-switch block the fw4 include installs at firewall
-/// start (`inet nym_boot`, see [`FW4_BOOT_TABLE`]). Called last in every
-/// apply and reset so it goes only once the live state has converged. Cheap
-/// when absent: one existence probe. A block that exists and cannot be
-/// removed fails the operation rather than reporting a working connection
-/// while WAN egress is still blackholed. The include may be lifting it
-/// concurrently (it re-checks after installing), so "gone by the time we
-/// delete it" is success.
+/// Called last so the block goes only once live state has converged. The
+/// include may be lifting it concurrently, so "already gone" is success.
 fn remove_boot_block() -> Result<()> {
     if !table_exists(FW4_BOOT_TABLE)? {
         return Ok(());
@@ -132,7 +93,6 @@ fn table_exists(name: &str) -> Result<bool> {
         .map_err(|e| Error::ApplyError(format!("spawn nft list table {name}: {e}")))
 }
 
-/// Delete the `inet nym` kill-switch table. Best-effort; ignores absence.
 fn delete_nym_table() {
     let output = Command::new("nft")
         .args(["delete", "table", "inet", "nym"])
@@ -176,8 +136,6 @@ fn run_nft_script(script: &str) -> Result<()> {
     Ok(())
 }
 
-/// Install our chains + jumps in `inet fw4` and populate them with one
-/// masquerade and one forward-accept rule per tunnel interface.
 fn integrate_with_fw4(interfaces: &[String]) -> Result<()> {
     ensure_chain(NAT_CHAIN)?;
     ensure_chain(FORWARD_CHAIN)?;
@@ -188,12 +146,9 @@ fn integrate_with_fw4(interfaces: &[String]) -> Result<()> {
         add_rule(&[
             "add", "rule", "inet", "fw4", NAT_CHAIN, "oifname", iface, "counter", "masquerade",
         ])?;
-        // Clamp TCP MSS to the path MTU for flows entering/leaving the tunnel.
-        // The 2-hop WG tun runs at 1340 bytes; without clamping, LAN clients
-        // negotiate MSS 1460 against their own 1500 link and full-size segments
-        // blackhole whenever ICMP frag-needed is lost (PMTU blackhole: pages
-        // hang, bulk transfers limp). `rt mtu` uses the packet's route MTU, so
-        // this is inert for the 1500-MTU mixnet tun. Must precede the accepts.
+        // MSS clamp: the 1340-MTU WG tun blackholes full-size segments when
+        // ICMP frag-needed is lost. `rt mtu` is inert for the 1500-MTU mixnet
+        // tun. Must precede the accepts.
         add_rule(&[
             "add", "rule", "inet", "fw4", FORWARD_CHAIN, "oifname", iface, "tcp", "flags",
             "syn", "tcp", "option", "maxseg", "size", "set", "rt", "mtu",
@@ -205,9 +160,7 @@ fn integrate_with_fw4(interfaces: &[String]) -> Result<()> {
         add_rule(&[
             "add", "rule", "inet", "fw4", FORWARD_CHAIN, "oifname", iface, "accept",
         ])?;
-        // Allow return traffic from tunnel to LAN (the ct established rule
-        // in our table covers traffic the router originated; this lets the
-        // forwarded LAN flows resume after the kill-switch state changes).
+        // Return traffic to the LAN; `inet nym` only covers router-originated flows.
         add_rule(&[
             "add", "rule", "inet", "fw4", FORWARD_CHAIN, "iifname", iface, "ct", "state",
             "established,related", "accept",
@@ -220,7 +173,6 @@ fn integrate_with_fw4(interfaces: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// Remove jumps from fw4's chains, then delete our chains. Best-effort.
 fn remove_integration() {
     remove_jumps(FW4_SRCNAT, NAT_CHAIN);
     remove_jumps(FW4_FORWARD_LAN, FORWARD_CHAIN);
@@ -241,10 +193,7 @@ fn remove_integration() {
 }
 
 fn ensure_chain(name: &str) -> Result<()> {
-    // `nft add chain` is idempotent if the chain spec is identical, but
-    // gives a non-zero exit + "File exists" stderr if it already exists.
-    // Treat both as success; only "real" errors (no fw4 table, no nft
-    // binary) should fail us here.
+    // `nft add chain` exits non-zero with "File exists" on some versions.
     let output = Command::new("nft")
         .args(["add", "chain", "inet", "fw4", name])
         .output()
@@ -293,9 +242,6 @@ fn add_rule(args: &[&str]) -> Result<()> {
     }
 }
 
-/// Add a `jump <target>` rule to a fw4 chain unless one is already present.
-/// We match structurally on `jump <name>`, so a user rule that merely
-/// mentions our chain name in a comment can never collide with ours.
 fn ensure_jump(parent: &str, target: &str) -> Result<()> {
     let listing = Command::new("nft")
         .args(["list", "chain", "inet", "fw4", parent])
@@ -314,7 +260,6 @@ fn ensure_jump(parent: &str, target: &str) -> Result<()> {
     add_rule(&["add", "rule", "inet", "fw4", parent, "jump", target])
 }
 
-/// Remove every `jump <target>` rule from `parent`. Best-effort.
 fn remove_jumps(parent: &str, target: &str) {
     let listing = match Command::new("nft")
         .args(["-a", "list", "chain", "inet", "fw4", parent])
@@ -368,9 +313,7 @@ mod tests {
     use super::super::common::{FW4_POLICY_PATH, IFACES_PATH, RUNTIME_DIR};
     use super::*;
 
-    /// The include script that installs the boot-time block this backend
-    /// lifts. Scanned line by line so a rename on either side fails here
-    /// instead of leaving a table nobody deletes.
+    /// A rename on either side must fail here, not leave a table nobody deletes.
     const INCLUDE: &str = include_str!("../../scripts/fw4-include.sh");
 
     fn lines() -> impl Iterator<Item = &'static str> {
@@ -379,8 +322,6 @@ mod tests {
 
     #[test]
     fn include_script_names_the_same_tables() {
-        // The boot table name comes from the generated fragment, which
-        // boot_rules renders from FW4_BOOT_TABLE.
         assert!(
             lines().any(|l| l == "BOOT_TABLE=\"$NYM_BOOT_TABLE\""),
             "fw4-include.sh must take the boot table name from fw-rules.sh"
@@ -392,9 +333,7 @@ mod tests {
         assert!(lines().any(|l| l == "NYM_TABLE=\"nym\""));
     }
 
-    /// The include installs the boot block from the generated fragment,
-    /// never from nft text of its own. Rule content is tested in
-    /// `boot_rules`.
+    /// Rule content is tested in `boot_rules`.
     #[test]
     fn include_script_installs_the_generated_boot_block() {
         assert!(
@@ -420,8 +359,6 @@ mod tests {
         }
     }
 
-    /// The include's optional hint files live in the runtime directory and
-    /// are only read once it has been verified.
     #[test]
     fn include_script_reads_hints_from_the_runtime_dir_only() {
         let default = format!("NYM_RUNTIME_DIR=\"${{NYM_RUNTIME_DIR:-{RUNTIME_DIR}}}\"");
@@ -457,7 +394,6 @@ mod tests {
 
     #[test]
     fn include_script_only_ever_deletes_the_boot_table() {
-        // `inet nym` is the daemon's; the include may probe it, never drop it.
         for line in lines().filter(|l| l.contains("delete table inet")) {
             assert!(
                 line.contains("$BOOT_TABLE"),

@@ -45,9 +45,7 @@ return baseclass.extend({
         params: ['entry_country', 'exit_country', 'entry_id', 'exit_id', 'entry_random', 'exit_random', 'residential_exit']
     }),
 
-    // Full typed list for one gateway type, served by the Rust rpcd bridge.
-    // The view derives the country dropdown and per-country lists from one
-    // response instead of a round-trip per country.
+    // Served by the Rust rpcd bridge; one response feeds every per-country list.
     gatewayListFull: rpc.declare({
         object: 'nym-vpn',
         method: 'gateway_list_full',
@@ -78,8 +76,7 @@ return baseclass.extend({
         params: ['ipv6', 'two_hop', 'killswitch', 'circumvention', 'legacy_split_tunnel', 'stealth_api']
     }),
 
-    // Mixnet tuning shares the tunnel_set ubus method (no new ACL surface);
-    // separate declaration so callers don't have to pad the tunnel params.
+    // Shares the tunnel_set ubus method so no new ACL surface is needed.
     mixnetTuningSet: rpc.declare({
         object: 'nym-vpn',
         method: 'tunnel_set',
@@ -212,8 +209,6 @@ return baseclass.extend({
         params: ['enabled']
     }),
 
-    // Anonymous network statistics (`nym-vpnc network-stats`). Both params are
-    // optional on set; the view only drives `enabled`.
     statsGet: rpc.declare({
         object: 'nym-vpn',
         method: 'stats_get',

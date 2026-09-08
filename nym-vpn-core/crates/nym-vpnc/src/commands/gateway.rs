@@ -421,8 +421,7 @@ impl TestArgs {
             timeout_ms,
             top: self.top,
         };
-        // Same rules the daemon applies, so the mistake is reported here
-        // with the flag's name instead of as an RPC error.
+        // Same rules as the daemon, so the error names the flag, not the RPC.
         params.dedup_gateways();
         params.validate().map_err(|e| anyhow!("--id: {e}"))?;
         Ok(params)

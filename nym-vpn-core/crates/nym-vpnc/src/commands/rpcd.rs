@@ -1,23 +1,14 @@
 // Copyright 2026 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// ubus rpcd bridge for the OpenWrt LuCI app.
+// ubus rpcd bridge for the OpenWrt LuCI app, speaking the rpcd "script
+// plugin" protocol (`list`; `call <method>` with JSON args on stdin). The
+// shell plugin at /usr/libexec/rpcd/nym-vpn is a one-line exec of this.
 //
-// Speaks the rpcd "script plugin" protocol: `call <method>` reads the JSON
-// argument object from stdin and prints a JSON reply on stdout. The shell
-// plugin at /usr/libexec/rpcd/nym-vpn delegates methods here via `exec`,
-// replacing its previous approach of screen-scraping nym-vpnc's
-// human-formatted output (hundreds of awk/sed forks per request — the reason
-// gateway loading timed out on slow routers).
-//
-// Contract notes:
-// - Replies must be JSON on stdout with exit status 0 even when the daemon is
-//   unreachable; rpcd turns a non-zero exit or non-JSON output into an opaque
-//   ubus error the UI can't act on. Degraded shapes mirror what the shell
-//   handlers produced when `nym-vpnc` failed, so the frontend's fallbacks
-//   keep working unchanged.
-// - The gRPC client is created per call, lazily: methods must keep answering
-//   while nym-vpnd is down (the UI's daemon-restart flow depends on it).
+// Replies must be JSON on stdout with exit status 0 even when the daemon is
+// unreachable: rpcd turns anything else into an opaque ubus error. The gRPC
+// client is created per call so methods keep answering while nym-vpnd is
+// down (the UI's daemon-restart flow depends on it).
 
 use std::collections::BTreeMap;
 use std::io::Read;
@@ -37,9 +28,7 @@ use nym_vpn_proto::rpc_client::RpcClient;
 
 use crate::display_helpers::{LEWES_PROTOCOL_LINE, LEWES_PROTOCOL_STATE, display_on_off};
 
-/// How long the /tmp id→(name, country) maps stay fresh. Matches the daemon's
-/// own directory cache so a stale-but-present file is never older than one
-/// daemon refresh behind.
+/// Matches the daemon's own directory cache interval.
 const NAME_CACHE_TTL: Duration = Duration::from_secs(5 * 60);
 
 #[derive(Debug, Clone, clap::Args)]
@@ -77,9 +66,7 @@ impl Args {
     }
 }
 
-/// Methods currently owned by this bridge. The shell plugin still owns the
-/// authoritative `list` answer to rpcd (it aggregates ported and unported
-/// methods); this output documents the ported subset.
+/// The `list` answer rpcd sees; the shell plugin just execs this bridge.
 fn method_signatures() -> Value {
     json!({
         "init": {},
@@ -136,11 +123,8 @@ fn method_signatures() -> Value {
     })
 }
 
-/// Methods whose ubus signature declares parameters. Only these read stdin:
-/// rpcd closes the pipe after writing the argument object, but other callers
-/// (interactive testing, scripts) may leave stdin open — a no-arg method must
-/// not block on it, exactly like the old shell that only `read input` where
-/// arguments were expected.
+/// Only these read stdin: rpcd closes the pipe after the argument object, but
+/// other callers may leave it open, and a no-arg method must not block on it.
 fn method_takes_args(method: &str) -> bool {
     matches!(
         method,
@@ -168,8 +152,6 @@ fn method_takes_args(method: &str) -> bool {
 
 fn read_stdin_args() -> Value {
     let mut buf = String::new();
-    // rpcd writes the argument object and closes the pipe. Anything
-    // unreadable degrades to {}.
     if std::io::stdin().read_to_string(&mut buf).is_err() {
         return json!({});
     }
@@ -367,9 +349,6 @@ async fn connect_and_fetch(gw_type: GatewayType) -> Result<Vec<Gateway>> {
 fn count_countries(gateways: &[Gateway]) -> BTreeMap<String, u64> {
     let mut counts = BTreeMap::new();
     for gw in gateways {
-        // The old parser only counted rows with a "[XX]" location; gateways
-        // without a location stay excluded for the same reason (no country to
-        // file them under).
         if let Some(location) = &gw.location {
             *counts
                 .entry(location.two_letter_iso_country_code.clone())
@@ -389,8 +368,7 @@ async fn gateway_list_countries(args: &Value) -> Value {
                 .collect::<Vec<_>>();
             json!({ "countries": countries })
         }
-        // The shell shape on failure was an empty array (no matches in the
-        // error text); the frontend shows "Failed to load" on empty + error.
+        // The frontend shows "Failed to load" on empty + error.
         Err(err) => json!({ "countries": [], "error": format!("{err:#}") }),
     }
 }
@@ -450,8 +428,7 @@ fn read_name_cache(path: &PathBuf, max_age: Option<Duration>) -> Option<NameMap>
 }
 
 fn write_name_cache(path: &PathBuf, map: &NameMap) {
-    // Best-effort, atomic within /tmp so a concurrent status poll never sees
-    // a half-written file.
+    // Rename so a concurrent status poll never sees a half-written file.
     let Ok(serialized) = serde_json::to_string(map) else {
         return;
     };
@@ -461,10 +438,8 @@ fn write_name_cache(path: &PathBuf, map: &NameMap) {
     }
 }
 
-/// id → (name, country) for one list type, backed by a /tmp cache so the
-/// UI's 5-second status poll doesn't pull the full directory list from the
-/// daemon every time. Falls back to a stale cache when the daemon fetch
-/// fails, and to None (id-only display upstream) when there is nothing.
+/// id -> (name, country), cached in /tmp so the 5-second status poll does not
+/// pull the full directory each time. Stale cache on daemon failure.
 async fn gateway_name_map(client: &mut RpcClient, gw_type: GatewayType) -> Option<NameMap> {
     let path = name_cache_path(gw_type);
     if let Some(map) = read_name_cache(&path, Some(NAME_CACHE_TTL)) {
@@ -493,11 +468,9 @@ async fn gateway_name_map(client: &mut RpcClient, gw_type: GatewayType) -> Optio
 // status
 //-------------------------------------------------------------------------------
 
-/// Marks a reply as "the daemon never answered", plus enough detail for the
-/// UI to say what to do about it. Every degraded shape must carry this: a
-/// frontend that cannot tell "unreachable" from a real answer ends up
-/// rendering "no account configured" for a question it never got to ask,
-/// which reads to the user as their credentials having been wiped.
+/// Every degraded shape must carry this: a frontend that cannot tell
+/// "unreachable" from a real answer renders "no account configured", which
+/// reads as wiped credentials.
 fn insert_unavailable(out: &mut serde_json::Map<String, Value>) {
     out.insert("available".into(), json!(false));
     out.insert("daemon_running".into(), json!(initd_running("nym-vpnd")));
@@ -585,9 +558,6 @@ async fn status() -> Value {
             out.insert("state".into(), json!("connected"));
             out.insert("connected".into(), json!(true));
 
-            // Session timer from the daemon's own connection timestamp: exact,
-            // browser-independent, and it survives rpcd/vpnc restarts (the old
-            // shell needed a /tmp marker file for this).
             let connected_since = connection_data.connected_at.unix_timestamp();
             let elapsed = (now_unix() - connected_since).max(0);
             out.insert("connected_since".into(), json!(connected_since.to_string()));
@@ -699,8 +669,7 @@ async fn status() -> Value {
             emit_account_error(&mut client, &mut out).await;
         }
         state @ TunnelState::Offline { .. } => {
-            // The shell bridge had no Offline mapping and reported "unknown";
-            // kept for frontend compatibility (treated as not-connected).
+            // "unknown" is what the frontend expects for Offline.
             out.insert("state".into(), json!("unknown"));
             out.insert("connected".into(), json!(false));
             out.insert("raw_state".into(), json!(format!("State: {state}")));
@@ -715,9 +684,7 @@ async fn status() -> Value {
 // gateway_get
 //-------------------------------------------------------------------------------
 
-/// The `entry_point`/`exit_point` display strings the shell produced from the
-/// daemon's debug output: bare id for a pinned gateway, "Random [XX]" for a
-/// country constraint, "Random" for random.
+/// Display strings the frontend parses: bare id, "Random [XX]", "Random".
 fn format_entry_point(point: &EntryPoint) -> String {
     match point {
         EntryPoint::Gateway { identity } => identity.to_base58_string(),
@@ -740,8 +707,7 @@ fn format_exit_point(point: &ExitPoint) -> String {
     }
 }
 
-/// (type, pinned id, country) for one side of the saved config, in the same
-/// vocabulary emit_point_fields used: gateway/country/random/other.
+/// (type, pinned id, country) for one side: gateway/country/random/other.
 type PointKind = (&'static str, Option<String>, Option<String>);
 
 fn classify_entry_point(point: &EntryPoint) -> PointKind {
@@ -778,8 +744,6 @@ async fn insert_point_fields(
 
     if let Some(id) = id {
         out.insert(format!("{side}_id"), json!(id));
-        // One cached map resolves both country and name; empty when the
-        // directory is unreachable, and the UI degrades to id-only.
         if let Some(map) = gateway_name_map(client, list_type).await
             && let Some((name, country)) = map.get(&id)
         {
@@ -796,8 +760,6 @@ async fn insert_point_fields(
 }
 
 async fn gateway_get() -> Value {
-    // Degraded shape on any failure mirrors the shell handler when nym-vpnc
-    // errored: empty display strings, no per-side fields.
     let degraded = |err: String| {
         json!({
             "entry_point": "",
@@ -889,8 +851,7 @@ async fn info() -> Value {
 // gateway_set
 //-------------------------------------------------------------------------------
 
-/// Mirrors the shell handler: id takes priority over country, invalid values
-/// are silently dropped (never an error), and "no parameters at all" fails.
+/// id takes priority over country; invalid values are silently dropped.
 async fn gateway_set(args: &Value) -> Value {
     let entry_point = if let Some(id) = arg_str(args, "entry_id") {
         NodeIdentity::from_base58_string(id)
@@ -958,7 +919,6 @@ fn opt_u32_string(value: Option<u32>) -> String {
     value.map(|v| v.to_string()).unwrap_or_default()
 }
 
-/// The core on/off flags shared by tunnel_get and tunnel_set's config echo.
 fn tunnel_flags_json(config: &VpnServiceConfig) -> serde_json::Map<String, Value> {
     let mut out = serde_json::Map::new();
     out.insert("ipv6".into(), json!(display_on_off(!config.disable_ipv6)));
@@ -1033,8 +993,7 @@ async fn tunnel_get() -> Value {
         _ => unreachable!(),
     };
 
-    // Stealth API has nothing to route through when the environment publishes
-    // no cover domains; say so rather than letting the toggle pretend.
+    // Without published cover domains the toggle has nothing to act on.
     let cover_domains = match client.get_info().await {
         Ok(info) => info.has_api_cover_domains(),
         Err(_) => true,
@@ -1046,8 +1005,7 @@ async fn tunnel_get() -> Value {
     };
     out.insert("stealth_api_note".into(), json!(stealth_api_note));
 
-    // Reconstruction of the old `nym-vpnc tunnel get` text; nothing parses it
-    // anymore, but it is surfaced in diagnostics views.
+    // `nym-vpnc tunnel get` text, surfaced in diagnostics views only.
     let inbound = if config.inbound_exemptions.is_empty() {
         "none".to_owned()
     } else {
@@ -1088,7 +1046,7 @@ async fn tunnel_set(args: &Value) -> Value {
     let legacy_split_tunnel = arg_onoff(args, "legacy_split_tunnel");
     let circumvention = arg_onoff(args, "circumvention");
     let stealth_api = arg_onoff(args, "stealth_api");
-    // Numeric ranges mirror the shell (and daemon-side) validation.
+    // Ranges mirror the daemon-side validation.
     let loop_cover_delay = arg_u32(args, "loop_cover_delay").filter(|v| *v <= 200);
     let packet_delay = arg_u32(args, "packet_delay").filter(|v| *v <= 200);
     let message_delay = arg_u32(args, "message_delay").filter(|v| (5..=50).contains(v));
@@ -1117,9 +1075,8 @@ async fn tunnel_set(args: &Value) -> Value {
         Err(err) => return fail(format!("{err:#}")),
     };
 
-    // Same application order as `nym-vpnc tunnel set`: killswitch before
-    // legacy_split_tunnel, so the daemon-side mutual exclusion sees the same
-    // sequence the CLI produced.
+    // killswitch before legacy_split_tunnel, like `nym-vpnc tunnel set`, so the
+    // daemon-side mutual exclusion sees the same sequence.
     let result: Result<()> = async {
         if let Some(killswitch) = killswitch {
             client.set_killswitch(killswitch).await?;
@@ -1204,8 +1161,7 @@ async fn account_get() -> Value {
     json!({
         "identity": identity,
         "state": state,
-        // Positive signal that this is the daemon's own answer, so an empty
-        // state here means "no account", not "could not ask".
+        // An empty state here means "no account", not "could not ask".
         "available": true,
         "raw_info": format!("Account identity: {identity}\nAccount state: {state}"),
     })
@@ -1225,7 +1181,7 @@ async fn account_set(args: &Value) -> Value {
     if !valid_mnemonic(mnemonic) {
         return fail("Invalid mnemonic format");
     }
-    // Mirrors the shell: anything but "decentralised" is treated as "api".
+    // Anything but "decentralised" is "api".
     let request = if arg_str(args, "mode") == Some("decentralised") {
         StoreAccountRequest::Decentralised {
             mnemonic: mnemonic.to_owned(),
@@ -1317,8 +1273,7 @@ async fn network_set(args: &Value) -> Value {
 }
 
 async fn lan_get() -> Value {
-    // The shell forwarded the whole `nym-vpnc lan get` line as "policy";
-    // reproduced verbatim for compatibility.
+    // The frontend parses the whole `nym-vpnc lan get` line.
     let mut client = match RpcClient::new().await {
         Ok(client) => client,
         Err(err) => return json!({ "policy": format!("{err:#}") }),
@@ -1474,11 +1429,8 @@ fn dns_json(config: &VpnServiceConfig) -> Value {
     })
 }
 
-/// `dns_json` plus a `user_managed` flag telling the UI the configured servers
-/// are not in force, so it can stop presenting a setting the resolver ignores.
-/// The flag is omitted rather than set false when the daemon can't answer (one
-/// too old to have the call): no claim beats a wrong one. Nothing is logged on
-/// the error path on purpose — stdout is the ubus reply channel.
+/// `user_managed` is omitted, not set false, when the daemon cannot answer
+/// (too old for the call). Nothing is logged: stdout is the reply channel.
 async fn dns_json_with_owner(client: &mut RpcClient, config: &VpnServiceConfig) -> Value {
     let mut out = dns_json(config);
     if let (Some(obj), Ok(owner)) = (out.as_object_mut(), client.get_dns_upstream_owner().await) {
@@ -1512,8 +1464,7 @@ async fn dns_set(args: &Value) -> Value {
             client.set_enable_custom_dns(enabled).await?;
         }
         if let Some(servers) = servers_arg {
-            // Mirror the shell: invalid entries are silently dropped; an
-            // explicitly empty list (with an enabled flag present) clears.
+            // Invalid entries are dropped; an explicitly empty list clears.
             let valid: Vec<std::net::IpAddr> = servers
                 .split_whitespace()
                 .filter_map(|s| s.parse().ok())
@@ -1650,8 +1601,7 @@ async fn diagnostic_run(args: &Value) -> Value {
         Err(err) => return fail(format!("{err:#}")),
     };
     match client.run_diagnostic(params).await {
-        // The report travels as a JSON *string* field — the LuCI view parses
-        // it itself, same as with the old passthrough of vpnc's stdout.
+        // The report is a JSON string field; the LuCI view parses it itself.
         Ok(report) => match serde_json::to_string_pretty(&report) {
             Ok(text) => json!({ "success": true, "report": text }),
             Err(err) => fail(format!("failed to serialize report: {err}")),
@@ -1679,9 +1629,7 @@ fn initd_running(service: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Whether the service has its /etc/rc.d start symlink, i.e. whether it comes
-/// back on the next boot. `enabled` answers through the exit status and prints
-/// nothing, so cmd_stdout can't be reused here.
+/// `enabled` answers through the exit status and prints nothing.
 fn initd_enabled(service: &str) -> bool {
     std::process::Command::new(format!("/etc/init.d/{service}"))
         .arg("enabled")
@@ -1697,16 +1645,13 @@ fn daemon_status() -> Value {
     json!({
         "status": if running { "running" } else { "stopped" },
         "running": running,
-        // Running but not enabled is a real state users land in (an upgrade
-        // that stops+disables and never re-enables), and it is invisible
-        // unless we report it: everything works until the next reboot.
+        // Running-but-disabled (a failed upgrade) is invisible until the next reboot.
         "enabled": initd_enabled("nym-vpnd"),
     })
 }
 
-/// dnsmasq-full advertises `nftset` in its compile-time options; the base
-/// build advertises `no-nftset` (which is why plain substring matching on
-/// "nftset" is not enough).
+/// The base dnsmasq build advertises `no-nftset`, so substring matching on
+/// "nftset" is not enough.
 fn nftset_supported_in(version_output: &str) -> bool {
     let mut has = false;
     for token in version_output.split_whitespace() {
@@ -1725,8 +1670,7 @@ fn nftset_supported() -> bool {
         .unwrap_or(false)
 }
 
-/// Parse `uci -q show nym-vpn` into the exclusion list, preserving file
-/// order (mirrors config_foreach). Sections without a `type` are skipped.
+/// Preserves file order; sections without a `type` are skipped.
 fn parse_split_exclusions(uci_show: &str) -> Vec<Value> {
     let mut order: Vec<String> = Vec::new();
     let mut options: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
@@ -1785,8 +1729,6 @@ fn split_list() -> Value {
 }
 
 async fn split_status() -> Value {
-    // killswitch / legacy_split_tunnel come from the daemon config; empty
-    // strings when it is unreachable (mirrors the failed-grep shell shape).
     let (killswitch, legacy) = match RpcClient::new().await {
         Ok(mut client) => match client.get_config().await {
             Ok(config) => (
@@ -1831,13 +1773,12 @@ fn clients_list() -> Value {
     json!({ "clients": clients })
 }
 
-/// Where the always-on watchdog publishes its state. Under /var/run (root-owned
-/// 0755 on OpenWrt) rather than /tmp, so nothing unprivileged can plant a file
-/// there for this root-run bridge to read.
+/// Under root-owned /var/run, not /tmp: nothing unprivileged may plant a file
+/// for this root-run bridge to read.
 const WATCHDOG_STATE_PATH: &str = "/var/run/nym-watchdog.state";
 
-/// Read the watchdog state file without following a symlink or blocking on a
-/// FIFO: open no-follow and non-blocking, then insist on a regular file.
+/// No-follow and non-blocking, then insist on a regular file: a planted
+/// symlink or FIFO must not be followed or block.
 fn read_watchdog_state() -> std::io::Result<String> {
     use std::os::unix::fs::OpenOptionsExt;
 
@@ -1939,8 +1880,7 @@ fn watchdog_get() -> Value {
 }
 
 fn strip_ansi(input: &str) -> String {
-    // Strips CSI sequences (ESC '[' ... final byte) — the tracing crate's
-    // color output; LuCI's RPC pipeline doesn't preserve raw 0x1b bytes.
+    // CSI sequences from tracing's color output; LuCI drops raw 0x1b bytes.
     let mut out = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();
     while let Some(c) = chars.next() {
@@ -1972,13 +1912,9 @@ fn logs_get(args: &Value) -> Value {
 }
 
 //-------------------------------------------------------------------------------
-// Split-tunnel exclusions (UCI /etc/config/nym-vpn `exclusion` sections)
-//
-// Managed nftables drop-in + dnsmasq nftset bridge. Matching packets are
-// marked with the daemon's bypass fwmark (0x14e), which the always-installed
-// priority-90 ip rule routes out the real WAN. See docs/guide/split-tunneling.md.
-// The generated artifacts (nft file, dhcp uci section) are byte-compatible
-// with what the retired shell implementation produced.
+// Split-tunnel exclusions (UCI `exclusion` sections): an nftables drop-in
+// marks matching packets with the bypass fwmark 0x14e, which the priority-90
+// ip rule routes out the real WAN. See docs/guide/split-tunneling.md.
 //-------------------------------------------------------------------------------
 
 const SPLIT_NFT: &str = "/etc/nftables.d/30-nym-split.nft";
@@ -2038,12 +1974,9 @@ fn valid_domain(domain: &str) -> Option<String> {
     Some(domain.to_ascii_lowercase())
 }
 
-/// Content-keyed stable section name — see the retired shell's
-/// _split_section_name: anonymous `cfgXXXX` ids are renumbered by libuci on
-/// commit, so ids handed to the frontend went stale. MACs map to a readable
-/// `cli_<hex>`; domains are hashed (`dom_<md5/16>`) to stay within UCI's
-/// `[A-Za-z0-9_]` charset. md5sum is shelled out to keep the hash (and thus
-/// existing section names on upgraded installs) identical.
+/// Content-keyed section names: anonymous `cfgXXXX` ids are renumbered by
+/// libuci on commit. Domains are md5-hashed to fit UCI's `[A-Za-z0-9_]`;
+/// md5sum is shelled out so existing section names survive upgrades.
 fn split_section_name(kind: &str, mac: &str, domain: &str) -> Option<String> {
     match kind {
         "client" => Some(format!("cli_{}", mac.replace(':', "").to_ascii_lowercase())),
@@ -2064,7 +1997,6 @@ fn split_section_name(kind: &str, mac: &str, domain: &str) -> Option<String> {
     }
 }
 
-/// The exact bytes the shell's _split_write_nft emitted.
 fn render_split_nft(clients: &[String], domains: &[String]) -> String {
     let mut out = String::new();
     out.push_str("# Managed by luci-app-nym-vpn — do not edit by hand.\n");
@@ -2090,8 +2022,7 @@ fn render_split_nft(clients: &[String], domains: &[String]) -> String {
     out
 }
 
-/// Regenerate the nft drop-in + dnsmasq nftset lines from stored exclusions
-/// and reload. Idempotent; safe with an empty list (tears everything down).
+/// Idempotent; an empty list tears everything down.
 fn regen_split() {
     let mut clients: Vec<String> = Vec::new();
     let mut domains: Vec<String> = Vec::new();
@@ -2114,9 +2045,7 @@ fn regen_split() {
         }
     }
 
-    // dnsmasq nftset bridge (only meaningful with nftset support present).
-    // OpenWrt's dnsmasq translates `config ipset` into both --ipset and
-    // --nftset directives; on fw4 the --nftset one populates our sets.
+    // OpenWrt's dnsmasq turns `config ipset` into --nftset directives on fw4.
     uci_run(&["-q", "delete", "dhcp.nym_split_ipset"]);
     if !domains.is_empty() && nftset_supported() {
         uci_run(&["set", "dhcp.nym_split_ipset=ipset"]);
@@ -2285,11 +2214,8 @@ fn daemon_stop() -> Value {
 }
 
 fn daemon_restart() -> Value {
-    // An in-place `restart` re-launches the daemon too quickly: it can come
-    // back before the previous instance has released its socket/state, which
-    // leaves the account controller wedged (the 1.27.1 reports where "restart
-    // does not work" but stop → wait → start does). Sequence it explicitly
-    // with a gap so the old instance fully tears down first.
+    // A plain `restart` relaunches before the old instance releases its
+    // socket/state and wedges the account controller; sequence it with a gap.
     initd_run("nym-vpnd", "stop");
     sleep_secs(3);
     initd_run("nym-vpnd", "start");
@@ -2297,22 +2223,14 @@ fn daemon_restart() -> Value {
     daemon_state_json("Daemon restarted successfully", "Daemon failed to start")
 }
 
-/// Hard recovery for the account-state desync where `account forget` can't
-/// clear a stranded account: forget requires the tunnel to be Disconnected,
-/// and an account error (e.g. Device Time Desynced) strands it in
-/// Error/Disconnecting, so the command is rejected and the stored mnemonic is
-/// never removed. This mirrors the proven manual fix (stop daemon, wipe the
-/// account/key store under the data dir, start again with a delay), bypassing
-/// the forget precondition. Only /etc/nym/data (mnemonic, device keys,
-/// credentials and wireguard-keys DBs, mixnet identity) is wiped; UCI settings
-/// and the global config in /etc/nym are left untouched.
+/// Hard recovery when `account forget` is rejected because an account error
+/// strands the tunnel outside Disconnected. Wipes only /etc/nym/data; UCI
+/// settings and the global config stay.
 fn account_reset() -> Value {
     initd_run("nym-vpnd", "stop");
-    // Give procd time to tear down the tunnel and release the data dir before
-    // we delete it — a plain `restart` is too quick and leaves stale state.
+    // procd needs time to release the data dir before it is deleted.
     sleep_secs(3);
 
-    // Belt-and-braces: kill any lingering process holding the data dir open.
     let _ = std::process::Command::new("killall").arg("nym-vpnd").output();
     sleep_secs(1);
 
@@ -2320,8 +2238,7 @@ fn account_reset() -> Value {
     let _ = std::fs::create_dir_all("/etc/nym/data");
 
     initd_run("nym-vpnd", "start");
-    // The daemon needs a moment to come up and re-create its stores before
-    // the UI polls account state again.
+    // Stores must exist again before the UI polls account state.
     sleep_secs(3);
 
     daemon_state_json(
@@ -2385,14 +2302,11 @@ fn watchdog_set(args: &Value) -> Value {
 // init — the dashboard's batch bootstrap call
 //-------------------------------------------------------------------------------
 
-/// One RPC response with everything the dashboard needs on load. The old
-/// shell version spawned nym-vpnc ~11 times and scraped each output; here a
-/// single daemon config fetch feeds most members. Member shapes mirror the
-/// shell (extra fields are additive, missing ones would break the UI).
+/// Everything the dashboard needs on load, from one config fetch. Extra
+/// members are additive; missing ones break the UI.
 async fn init_batch() -> Value {
     let mut out = serde_json::Map::new();
 
-    // Full status object — a superset of the old init "status" member.
     out.insert("status".into(), status().await);
 
     match RpcClient::new().await {
@@ -2451,8 +2365,7 @@ async fn init_batch() -> Value {
                 Err(err) => insert_degraded_config_members(&mut out, format!("{err:#}")),
             }
 
-            // Mirror account_get(): a failed query must not fall through as an
-            // empty state, which the frontend would read as "no account".
+            // A failed query must not read as "no account" (see insert_unavailable).
             let identity_res = client.get_account_identity().await;
             let state_res = client.get_account_state().await;
             let mut account = serde_json::Map::new();
@@ -2673,7 +2586,6 @@ mod tests {
 
     #[test]
     fn split_nft_rendering_matches_shell_output() {
-        // Clients only: no sets, no daddr rules.
         let clients = vec!["aa:bb:cc:dd:ee:ff".to_owned()];
         assert_eq!(
             render_split_nft(&clients, &[]),
@@ -2686,7 +2598,6 @@ mod tests {
              }\n"
         );
 
-        // Domains present: sets + both daddr rules.
         let domains = vec!["example.com".to_owned()];
         let rendered = render_split_nft(&clients, &domains);
         assert!(rendered.contains("set nym_bypass4 {\n\ttype ipv4_addr\n}\n"));
@@ -2701,8 +2612,7 @@ mod tests {
             split_section_name("client", "aa:bb:cc:dd:ee:ff", "").as_deref(),
             Some("cli_aabbccddeeff")
         );
-        // echo -n example.com | md5sum → 5ababd603b22780302dd8d83498e5172;
-        // the shell took the first 16 hex chars. Requires md5sum on PATH.
+        // echo -n example.com | md5sum, first 16 hex chars. Needs md5sum on PATH.
         assert_eq!(
             split_section_name("domain", "", "example.com").as_deref(),
             Some("dom_5ababd603b227803")
@@ -2714,7 +2624,6 @@ mod tests {
     fn nftset_detection_handles_negated_token() {
         assert!(nftset_supported_in("Compile time options: IPv6 GNU-getopt nftset auth"));
         assert!(!nftset_supported_in("Compile time options: IPv6 no-nftset auth"));
-        // Both present (never happens in practice): the negation wins.
         assert!(!nftset_supported_in("nftset no-nftset"));
         assert!(!nftset_supported_in("Compile time options: IPv6 auth"));
     }

@@ -46,14 +46,11 @@ pub(crate) use decentralised_state::DecentralisedState;
 /// The system is undergoing an upgrade mode, where zk-nyms can't be issued
 pub(crate) use upgrade_mode_state::UpgradeModeState;
 
-// The interval at which we update the account state while the tunnel is up or a connect has
-// been requested
+// While the tunnel is up or a connect has been requested.
 const ACCOUNT_UPDATE_INTERVAL: Duration = Duration::from_secs(2 * 60);
 
-// The interval at which we update the account state while the tunnel is idle: Disconnected and
-// nobody has asked to connect. A connect request switches back to ACCOUNT_UPDATE_INTERVAL and
-// syncs right away if the last sync is older than that, so a long idle cadence costs nothing at
-// connect time.
+// While idle. A connect request switches back and syncs at once if the last
+// sync is older than ACCOUNT_UPDATE_INTERVAL, so idling costs nothing at connect.
 const ACCOUNT_IDLE_UPDATE_INTERVAL: Duration = Duration::from_secs(30 * 60);
 
 // The interval at which we attempt to exit the upgrade mode by trying to get a new zk-nym instead
@@ -120,15 +117,12 @@ impl From<PrivateAccountControllerState> for AccountControllerState {
     }
 }
 
-/// How often the account controller re-syncs with the VPN API on its own while it is
-/// `ReadyState`. Set by the daemon from the tunnel state. `ErrorState` ignores it and keeps
-/// retrying on the normal cadence, so idle backoff never slows error recovery.
+/// `ReadyState` re-sync cadence, set by the daemon from the tunnel state.
+/// `ErrorState` ignores it so idle backoff never slows error recovery.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AccountRefreshMode {
-    /// Tunnel is up or a connect has been requested: keep the account state fresh.
     #[default]
     Active,
-    /// Tunnel is Disconnected and nothing is pending: slow heartbeat only.
     Idle,
 }
 
@@ -141,13 +135,9 @@ impl AccountRefreshMode {
     }
 }
 
-/// Timer driving the periodic re-sync of `ReadyState` (mode-dependent) and `ErrorState` (always
-/// `Active`).
-///
-/// The deadline is always `entered_at + interval(mode)`, where `entered_at` is when the state was
-/// entered, i.e. when the last sync attempt concluded. Changing the mode re-targets that deadline
-/// rather than restarting the wait, so switching to `Active` after a long idle period reports the
-/// account state as stale (and the caller syncs immediately) instead of waiting another interval.
+/// The deadline is `entered_at + interval(mode)`, never `now + interval`:
+/// changing mode re-targets the deadline rather than restarting the wait, so
+/// leaving a long idle reports the state as stale and syncs at once.
 pub(crate) struct RefreshTimer {
     entered_at: Instant,
     sleep: Pin<Box<Sleep>>,
@@ -162,22 +152,19 @@ impl RefreshTimer {
         }
     }
 
-    /// Resolves when the next timed sync is due.
     pub(crate) async fn tick(&mut self) {
         self.sleep.as_mut().await
     }
 
-    /// Re-arms the timer for `mode`. Returns `true` when the state was entered longer ago than
-    /// `mode` tolerates: the timer is then due immediately and the caller should sync now.
+    /// Returns `true` when the re-armed timer is already due: sync now.
     pub(crate) fn set_mode(&mut self, mode: AccountRefreshMode) -> bool {
         let deadline = self.entered_at + mode.interval();
         self.sleep.as_mut().reset(deadline);
         deadline <= Instant::now()
     }
 
-    /// Records a `SetRefreshMode` command. Returns `true` when the caller should sync right away:
-    /// the mode changed, the account state is stale for the new mode, and the VPN API is
-    /// reachable.
+    /// Returns `true` when the caller should sync right away: mode changed,
+    /// state stale for the new mode, and the VPN API reachable.
     pub(crate) fn apply_mode<C: ConnectivityMonitor>(
         &mut self,
         shared_state: &mut SharedAccountState<C>,

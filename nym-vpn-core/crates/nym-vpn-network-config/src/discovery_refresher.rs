@@ -30,10 +30,8 @@ pub struct DiscoveryRefresher {
     current_resolver_overrides: Option<ResolverOverrides>,
     /// Set by the tunnel state machine while the firewall blocks the API.
     paused: bool,
-    /// Set by the daemon while the tunnel is down and nobody has asked for it. Unlike `paused`
-    /// it never blocks the very first check, so a fresh start still validates its network files.
+    /// Unlike `paused`, never blocks the very first check.
     idle: bool,
-    /// When the last check ran, so leaving idle can tell a stale schedule from a fresh one.
     last_check: Option<Instant>,
 }
 
@@ -100,9 +98,7 @@ impl DiscoveryRefresher {
                             if idle {
                                 tracing::debug!("Discovery Refresher idle, periodic checks suspended");
                             } else {
-                                // Catch up now if the last check is older than the interval,
-                                // otherwise keep its schedule. Resetting either way stops the
-                                // ticks missed while idle from firing in a burst.
+                                // Reset either way so ticks missed while idle don't burst.
                                 match self.last_check {
                                     Some(last) if last.elapsed() < CHECK_INTERVAL => {
                                         interval.reset_at(last + CHECK_INTERVAL)
@@ -236,9 +232,8 @@ impl DiscoveryRefresher {
 pub enum DiscoveryRefresherCommand {
     /// The firewall blocks (true) or permits (false) API traffic; no checks while blocked.
     Pause(bool),
-    /// The tunnel is down and nobody has asked for it (true): suspend the periodic check until a
-    /// connect is requested (false), at which point a check runs right away if the last one is
-    /// older than the interval. The first check after start always runs.
+    /// Suspend the periodic check (true) until a connect is requested (false);
+    /// leaving idle checks at once if the last one is older than the interval.
     SetIdle(bool),
     UseResolverOverrides(Option<Box<ResolverOverrides>>),
 }

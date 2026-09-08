@@ -1,34 +1,21 @@
 // Copyright 2025 Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! OpenWrt dnsmasq DNS backend — restart-free upstream switching.
+//! OpenWrt dnsmasq DNS backend. dnsmasq's `resolvfile` is repointed (staged
+//! uci, never committed, so a reboot reverts it) at a daemon-managed file
+//! in `/tmp/resolv.conf.d/`, which the jailed dnsmasq sees through the init
+//! script's bind-mount and reloads via inotify on rename-in. Connect and
+//! disconnect are then file writes, not a 3s LAN-wide dnsmasq restart.
 //!
-//! dnsmasq's `resolvfile` is repointed (staged uci, never committed — reboot
-//! auto-reverts) at a daemon-managed file in `/tmp/resolv.conf.d/`, which the
-//! jailed dnsmasq observes through the init script's directory bind-mount and
-//! reloads via inotify on every rename-in. Connecting and disconnecting are
-//! then just file writes: no `/etc/init.d/dnsmasq restart` (~3.3s plus a
-//! LAN-wide DNS outage) on the connect path. dnsmasq is restarted at most
-//! once, at first daemon start, and only if its running config doesn't
-//! already point at the managed file.
+//! One daemon-lifetime actor owns the file: tunnel resolvers while
+//! connected, a 5s mirror of netifd's `resolv.conf.auto` while idle. Every
+//! writer goes through it, so a stale mirror write can never clobber tunnel
+//! resolvers. Repointing `resolvfile` also makes the init script write
+//! `/tmp/resolv.conf` as 127.0.0.1; `/etc/resolv.conf` is never touched.
 //!
-//! A single daemon-lifetime actor owns the managed file: tunnel resolvers
-//! while connected, a 5s-interval mirror of netifd's `resolv.conf.auto`
-//! while disconnected (tracks WAN DHCP renewals). Serializing all writers
-//! through the actor makes a stale mirror write clobbering tunnel resolvers
-//! (a DNS leak) structurally impossible.
-//!
-//! Local programs on the router resolve via 127.0.0.1: repointing
-//! `resolvfile` flips the init script's `localuse` logic to write
-//! `/tmp/resolv.conf` as `nameserver 127.0.0.1`, so they ride dnsmasq and
-//! its cache. We deliberately do not touch `/etc/resolv.conf`.
-//!
-//! Escape hatch: a committed `noresolv` (AdGuard Home, https-dns-proxy,
-//! stubby — user-owned upstream DNS) makes the init script omit
-//! `resolv-file=` entirely, so the repoint can never take. Converge detects
-//! this and steps aside (`Scheme::UserManaged`): dnsmasq is left untouched,
-//! `set_dns` degrades to a cache flush, and the user's chosen upstreams
-//! simply ride the tunnel while connected.
+//! A committed `noresolv` (AdGuard Home, https-dns-proxy, stubby) makes the
+//! init script omit `resolv-file=` entirely; converge then steps aside
+//! (`Scheme::UserManaged`) and `set_dns` degrades to a cache flush.
 
 use std::{
     fs, io,
@@ -45,11 +32,8 @@ use crate::IdleDns;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Prefer IPv4 upstream resolvers when both families are present. IPv6
-/// upstreams are only reachable when the exit gateway actually carries IPv6,
-/// which cannot be verified from the router; unreachable IPv6 upstreams cause
-/// per-lookup timeouts in dnsmasq. AAAA records still resolve fine over IPv4
-/// transport, so dropping the IPv6 upstreams loses nothing.
+/// IPv6 upstreams are unreachable unless the exit carries IPv6, which cannot
+/// be verified here, and each unreachable one costs a per-lookup timeout.
 fn prefer_ipv4_upstreams(servers: &[std::net::IpAddr]) -> Vec<std::net::IpAddr> {
     let v4: Vec<std::net::IpAddr> = servers.iter().copied().filter(|ip| ip.is_ipv4()).collect();
     if v4.is_empty() { servers.to_vec() } else { v4 }
@@ -60,17 +44,13 @@ const BACKUP_MARKER: &str = "/tmp/nym-dns-backup";
 const RESOLV_CONF: &str = "/etc/resolv.conf";
 const RESOLV_CONF_BACKUP: &str = "/tmp/resolv.conf.nymbackup";
 
-/// The daemon-managed resolv file dnsmasq is repointed at. MUST live inside
-/// /tmp/resolv.conf.d/: the dnsmasq init script bind-mounts that directory
-/// into the ujail (it mounts dirname(resolvfile)), so a file anywhere else
-/// would be invisible to the jailed process. It is always a regular file,
-/// never a symlink: dnsmasq's inotify build resolves the watch name once at
-/// startup, so symlink swaps stop being observed.
+/// Must live inside /tmp/resolv.conf.d/: the init script bind-mounts
+/// dirname(resolvfile) into the ujail. Always a regular file, never a
+/// symlink: dnsmasq's inotify resolves the watch name once at startup.
 const MANAGED_FILE: &str = "/tmp/resolv.conf.d/nym-resolv.conf";
-/// Rename source for atomic updates. Basename must not match MANAGED_FILE's
-/// (dnsmasq watches the directory by name; the temp write must not trigger).
+/// Basename must differ from MANAGED_FILE's; dnsmasq watches by name.
 const MANAGED_TMP: &str = "/tmp/resolv.conf.d/.nym-resolv.tmp";
-/// netifd-owned WAN resolv file, mirrored into MANAGED_FILE while disconnected.
+/// netifd-owned WAN resolv file.
 const WAN_RESOLV: &str = "/tmp/resolv.conf.d/resolv.conf.auto";
 
 fn render_resolv_conf(servers: &[IpAddr]) -> String {
@@ -102,12 +82,8 @@ fn parse_dnsmasq_section(uci_show: &str) -> Option<String> {
     })
 }
 
-/// Minimal extraction of the instance pid from `ubus call service list` output.
-/// Deliberately not a JSON parser: the shape is stable procd output and we
-/// only need one integer; a serde dependency isn't warranted. The pid procd
-/// reports is the ujail wrapper's, which forwards SIGHUP to the jailed
-/// dnsmasq. Never read the dnsmasq pidfile instead — it contains the PID as
-/// seen inside the jail's own PID namespace (i.e. "1").
+/// procd reports the ujail wrapper's pid, which forwards SIGHUP. Never read
+/// the dnsmasq pidfile: it holds the pid as seen inside the jail ("1").
 fn extract_instance_pid(service_json: &str, section: &str) -> Option<u32> {
     let inst = service_json.find(&format!("\"{}\"", section))?;
     let rest = &service_json[inst..];
@@ -123,30 +99,22 @@ fn extract_instance_pid(service_json: &str, section: &str) -> Option<u32> {
 
 /// System interaction boundary, mockable for tests.
 trait Sys: Send + Sync + 'static {
-    /// Targeted `uci revert` of a single option. Best-effort: reverting an
-    /// option that has no staged delta fails harmlessly.
     fn uci_revert_option(&self, key: &str);
-    /// `uci set` — staged only, never committed.
+    /// Staged only, never committed.
     fn uci_set(&self, key: &str, value: &str) -> Result<()>;
-    /// The ONE allowed commit: delete an accidentally-committed resolvfile
-    /// option (restores the stock default) and commit dhcp.
+    /// The one allowed commit: delete an accidentally-committed resolvfile.
     fn repair_committed_resolvfile(&self) -> Result<()>;
-    /// Contents of the committed /etc/config/dhcp ("" if unreadable).
     fn committed_dhcp(&self) -> String;
-    /// Effective truthiness of the section's `noresolv` option via `uci get`.
-    /// Must be read AFTER the targeted reverts so a stale staged delta of our
-    /// own (≤1.31 scheme) can't masquerade as user intent.
+    /// Must be read after the targeted reverts, or a stale staged delta of
+    /// our own could masquerade as user intent.
     fn effective_noresolv(&self, section: &str) -> bool;
-    /// First uci section of type dnsmasq, e.g. "cfg01411c".
     fn dnsmasq_section(&self) -> Option<String>;
     /// Contents of the generated /var/etc/dnsmasq.conf.<section>.
     fn generated_conf(&self, section: &str) -> Option<String>;
     fn restart_dnsmasq(&self) -> Result<()>;
-    /// `ubus call service list '{"name":"dnsmasq"}'` output.
     fn service_json(&self) -> String;
-    /// SIGHUP the ujail wrapper (cache flush only — with polling on, dnsmasq
-    /// does NOT re-read resolv files on SIGHUP; reload is carried by inotify.
-    /// Side effects: re-reads /etc/hosts and runs the lease script per lease).
+    /// Cache flush only: dnsmasq does not re-read resolv files on SIGHUP;
+    /// reload is carried by inotify.
     fn send_hup(&self, pid: u32);
 }
 
@@ -221,12 +189,11 @@ impl Sys for RealSys {
         let output = Command::new("uci")
             .args(["get", &format!("dhcp.{}.noresolv", section)])
             .output();
-        // Unset option → uci exits non-zero → not noresolv.
         let Ok(output) = output else { return false };
         if !output.status.success() {
             return false;
         }
-        // config_get_bool truthy set.
+        // config_get_bool's truthy set.
         matches!(
             String::from_utf8_lossy(&output.stdout).trim(),
             "1" | "on" | "true" | "yes" | "enabled"
@@ -234,8 +201,7 @@ impl Sys for RealSys {
     }
 
     fn dnsmasq_section(&self) -> Option<String> {
-        // -X: raw section ids (cfg01411c), not extended syntax (@dnsmasq[0]).
-        // procd keys its service instances by the raw id.
+        // -X gives raw section ids; procd keys its instances by those.
         let output = Command::new("uci").args(["-X", "show", "dhcp"]).output().ok()?;
         parse_dnsmasq_section(&String::from_utf8_lossy(&output.stdout))
     }
@@ -272,52 +238,33 @@ impl Sys for RealSys {
 }
 
 enum ConvergeOutcome {
-    /// dnsmasq is running and its generated config points at the managed file.
     Ready,
-    /// The repoint is staged but dnsmasq is administratively stopped; we leave
-    /// it stopped (it will pick up the staged config whenever it starts).
+    /// Repoint staged; dnsmasq is left stopped and picks it up on start.
     DnsmasqStopped,
-    /// Committed `noresolv` in the user's dhcp config: the init script never
-    /// emits a `resolv-file=` line, so the repoint scheme cannot work — and
-    /// the user has deliberately taken ownership of upstream DNS (AdGuard
-    /// Home, https-dns-proxy, stubby all commit this). Leave dnsmasq alone;
-    /// their upstreams ride the tunnel while connected.
+    /// Committed `noresolv`: the init script never emits `resolv-file=`, so
+    /// the repoint cannot work. Leave dnsmasq alone.
     UserManagedDns,
 }
 
-/// Which DNS handover scheme converge settled on, cached for the actor's
-/// lifetime (re-checked on connect via the self-heal paths).
+/// Cached for the actor's lifetime; re-checked on connect by the self-heal paths.
 #[derive(Clone, Copy, PartialEq)]
 enum Scheme {
-    /// dnsmasq reads upstreams from our managed resolv file.
     ManagedFile,
-    /// User-managed upstreams (committed `noresolv`); we never touch dnsmasq.
     UserManaged,
 }
 
-/// Who owns dnsmasq's upstream resolvers right now — i.e. whether the DNS
-/// servers configured in nym-vpnd actually reach the system resolver.
-///
-/// Reported to callers so the UI can stop claiming a custom-DNS setting is in
-/// effect when [`UpstreamOwner::User`] means we deliberately stepped aside.
+/// Whether the DNS servers configured in nym-vpnd actually reach the system
+/// resolver, so the UI can stop claiming a custom-DNS setting is in effect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UpstreamOwner {
-    /// We manage dnsmasq's upstreams via the managed resolv file; the
-    /// configured DNS servers are applied while connected.
     Vpn,
-    /// The user manages upstreams (committed `noresolv`): the configured DNS
-    /// servers are **not** applied, and dnsmasq's own `server=` forwards are
-    /// what resolve — riding the tunnel while connected.
+    /// Committed `noresolv`; dnsmasq's own `server=` forwards resolve.
     User,
-    /// No dnsmasq under UCI on this host, so the question doesn't apply.
     NotApplicable,
 }
 
-/// Read-only view of who owns the upstreams. Deliberately not routed through
-/// the actor and deliberately not cached off `Scheme`: this re-reads the
-/// effective `noresolv` so a user who has just edited their dhcp config sees
-/// the truth rather than whatever converge last settled on. Being read-only,
-/// it must never converge, stage uci, or restart anything.
+/// Read-only and not cached off `Scheme`: a user who just edited dhcp sees
+/// the truth. Must never converge, stage uci or restart anything.
 fn upstream_owner<S: Sys>(sys: &S) -> UpstreamOwner {
     match sys.dnsmasq_section() {
         None => UpstreamOwner::NotApplicable,
@@ -326,7 +273,6 @@ fn upstream_owner<S: Sys>(sys: &S) -> UpstreamOwner {
     }
 }
 
-/// Who currently owns dnsmasq's upstream resolvers on this host.
 pub fn current_upstream_owner() -> UpstreamOwner {
     if !Path::new(OPENWRT_RELEASE).exists() {
         return UpstreamOwner::NotApplicable;
@@ -334,23 +280,18 @@ pub fn current_upstream_owner() -> UpstreamOwner {
     upstream_owner(&RealSys)
 }
 
-/// Idempotently converge system state onto the managed-resolv-file scheme.
-/// Safe to run on every daemon start: it only restarts dnsmasq when the
-/// running instance's generated config does not already point at the managed
-/// file, so a crash-looping daemon cannot turn into a dnsmasq restart storm.
-/// This is also the crash-recovery path — there is no separate marker.
+/// Idempotent and run on every daemon start: dnsmasq is restarted only when
+/// its generated config does not already point at the managed file, so a
+/// crash loop cannot become a restart storm. Also the crash-recovery path.
 fn converge<S: Sys>(sys: &S, managed_file: &str) -> Result<ConvergeOutcome> {
-    // Targeted reverts: clears the legacy (≤1.31) staged noresolv/server-list
-    // scheme and any stale repoint of our own, without discarding the user's
-    // unrelated staged dhcp edits (never `uci revert dhcp` wholesale).
+    // Targeted reverts only, never `uci revert dhcp`: the user's unrelated
+    // staged edits must survive.
     sys.uci_revert_option("dhcp.@dnsmasq[0].noresolv");
     sys.uci_revert_option("dhcp.@dnsmasq[0].server");
     sys.uci_revert_option("dhcp.@dnsmasq[0].resolvfile");
 
-    // Repair an accidentally-committed repoint (LuCI Save&Apply on the DHCP
-    // page commits staged deltas wholesale). Deleting the option restores the
-    // stock default; without this, a reboot with the daemon disabled would
-    // leave dnsmasq pointing at a file nothing maintains.
+    // LuCI Save&Apply on the DHCP page commits staged deltas wholesale; a
+    // committed repoint would outlive a disabled daemon.
     if committed_has_managed_path(&sys.committed_dhcp()) {
         tracing::warn!(
             "Our resolvfile repoint was found committed in /etc/config/dhcp \
@@ -361,11 +302,7 @@ fn converge<S: Sys>(sys: &S, managed_file: &str) -> Result<ConvergeOutcome> {
 
     let section = sys.dnsmasq_section().ok_or(Error::NoDnsmasq)?;
 
-    // Committed noresolv makes the repoint unreachable (the init script only
-    // emits `resolv-file=` when noresolv is unset/false — 24.10 dnsmasq.init
-    // gates it), and it signals the user runs their own upstream (DoH proxy,
-    // AdGuard Home). Respect it: no repoint, no restarts, connect proceeds
-    // with the user's upstreams riding the tunnel.
+    // dnsmasq.init emits `resolv-file=` only when noresolv is unset/false.
     if sys.effective_noresolv(&section) {
         tracing::info!(
             "dnsmasq has noresolv set — user manages upstream DNS; \
@@ -400,8 +337,7 @@ fn converge<S: Sys>(sys: &S, managed_file: &str) -> Result<ConvergeOutcome> {
         {
             return Ok(ConvergeOutcome::Ready);
         }
-        // A third-party restart may have raced between our revert and re-stage,
-        // regenerating the config from an intermediate state. Retry once.
+        // A third-party restart may have raced the revert/re-stage.
         tracing::warn!(
             "dnsmasq generated config did not converge after restart (attempt {}), retrying",
             attempt + 1
@@ -434,11 +370,7 @@ pub enum Error {
     ActorGone,
 }
 
-/// How often the actor mirrors `resolv.conf.auto` into the managed file
-/// while disconnected. A WAN DHCP renew that changes DNS servers is rare;
-/// 5s of staleness is well inside the same failure envelope as the 30s
-/// watchdog. Deliberately a poll, not an inotify watch: it folds into the
-/// single-owner actor loop as one more `select!` arm.
+/// A poll, not inotify: it folds into the single-owner actor loop.
 const MIRROR_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Clone)]
@@ -460,8 +392,6 @@ impl Paths {
 
 enum Cmd {
     SetTunnel(Vec<IpAddr>, oneshot::Sender<Result<()>>),
-    /// Tunnel down: mirror the idle resolvers (the user's LAN custom servers
-    /// and/or the WAN-provided ones, see [`IdleDns`]).
     SetWanMirror(IdleDns, oneshot::Sender<Result<()>>),
 }
 
@@ -470,10 +400,8 @@ enum Mode {
     WanMirror(IdleDns),
 }
 
-/// Atomic update of the managed file: write a temp file in the same tmpfs
-/// directory, then rename(2) over the destination. The path is never absent
-/// and dnsmasq's inotify sees exactly one IN_MOVED_TO per update. Never
-/// truncate-in-place the managed file from anywhere else.
+/// Temp file + rename: dnsmasq's inotify sees exactly one IN_MOVED_TO per
+/// update. Never truncate the managed file in place from anywhere.
 fn write_managed(paths: &Paths, content: &str) -> Result<()> {
     let wrap = |source: io::Error, path: &PathBuf| Error::WriteFile {
         path: path.display().to_string(),
@@ -483,20 +411,13 @@ fn write_managed(paths: &Paths, content: &str) -> Result<()> {
     fs::rename(&paths.tmp, &paths.managed).map_err(|e| wrap(e, &paths.managed))
 }
 
-/// Current WAN upstreams as file content; header-only if netifd hasn't
-/// written `resolv.conf.auto` yet (WAN down at boot — same no-upstream
-/// behavior as stock with a missing resolvfile).
+/// Header-only when netifd has not written `resolv.conf.auto` yet.
 fn wan_snapshot(paths: &Paths) -> String {
     fs::read_to_string(&paths.wan).unwrap_or_else(|_| String::from("# Generated by nym-vpnd\n"))
 }
 
-/// What the managed file should hold while the tunnel is down. Without local
-/// resolvers this is the WAN mirror byte for byte (the stock behaviour). With
-/// a LAN custom resolver it is that resolver first — it is the one the user
-/// asked for and the one the kill-switch admits — followed by the WAN
-/// resolvers only when they are reachable (kill-switch off); with the
-/// kill-switch on they would be rejected and dnsmasq would burn its retries
-/// on them before falling back to the LAN resolver.
+/// Local resolvers first, then the WAN ones only when reachable; with the
+/// kill-switch on dnsmasq would burn its retries on rejected upstreams.
 fn idle_snapshot(paths: &Paths, idle: &IdleDns) -> String {
     if idle.local_resolvers.is_empty() {
         return wan_snapshot(paths);
@@ -513,10 +434,8 @@ fn idle_snapshot(paths: &Paths, idle: &IdleDns) -> String {
     out
 }
 
-/// Best-effort cache flush via SIGHUP to the ubus-reported (ujail wrapper)
-/// pid. Cache flush only: on-path answers differ across WAN/tunnel
-/// (split-horizon, CDN geo), so flush at transitions; the resolv-file
-/// reload itself is carried by dnsmasq's inotify, not by this signal.
+/// Answers differ across WAN/tunnel (split-horizon, CDN geo), so the cache
+/// is flushed at transitions. The resolv-file reload is inotify's job.
 fn flush_cache<S: Sys>(sys: &S, section: &str) {
     match extract_instance_pid(&sys.service_json(), section) {
         Some(pid) => sys.send_hup(pid),
@@ -553,10 +472,8 @@ fn handle_set_tunnel<S: Sys>(
     if let Some(section) = sys.dnsmasq_section() {
         match s {
             Scheme::ManagedFile => {
-                // Self-heal: a third-party dnsmasq restart may have regenerated
-                // the config while our staged delta was absent/stale. Cheap
-                // re-assert on every connect; full converge (with restart) only
-                // on mismatch.
+                // A third-party dnsmasq restart may have regenerated the config
+                // without our staged delta; full converge only on mismatch.
                 let managed = paths.managed.display().to_string();
                 let pointed = sys
                     .generated_conf(&section)
@@ -570,9 +487,7 @@ fn handle_set_tunnel<S: Sys>(
                 }
             }
             Scheme::UserManaged => {
-                // Symmetric self-heal: if the user cleared noresolv since we
-                // last looked (e.g. uninstalled their DoH proxy), converge onto
-                // the managed-file scheme.
+                // The user may have cleared noresolv since (DoH proxy removed).
                 if !sys.effective_noresolv(&section) {
                     tracing::info!("noresolv cleared since last converge; re-converging");
                     *scheme = None;
@@ -583,7 +498,6 @@ fn handle_set_tunnel<S: Sys>(
         flush_cache(sys, &section);
     }
 
-    // The self-heal above may have switched schemes; log the effective one.
     match scheme.unwrap_or(s) {
         Scheme::ManagedFile => {
             tracing::info!("Configured dnsmasq with VPN DNS servers: {:?}", servers)
@@ -598,8 +512,7 @@ fn handle_set_tunnel<S: Sys>(
 }
 
 fn handle_set_wan<S: Sys>(sys: &S, paths: &Paths, idle: &IdleDns) -> Result<()> {
-    // No converge requirement: mirroring idle upstreams into the managed file
-    // is correct (and harmless) regardless of repoint state.
+    // No converge needed: the mirror is harmless regardless of repoint state.
     write_managed(paths, &idle_snapshot(paths, idle))?;
     if let Some(section) = sys.dnsmasq_section() {
         flush_cache(sys, &section);
@@ -620,8 +533,7 @@ fn handle_set_wan<S: Sys>(sys: &S, paths: &Paths, idle: &IdleDns) -> Result<()> 
     Ok(())
 }
 
-/// Mirror tick: write-if-changed, no cache flush (background tracking of a
-/// WAN DHCP renew shouldn't churn LAN client caches).
+/// Write-if-changed, no cache flush: a WAN DHCP renew must not churn LAN caches.
 fn mirror_tick(paths: &Paths, idle: &IdleDns) {
     let wanted = idle_snapshot(paths, idle);
     let current = fs::read_to_string(&paths.managed).unwrap_or_default();
@@ -633,15 +545,13 @@ fn mirror_tick(paths: &Paths, idle: &IdleDns) {
     }
 }
 
-/// Single-writer owner of the managed resolv file for the daemon's lifetime.
-/// All mutations (connect, disconnect, mirror ticks) are serialized through
-/// this loop; a tick that arrives while in `Mode::Tunnel` is dropped, so the
-/// mirror can never clobber tunnel resolvers.
+/// Single writer of the managed file; a tick in `Mode::Tunnel` is dropped, so
+/// the mirror can never clobber tunnel resolvers.
 async fn run_actor<S: Sys>(sys: S, paths: Paths, mut rx: mpsc::Receiver<Cmd>) {
     migrate_legacy_state();
 
-    // Seed so dnsmasq never observes a missing file, then converge. A failed
-    // converge (e.g. transient uci lock) is retried lazily on first use.
+    // Seed so dnsmasq never observes a missing file. A failed converge is
+    // retried on first use.
     if let Err(e) = write_managed(&paths, &wan_snapshot(&paths)) {
         tracing::warn!("Failed to seed managed resolv file: {}", e);
     }
@@ -684,11 +594,8 @@ async fn run_actor<S: Sys>(sys: S, paths: Paths, mut rx: mpsc::Receiver<Cmd>) {
     }
 }
 
-/// One-time migration from the ≤1.31 scheme: if the old crash-recovery
-/// artifacts exist (daemon died mid-session before this upgrade), restore
-/// /etc/resolv.conf from the old backup and drop the marker. The uci side is
-/// covered by converge's targeted reverts. Delete once ≤1.31 is out of the
-/// upgrade window.
+/// Restores /etc/resolv.conf from the pre-1.32 backup if one was left behind.
+/// Delete once 1.31 and older are out of the upgrade window.
 fn migrate_legacy_state() {
     if Path::new(RESOLV_CONF_BACKUP).exists() {
         tracing::info!("Migrating legacy DNS backup state from pre-1.32");
@@ -702,10 +609,8 @@ fn migrate_legacy_state() {
 
 static ACTOR: OnceLock<mpsc::Sender<Cmd>> = OnceLock::new();
 
-/// Eagerly spawn the actor at daemon startup so the one-time converge — and
-/// its possible single dnsmasq restart — happens off the connect path. A
-/// no-op off OpenWrt or outside a tokio runtime (then the actor spawns
-/// lazily on first use instead).
+/// Spawn the actor at startup so its one-time converge (and possible dnsmasq
+/// restart) stays off the connect path. No-op outside a tokio runtime.
 pub fn warm_up() {
     if tokio::runtime::Handle::try_current().is_err() {
         return;
@@ -716,20 +621,17 @@ pub fn warm_up() {
     }
 }
 
-/// Thin client handle; one is created per connect (see linux/mod.rs), all of
-/// them talking to the same daemon-lifetime actor.
+/// Thin handle, one per connect; all talk to the same daemon-lifetime actor.
 pub struct Dnsmasq {
     tx: mpsc::Sender<Cmd>,
 }
 
 impl Dnsmasq {
     pub fn new() -> Result<Self> {
-        // Check if we're on OpenWrt
         if !Path::new(OPENWRT_RELEASE).exists() {
             return Err(Error::NotOpenWrt);
         }
 
-        // Check if dnsmasq is configured via UCI
         let output = Command::new("uci")
             .args(["get", "dhcp.@dnsmasq[0]"])
             .output()
@@ -774,7 +676,6 @@ impl Dnsmasq {
     }
 }
 
-/// Run `uci set <key>=<value>` (staged, not committed).
 fn uci_set(key: &str, value: &str) -> Result<()> {
     let arg = format!("{}={}", key, value);
     let output = Command::new("uci")
@@ -789,7 +690,6 @@ fn uci_set(key: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
-/// Restart dnsmasq via its init script.
 fn restart_dnsmasq() -> Result<()> {
     let output = Command::new("/etc/init.d/dnsmasq")
         .arg("restart")
@@ -1290,8 +1190,7 @@ mod tests {
         );
     }
 
-    /// The query is a status read on a live system; converging or restarting
-    /// dnsmasq from a `dns get` would be a nasty surprise.
+    /// A `dns get` must never converge or restart dnsmasq.
     #[test]
     fn ownership_query_never_mutates_system_state() {
         let sys = FakeSys {

@@ -381,7 +381,6 @@ where
             error: Box::new(error),
         })?;
 
-    // Ensure parent directory exists
     let config_dir = file_path
         .parent()
         .ok_or_else(|| ConfigSetupError::GetParentDirectory {
@@ -395,10 +394,8 @@ where
             error,
         })?;
 
-    // Write-to-temp + fsync + rename so the target file is replaced
-    // atomically: a crash or power cut mid-write must never leave a
-    // truncated config behind (routers get power-cycled a lot, and an
-    // unreadable config used to reset every setting to defaults).
+    // Temp + fsync + rename: a power cut mid-write must never leave a
+    // truncated config, which would reset every setting to defaults.
     let tmp_path = file_path.with_extension("json.tmp");
 
     let mut file = fs::File::create(&tmp_path)
@@ -415,10 +412,8 @@ where
             error,
         })?;
 
-    // tokio's File buffers writes and reports errors on the NEXT operation;
-    // sync_all() swallows a pending write error (tokio Inner::complete_inflight
-    // stashes it for a later write that never comes). Without this flush an
-    // ENOSPC write "succeeds" and the rename below installs an empty file.
+    // tokio's File reports write errors on the NEXT operation and sync_all()
+    // swallows a pending one; without this flush an ENOSPC write "succeeds".
     file.flush()
         .await
         .map_err(|error| ConfigSetupError::WriteFile {
@@ -426,9 +421,8 @@ where
             error,
         })?;
 
-    // Flush file data to disk before the rename, otherwise the rename can
-    // hit persistent storage before the data does and a power cut still
-    // produces an empty file under the final name.
+    // Data must reach disk before the rename does, or a power cut still
+    // leaves an empty file under the final name.
     file.sync_all()
         .await
         .map_err(|error| ConfigSetupError::WriteFile {
@@ -461,7 +455,6 @@ pub async fn create_data_dir(data_dir: &Path, network_name: &str) -> Result<(), 
     );
 
     for dir_path in [&network_data_dir, data_dir] {
-        // Set directory permissions to 700 (rwx------)
         let permissions = std::fs::Permissions::from_mode(0o700);
         fs::set_permissions(dir_path, permissions)
             .await

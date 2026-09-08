@@ -53,8 +53,7 @@ const FAST_RETRY_ATTEMPTS: u32 = 2;
 /// Fast retry delay for network recovery scenarios (first FAST_RETRY_ATTEMPTS).
 const NETWORK_RECOVERY_DELAY: Duration = Duration::from_millis(500);
 
-/// Overall deadline for the VPN API reachability probe that distinguishes a
-/// local outage from a broken gateway inside the post-drop grace window.
+/// Deadline for the API reachability probe used inside the grace window.
 const API_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 
 type ResolveApiAddrsFuture = BoxFuture<'static, Result<ResolvedConfig>>;
@@ -113,9 +112,7 @@ impl ConnectingState {
                     .map(|v| v.entry_gateway().lp_endpoints())
                     .unwrap_or_default(),
                 api_endpoints: Vec::new(),
-                // The daemon's own resolvers (hickory does not rely on custom
-                // DNS) plus a private custom resolver, which the policy admits
-                // off-WAN for the LAN while connecting.
+                // Daemon resolvers plus any LAN custom resolver, admitted off-WAN.
                 dns_servers: shared_state.tunnel_settings.idle_dns_ips(),
                 tunnel_interface: None,
                 inbound_exemptions: shared_state.tunnel_settings.inbound_exemptions.clone(),
@@ -173,15 +170,10 @@ impl ConnectingState {
     ) -> Result<()> {
         let policy = params.as_policy();
 
-        // Apply even before peer/API endpoints are known. Base rules retain
-        // mwan3 tracking traffic, while daemon-scoped DNS/NTP bootstrap
-        // exceptions let endpoint resolution proceed. Skipping this apply
-        // left a fresh install fully open because there was no prior cached
-        // Blocked policy to inherit.
-
-        // The firewall caches the kill-switch flag; sync it from live settings
-        // so a runtime toggle (LuCI / `tunnel set`) takes effect without a
-        // daemon restart.
+        // Applied before endpoints are known: the daemon-scoped DNS/NTP
+        // hatches let resolution proceed, and a fresh install has no cached
+        // Blocked policy to fall back on. The firewall caches the kill-switch
+        // flag; sync a runtime toggle.
         shared_state
             .firewall
             .set_killswitch(shared_state.tunnel_settings.killswitch);
@@ -209,9 +201,8 @@ impl ConnectingState {
 
     async fn reconnect(self, shared_state: &mut SharedState) -> NextTunnelState {
         let next_attempt = self.retry_attempt.saturating_add(1);
-        // Refresh the selection every other attempt — unless the current
-        // gateway is owed a grace retry, which must run against the same
-        // gateway to mean anything.
+        // Re-select every other attempt, unless a grace retry is owed to the
+        // current gateway.
         let next_gateways =
             if next_attempt.is_multiple_of(2) && !self.grace_retry_pending(shared_state) {
                 None
@@ -241,7 +232,6 @@ impl ConnectingState {
     async fn handle_tunnel_close(tombstone: Tombstone, shared_state: &mut SharedState) {
         shared_state.route_handler.remove_routes().await;
 
-        // drop tombstone to close tunnel devices
         let _ = tombstone;
     }
 
@@ -249,8 +239,6 @@ impl ConnectingState {
         mut self: Box<Self>,
         shared_state: &mut SharedState,
     ) -> NextTunnelState {
-        // Same resolver the idle states use; what the kill-switch admits is
-        // decided in one place.
         self.resolve_api_addrs_fut = crate::tunnel_state_machine::resolve_api_endpoints(
             shared_state.nym_config.gateway_config.clone(),
         )
@@ -289,7 +277,7 @@ impl ConnectingState {
                 .nym_vpn_api_resolver_overrides
                 .clone();
 
-            // Set DNS resolver overrides to ensure that HTTP clients use IP addresses specified in firewall exceptions.
+            // Pins the HTTP clients to the IPs the firewall admits.
             if !shared_state
                 .set_resolver_overrides(resolver_overrides)
                 .await
@@ -308,7 +296,6 @@ impl ConnectingState {
             );
         }
 
-        // Allow networking now when firewall and resolver overrides are configured.
         shared_state.allow_networking().await;
 
         Self::force_account_refresh_if_time_desynced(self.retry_attempt, shared_state).await;
@@ -317,10 +304,8 @@ impl ConnectingState {
             .await
     }
 
-    /// Requests account summary refresh on the very first connection attempt if the
-    /// account controller is stuck in the device-time-desynced error state. This is
-    /// an escape hatch so a disconnect/reconnect can leave the error state instead
-    /// of failing indefinitely.
+    /// Escape hatch so a disconnect/reconnect can leave the device-time-desynced
+    /// account error instead of failing indefinitely.
     async fn force_account_refresh_if_time_desynced(
         retry_attempt: u32,
         shared_state: &SharedState,
@@ -391,8 +376,7 @@ impl ConnectingState {
         connection_data: Box<EstablishConnectionData>,
         shared_state: &mut SharedState,
     ) -> Result<()> {
-        // Only allow entry wg endpoint in firewall when bridges are not enabled.
-        // Because all bridges are already added to firewall exceptions.
+        // With bridges on, the bridge endpoints are already admitted instead.
         let wg_entry_endpoint = if let Some(TunnelConnectionData::Wireguard(ref wg)) =
             connection_data.tunnel
             && !shared_state.tunnel_settings.bridges_enabled()
@@ -445,12 +429,8 @@ impl ConnectingState {
         set_policy_result
     }
 
-    /// Quick reachability probe against the known VPN API endpoints, used to
-    /// tell a local outage from a broken gateway when a reconnect fails inside
-    /// the post-drop grace window. Reaching any endpoint proves the local
-    /// network is up. Probes run concurrently under a single deadline so the
-    /// event loop is never held up for more than API_PROBE_TIMEOUT. No known
-    /// endpoints counts as unreachable (indeterminate, so the grace stands).
+    /// Reaching any API endpoint proves the local network is up. No known
+    /// endpoints counts as unreachable, so the grace stands.
     async fn any_api_endpoint_reachable(shared_state: &SharedState) -> bool {
         let probes: Vec<_> = shared_state
             .api_endpoints
@@ -467,17 +447,9 @@ impl ConnectingState {
         )
     }
 
-    /// Handle a failed connection/registration attempt against the selected
-    /// gateways. While the entry gateway of a recently dropped (previously
-    /// viable) session is inside its grace window AND the local network is
-    /// down (the VPN API is unreachable too), the failure is forgiven and the
-    /// same selection retried: blaming the gateway for a WAN blip switches
-    /// the user's server for no reason. Once the API answers, the network is
-    /// up and the gateway looks genuinely at fault — but this failed attempt
-    /// may have started while the network was still down (recovery edge), so
-    /// the grace is expired and the same gateway retried one final time; the
-    /// next failure comes from an attempt made with the network provenly up
-    /// and blacklists it (when culpable), forcing re-selection.
+    /// Inside the grace window with the API unreachable the failure is
+    /// forgiven. Once the API answers, the grace ends but the same gateway
+    /// gets one final retry: this attempt may predate the network's recovery.
     async fn handle_gateway_failure(
         &mut self,
         entry_culpable: bool,
@@ -670,7 +642,6 @@ impl TunnelStateHandler for ConnectingState {
                         ).await)
                     }
                     TunnelMonitorEvent::Down { error_state_reason, reply_tx } => {
-                        // Signal that the message was received first.
                         _ = reply_tx.send(());
 
                         if let Some(error_state_reason) = error_state_reason {
@@ -691,20 +662,12 @@ impl TunnelStateHandler for ConnectingState {
                         }
                     }
                     TunnelMonitorEvent::ConnectionFailed => {
-                        // Failed to connect via the entry gateway. Inside the post-drop
-                        // grace window with the API also unreachable this is forgiven
-                        // (local outage); otherwise blacklist and force gateway
-                        // re-selection.
                         self.handle_gateway_failure(true, "connection failure", shared_state).await;
                         NextTunnelState::SameState(self)
                     }
                     TunnelMonitorEvent::RegistrationFailed { entry_culpable } => {
-                        // Registration failed. Only blacklist the entry gateway when it is
-                        // the culpable party — an exit-gateway registration rejection must
-                        // not poison the (innocent) entry gateway. Either way force
-                        // re-selection (once past the post-drop grace window) so a
-                        // Random exit can land on a different node next attempt (a
-                        // pinned, broken exit will simply keep retrying).
+                        // An exit rejection must not blacklist the innocent entry
+                        // gateway; re-selection still happens so a Random exit moves.
                         self.handle_gateway_failure(entry_culpable, "registration failure", shared_state).await;
                         NextTunnelState::SameState(self)
                     }
@@ -733,14 +696,11 @@ impl TunnelStateHandler for ConnectingState {
                             return NextTunnelState::SameState(self);
                         };
 
-                        // Assign before re-applying so the firewall sync inside
-                        // set_firewall_policy picks up the new killswitch/
-                        // allow_lan/inbound_exemptions values, not stale ones.
+                        // Assign first: set_firewall_policy reads the killswitch flag.
                         shared_state.tunnel_settings = tunnel_settings;
 
-                        // Hot-apply path — mirrors connected_state. The exempt
-                        // routing rule is permanent for the tunnel lifetime, so only
-                        // the firewall mark-set rules are re-applied here.
+                        // The exempt routing rule is permanent for the tunnel
+                        // lifetime; only the firewall side is re-applied.
                         if diff.allow_lan_changed() {
                             self.firewall_policy_params.allow_lan = shared_state.tunnel_settings.allow_lan;
                         }
@@ -761,9 +721,6 @@ impl TunnelStateHandler for ConnectingState {
                             return NextTunnelState::SameState(self);
                         }
 
-                        // Same rule as connected_state: a settings-driven
-                        // reconnect keeps the pair it had unless the change is
-                        // an input to gateway selection.
                         let next_gateways = if diff.affects_gateway_selection() {
                             None
                         } else {
@@ -840,7 +797,6 @@ struct ConnectingPolicyParameters {
 
 impl ConnectingPolicyParameters {
     pub fn as_policy(&self) -> FirewallPolicy {
-        // Allow websocket entry endpoints
         let mut peer_endpoints = self
             .ws_entry_endpoints
             .iter()
@@ -853,7 +809,6 @@ impl ConnectingPolicyParameters {
             })
             .collect::<Vec<_>>();
 
-        // Allow WireGuard and entry endpoint
         if let Some(addr) = self.wg_entry_endpoint {
             if addr.is_ipv4() || (self.enable_ipv6 && addr.is_ipv6()) {
                 let allow_wg_endpoint = AllowedEndpoint::new(
@@ -867,7 +822,6 @@ impl ConnectingPolicyParameters {
             }
         }
 
-        // Allow endpoints from bridge connections to the entry gateway.
         self.bridge_endpoints
             .iter()
             .filter(|addr| addr.is_ipv4() || (self.enable_ipv6 && addr.is_ipv6()))
@@ -879,7 +833,6 @@ impl ConnectingPolicyParameters {
                 peer_endpoints.push(allow_bridge_endpoint);
             });
 
-        // Allow API endpoints
         let mut allowed_endpoints = self
             .api_endpoints
             .iter()
@@ -892,10 +845,8 @@ impl ConnectingPolicyParameters {
             })
             .collect::<Vec<_>>();
 
-        // Allow LP control endpoints for LP-based registration. These must be in
-        // allowed_endpoints (non-tunnel), not peer_endpoints, since LP registration
-        // connects to the entry gateway's control port before the tunnel is up
-        // (upstream nym-vpn-client #5516).
+        // LP control endpoints go in allowed_endpoints, not peer_endpoints: LP
+        // registration connects before the tunnel is up (upstream #5516).
         allowed_endpoints.extend(
             self.lp_entry_endpoints
                 .iter()
@@ -913,9 +864,8 @@ impl ConnectingPolicyParameters {
             .clone()
             .map(nym_firewall::TunnelInterface::from);
 
-        // Set non-tunnel DNS to allow api client to use those DNS servers.
+        // Non-tunnel DNS only; the override makes the default list irrelevant.
         let dns_config = DnsConfig::from_addresses(&[], &self.dns_servers).resolve(
-            // pass empty because we already override the config with non-tunnel addresses.
             &[],
         );
 
@@ -934,12 +884,10 @@ impl ConnectingPolicyParameters {
 }
 
 fn wait_delay(retry_attempt: u32) -> Duration {
-    // Use fast retries for the first FAST_RETRY_ATTEMPTS to handle network recovery
-    // where the network reports as "online" before DNS/routing are ready.
+    // Fast retries first: the network reports "online" before DNS/routing are ready.
     if retry_attempt <= FAST_RETRY_ATTEMPTS {
         NETWORK_RECOVERY_DELAY
     } else {
-        // After fast retries, use exponential backoff for persistent failures
         let multiplier = retry_attempt
             .saturating_sub(FAST_RETRY_ATTEMPTS)
             .saturating_mul(DELAY_MULTIPLIER);

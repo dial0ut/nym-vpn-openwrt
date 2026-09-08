@@ -138,16 +138,10 @@ impl ResolvedDnsConfig {
     }
 }
 
-/// What the system resolver should use while the tunnel is down.
-///
-/// Only the OpenWrt dnsmasq backend acts on this; every other backend treats
-/// an idle reset as a plain [`DnsMonitor::reset`]. `local_resolvers` are the
-/// user's custom DNS servers on private addresses (a LAN Pi-hole): the
-/// kill-switch admits them on every interface but the WAN, so they keep
-/// working while disconnected. The WAN-provided resolvers are kept only when
-/// the kill-switch is off or there is no local resolver: with the kill-switch
-/// on they are unreachable, and listing them would only make dnsmasq burn its
-/// retries on rejected upstreams.
+/// What the system resolver should use while the tunnel is down. Only the
+/// OpenWrt dnsmasq backend acts on it; others treat an idle reset as a plain
+/// [`DnsMonitor::reset`]. WAN resolvers are dropped when the kill-switch is
+/// on and a local resolver exists, so dnsmasq does not burn retries on them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct IdleDns {
     pub local_resolvers: Vec<IpAddr>,
@@ -155,12 +149,10 @@ pub struct IdleDns {
 }
 
 impl IdleDns {
-    /// The stock behaviour: mirror whatever the WAN handed out.
     pub fn wan_only() -> Self {
         Self::default()
     }
 
-    /// Whether the WAN-provided resolvers belong in the idle resolv file.
     pub fn includes_wan(&self) -> bool {
         !self.killswitch || self.local_resolvers.is_empty()
     }
@@ -192,8 +184,7 @@ impl DnsMonitor {
         self.inner.reset().await
     }
 
-    /// Reset system DNS for the idle (tunnel down) state, keeping the user's
-    /// private custom resolvers in play where the backend supports it.
+    /// Idle-state reset; see [`IdleDns`].
     pub async fn reset_idle(&mut self, idle: IdleDns) -> Result<(), Error> {
         tracing::info!(
             "Resetting DNS for idle: local resolvers {:?}, WAN resolvers {}",

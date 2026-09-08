@@ -201,8 +201,7 @@ async fn build_vpn_api_clients(network: &Network) -> Result<Vec<VpnApiClient>> {
 
     for url in nym_urls {
         let plain_url = Url::new(url.inner_url().clone(), None).map_err(|_| Error::MissingApiUrl)?;
-        // A plain Url carries no fronting domains, so the client never fronts —
-        // equivalent to upstream's explicit FrontPolicy::Off.
+        // No fronting domains, so the client never fronts.
         let plain_client = VpnApiClient::new(vec![plain_url], new_user_agent!(), None).await?;
 
         clients.push(plain_client);
@@ -212,8 +211,7 @@ async fn build_vpn_api_clients(network: &Network) -> Result<Vec<VpnApiClient>> {
                 let fronted_url = Url::new(url.inner_url().clone(), Some(vec![front.clone()]))
                     .map_err(|_e| Error::MissingApiUrl)?;
 
-                // A client-local always-on policy, detached from the shared one
-                // the Stealth API setting drives, so this probe always fronts.
+                // Client-local policy, detached from the Stealth API setting.
                 let fronted_client = VpnApiClient::new_with_front_policy(
                     vec![fronted_url],
                     new_user_agent!(),

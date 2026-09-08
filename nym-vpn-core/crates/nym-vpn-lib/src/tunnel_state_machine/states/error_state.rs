@@ -13,9 +13,6 @@ use crate::tunnel_state_machine::{
 };
 
 pub struct ErrorState {
-    /// Why we are here. A settings change that makes the failed operation
-    /// succeed again is a way out only for the reasons this state can
-    /// re-attempt itself (a firewall policy apply).
     reason: ErrorStateReason,
 }
 
@@ -24,15 +21,10 @@ impl ErrorState {
         reason: ErrorStateReason,
         shared_state: &mut SharedState,
     ) -> (Box<dyn TunnelStateHandler>, PrivateTunnelState) {
-        // Mirror DisconnectedState: only lock the firewall when the user
-        // opted into the kill-switch AND we have API endpoints to whitelist.
-        // Otherwise reset so the daemon can reach the API and self-recover
-        // from transient connect errors. The previous behavior — Blocked
-        // with empty exemptions — was a one-way deadlock.
-        //
-        // Already in the error path — a failed apply can only be logged here
-        // (escalating would recurse), and the state shown to the user is an
-        // error either way.
+        // Same idle policy as DisconnectedState: Blocked whenever the
+        // kill-switch is on (with whatever API endpoints are known, possibly
+        // none), reset otherwise. A failed apply can only be logged here;
+        // escalating would recurse.
         if let Err(e) = shared_state.apply_killswitch_policy() {
             trace_err_chain!(e, "Failed to apply kill-switch policy in error state");
         }
@@ -101,10 +93,7 @@ impl TunnelStateHandler for ErrorState {
                                 Err(e) => {
                                     trace_err_chain!(e, "Failed to apply kill-switch policy in error state");
                                 }
-                                // We came here because a policy apply failed;
-                                // the re-apply just succeeded, so the error
-                                // is resolved. Stay parked only for reasons a
-                                // settings change cannot fix.
+                                // A successful re-apply resolves a SetFirewallPolicy error.
                                 Ok(()) if matches!(self.reason, ErrorStateReason::SetFirewallPolicy) => {
                                     return NextTunnelState::NewState(
                                         DisconnectedState::enter(None, shared_state).await,

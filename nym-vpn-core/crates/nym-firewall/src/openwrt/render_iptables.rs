@@ -19,9 +19,7 @@ pub const CHAIN_FORWARD: &str = "NYM_FORWARD";
 pub const CHAIN_MANGLE_PREROUTING: &str = "NYM_MANGLE_PREROUTING";
 pub const CHAIN_MANGLE_OUTPUT: &str = "NYM_MANGLE_OUTPUT";
 
-/// Render the [`RuleSet`] for one address family as an iptables-restore
-/// script body. When `rs.mangle` is non-empty, a `*mangle` table block is
-/// emitted before `*filter`.
+/// A `*mangle` block precedes `*filter` when `rs.mangle` is non-empty.
 pub fn render(rs: &RuleSet, family: AddrFamily) -> String {
     let mut out = String::new();
 
@@ -53,8 +51,7 @@ pub fn render(rs: &RuleSet, family: AddrFamily) -> String {
 }
 
 fn render_chain(out: &mut String, chain: &str, c: &Chain, family: AddrFamily) {
-    // The kernel hard-rejects `-m owner` outside OUTPUT/POSTROUTING, so an
-    // skuid match on any other chain would fail the whole restore COMMIT.
+    // `-m owner` outside OUTPUT/POSTROUTING fails the whole restore.
     debug_assert!(
         chain == CHAIN_OUTPUT
             || chain == CHAIN_MANGLE_OUTPUT
@@ -98,12 +95,8 @@ fn render_rule(rule: &Rule, family: AddrFamily) -> String {
     if let Some(daddr) = &m.daddr {
         parts.push(format!("-d {}", render_addr(daddr)));
     }
-    // Legacy (ip)?(6)?tables-restore only recognizes --icmp-type /
-    // --icmpv6-type once the protocol providing the option is on the line;
-    // without `-p` the whole restore fails with "unknown option". The rule
-    // builder guarantees this (icmp*_type() implies the proto) — assert it
-    // rather than guess here, so a rule built by hand fails loudly in tests
-    // instead of failing an entire restore on a router.
+    // Legacy *tables-restore fails with "unknown option" on --icmp-type /
+    // --icmpv6-type unless `-p` precedes it on the line.
     debug_assert!(
         (m.icmpv4_type.is_none() && m.icmpv6_type.is_none()) || m.proto.is_some(),
         "ICMP type match without a protocol: {m:?}"
@@ -192,9 +185,7 @@ fn icmpv6_name(t: IcmpV6Type) -> &'static str {
     }
 }
 
-/// Pick the right REJECT method per family/proto. Without a `--reject-with`
-/// flag iptables would default to icmp-port-unreachable on v4 / icmp6 on v6,
-/// but for TCP we want tcp-reset so clients see a clean refusal.
+/// TCP gets tcp-reset so clients see a clean refusal.
 fn reject_with(rule: &Rule, family: AddrFamily) -> &'static str {
     if rule.matches.proto == Some(Proto::Tcp) {
         return "tcp-reset";
@@ -228,10 +219,7 @@ mod tests {
 
     #[test]
     fn icmp_type_without_proto_still_emits_protocol_flag() {
-        // Regression: base_rules pushes ICMPv6 accepts without an explicit
-        // proto. ip6tables-restore 1.8.7 rejects a bare --icmpv6-type
-        // ("unknown option"), which failed the entire v6 restore and broke
-        // the fw3 kill switch in every release since v1.27.0. nft never
+        // ip6tables-restore 1.8.7 rejects a bare --icmpv6-type; nft never
         // needed the proto, so fw4 masked it.
         let rule = Rule::accept(Family::V6).icmpv6_type(IcmpV6Type::RouterSolicit);
         assert_eq!(
@@ -445,7 +433,6 @@ mod tests {
         assert!(v4.contains("-A NYM_MANGLE_PREROUTING -j CONNMARK --restore-mark"));
         assert!(v4.contains("-A NYM_MANGLE_PREROUTING -i wan -p tcp --dport 443 -m conntrack --ctstate NEW -j CONNMARK --set-mark 0x14e"));
         assert!(v4.contains("-A NYM_MANGLE_OUTPUT -j CONNMARK --restore-mark"));
-        // Both tables COMMIT.
         let commits: Vec<&str> = v4.matches("COMMIT").collect();
         assert_eq!(commits.len(), 2, "expected COMMIT for both *mangle and *filter");
     }

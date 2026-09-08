@@ -6,22 +6,17 @@ use std::fmt::Write;
 
 use super::rules::*;
 
-/// Priority of our filter chains relative to fw4's: we run first so blocks
-/// are final and fw4 never sees that traffic.
+/// Ahead of fw4 so our blocks are final.
 const FILTER_PRIORITY_OFFSET: i32 = -10;
 
-/// Priority of our mangle chains. Sits at `mangle - 10` so it runs before
-/// any other mangle hook (and crucially before fw4's dstnat at `dstnat`).
-/// `mangle` is -150 in nftables, so this resolves to -160.
+/// `mangle - 10` (-160): before every other mangle hook and fw4's dstnat.
 const MANGLE_PRIORITY_OFFSET: i32 = -10;
 
-/// Render the [`RuleSet`] as an `nft -f` script.
 pub fn render(rs: &RuleSet) -> String {
     let mut out = String::new();
     writeln!(out, "#!/usr/sbin/nft -f").unwrap();
     writeln!(out).unwrap();
-    // Idempotent create-then-replace dance: `delete table` errors if the
-    // table doesn't exist, so we create-then-delete-then-create.
+    // `delete table` errors on a missing table, hence create-delete-create.
     writeln!(out, "table inet nym").unwrap();
     writeln!(out, "delete table inet nym").unwrap();
     writeln!(out).unwrap();
@@ -168,9 +163,7 @@ fn addr_family(family: Family) -> &'static str {
     match family {
         Family::V4 => "ip",
         Family::V6 => "ip6",
-        // `inet` family chains accept both; if we got here, the caller is
-        // passing an address with no explicit family. Treat as ipv4 — but
-        // policy.rs always sets V4/V6 explicitly when there's an address.
+        // policy.rs always sets V4/V6 when there is an address.
         Family::Inet => "ip",
     }
 }

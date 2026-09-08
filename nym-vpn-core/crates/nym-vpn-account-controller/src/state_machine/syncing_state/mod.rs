@@ -33,11 +33,8 @@ const SYNCING_STATE_CONTEXT: &str = "SYNCING_STATE";
 const SYNCING_BACKOFF_BASE: Duration = Duration::from_millis(250);
 const MAX_SYNCING_BACKOFF_EXPONENT: u32 = 5;
 
-/// Bounded exponential backoff before a sync *retry*: zero on the first attempt,
-/// then [0.25, 0.5, 1, 2, 4, 8, 8, ...] seconds — each retry capped at 8s, ~55s
-/// total over MAX_SYNCING_ATTEMPTS. Without this the state machine re-enters
-/// `SyncingState` immediately on every API failure, hammering the VPN API and
-/// the log on an intermittent router uplink (upstream nym-vpn-client #4898).
+/// Zero on the first attempt, then 0.25s doubling to an 8s cap; without it an
+/// intermittent uplink hammers the VPN API (upstream nym-vpn-client #4898).
 fn syncing_backoff(attempts: u32) -> Duration {
     if attempts == 0 {
         return Duration::ZERO;
@@ -69,9 +66,8 @@ pub struct SyncingState {
     attempts: u32,
 }
 
-/// Outcome of an account sync attempt. The best-effort `summary` is persisted
-/// even when `result` is an error, so the daemon/LuCI can still show last-known
-/// account state when sync ultimately fails (upstream nym-vpn-client #4812).
+/// `summary` is persisted even when `result` is an error, so last-known
+/// account state survives a failed sync (upstream nym-vpn-client #4812).
 struct SyncOutcome {
     summary: Option<VpnAccountSummary>,
     result: Result<(), SyncError>,
@@ -196,8 +192,7 @@ impl SyncingState {
                     summary.account_summary.fair_usage.resetsOnUtc.clone(),
                 );
 
-                // From here the summary is stored regardless of the eligibility
-                // checks below, so last-known state survives a soft failure.
+                // From here the summary is stored whatever the checks below say.
 
                 // Checking that the account is active
                 if !summary.account_active() {
@@ -465,7 +460,6 @@ mod tests {
         assert_eq!(syncing_backoff(2), Duration::from_millis(500));
         assert_eq!(syncing_backoff(3), Duration::from_secs(1));
         assert_eq!(syncing_backoff(6), Duration::from_secs(8));
-        // Caps each retry at 8s (exponent 5) and never overflows.
         assert_eq!(syncing_backoff(9), Duration::from_secs(8));
         assert_eq!(syncing_backoff(u32::MAX), Duration::from_secs(8));
     }

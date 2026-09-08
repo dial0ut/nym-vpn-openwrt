@@ -1,16 +1,11 @@
 #!/bin/bash
-# Run shellcheck over every shell script the project ships or runs.
-#
-# Single source of truth for the file set and the severity gate, so CI and
-# local runs agree. Covers the *.sh helpers plus the suffix-less scripts that
-# run as root on the router: the rpcd plugin, the procd init scripts, the
-# hotplug hook, the package hooks and the watchdog.
+# Run shellcheck over every shell script the project ships or runs; the one
+# file set and severity gate for CI and local runs.
 #
 # Usage: scripts/security/shellcheck.sh [extra shellcheck args...]
 #   SHELLCHECK  override the binary, e.g. SHELLCHECK="uvx --from shellcheck-py shellcheck"
 #
-# The gate is --severity=error. Raise it to warning once the existing
-# warning-level findings (mostly SC2155/SC2046) have been cleaned up.
+# Gate is --severity=error until the SC2155/SC2046 warnings are cleaned up.
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."

@@ -1,25 +1,18 @@
 #!/bin/sh
 # Pre-removal script for nym-vpn IPK package
 
-# Upgrade only: remember what rpcd is currently serving. postinst compares
-# this against the new package to pick the least disruptive rpcd refresh
-# (see there); a missing stash makes it restart rpcd.
-#
-# The plugin file /usr/libexec/rpcd/nym-vpn is a fixed wrapper around
-# `nym-vpnc rpcd`, so its checksum never changes; what rpcd caches at start
-# is the method list that wrapper prints for `list`. Hash that output (from
-# the binary still installed here). Empty when `list` fails, which postinst
-# reads as "changed".
+# Upgrade only: stash what rpcd currently serves so postinst can pick the
+# least disruptive refresh. The plugin file is a fixed wrapper around
+# `nym-vpnc rpcd`, so hash its `list` output, not the file. Empty when
+# `list` fails, which postinst reads as "changed".
 nym_rpcd_schema_hash() {
     local out
     out=$(/usr/libexec/rpcd/nym-vpn list 2>/dev/null) || return 0
     [ -n "$out" ] || return 0
     printf '%s\n' "$out" | md5sum | cut -d' ' -f1
 }
-# The stash lives under /var/run (root-owned 0755 on OpenWrt), not /tmp: a
-# predictable world-writable path could be pre-created as a FIFO and hang
-# this script at the redirect, or seeded with content. Remove any stale
-# entry first so the redirect always creates a fresh regular file.
+# Under /var/run, not /tmp: a pre-created FIFO at a world-writable path would
+# hang the redirect. Remove stale entries so it always creates a fresh file.
 nym_rpcd_state=/var/run/nym-vpn.rpcd-state
 rm -f "$nym_rpcd_state" /tmp/nym-vpn.rpcd-state 2>/dev/null
 if [ "$PKG_UPGRADE" = "1" ]; then
@@ -29,46 +22,33 @@ if [ "$PKG_UPGRADE" = "1" ]; then
     } > "$nym_rpcd_state"
 fi
 
-# Stop the watchdog: it would fight the restart postinst does. On an upgrade
-# the daemon itself keeps running through the file swap (Linux keeps the old
-# binary alive on its unlinked inode) and postinst restarts it through the
-# newly installed init script, whose restart path keeps the kill-switch
-# armed. The init script on disk at this point is the old package's, so
-# nothing here relies on what its stop would do. Real removal stops both.
+# The watchdog would fight postinst's restart. On an upgrade the daemon keeps
+# running through the file swap; postinst restarts it via the new init
+# script, whose restart path keeps the kill-switch armed.
 /etc/init.d/nym-vpn-watchdog stop 2>/dev/null
 if [ "$PKG_UPGRADE" != "1" ]; then
     /etc/init.d/nym-vpnd stop 2>/dev/null
 fi
 
-# Disabling is for real removal only. On an upgrade the boot symlinks must
-# survive: postinst re-creates them, but if postinst never runs (a failed or
-# interrupted transaction, or a package manager that skips post-upgrade) the
-# router is left with the service permanently disabled — it does not come back
-# after a reboot either, and the UI then shows an empty account, which reads as
-# lost credentials. Leaving /etc/rc.d alone makes that failure self-healing.
+# Removal only: if postinst never runs after an upgrade (interrupted
+# transaction), a disabled service would stay disabled across reboots.
 if [ "$PKG_UPGRADE" != "1" ]; then
     /etc/init.d/nym-vpn-watchdog disable 2>/dev/null
     /etc/init.d/nym-vpnd disable 2>/dev/null
 fi
 
-# Firewall teardown is for real removal only. On an upgrade the daemon's
-# policy, the boot block and the fw3 rules files stay: the new daemon
-# replaces them atomically on its first apply (fw4 re-creates its table and
-# adds jumps only when absent; fw3 restores over existing chains), and
-# tearing them down here would open WAN egress for the whole transaction.
+# Removal only: on an upgrade the policy, boot block and fw3 rules files stay
+# and the new daemon replaces them atomically on its first apply. Tearing
+# them down here would open WAN egress for the whole transaction.
 if [ "$PKG_UPGRADE" != "1" ]; then
 
-# The boot-time kill-switch block (fw4-include.sh, fw-boot-guard.sh) must not
-# outlive the package: with the daemon gone nothing else would ever lift it.
-# An nftables table filters on its own whether fw4 is the active backend or
-# not, so remove it wherever nft exists instead of trusting the backend guess
-# below. The fw3 counterpart shares the NYM_EMERGENCY_* chains removed there.
+# An nftables table filters regardless of the active backend, so remove the
+# boot block wherever nft exists rather than trusting the backend guess.
 if command -v nft >/dev/null 2>&1; then
     nft delete table inet nym_boot 2>/dev/null
 fi
 
-# Clean up firewall rules (backend decided by the shared detector so this
-# cannot disagree with the include registration)
+# Same detector as the include registration, so the two cannot disagree.
 if [ -x /usr/share/nym-vpn/fw-backend.sh ]; then
     nym_fw_backend="$(/usr/share/nym-vpn/fw-backend.sh)"
 elif [ -x /sbin/fw4 ] || [ -x /usr/sbin/fw4 ]; then
@@ -77,13 +57,11 @@ else
     nym_fw_backend="fw3"
 fi
 if [ "$nym_fw_backend" = "fw4" ]; then
-    # fw4/nftables cleanup. No lock is involved on fw4: each nft command is
-    # one atomic transaction, the fw4 include never touches `inet nym`, and
-    # the only other writer of `inet nym_boot` is that include, which cannot
-    # re-arm the block while the stop marker written by the init script's
-    # stop above exists.
+    # No lock on fw4: each nft command is one atomic transaction and the
+    # include never touches `inet nym`. The include cannot re-arm the boot
+    # block after this: the `disable` above removed the rc.d link its guard
+    # requires, and the uci include section goes below.
     nft delete table inet nym 2>/dev/null
-    # Remove rules from fw4 chains (srcnat, forward_lan)
     for chain in srcnat forward_lan; do
         handles=$(nft -a list chain inet fw4 "$chain" 2>/dev/null | grep "nym-vpn:" | sed 's/.*handle //')
         for h in $handles; do
@@ -91,31 +69,25 @@ if [ "$nym_fw_backend" = "fw4" ]; then
         done
     done
 else
-    # fw3/iptables cleanup. The include script owns the teardown of our
-    # chains (fw3-include.sh with the stop marker present: discard persisted
-    # state, remove chains, jumps, masquerade and LAN forwarding), and the
-    # init script already ran it under the fw3 state lock when it stopped the
-    # daemon above. Run it once more the same way — marker written, lock held
-    # — so a stop that could not take the lock is completed here and a
-    # firewall reload cannot interleave with the removal. The inline teardown
-    # is the fallback for an installation whose include or guard is already
-    # gone; it is the same set of chains, named here for that case only.
+    # The include owns the fw3 teardown (stop marker present: discard
+    # persisted state, remove chains, jumps, masquerade, LAN forwarding).
+    # The init script's stop already ran it under the lock; run it once more
+    # the same way so a stop that could not take the lock is completed here.
+    # The inline fallback is for an install whose include or guard is gone;
+    # it covers the filter and mangle chains but not the NYM_POSTROUTING nat
+    # chain, only the commented POSTROUTING rules.
     nym_fw3_teardown_inline() {
         for ipt in iptables ip6tables; do
-            # Remove jump rules from fw3 hook chains
             for hook in input_rule output_rule forwarding_rule; do
                 $ipt -D "$hook" -j NYM_INPUT 2>/dev/null
                 $ipt -D "$hook" -j NYM_OUTPUT 2>/dev/null
                 $ipt -D "$hook" -j NYM_FORWARD 2>/dev/null
             done
-            # Remove jump rules from mangle table built-ins (inbound exemption)
             $ipt -t mangle -D PREROUTING -j NYM_MANGLE_PREROUTING 2>/dev/null
             $ipt -t mangle -D OUTPUT -j NYM_MANGLE_OUTPUT 2>/dev/null
-            # Remove forwarding-plane and transition-emergency jumps.
             $ipt -D forwarding_rule -j NYM_FORWARD_LAN 2>/dev/null
             while $ipt -D output_rule -j NYM_EMERGENCY_OUT 2>/dev/null; do :; done
             while $ipt -D forwarding_rule -j NYM_EMERGENCY_FWD 2>/dev/null; do :; done
-            # Flush and delete our chains in filter + mangle
             for chain in NYM_INPUT NYM_OUTPUT NYM_FORWARD NYM_FORWARD_LAN \
                 NYM_EMERGENCY_OUT NYM_EMERGENCY_FWD; do
                 $ipt -F "$chain" 2>/dev/null
@@ -126,7 +98,6 @@ else
                 $ipt -t mangle -X "$chain" 2>/dev/null
             done
         done
-        # Remove masquerade rules from NAT table
         for num in $(iptables -t nat -L POSTROUTING -n --line-numbers -v 2>/dev/null | grep "nym-vpn" | awk '{print $1}' | sort -rn); do
             iptables -t nat -D POSTROUTING "$num" 2>/dev/null
         done
@@ -148,10 +119,7 @@ else
     fi
 fi
 
-# The runtime-state directory (RUNTIME_DIR in the firewall backends; rules
-# files, transition marker, lock, stop marker) is the includes' reload state.
-# Removal only, for the same reason. The /tmp names are what versions before
-# the runtime directory used; nothing reads them any more.
+# The /tmp names predate the runtime directory; nothing reads them any more.
 rm -rf /var/run/nym-firewall 2>/dev/null
 rm -f /tmp/nym-firewall-v4.rules /tmp/nym-firewall-v6.rules /tmp/nym-firewall.nft \
     /tmp/nym-firewall.ifaces /tmp/nym-firewall.transition /tmp/nym-firewall.lock \
@@ -159,13 +127,9 @@ rm -f /tmp/nym-firewall-v4.rules /tmp/nym-firewall-v6.rules /tmp/nym-firewall.nf
 
 fi # PKG_UPGRADE != 1
 
-# Defensive: flush any stray ip rule entries our daemon may have installed.
-# These are normally cleared by the daemon's clear_routing_rules() on stop,
-# but a crashed daemon can leave them behind. Match by our specific fwmark
-# values rather than priority to avoid touching unrelated rules. Removal
-# only: on an upgrade the daemon is still running and owns these rules
-# (inbound-exemption replies route through the 0x14e one), and the new
-# daemon re-creates them when postinst restarts it.
+# ip rules a crashed daemon may have left. Matched by our fwmarks, not by
+# priority, so unrelated rules are untouched. Removal only: on an upgrade the
+# running daemon still owns them.
 if [ "$PKG_UPGRADE" != "1" ]; then
     for ip_cmd in "ip" "ip -6"; do
         while $ip_cmd rule del fwmark 0x14d lookup 333 2>/dev/null; do :; done
@@ -173,49 +137,39 @@ if [ "$PKG_UPGRADE" != "1" ]; then
     done
 fi
 
-# Remove the UCI firewall include on real removal only. On an upgrade
-# postinst reconciles it, but if postinst never runs (interrupted
-# transaction) a deleted section would leave the kill-switch unable to
-# survive a firewall reload with nothing to repair it until the next
-# install. Leaving it in place is self-healing.
+# Removal only: postinst reconciles the include on upgrade, and if it never
+# runs a deleted section would leave nothing to survive a firewall reload.
 if [ "$PKG_UPGRADE" != "1" ]; then
     uci delete firewall.nym_vpn 2>/dev/null
     uci commit firewall 2>/dev/null
 fi
 
-# Clean up temporary files (safe on both upgrade and removal)
 rm -f /tmp/dnsmasq.d/nym-adblock.conf 2>/dev/null
 rm -f /tmp/nym-dns-backup /tmp/resolv.conf.nymbackup 2>/dev/null
 rm -f /var/run/nym-watchdog.state /tmp/nym-watchdog.state 2>/dev/null
 
-# DNS: on full removal, return dnsmasq to stock resolv handling. On upgrade,
-# leave everything in place — the new daemon reconverges without a restart
-# and a dnsmasq restart here would be a pointless LAN-wide DNS outage.
+# Removal only: on an upgrade the new daemon reconverges DNS without a
+# restart, and a dnsmasq restart here would be a LAN-wide outage.
 if [ "$PKG_UPGRADE" != "1" ]; then
-    # Staged (uncommitted) repoint: targeted revert only — never wholesale,
-    # so the user's own staged dhcp edits survive.
+    # Targeted revert so the user's own staged dhcp edits survive.
     uci -q revert dhcp.@dnsmasq[0].resolvfile
-    # Accidentally-committed repoint (LuCI Save&Apply commits staged deltas):
-    # deleting the option restores the stock default resolvfile.
+    # LuCI Save&Apply may have committed the staged repoint.
     if grep -q "nym-resolv.conf" /etc/config/dhcp 2>/dev/null; then
         uci -q delete dhcp.@dnsmasq[0].resolvfile
         uci -q commit dhcp
     fi
     rm -f /tmp/resolv.conf.d/nym-resolv.conf /tmp/resolv.conf.d/.nym-resolv.tmp 2>/dev/null
-    # Restart only if the running instance still points at our (now removed) file.
     if grep -qs "resolv-file=.*nym-resolv.conf" /var/etc/dnsmasq.conf.* 2>/dev/null; then
         /etc/init.d/dnsmasq restart 2>/dev/null
     fi
 fi
 
-# Only do destructive cleanup on full removal, not upgrades.
-# opkg sets PKG_UPGRADE=1 when upgrading.
+# opkg sets PKG_UPGRADE=1 on upgrade; build-apk.sh exports it for apk.
 if [ "$PKG_UPGRADE" != "1" ]; then
     rm -rf /etc/nym 2>/dev/null
     rm -rf /var/log/nym-vpnd 2>/dev/null
     rm -f /var/run/nym-vpn.rpcd-state 2>/dev/null
 
-    # Remove package feed registration
     if [ -f /etc/opkg/customfeeds.conf ]; then
         sed -i '/nym-vpn/d' /etc/opkg/customfeeds.conf 2>/dev/null
     fi

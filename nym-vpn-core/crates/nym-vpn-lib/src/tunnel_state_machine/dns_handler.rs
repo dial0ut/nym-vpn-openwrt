@@ -128,8 +128,6 @@ impl DnsHandlerHandle {
             .await
     }
 
-    /// Reset for the tunnel-down state, keeping the user's LAN custom
-    /// resolvers in dnsmasq's upstream list (see [`IdleDns`]).
     pub async fn reset_idle(&mut self, idle: IdleDns) -> Result<()> {
         let (reply_tx, reply_rx) = oneshot::channel();
 

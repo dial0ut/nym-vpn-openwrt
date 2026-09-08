@@ -3,13 +3,8 @@ START=90
 STOP=10
 USE_PROCD=1
 
-# Runtime state shared with the daemon and the firewall includes lives in a
-# root-owned private directory, not /tmp: the boot guard honours the stop
-# marker and the fw3 include loads the rules files only from a directory
-# nobody else could have written to. fw-boot-guard.sh owns the paths and the
-# checks (NYM_RUNTIME_DIR, NYM_VPND_STOPPED, nym_runtime_dir_prepare); source
-# it so this script cannot drift from the includes. Without it there is no
-# boot-time block either, so the marker is irrelevant and is not written.
+# fw-boot-guard.sh owns the runtime-directory paths and checks. Without it
+# there is no boot-time block either, so the stop marker is not written.
 NYM_SHARE_DIR="${NYM_SHARE_DIR:-/usr/share/nym-vpn}"
 if [ -r "$NYM_SHARE_DIR/fw-boot-guard.sh" ]; then
     # shellcheck source=/dev/null
@@ -20,24 +15,14 @@ else
     nym_runtime_dir_prepare() { return 1; }
 fi
 
-# Written on explicit stop, cleared on start (contract with fw-boot-guard.sh).
-# While present, a firewall reload must not re-install the boot-time
-# kill-switch block: the administrator asked for their network back and no
-# daemon is coming to lift it. /var/run is tmpfs, so a reboot re-arms the
-# block.
+# Written on explicit stop, cleared on start: while present, a firewall
+# reload must not re-install the boot block. tmpfs, so a reboot re-arms it.
 STOPPED_MARKER="$NYM_VPND_STOPPED"
 
-# Only an explicit `stop` opens the network. A `restart` — which is also
-# how a package upgrade swaps the daemon (postinst restarts through this
-# script) — leaves the kill-switch armed for the gap: the daemon keeps its
-# Blocked policy in place on shutdown while the kill-switch is on, and the
-# next daemon replaces it atomically on its first apply. rc.common runs
-# `restart` as the stop and start functions of one process, so $action is
-# still "restart" in the stop hooks. A system shutdown or reboot runs the
-# K-script with action "shutdown", which rc.common maps onto stop: opening
-# the firewall for the last seconds of a reboot let a LAN client's DNS and
-# HTTPS leave on the WAN (captured), so shutdown keeps the block too.
-# tmpfs is cleared by the reboot, and the boot-time block takes over.
+# Only an explicit `stop` opens the network. `restart` (also how a package
+# upgrade swaps the daemon) and `shutdown` (the K-script on reboot) keep the
+# kill-switch armed: rc.common leaves $action set in the stop hooks, and an
+# open firewall in the last seconds of a reboot leaked LAN DNS/HTTPS on WAN.
 keep_killswitch() {
     # shellcheck disable=SC2154  # action is set by rc.common
     [ "$action" = "restart" ] || [ "$action" = "shutdown" ]
@@ -46,19 +31,16 @@ keep_killswitch() {
 start_service() {
     rm -f "$STOPPED_MARKER"
 
-    # Kill-switch firewall integration needs fw4's table present; if the
-    # firewall service exists but its table isn't up yet, nudge it first.
-    # That reload also runs the include, which arms the boot-time block if
-    # the kill-switch is on — closing the gap until the daemon's first policy.
+    # fw4 integration needs its table; the reload also runs the include,
+    # which arms the boot block until the daemon's first policy.
     if [ -x /etc/init.d/firewall ] && ! nft list table inet fw4 >/dev/null 2>&1; then
         /etc/init.d/firewall reload >/dev/null 2>&1 || true
     fi
     mkdir -p /etc/nym/data
     procd_open_instance
     procd_set_param command /usr/sbin/nym-vpnd
-    # retry=0: respawn forever. The daemon owns the fail-closed kill-switch
-    # table (inet nym); if procd gives up on a crash-looping daemon, the
-    # router is left blackholed with no process able to clear it.
+    # retry=0: respawn forever. If procd gave up, the kill-switch table
+    # would outlive the daemon with nothing left to clear it.
     procd_set_param respawn 3600 5 0
     procd_set_param stdout 1
     procd_set_param stderr 1
@@ -69,9 +51,7 @@ start_service() {
 STOP_PID_STASH="$NYM_RUNTIME_DIR/stop-pid"
 
 stop_service() {
-    # First thing, before anything can fail or block: a reload racing this
-    # stop must already see the marker. Only ever written into a directory
-    # that passed the ownership/mode checks; the guard ignores it elsewhere.
+    # First, before anything can block: a racing reload must see the marker.
     if ! keep_killswitch; then
         if nym_runtime_dir_prepare; then
             touch "$STOPPED_MARKER" 2>/dev/null
@@ -80,17 +60,14 @@ stop_service() {
         fi
     fi
 
-    # Stash the daemon pid before procd kills it: service_stopped() needs
-    # it, and pidof is useless there — rc.common itself runs with comm
-    # "nym-vpnd" and would match.
+    # service_stopped() needs the pid; pidof would match rc.common itself
+    # (comm "nym-vpnd").
     if nym_runtime_dir_prepare; then
         cat /var/run/nym-vpnd.pid 2>/dev/null > "$STOP_PID_STASH"
     fi
 
-    # Graceful disconnect, guarded: a hung daemon accepts the control
-    # socket but never replies, and an unguarded nym-vpnc wedges stop
-    # forever (BusyBox ships no timeout(1)). Give it 10s, then move on —
-    # procd_kill and service_stopped() handle the rest.
+    # A hung daemon accepts the socket but never replies; BusyBox has no
+    # timeout(1), so bound the disconnect by hand.
     /usr/bin/nym-vpnc disconnect 2>/dev/null &
     local vpnc=$! i=0
     while kill -0 "$vpnc" 2>/dev/null && [ "$i" -lt 10 ]; do
@@ -102,17 +79,11 @@ stop_service() {
 }
 
 service_stopped() {
-    # Runs after procd has killed the daemon. A dead or hung daemon cannot
-    # answer the disconnect above, and the kill-switch table outlives the
-    # process — without this the router stays blackholed (WAN egress and
-    # LAN forwarding blocked) with nothing left to open the firewall.
-    # An explicit stop means the admin wants their network back.
-    #
-    # procd's kill is asynchronous: the daemon may still be shutting down
-    # (re-asserting its Blocked policy on the way out) when this hook runs.
-    # Wait for the stashed pid to really exit — SIGKILL lands after
-    # term_timeout (5s), so the loop terminates well inside its bound. The
-    # cmdline check guards against pid reuse and a stale stash.
+    # The kill-switch table outlives the process; on explicit stop this is
+    # what opens the router. procd's kill is asynchronous and the daemon
+    # re-asserts Blocked on the way out, so wait for the pid to really exit
+    # (SIGKILL lands after term_timeout 5s). The cmdline check guards
+    # against pid reuse.
     local pid i=0
     pid="$(cat "$STOP_PID_STASH" 2>/dev/null)"
     rm -f "$STOP_PID_STASH"
@@ -122,37 +93,23 @@ service_stopped() {
         i=$((i + 1))
     done
 
-    # Restart or upgrade: the kill-switch stays armed. The daemon left its
-    # policy (fw4: inet nym; fw3: chains plus the persisted rules files), a
-    # boot block that may exist is lifted by the next daemon's first apply,
-    # and a reload meanwhile finds no stop marker and keeps the block. If
-    # the new daemon never comes up, `stop` is what opens the router.
+    # The daemon left its policy in place; the next daemon's first apply
+    # replaces it. If it never comes up, `stop` is what opens the router.
     if keep_killswitch; then
         logger -t nym-vpn "nym-vpnd $action: leaving the kill-switch armed"
         return 0
     fi
 
     nft delete table inet nym 2>/dev/null || true
-    # The boot-time block (fw4-include.sh) would otherwise outlive the daemon
-    # that was supposed to lift it; the stop marker keeps reloads from
-    # re-installing it until the next start.
     nft delete table inet nym_boot 2>/dev/null || true
 
-    # fw3 (iptables) routers: the kill-switch chains live in the shared
-    # filter/mangle/nat tables and outlive the daemon just like the nft
-    # table does. The include script owns their teardown: with the stop
-    # marker present it discards the daemon's persisted rules files and the
-    # transition marker, then removes chains, jumps, masquerade and LAN
-    # forwarding — the same code path a firewall reload takes, so stop and
-    # reload cannot diverge, and this script never touches those files
-    # itself. Done under the fw3 state lock the daemon and the include
-    # share; the include is told the lock is already held (re-taking it
-    # would deadlock).
+    # fw3: the include owns the chain teardown (stop marker present: discard
+    # persisted state, remove chains, jumps, masquerade, LAN forwarding), the
+    # same path a reload takes, run under the shared state lock with
+    # NYM_FW_LOCKED=1 so the include does not re-take it (deadlock).
     (
-        # Same rule as the include: no lock, no fw3 mutation. The daemon is
-        # already gone and the stop marker is written; the include honours
-        # the marker ahead of any persisted policy on its next run, so the
-        # teardown happens there (`/etc/init.d/firewall reload`).
+        # No lock, no fw3 mutation; the include honours the marker on its
+        # next run and finishes the teardown there.
         if ! command -v flock >/dev/null 2>&1 || ! nym_runtime_dir_prepare; then
             logger -t nym-vpn "cannot take the fw3 state lock; the next firewall reload performs the fw3 teardown (stop marker present)"
             exit 0
@@ -163,9 +120,7 @@ service_stopped() {
             exit 0
         }
         export NYM_FW_LOCKED=1
-        # Files a pre-runtime-directory daemon left under /tmp. Never read
-        # any more; removed on explicit stop so they do not linger until the
-        # next reboot.
+        # Files a pre-runtime-directory daemon left under /tmp; never read.
         rm -f /tmp/nym-firewall-v4.rules /tmp/nym-firewall-v6.rules \
             /tmp/nym-firewall.ifaces /tmp/nym-firewall.transition \
             /tmp/nym-firewall.lock /tmp/nym-vpnd.stopped /tmp/nym-vpnd.stop-pid 2>/dev/null

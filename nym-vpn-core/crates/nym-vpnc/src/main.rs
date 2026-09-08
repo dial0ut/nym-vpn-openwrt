@@ -20,20 +20,19 @@ use crate::table_style::TableStyle;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Rust ignores SIGPIPE, so `nym-vpnc tunnel get | grep -q x` ended with
-    // "failed printing to stdout: Broken pipe" once grep closed the pipe.
-    // Restore the default so the process exits quietly like other CLIs.
-    // SAFETY: called before any other thread exists; signal(2) with SIG_DFL
-    // has no preconditions.
+    // Rust ignores SIGPIPE; restore the default so `nym-vpnc ... | grep -q`
+    // exits quietly instead of "failed printing to stdout: Broken pipe".
+    // SAFETY: signal(2) with a valid signal and SIG_DFL has no preconditions;
+    // the disposition is process-wide, so the runtime's worker threads
+    // (already running under #[tokio::main]) are irrelevant.
     unsafe {
         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
     }
 
     let args = ProgramArgs::parse();
 
-    // The rpcd bridge connects lazily per-method: it must keep answering
-    // (with JSON error payloads) while the daemon is down, e.g. for the
-    // LuCI daemon-restart flow.
+    // The rpcd bridge connects lazily per method: it must keep answering
+    // while the daemon is down (LuCI daemon-restart flow).
     if let Command::Rpcd(rpcd_args) = args.command {
         return rpcd_args.execute().await;
     }

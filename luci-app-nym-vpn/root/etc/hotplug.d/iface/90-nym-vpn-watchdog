@@ -2,34 +2,26 @@
 # Copyright 2025 - Nym Technologies SA <contact@nymtech.net>
 # SPDX-License-Identifier: GPL-3.0-only
 #
-# NymVPN always-on watchdog: WAN link-event hook.
-#
-# netifd runs the scripts in this directory (sourced by hotplug-call) on every
-# logical-interface state change. When a WAN-facing interface goes up or down
-# this wakes the watchdog loop (SIGUSR1 = up, SIGUSR2 = down) so the tunnel is
-# checked immediately instead of at the next poll. Everything else is ignored.
+# Wakes the always-on watchdog (SIGUSR1 = up, SIGUSR2 = down) when a
+# WAN-facing interface changes state. Sourced by hotplug-call.
 
 [ "$ACTION" = "ifup" ] || [ "$ACTION" = "ifdown" ] || exit 0
 [ -n "$INTERFACE" ] || exit 0
 [ "$INTERFACE" != "loopback" ] || exit 0
 
-# Only relevant while always-on is enabled and the watchdog is running
 [ "$(uci -q get nym-vpn.settings.always_on)" = "1" ] || exit 0
 pid="$(cat /var/run/nym-vpn-watchdog.pid 2>/dev/null)"
 case "$pid" in
     ''|*[!0-9]*) exit 0 ;;
 esac
-# An untrapped SIGUSR1/2 terminates its target: make sure the pid still
-# belongs to the watchdog and not to something that reused it.
+# An untrapped SIGUSR1/2 kills its target; guard against pid reuse.
 grep -q "nym-vpn-watchdog" "/proc/$pid/cmdline" 2>/dev/null || exit 0
 
 . /lib/functions.sh
 . /lib/functions/network.sh
 
-# WAN-facing means: the stock wan/wan6 interfaces, any member of the "wan"
-# firewall zone (renamed WANs, PPPoE, LTE), or an interface carrying a default
-# route (a WAN outside that zone — only detectable on ifup, since on ifdown the
-# route is already gone).
+# wan/wan6, any member of the "wan" firewall zone, or an interface with a
+# default route (only detectable on ifup; on ifdown the route is gone).
 in_wan_zone=0
 check_zone() {
     local name networks

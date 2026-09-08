@@ -57,9 +57,8 @@ impl super::DnsMonitorT for DnsMonitor {
     type Error = Error;
 
     fn new(route_manager: RouteManagerHandle) -> Result<Self> {
-        // On OpenWrt, spawn the dnsmasq actor now so its one-time converge
-        // (possibly one dnsmasq restart) runs at daemon startup, not inside
-        // the first connect.
+        // The dnsmasq actor's one-time converge (possibly a dnsmasq restart)
+        // belongs at daemon startup, not inside the first connect.
         dnsmasq::warm_up();
         Ok(DnsMonitor {
             route_manager,
@@ -68,11 +67,8 @@ impl super::DnsMonitorT for DnsMonitor {
     }
 
     async fn set(&mut self, interface: &str, config: ResolvedDnsConfig) -> Result<()> {
-        // Tunnel resolvers first, then the non-tunnel ones: a custom resolver
-        // on a private address (a LAN Pi-hole) is deliberately not routed
-        // through the tunnel, but it is still the resolver the user asked
-        // for, so dnsmasq must be pointed at it; the firewall admits it on
-        // every interface but the WAN.
+        // Non-tunnel resolvers (a LAN Pi-hole) are not routed through the
+        // tunnel but are still what the user asked for, so they go in too.
         let servers: Vec<IpAddr> = config
             .tunnel_config()
             .iter()
@@ -100,12 +96,8 @@ impl super::DnsMonitorT for DnsMonitor {
         if let Some(mut inner) = self.inner.take() {
             return inner.reset_idle(idle).await;
         }
-        // Nothing was set since the daemon started (fresh boot, or the user
-        // changed the LAN resolvers while disconnected): the dnsmasq actor is
-        // already mirroring, so hand it the idle set directly — including an
-        // empty one, which is how disabling or clearing custom DNS while idle
-        // puts the WAN mirror back. Only dnsmasq has an idle mode; elsewhere
-        // there is nothing to do.
+        // Nothing set yet: hand the (possibly empty) idle set straight to the
+        // mirroring dnsmasq actor. Only dnsmasq has an idle mode.
         match Dnsmasq::new() {
             Ok(mut dnsmasq) => dnsmasq.reset_idle(idle).await?,
             Err(dnsmasq::Error::NotOpenWrt) | Err(dnsmasq::Error::NoDnsmasq) => {}

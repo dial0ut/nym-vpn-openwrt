@@ -1,21 +1,10 @@
 #!/bin/bash
-# Build IPK package for OpenWrt
+# Build IPK package for OpenWrt.
 #
 # Usage: build-ipk.sh <version> <openwrt_arch> <binary_dir> [luci_dir] [output_dir]
-#
-# Arguments:
-#   version      - Package version (e.g., "1.30.0")
-#   openwrt_arch - OpenWrt architecture (e.g., "aarch64_generic")
-#   binary_dir   - Directory containing nym-vpnd and nym-vpnc binaries
-#   luci_dir     - Path to the LuCI app source (default: luci-app-nym-vpn/ in this repo)
-#   output_dir   - Output directory for IPK (default: current directory)
-#
-# Example:
-#   ./build-ipk.sh 1.30.0 aarch64_generic ./artifacts luci-app-nym-vpn .
 
 set -euo pipefail
 
-# --- Argument parsing ---
 if [ $# -lt 3 ]; then
     echo "Usage: $0 <version> <openwrt_arch> <binary_dir> [luci_dir] [output_dir]"
     echo ""
@@ -40,7 +29,6 @@ LUCI_DIR="${LUCI_DIR:-$REPO_ROOT/luci-app-nym-vpn}"
 mkdir -p "$OUTPUT_DIR"
 OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"
 
-# --- Validation ---
 echo "=== Validating inputs ==="
 
 if [ ! -f "$BINARY_DIR/nym-vpnd" ]; then
@@ -74,39 +62,32 @@ echo "Binaries:     $BINARY_DIR"
 echo "LuCI:         $LUCI_DIR"
 echo "Output:       $OUTPUT_DIR"
 
-# --- Setup build directory ---
 BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
 
 mkdir -p "$BUILD_DIR"/{control,data}
 
-# === DATA: Binaries ===
 echo "=== Adding binaries ==="
 mkdir -p "$BUILD_DIR/data/usr/sbin" "$BUILD_DIR/data/usr/bin"
 cp "$BINARY_DIR/nym-vpnd" "$BUILD_DIR/data/usr/sbin/"
 cp "$BINARY_DIR/nym-vpnc" "$BUILD_DIR/data/usr/bin/"
 chmod 755 "$BUILD_DIR/data/usr/sbin/nym-vpnd" "$BUILD_DIR/data/usr/bin/nym-vpnc"
 
-# === DATA: LuCI frontend ===
 echo "=== Adding LuCI frontend ==="
 
-# View file
 mkdir -p "$BUILD_DIR/data/www/luci-static/resources/view/nym-vpn"
 cp "$LUCI_DIR/htdocs/luci-static/resources/view/nym-vpn/"*.js \
    "$BUILD_DIR/data/www/luci-static/resources/view/nym-vpn/"
 
-# Module files (rpc, ui, countries, assets, theme)
 mkdir -p "$BUILD_DIR/data/www/luci-static/resources/nym-vpn"
 cp "$LUCI_DIR/htdocs/luci-static/resources/nym-vpn/"*.js \
    "$BUILD_DIR/data/www/luci-static/resources/nym-vpn/"
 
-# === DATA: RPC backend ===
 echo "=== Adding RPC backend ==="
 mkdir -p "$BUILD_DIR/data/usr/libexec/rpcd"
 cp "$LUCI_DIR/root/usr/libexec/rpcd/nym-vpn" "$BUILD_DIR/data/usr/libexec/rpcd/"
 chmod 755 "$BUILD_DIR/data/usr/libexec/rpcd/nym-vpn"
 
-# === DATA: Menu and ACL config ===
 echo "=== Adding menu and ACL config ==="
 mkdir -p "$BUILD_DIR/data/usr/share/luci/menu.d"
 mkdir -p "$BUILD_DIR/data/usr/share/rpcd/acl.d"
@@ -115,7 +96,6 @@ cp "$LUCI_DIR/root/usr/share/luci/menu.d/luci-app-nym-vpn.json" \
 cp "$LUCI_DIR/root/usr/share/rpcd/acl.d/luci-app-nym-vpn.json" \
    "$BUILD_DIR/data/usr/share/rpcd/acl.d/"
 
-# === DATA: Init scripts ===
 echo "=== Adding init scripts ==="
 mkdir -p "$BUILD_DIR/data/etc/init.d"
 cp "$LUCI_DIR/root/etc/init.d/nym-vpnd" "$BUILD_DIR/data/etc/init.d/"
@@ -123,20 +103,17 @@ chmod 755 "$BUILD_DIR/data/etc/init.d/nym-vpnd"
 cp "$LUCI_DIR/root/etc/init.d/nym-vpn-watchdog" "$BUILD_DIR/data/etc/init.d/"
 chmod 755 "$BUILD_DIR/data/etc/init.d/nym-vpn-watchdog"
 
-# === DATA: Watchdog script ===
 echo "=== Adding watchdog script ==="
 cp "$SCRIPT_DIR/nym-vpn-watchdog" "$BUILD_DIR/data/usr/sbin/"
 chmod 755 "$BUILD_DIR/data/usr/sbin/nym-vpn-watchdog"
 
-# === DATA: Hotplug hook ===
-# Sourced by hotplug-call rather than executed, so no exec bit needed
+# Sourced by hotplug-call, so no exec bit.
 echo "=== Adding hotplug hook ==="
 mkdir -p "$BUILD_DIR/data/etc/hotplug.d/iface"
 cp "$LUCI_DIR/root/etc/hotplug.d/iface/90-nym-vpn-watchdog" \
    "$BUILD_DIR/data/etc/hotplug.d/iface/"
 chmod 644 "$BUILD_DIR/data/etc/hotplug.d/iface/90-nym-vpn-watchdog"
 
-# === DATA: Config and UCI defaults ===
 echo "=== Adding config and UCI defaults ==="
 mkdir -p "$BUILD_DIR/data/etc/config"
 mkdir -p "$BUILD_DIR/data/etc/uci-defaults"
@@ -144,13 +121,11 @@ mkdir -p "$BUILD_DIR/data/etc/nym/data"
 
 cp "$SCRIPT_DIR/nym-vpn.conf" "$BUILD_DIR/data/etc/config/nym-vpn"
 
-# LuCI UCI defaults (if present in LuCI repo)
 if [ -f "$LUCI_DIR/root/etc/uci-defaults/luci-app-nym-vpn" ]; then
     cp "$LUCI_DIR/root/etc/uci-defaults/luci-app-nym-vpn" "$BUILD_DIR/data/etc/uci-defaults/"
     chmod 755 "$BUILD_DIR/data/etc/uci-defaults/luci-app-nym-vpn"
 fi
 
-# === DATA: Firewall include scripts ===
 echo "=== Adding firewall scripts ==="
 mkdir -p "$BUILD_DIR/data/usr/share/nym-vpn"
 
@@ -167,13 +142,11 @@ if [ -f "$FW_SCRIPTS_DIR/fw-backend.sh" ]; then
     cp "$FW_SCRIPTS_DIR/fw-backend.sh" "$BUILD_DIR/data/usr/share/nym-vpn/"
     chmod 755 "$BUILD_DIR/data/usr/share/nym-vpn/fw-backend.sh"
 fi
-# Sourced by both includes (boot-time kill-switch decision), not executed.
 if [ -f "$FW_SCRIPTS_DIR/fw-boot-guard.sh" ]; then
     cp "$FW_SCRIPTS_DIR/fw-boot-guard.sh" "$BUILD_DIR/data/usr/share/nym-vpn/"
     chmod 644 "$BUILD_DIR/data/usr/share/nym-vpn/fw-boot-guard.sh"
 fi
-# Generated emergency/boot-time rule sets (nym-firewall build.rs), sourced by
-# both includes. A package without it cannot install any emergency block.
+# Generated by nym-firewall build.rs; without it no emergency block can be installed.
 if [ ! -f "$FW_SCRIPTS_DIR/fw-rules.sh" ]; then
     echo "Error: $FW_SCRIPTS_DIR/fw-rules.sh missing (run: cargo build -p nym-firewall)" >&2
     exit 1
@@ -181,12 +154,11 @@ fi
 cp "$FW_SCRIPTS_DIR/fw-rules.sh" "$BUILD_DIR/data/usr/share/nym-vpn/"
 chmod 644 "$BUILD_DIR/data/usr/share/nym-vpn/fw-rules.sh"
 
-# === DATA: Feed signing public key ===
 echo "=== Adding feed signing key ==="
 FEED_KEY="$REPO_ROOT/scripts/feed/dial0ut.pub"
 if [ -f "$FEED_KEY" ]; then
-    # opkg requires the key filename to be the fingerprint
-    # Extract fingerprint from usign public key (second line, base64 decoded, bytes 2-9 as hex)
+    # opkg looks the key up by fingerprint: usign pubkey line 2, base64
+    # decoded, bytes 2-9 as hex.
     FINGERPRINT=$(awk 'NR==2' "$FEED_KEY" | base64 -d | od -A n -t x1 -N 10 | tr -d ' ' | cut -c5-20)
     mkdir -p "$BUILD_DIR/data/etc/opkg/keys"
     cp "$FEED_KEY" "$BUILD_DIR/data/etc/opkg/keys/$FINGERPRINT"
@@ -194,7 +166,6 @@ if [ -f "$FEED_KEY" ]; then
     cp "$FEED_KEY" "$BUILD_DIR/data/etc/apk/keys/dial0ut.pub"
 fi
 
-# === CONTROL: Generate from template ===
 echo "=== Generating control file ==="
 INSTALLED_SIZE=$(du -sk "$BUILD_DIR/data" | cut -f1)
 
@@ -203,7 +174,6 @@ sed -e "s/{{VERSION}}/$VERSION/" \
     -e "s/{{SIZE}}/$INSTALLED_SIZE/" \
     "$SCRIPT_DIR/control.template" > "$BUILD_DIR/control/control"
 
-# Validate control file
 if ! grep -q "^Package:" "$BUILD_DIR/control/control"; then
     echo "Error: Generated control file is invalid (missing Package field)"
     cat "$BUILD_DIR/control/control"
@@ -218,18 +188,15 @@ fi
 echo "Control file:"
 cat "$BUILD_DIR/control/control"
 
-# === CONTROL: conffiles ===
 if [ -f "$SCRIPT_DIR/conffiles" ]; then
     cp "$SCRIPT_DIR/conffiles" "$BUILD_DIR/control/"
 fi
 
-# === CONTROL: Install scripts ===
 echo "=== Adding install scripts ==="
 cp "$SCRIPT_DIR/postinst" "$BUILD_DIR/control/"
 cp "$SCRIPT_DIR/prerm" "$BUILD_DIR/control/"
 chmod 755 "$BUILD_DIR/control/postinst" "$BUILD_DIR/control/prerm"
 
-# === Build IPK ===
 echo "=== Building IPK ==="
 (cd "$BUILD_DIR/control" && tar -czf ../control.tar.gz .)
 (cd "$BUILD_DIR/data" && tar -czf ../data.tar.gz .)

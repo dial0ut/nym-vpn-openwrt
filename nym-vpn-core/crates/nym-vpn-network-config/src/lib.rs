@@ -136,9 +136,8 @@ impl Network {
         self.nym_network.network.nym_vpn_api_urls.clone()
     }
 
-    /// Whether any Nym API URL in this environment carries cover domains.
-    /// Always-on fronting (Stealth API connect) can only route through those;
-    /// an environment without them leaves the setting with nothing to act on.
+    /// Whether any Nym API URL carries cover domains; Stealth API has nothing
+    /// to act on without them.
     pub fn has_api_cover_domains(&self) -> bool {
         let has_front = |api_url: &nym_network_defaults::ApiUrl| {
             api_url
@@ -282,20 +281,15 @@ pub async fn network_from_discovery(config_path: &Path, discovery: Discovery) ->
     // Using discovery, fetch and setup nym network details
     let mut nym_network = NymNetwork::ensure_exists(config_path, &discovery).await?;
 
-    // Patch up the network details with domain fronting data
-    // TODO: remove once network details contain domain fronting data
-    // Always use discovery URLs to ensure we have the correct environment URLs
-    // The file-based nym_network might have stale/wrong URLs from a previous environment
-    // This prevents mainnet URLs from appearing in sandbox mode (or vice versa)
+    // TODO: remove once network details contain domain fronting data.
+    // Discovery URLs win: the file-based nym_network may carry URLs from a
+    // previous environment (mainnet URLs in sandbox mode, or vice versa).
     let discovery_nym_api_urls = discovery.nym_api_urls();
     if !discovery_nym_api_urls.is_empty() {
         nym_network.network.nym_api_urls = Some(discovery_nym_api_urls);
     }
 
-    // Patch up the network details with domain fronting
-    // TODO: remove once network details contain domain fronting data
-    // Always use discovery URLs to ensure we have the correct environment URLs
-    // The file-based nym_network might have stale/wrong URLs from a previous environment
+    // TODO: remove once network details contain domain fronting data.
     let discovery_vpn_api_urls = discovery.nym_vpn_api_urls();
     if !discovery_vpn_api_urls.is_empty() {
         nym_network.network.nym_vpn_api_urls = Some(discovery_vpn_api_urls);

@@ -2,13 +2,10 @@
 # Copyright 2025 - Nym Technologies SA <contact@nymtech.net>
 # SPDX-License-Identifier: GPL-3.0-only
 
-# Enable nym-vpnd service on install
 /etc/init.d/nym-vpnd enable 2>/dev/null
 
-# Register the include for the ACTIVE firewall backend, as decided by the
-# shared detector (live state, then the firewall init script, then binary
-# presence — the boot-time defaults runner executes before the firewall
-# service, so this must still resolve correctly with nothing loaded).
+# The boot-time defaults runner executes before the firewall service, so
+# the detector must resolve with nothing loaded.
 if [ -x /usr/share/nym-vpn/fw-backend.sh ]; then
     nym_fw_backend="$(/usr/share/nym-vpn/fw-backend.sh)"
 elif grep -q -w fw4 /etc/init.d/firewall 2>/dev/null || [ -x /sbin/fw4 ]; then
@@ -24,16 +21,9 @@ else
     nym_fw_reload="1"
 fi
 
-# Reconcile every field, not just the path. This repairs disabled or legacy
-# sections left by earlier packages and removes fw4_compatible, which would
-# make fw4 capture stdout instead of running the include's nft side effects.
-#
-# The section is what lets the kill-switch survive a firewall reload, so a
-# failure here must not pass as success: exit non-zero. Both callers keep
-# the script for another attempt in that case — postinst leaves it in
-# /etc/uci-defaults, and OpenWrt's boot-time defaults runner deletes a
-# script only when it exits 0. Only the deletes of optional fields are
-# tolerant (they fail when the field is already absent).
+# Reconcile every field: fw4_compatible would make fw4 capture stdout
+# instead of running the include's nft side effects. Exit non-zero on
+# failure so both callers keep the script for another attempt.
 fail() {
     echo "nym-vpn: firewall include registration failed: $1" >&2
     logger -t nym-vpn "firewall include registration failed: $1"
@@ -51,11 +41,7 @@ else
 fi
 uci commit firewall || fail "uci commit firewall"
 
-# rpcd and the LuCI caches are deliberately left alone here: the package
-# postinst owns that and defers the rpcd refresh until the package
-# transaction has returned. This script runs inside that transaction, and
-# restarting rpcd there breaks installs driven from LuCI's Software page,
-# which runs opkg/apk through rpcd (#13). At first boot rpcd has not
-# started yet, so there is nothing to refresh.
+# rpcd is left alone: postinst defers its refresh until the transaction has
+# returned (#13), and at first boot rpcd has not started yet.
 
 exit 0

@@ -1,60 +1,28 @@
 #!/bin/sh
-# Nym VPN firewall include script for OpenWrt fw3 (iptables)
+# Nym VPN firewall include script for OpenWrt fw3 (iptables). Run by fw3 on
+# start, restart and reload, and by the init script on explicit stop.
 #
-# This script is called by fw3 on start, restart, and reload (reload=1).
-#
-# Why this exists (mirror of fw4-include.sh, adapted to fw3's world):
-#   On fw4 the kill-switch lives in a separate `inet nym` table that a
-#   firewall reload cannot touch — only the small in-fw4 integration has to
-#   be restored. fw3 shares its filter/mangle/nat tables with everyone. A
-#   `fw3 reload` is selective: it removes only fw3's own tagged rules and
-#   leaves the user *_rule chains and foreign chains (ours) alone, so on a
-#   reload this script only reconciles — re-hooks a jump a foreign rule got
-#   ahead of, lifts a stale emergency block, converges. A `fw3 restart` or
-#   `stop` flushes every table, chains included; `start` then rebuilds fw3's
-#   rules and runs this script last, and without it the whole kill-switch
-#   would stay gone until the daemon's next state change. (Between the flush
-#   and this script fw3 itself runs with an ACCEPT policy; that window is
-#   fw3's and nothing here can close it.)
-#   The emergency and boot-time rule sets themselves come from fw-rules.sh,
-#   generated from the daemon's boot_rules.rs, so the block this script
-#   installs is the block the daemon lifts.
-#   For that rebuild the daemon persists exactly what it applied, in the
-#   root-owned runtime directory $NYM_RUNTIME_DIR (default
-#   /var/run/nym-firewall, shared with fw-boot-guard.sh and the init script):
-#     v4.rules    iptables-restore script (filter [+ mangle])
-#     v6.rules    ip6tables-restore script, if IPv6 is up
-#     ifaces      tunnel interfaces needing masquerade
-#     transition  fail-closed multi-file update marker
-#     lock        flock(2) serializing every writer
-#   Nothing in that directory is used unless it still is a plain directory
-#   owned by root with no group/other access (this script runs as root and
-#   feeds the rules files to iptables-restore, so a world-writable location
-#   such as /tmp would let any local user hand it a ruleset). This script
-#   re-applies the files whenever fw3 runs it, holding the lock for
-#   the whole run like the daemon does for every apply/reset: the two never
-#   interleave, so this script only ever sees fw3 state between complete
-#   transitions. While the transition marker exists — a daemon crashed
-#   mid-transition — it installs dedicated emergency OUTPUT/FORWARD drops
-#   (reply traffic for inbound management sessions excepted) instead of
-#   reading or cleaning partially-updated state. No rules files means no blocking policy
-#   is in force: the kill-switch is off, the daemon was stopped, or — the boot
-#   window — the daemon (S90) has not run yet since power-on while the
-#   firewall (S19) and network (S20) are already up. In that last case, when
-#   fw-boot-guard.sh says the kill-switch is armed, the same emergency chains
-#   are installed with a boot rule set that also lets the router come up and
-#   stay manageable from the LAN; the daemon lifts them with its first policy
-#   exactly as it lifts a transition block. Otherwise any leftover Nym chains
-#   are torn down. The init script runs this script for that cleanup branch on
-#   explicit daemon stop, too.
+# `fw3 reload` leaves foreign chains and the *_rule hooks alone, so a reload
+# only reconciles. `fw3 restart`/`stop` flush every table and run this script
+# last; the daemon's persisted restore scripts in $NYM_RUNTIME_DIR (v4.rules,
+# v6.rules, ifaces, transition, lock) are what rebuild the kill-switch then.
+# The files are fed to iptables-restore as root, so the directory must be a
+# private root-owned one (never /tmp). The whole run holds the same flock the
+# daemon holds for every apply/reset. A transition marker means a daemon died
+# mid-apply: install the emergency block rather than read half-written
+# state. No rules file: tear down leftovers, or, when fw-boot-guard.sh says
+# the kill-switch is armed, install the boot rule set (firewall S19 and
+# network S20 come up long before nym-vpnd S90); the daemon lifts either
+# block with its first policy. The rule sets come from fw-rules.sh, generated
+# from boot_rules.rs, so the block installed here is the one the daemon lifts.
 #
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright 2025 Nym Technologies SA <contact@nymtech.net>
 
 set -e
 
-# Persisted daemon state (directory and names are a contract with the fw3
-# backend, common.rs). Trusted only after nym_runtime_dir_prepare (below).
+# Names are a contract with the fw3 backend (common.rs). Trusted only after
+# nym_runtime_dir_prepare.
 NYM_RUNTIME_DIR="${NYM_RUNTIME_DIR:-/var/run/nym-firewall}"
 RULES_V4="$NYM_RUNTIME_DIR/v4.rules"
 RULES_V6="$NYM_RUNTIME_DIR/v6.rules"
@@ -62,14 +30,12 @@ IFACES_FILE="$NYM_RUNTIME_DIR/ifaces"
 TRANSITION_FILE="$NYM_RUNTIME_DIR/transition"
 LOCK_FILE="$NYM_RUNTIME_DIR/lock"
 
-# fw3 hook chains (user chains fw3 preserves on reload and recreates empty
-# on restart).
+# fw3 user chains, preserved on reload and recreated empty on restart.
 HOOK_INPUT="input_rule"
 HOOK_OUTPUT="output_rule"
 HOOK_FORWARD="forwarding_rule"
 
-# Our chains — kept identical to the daemon's fw3 backend so this script and
-# the daemon converge on a single structure instead of two competing sets.
+# Same chain names as the daemon's fw3 backend.
 NYM_INPUT="NYM_INPUT"
 NYM_OUTPUT="NYM_OUTPUT"
 NYM_FORWARD="NYM_FORWARD"
@@ -78,8 +44,8 @@ NYM_MANGLE_OUT="NYM_MANGLE_OUTPUT"
 NAT_CHAIN="NYM_POSTROUTING"
 FORWARD_LAN_CHAIN="NYM_FORWARD_LAN"
 
-# Boot-time kill-switch guard: the shared decision logic. A missing helper
-# must fail towards not blocking, never towards a block nothing can lift.
+# A missing guard must fail towards not blocking, never towards a block
+# nothing can lift.
 NYM_SHARE_DIR="${NYM_SHARE_DIR:-/usr/share/nym-vpn}"
 if [ -r "$NYM_SHARE_DIR/fw-boot-guard.sh" ]; then
     # shellcheck source-path=SCRIPTDIR
@@ -90,15 +56,11 @@ else
         NYM_BOOT_REASON="$NYM_SHARE_DIR/fw-boot-guard.sh is missing; not blocking"
         return 1
     }
-    # Without the shared checks nothing in the runtime directory is trusted.
     nym_runtime_dir_prepare() { return 1; }
 fi
 
-# The emergency and boot-time rule sets. Generated from the daemon's own
-# definition (nym-firewall/src/openwrt/boot_rules.rs → fw-rules.sh) so this
-# script, the fw4 include and the daemon install one and the same block.
-# Without it no emergency block can be built: the generator stubs fail, the
-# callers log CRITICAL, and the persisted policy is still restored.
+# Emergency and boot-time rule sets, generated from boot_rules.rs. Without
+# the file the generators print nothing and no block can be built.
 if [ -r "$NYM_SHARE_DIR/fw-rules.sh" ]; then
     # shellcheck source-path=SCRIPTDIR
     # shellcheck source=fw-rules.sh
@@ -113,26 +75,19 @@ else
     nym_boot_block_nft() { return 1; }
 fi
 
-# The emergency chain names, as the daemon and the generated rule sets name
-# them.
 EMERGENCY_OUT="$NYM_EMERGENCY_OUT"
 EMERGENCY_FWD="$NYM_EMERGENCY_FWD"
 
-# A persisted state file exists AND lives in a directory that passed the
-# ownership/mode checks. Every test of a state file goes through here; a
-# directory that cannot be trusted reads as "no state", which lands in the
-# fail-closed branches below (boot guard verdict, emergency block).
+# Every state-file test goes through here; an untrusted directory reads as
+# "no state" and lands in the fail-closed branches.
 STATE_TRUSTED=0
 have_state() {
     [ "$STATE_TRUSTED" = 1 ] && [ -f "$1" ]
 }
 
-# Make a jump lead its hook chain. Mode "first": it must be rule 1. Mode
-# "leading": only jumps to our own NYM_* chains may precede it (a foreign
-# rule inserted ahead of the kill-switch could accept traffic past it). A
-# jump already in a valid position is left alone — deleting and re-inserting
-# would leave the chain unhooked for a moment. Otherwise insert at 1 first,
-# then drop stale later copies, so there is never a moment without it.
+# Mode "first": rule 1 exactly. Mode "leading": only NYM_* jumps may precede
+# it, or a foreign rule could accept past the kill-switch. A jump in a valid
+# position is left alone; delete + re-insert would unhook it briefly.
 ensure_jump() {
     local ipt="$1" hook="$2" target="$3" mode="$4" rules pos n ok first
 
@@ -148,7 +103,7 @@ ensure_jump() {
     if [ "$ok" != 1 ]; then
         $ipt -w -I "$hook" 1 -j "$target" 2>/dev/null || return 1
     fi
-    # Drop stale duplicates after the leading occurrence, highest first.
+    # Highest first so the remaining rule numbers stay valid.
     first=""
     for n in $($ipt -w -S "$hook" 2>/dev/null | grep -e "^-A " \
         | grep -n -x -e "-A $hook -j $target" | cut -d: -f1 | sort -rn); do
@@ -161,8 +116,7 @@ ensure_jump() {
     return 0
 }
 
-# Mangle has no fw3 *_rule hook chains and position is not security-relevant
-# there (an unmarked exempted flow stays blocked), so presence is enough.
+# Presence is enough in mangle: an unmarked exempted flow stays blocked.
 ensure_mangle_jump() {
     local ipt="$1" hook="$2" target="$3"
 
@@ -170,8 +124,6 @@ ensure_mangle_jump() {
         || $ipt -w -t mangle -I "$hook" 1 -j "$target" 2>/dev/null
 }
 
-# Set up jump rules from fw3's hook chains to our filter chains. Insertion is
-# mandatory: restored chain contents provide no protection when unreachable.
 setup_jumps() {
     local ipt="$1"
 
@@ -180,31 +132,9 @@ setup_jumps() {
     ensure_jump "$ipt" "$HOOK_FORWARD" "$NYM_FORWARD" leading || return 1
 }
 
-# Last-resort fail-closed policy when a transition is active or a saved
-# restore/jump setup fails. Dedicated chains avoid clobbering the desired
-# policy while it is built. The restore transaction creates, fills and hooks
-# both drops atomically. INPUT is deliberately untouched so LuCI/SSH continue
-# to follow fw3's management policy — and because fw3 runs output_rule BEFORE
-# its own established-accept, the OUTPUT block must itself let reply-direction
-# packets through (--ctdir REPLY: the router answering a connection someone
-# opened to it) or those management sessions would be dropped on the way out.
-# Router-originated flows are in the ORIGINAL direction and stay blocked.
-# IPv6 neighbour discovery is kept so on-link reachability survives.
-#
-# Two rule sets share the chains. "transition" (the default) is the strict
-# block for a policy change in flight or a failed restore. "boot" covers the
-# window before the daemon's first policy since power-on and additionally
-# lets the router come up and stay manageable: loopback, DHCP/DHCPv6 as client
-# and server, IPv6 router solicitation, and LAN/link-local/multicast
-# destinations — the base of the daemon's own Blocked policy. As in that
-# policy (block_dns before allow_lan_traffic), DNS is rejected BEFORE the
-# LAN-destination accepts: a private address is not a LAN interface, and
-# behind another router the upstream resolver is 192.168.x.1, so dnsmasq's
-# forwarded lookups and LAN clients' direct queries would otherwise leave in
-# plaintext during the boot window. The router's own dnsmasq answering the
-# LAN is unaffected — those answers match the reply-direction accept above.
-# The daemon tears both rule sets down the same way once its live state has
-# converged.
+# Fail-closed OUTPUT/FORWARD block in dedicated chains, one atomic restore.
+# "transition" (default) passes only reply traffic and ND; "boot" adds what
+# a router needs to come up. Rules, order and rationale: boot_rules.rs.
 emergency_block() {
     local ipt="$1" mode="${2:-transition}" restore="${1}-restore" rules
 
@@ -212,10 +142,6 @@ emergency_block() {
         ip6tables) rules=nym_emergency_rules_v6 ;;
         *) rules=nym_emergency_rules_v4 ;;
     esac
-    # One atomic --noflush restore of the generated rule set; the boot set
-    # (mode "boot") adds the allowances a router needs to come up and stay
-    # manageable, the transition set only passes reply traffic and ND. See
-    # boot_rules.rs for the rules and the order they must keep.
     $rules "$mode" | $restore --noflush -w 2>/dev/null \
         || $rules "$mode" | $restore --noflush 2>/dev/null
 }
@@ -235,8 +161,7 @@ cleanup_emergency() {
     done
 }
 
-# Mangle has no fw3 *_rule hook chains — jump straight from the built-ins,
-# exactly like the daemon's fw3 backend does.
+# fw3 has no *_rule hooks in mangle; jump from the built-ins.
 setup_mangle_jumps() {
     local ipt="$1"
 
@@ -271,10 +196,8 @@ cleanup_mangle() {
     done
 }
 
-# Re-apply one family's persisted ruleset and its jumps. The daemon renders
-# the restore script with chain declarations and -F lines, so re-applying
-# with --noflush is idempotent. Mangle jumps are set up only when the script
-# actually carries a *mangle block (inbound exemptions configured).
+# The persisted script carries chain declarations and -F lines, so
+# --noflush re-application is idempotent.
 apply_rules() {
     local restore="$1" file="$2" ipt="$3"
 
@@ -300,9 +223,6 @@ apply_rules() {
     return 1
 }
 
-# Rebuild the masquerade chain from the daemon's interface list. Mirrors
-# add_masquerade_rules in the fw3 backend: owned chain, flush + repopulate,
-# jump added only when missing.
 restore_masquerade() {
     if ! have_state "$IFACES_FILE"; then
         cleanup_masquerade
@@ -329,11 +249,8 @@ cleanup_masquerade() {
     iptables -w -t nat -X "$NAT_CHAIN" 2>/dev/null || true
 }
 
-# Rebuild the LAN<->tunnel forwarding plane (fw3 analogue of fw4's
-# nym_forward_lan): per-interface MSS clamps and forward accepts, jumped
-# from forwarding_rule. Mirrors add_forwarding_rules in the fw3 backend.
-# Needed with the kill-switch on AND off — the tun devices are in no fw3
-# zone, so fw3's global forward policy rejects LAN clients without it.
+# Needed with the kill-switch off too: tun devices are in no fw3 zone, so
+# fw3's forward policy rejects LAN clients without these accepts.
 restore_forwarding() {
     if ! have_state "$IFACES_FILE"; then
         cleanup_forwarding
@@ -354,7 +271,7 @@ restore_forwarding() {
             $ipt -w -A "$FORWARD_LAN_CHAIN" -i "$iface" -m conntrack \
                 --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
         done < "$IFACES_FILE"
-        # Rule 1: the MSS clamp must run before NYM_FORWARD accepts flows.
+        # Rule 1: the MSS clamp must run before NYM_FORWARD accepts.
         ensure_jump "$ipt" "$HOOK_FORWARD" "$FORWARD_LAN_CHAIN" first || true
     done
 }
@@ -373,8 +290,6 @@ kernel_ipv6_enabled() {
         && [ "$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null)" != "1" ]
 }
 
-# Re-apply the persisted policy (the daemon has applied one since boot) for
-# every family in force.
 restore_policy() {
     local failed=0
 
@@ -382,9 +297,8 @@ restore_policy() {
     if have_state "$RULES_V6"; then
         apply_rules "ip6tables-restore" "$RULES_V6" "ip6tables" || failed=1
     elif kernel_ipv6_enabled; then
-        # The daemon persisted a v4 policy while IPv6 was disabled, but
-        # the kernel now routes v6. Never turn that state transition into
-        # a v6 bypass during reload; block until the daemon reapplies.
+        # IPv6 came up after the v4-only policy was persisted: block v6
+        # until the daemon reapplies, never bypass.
         logger -t nym-vpn "IPv6 became enabled without a saved policy; installing emergency block"
         emergency_block "ip6tables" || failed=1
     else
@@ -394,8 +308,7 @@ restore_policy() {
     return "$failed"
 }
 
-# Whether the daemon's own kill-switch chains are hooked for IPv4 — a live
-# policy, not merely a persisted one, protects the router.
+# A live (hooked) IPv4 policy, not merely a persisted one.
 policy_hooked() {
     iptables -w -C "$HOOK_OUTPUT" -j "$NYM_OUTPUT" 2>/dev/null \
         && iptables -w -C "$HOOK_FORWARD" -j "$NYM_FORWARD" 2>/dev/null
@@ -407,9 +320,8 @@ lift_emergency() {
     cleanup_emergency "ip6tables" 2>/dev/null || true
 }
 
-# No persisted policy: the kill-switch is off, the daemon was stopped, or it
-# has not run yet since boot. Stale policy chains go either way; then either
-# arm the boot-time block or make sure none is left behind.
+# No persisted policy: kill-switch off, daemon stopped, or not yet run since
+# boot. Tear down stale chains, then arm the boot block or make sure none is left.
 handle_no_policy() {
     local failed=0
 
@@ -441,13 +353,10 @@ handle_no_policy() {
         fi
     fi
 
-    # Re-check after installing. The daemon persists its state before it lifts
-    # the emergency chains and persists a kill-switch toggle before it opens
-    # the firewall, so a decision that raced either is caught here instead of
-    # leaving a block only the daemon's next state change would lift. A
-    # transition marker means the daemon is mid-apply and lifts the block
-    # itself; a persisted policy that is not hooked yet means the daemon is
-    # about to activate it and does the same.
+    # Re-check: the daemon persists before it lifts the emergency chains and
+    # before it opens the firewall, so a raced decision is caught here. A
+    # transition marker or an unhooked persisted policy means the daemon is
+    # mid-apply and lifts the block itself.
     if have_state "$TRANSITION_FILE"; then
         :
     elif have_state "$RULES_V4"; then
@@ -460,16 +369,13 @@ handle_no_policy() {
     return "$failed"
 }
 
-# Main logic. Runs under the fw3 state lock (see the bottom of the file).
+# Runs under the fw3 state lock (taken at the bottom of the file).
 main() {
     local failed=0
 
-    # An explicit administrative stop is authorisation to open, and it must
-    # win over everything persisted: the init script writes the marker
-    # first, then tears down under the lock — but if it could not take the
-    # lock it leaves the teardown to this run. Drop the persisted state so a
-    # stale policy cannot be restored, then take the no-policy path, which
-    # cleans the chains and (marker present) installs no block.
+    # Stop intent wins over persisted state: the init script writes the
+    # marker first and, if it could not take the lock, leaves the teardown
+    # to this run.
     if have_state "$NYM_VPND_STOPPED"; then
         logger -t nym-vpn "nym-vpnd was stopped by the administrator; discarding persisted fw3 state"
         rm -f "$RULES_V4" "$RULES_V6" "$IFACES_FILE" "$TRANSITION_FILE" 2>/dev/null
@@ -479,12 +385,9 @@ main() {
         return "$failed"
     fi
 
-    # Rust creates this marker before touching live or persisted fw3 state
-    # and holds the state lock until it has removed the marker again, so
-    # finding it here means a daemon died mid-transition. Never interpret
-    # missing/partially-updated rules files as kill-switch-off while it
-    # exists; a later successful apply/reset or explicit service stop clears
-    # it.
+    # The daemon holds the lock from creating the marker to removing it, so
+    # seeing it here means a daemon died mid-transition: never read the
+    # rules files as kill-switch-off while it exists.
     if have_state "$TRANSITION_FILE"; then
         logger -t nym-vpn "Firewall transition in progress; enforcing emergency block"
         emergency_block "iptables" || failed=1
@@ -500,30 +403,15 @@ main() {
         handle_no_policy || failed=1
     fi
 
-    # Always reconcile the tunnel plane (masquerade + LAN forwarding) with
-    # the persisted interface list — it is needed with the kill-switch both
-    # on and off (forwarding-only mode).
+    # The tunnel plane is needed with the kill-switch on and off.
     restore_masquerade
     restore_forwarding
     return "$failed"
 }
 
-# Serialize with the daemon's fw3 backend and the init script's stop-time
-# teardown. Existence checks on the marker are not mutual exclusion: without
-# the lock this script could see the marker, lose the CPU while the daemon
-# finished and lifted its block, and then install an emergency block that
-# nothing removes until the next transition. fd 9 stays open for the rest of
-# the script, so the lock is released when it exits. A caller that already
-# holds the lock (the init script) sets NYM_FW_LOCKED=1; taking it again on a
-# fresh descriptor would deadlock against the inherited one.
-#
-# The lock is a prerequisite, not a nicety: with no lock, main() never runs.
-# What happens instead is fail-closed (run_without_lock): a live kill-switch
-# is left exactly as it is, and when nothing is hooked — a firewall restart
-# flushed everything, or first boot — the boot-time emergency block goes in
-# so the router is protected until the daemon's next apply lifts it. Either
-# way it is logged as CRITICAL: a box that gets here has no flock, or a
-# runtime directory somebody tampered with, and needs an administrator.
+# Without the lock, main() never runs: a live kill-switch is left as it is,
+# and when nothing is hooked the boot block goes in if wanted. The marker
+# alone is no mutual exclusion (see FW3_LOCK_PATH in common.rs).
 run_without_lock() {
     if policy_hooked; then
         logger -t nym-vpn "CRITICAL: fw3 include ran without the state lock ($1); the live kill-switch is left untouched and reconciliation is skipped"
@@ -538,12 +426,8 @@ run_without_lock() {
     if kernel_ipv6_enabled; then
         emergency_block "ip6tables" boot
     fi
-    # Without the lock the daemon may have hooked its policy between the
-    # check above and the install; re-check and lift so its live policy is
-    # not shadowed by a block nobody removes. A daemon apply that lands
-    # after this re-check still lifts the emergency chains itself as its last
-    # step, so the residual window is that of a single apply, not "until the
-    # next transition".
+    # The daemon may have hooked its policy since the check above; a later
+    # apply still lifts the emergency chains itself.
     if policy_hooked; then
         logger -t nym-vpn "daemon policy went live during the unlocked fallback; lifting the emergency block"
         cleanup_emergency "iptables" || true
@@ -552,15 +436,15 @@ run_without_lock() {
     return 1
 }
 
-# Establish trust in the runtime directory first: create it when missing (fw3
-# starts before the daemon has ever run), then verify owner and mode. The lock
-# lives inside it, so an untrusted directory means no lock as well.
+# The lock lives inside the runtime directory, so untrusted means no lock.
 if ! nym_runtime_dir_prepare; then
     run_without_lock "$NYM_RUNTIME_DIR is not a private root-owned directory"
     exit 1
 fi
 STATE_TRUSTED=1
 
+# NYM_FW_LOCKED=1: the caller (init script) already holds the lock; taking
+# it again on a fresh descriptor would deadlock against the inherited one.
 if [ "${NYM_FW_LOCKED:-}" != "1" ]; then
     if ! command -v flock >/dev/null 2>&1; then
         run_without_lock "flock is not installed"

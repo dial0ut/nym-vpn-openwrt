@@ -24,11 +24,9 @@ async fn run_migrate_toml_test(
     let toml_path = network_config_path.join(DEFAULT_CONFIG_FILE_TOML);
     let json_path = network_config_path.join(DEFAULT_CONFIG_FILE_JSON);
 
-    // Write the TOML config file
     fs::write(&toml_path, toml_content).await.unwrap();
 
-    // Read the TOML config and migrate it to latest JSON version.  The latest version of the
-    // JSON will be written straight back to disk.
+    // Loading migrates and writes the latest JSON straight back to disk.
     let config_manager = VpnServiceConfigManager::new(&network_config_path, None)
         .await
         .unwrap();
@@ -36,11 +34,9 @@ async fn run_migrate_toml_test(
     assert_eq!(config.entry_point, entry_point);
     assert_eq!(config.exit_point, exit_point);
 
-    // The TOML file should be deleted and replaced with a JSON version
     assert!(!toml_path.exists());
     assert!(json_path.exists());
 
-    // Read the JSON config
     let config_manager = VpnServiceConfigManager::new(&network_config_path, None)
         .await
         .unwrap();
@@ -48,12 +44,10 @@ async fn run_migrate_toml_test(
     assert_eq!(config.entry_point, entry_point);
     assert_eq!(config.exit_point, exit_point);
 
-    // Check the JSON is the right version and all snake-case
     let read_json_content = fs::read_to_string(&json_path).await.unwrap();
     assert_eq!(json_latest_content, read_json_content);
 }
 
-// Test migrating from an old JSON version to the latest JSON version
 async fn run_migrate_json_test(json_old_content: &str, json_latest_content: &str) {
     let temp_dir = tempdir().unwrap();
     let config_path = temp_dir.path();
@@ -62,30 +56,26 @@ async fn run_migrate_json_test(json_old_content: &str, json_latest_content: &str
     let _ = fs::create_dir_all(&network_config_path).await;
     let json_path = network_config_path.join(DEFAULT_CONFIG_FILE_JSON);
 
-    // Write the old JSON config file
     fs::write(&json_path, json_old_content).await.unwrap();
 
-    // Read the old JSON config and migrate it to latest JSON.  The latest version of the
-    // JSON will be written straight back to disk.
+    // Loading migrates and writes the latest JSON straight back to disk.
     let _config_manager = VpnServiceConfigManager::new(&network_config_path, None)
         .await
         .unwrap();
 
-    // Check the JSON is the right version and all snake-case (ignore whitespace/order)
+    // Compared as values: whitespace and key order are irrelevant.
     let read_json_content = fs::read_to_string(&json_path).await.unwrap();
     let expected: serde_json::Value = serde_json::from_str(json_latest_content).unwrap();
     let actual: serde_json::Value = serde_json::from_str(&read_json_content).unwrap();
     assert_eq!(expected, actual);
 }
 
-// Test serializing and deserializing the config produces the same result
 async fn run_serialize_test(config: nym_vpn_lib_types::VpnServiceConfig) {
     let temp_dir = tempdir().unwrap();
     let config_path = temp_dir.path();
 
     let network_config_path = config_path.join("tulips");
 
-    // Write the config to disk
     let mut config_manager = VpnServiceConfigManager::new(&network_config_path, None)
         .await
         .unwrap();
@@ -93,7 +83,6 @@ async fn run_serialize_test(config: nym_vpn_lib_types::VpnServiceConfig) {
     assert!(config_manager.write_to_file().await.is_ok());
     drop(config_manager);
 
-    // Read it back and compare it
     let config_manager = VpnServiceConfigManager::new(&network_config_path, None)
         .await
         .unwrap();
@@ -101,7 +90,6 @@ async fn run_serialize_test(config: nym_vpn_lib_types::VpnServiceConfig) {
     assert_eq!(&config, read_config);
 }
 
-// Test reading a broken config falls back to a default config
 async fn run_fallback_test(broken_json_content: &str) {
     let temp_dir = tempdir().unwrap();
     let config_path = temp_dir.path();
@@ -110,10 +98,8 @@ async fn run_fallback_test(broken_json_content: &str) {
     let _ = fs::create_dir_all(&network_config_path).await;
     let json_path = network_config_path.join(DEFAULT_CONFIG_FILE_JSON);
 
-    // Write the broken JSON config file
     fs::write(&json_path, broken_json_content).await.unwrap();
 
-    // Ensure reading the broken config falls back to default config
     let config_manager = VpnServiceConfigManager::new(&network_config_path, None)
         .await
         .unwrap();
@@ -123,13 +109,12 @@ async fn run_fallback_test(broken_json_content: &str) {
         &nym_vpn_lib_types::VpnServiceConfig::default()
     );
 
-    // The broken file must be preserved as .bak (settings recoverable,
-    // corruption evidence intact), not silently overwritten with defaults.
+    // Preserved as .bak, not silently overwritten with defaults.
     let bak_path = json_path.with_extension("json.bak");
     let bak_content = fs::read_to_string(&bak_path).await.unwrap();
     assert_eq!(bak_content, broken_json_content);
 
-    // And the default config written in its place must parse on the next start.
+    // The default written in its place must parse on the next start.
     let config_manager = VpnServiceConfigManager::new(&network_config_path, None)
         .await
         .unwrap();
@@ -982,10 +967,8 @@ async fn test_service_config_serialize_defaults() {
     run_serialize_test(config).await;
 }
 
-// Legacy split tunneling and the kill-switch are mutually exclusive: enabling
-// legacy mode must force the *effective* kill-switch off in the generated tunnel
-// settings, even when the stored kill-switch is on. Otherwise the firewall would
-// block the very WAN egress that legacy/PBR mode depends on.
+// Legacy/PBR mode depends on WAN egress the kill-switch would block, so the
+// effective kill-switch must be off even when the stored one is on.
 #[tokio::test]
 async fn test_legacy_split_tunnel_forces_killswitch_off() {
     let temp_dir = tempdir().unwrap();
@@ -1062,8 +1045,6 @@ async fn test_service_config_serialize_full() {
     run_serialize_test(config).await;
 }
 
-// Stealth API connect is a daemon-side API transport switch: persisted with
-// the rest of the service config, off by default, and restored on restart.
 #[tokio::test]
 async fn test_stealth_api_persists_across_restart() {
     let temp_dir = tempdir().unwrap();
@@ -1082,9 +1063,8 @@ async fn test_stealth_api_persists_across_restart() {
     assert!(config_manager.config().stealth_api);
 }
 
-// A v8 file written before the field existed must load with it off. The file is
-// already the latest version, so the loader leaves it alone; the field is
-// written out on the next save.
+// A v8 file predating the field is already the latest version, so the loader
+// leaves it alone; the field appears on the next save.
 #[tokio::test]
 async fn test_service_config_v8_without_stealth_api_loads_off() {
     let json_v8_content = r#"{

@@ -16,62 +16,42 @@ use nym_network_defaults::ApiUrl;
 
 pub use nym_http_api_client::FrontPolicy;
 
-/// Every client this crate builds for a fronting-capable URL follows the
-/// http-api-client's process-wide shared fronting policy. A policy change
-/// therefore reaches clients that already exist without rebuilding anything,
-/// on one condition: a long-lived client must call [`prefer_fronted_base_url`]
-/// before each request (`VpnApiClient::client` and the gateway directory's
-/// nym-api accessor do), because the library only fronts through the current
-/// base URL and never moves off a plain host on its own until a request
-/// fails. Clients built per request (discovery, topology, diagnostics) get the
-/// same treatment from [`fronted_http_client`] at construction.
-///
-/// The library initialises that shared policy to `Off`; this crate has always
-/// fronted on retry. Seed the shared policy with `OnRetry` the first time
-/// anyone touches it, whichever side (builder or setter) gets there first.
+/// Every fronting-capable client follows the http-api-client's process-wide
+/// policy, so a change reaches existing clients; but the library only fronts
+/// through the *current* base URL, so long-lived clients must call
+/// [`prefer_fronted_base_url`] before each request. The library's own
+/// default is `Off`; seed `OnRetry` on first touch, from either side.
 static SHARED_FRONT_POLICY_INIT: Once = Once::new();
 
-/// The policy in force when nobody has asked for anything else.
 pub const DEFAULT_FRONT_POLICY: FrontPolicy = FrontPolicy::OnRetry;
 
 fn init_shared_front_policy() {
     SHARED_FRONT_POLICY_INIT.call_once(|| Client::set_shared_front_policy(DEFAULT_FRONT_POLICY));
 }
 
-/// Mirror of whether the shared policy is `Always`; the library keeps its
-/// policy private, and [`prefer_fronted_base_url`] needs to know.
-///
-/// Hazard: this is only correct while every policy change in the process goes
-/// through [`set_shared_front_policy`]. A direct `Client::set_shared_front_policy`
-/// call desynchronises the two and silently disables the base-URL step.
+/// Mirror of "shared policy is `Always`" (the library keeps it private).
+/// Only correct while every change goes through [`set_shared_front_policy`];
+/// a direct `Client::set_shared_front_policy` call silently desynchronises it.
 static FRONT_ALWAYS: AtomicBool = AtomicBool::new(false);
 
-/// Set the domain-fronting policy for every fronting-capable client built by
-/// this crate, existing and future. `Always` is what the apps call "Stealth API
-/// connect": route each API request via the cover domains instead of only
-/// falling back to them after a direct request fails.
+/// Sets the fronting policy for every fronting-capable client, existing and
+/// future. `Always` is what the apps call "Stealth API connect".
 pub fn set_shared_front_policy(policy: FrontPolicy) {
     init_shared_front_policy();
     FRONT_ALWAYS.store(policy == FrontPolicy::Always, Ordering::Relaxed);
     Client::set_shared_front_policy(policy);
 }
 
-/// Under an always-on policy, make sure `client` sends through a base URL that
-/// has cover domains.
-///
-/// The http-api-client fronts whatever its *current* base URL is and only
-/// moves to a base URL with fronts after a failed request. The discovery
-/// lists the plain host first (`nymvpn.com`, then the fronted
-/// `*-frontdoor.global.ssl.fastly.net`), so a fresh client under `Always`
-/// would still go direct until something failed. Step it onto the next base
-/// URL with fronts up front; under any other policy this is a no-op.
+/// Under `Always`, step `client` onto a base URL that has cover domains. The
+/// discovery lists the plain host first and the library only rotates after a
+/// failed request, so a fresh client would otherwise go direct. No-op under
+/// any other policy.
 pub fn prefer_fronted_base_url(client: &Client) {
     if FRONT_ALWAYS.load(Ordering::Relaxed)
         && !client.current_url().has_front()
         && client.base_urls().iter().any(Url::has_front)
     {
-        // With fronting enabled the library's rotation picks the next base URL
-        // that has fronts configured.
+        // With fronting enabled, rotation picks the next base URL with fronts.
         client.maybe_rotate_hosts(None);
         tracing::debug!(
             "Stealth API: using fronted base URL {}",
@@ -125,9 +105,7 @@ pub async fn fronted_http_client_builder(
         builder = builder.with_fronting(None);
     }
 
-    // Add resolver overrides. venaco removed ClientBuilder::resolve_to_addrs; the
-    // successor is a HickoryDnsResolver with a static pre-resolve map (overrides
-    // the listed domains, real DNS for everything else), attached via dns_resolver.
+    // Static pre-resolve map: overrides the listed domains, real DNS otherwise.
     if let Some(resolver_overrides) = resolver_overrides.as_ref()
         && !resolver_overrides.is_empty()
     {
@@ -227,9 +205,8 @@ mod tests {
     use nym_http_api_client::{ApiClient, NO_PARAMS, PathSegments};
     use tokio::sync::Mutex;
 
-    // The tests below drive the process-wide policy; serialise them. An async
-    // lock: it is held across awaits, and a failing test must not poison it
-    // for the others.
+    // Serialises the tests driving the process-wide policy. tokio's Mutex: held
+    // across awaits, and a failing test must not poison it.
     static POLICY_LOCK: Mutex<()> = Mutex::const_new(());
 
     /// Same shape as the mainnet discovery: plain host first, fronted
@@ -248,8 +225,7 @@ mod tests {
         .unwrap()
     }
 
-    /// (host the TLS connection goes to, HTTP Host header) of a request as
-    /// the client would send it.
+    /// (host the TLS connection goes to, HTTP Host header).
     fn first_request_target(client: &Client) -> (String, Option<String>) {
         let path: PathSegments<'_> = &["v1", "ping"];
         let req = client
@@ -291,9 +267,7 @@ mod tests {
         set_shared_front_policy(DEFAULT_FRONT_POLICY);
     }
 
-    /// A client that outlives a policy change: built direct, then Stealth API
-    /// switched on. The per-request step (what `VpnApiClient::client` and the
-    /// gateway directory accessor do) is what moves it onto the cover domain.
+    /// The per-request step is what moves an existing client onto the cover domain.
     #[tokio::test]
     async fn runtime_toggle_reaches_an_existing_client_before_its_next_request() {
         let _guard = POLICY_LOCK.lock().await;
