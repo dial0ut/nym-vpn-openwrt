@@ -8,7 +8,10 @@
 //! - [`policy`] compiles a [`FirewallPolicy`] into a backend-neutral
 //!   [`rules::RuleSet`]; [`render_nft`] and [`render_iptables`] turn that
 //!   into wire syntax; [`fw3`] and [`fw4`] apply it and own the
-//!   backend-specific integration (masquerade, jumps from fw3/fw4 chains).
+//!   backend-specific hooking (jumps from fw3 chains, the `inet nym` table).
+//!   The tunnel plane — masquerade, MSS clamp, LAN-to-tunnel forwarding —
+//!   is not the daemon's: it is the `nym` firewall zone (`common::NYM_ZONE`)
+//!   that `uci-defaults` declares, rendered by fw3/fw4 themselves.
 //! - [`boot_rules`] is the single definition of the emergency and boot-time
 //!   rule sets; `build.rs` renders it into `scripts/fw-rules.sh`, which the
 //!   shell includes source. Guarantees are tabulated in
@@ -79,23 +82,12 @@ impl Firewall {
         }
     }
 
-    /// Kill-switch disabled: install only masquerade + forward accepts and
-    /// remove any blocking rules. Without the masquerade, forwarded LAN
-    /// packets enter the tunnel un-NAT'd and the exit gateway drops them.
-    pub fn apply_forwarding_only(&mut self, policy: FirewallPolicy) -> Result<()> {
-        self.refresh_system_if_unknown();
-        let ruleset = policy::compile(&policy);
-        match self.system {
-            FirewallSystem::Fw3 => fw3::apply_forwarding_only(&ruleset),
-            FirewallSystem::Fw4 => fw4::apply_forwarding_only(&ruleset),
-            FirewallSystem::Unknown => {
-                tracing::warn!("Unknown firewall system, falling back to fw3/iptables");
-                fw3::apply_forwarding_only(&ruleset)
-            }
-        }
-    }
-
+    /// Removes any blocking rules and lifts the boot block. Also the whole
+    /// of what a policy apply does with the kill-switch off: routing into
+    /// the tunnel and the zone that NATs and forwards into it need nothing
+    /// from the daemon.
     pub fn reset_policy(&mut self) -> Result<()> {
+        self.refresh_system_if_unknown();
         match self.system {
             FirewallSystem::Fw3 => fw3::reset(),
             FirewallSystem::Fw4 => fw4::reset(),
@@ -232,10 +224,8 @@ mod e2e_tests {
     }
 
     #[test]
-    fn connected_lan_collects_tunnel_iface_and_emits_cve_drop() {
+    fn connected_lan_emits_cve_drop() {
         let rs = policy::compile(&connected_lan());
-        assert_eq!(rs.tunnel_interfaces, vec!["wg0".to_string()]);
-
         let nft = render_nft::render(&rs);
         // CVE-2019-14899 guard.
         assert!(nft.contains("iifname != \"wg0\" ip daddr 10.64.0.2 drop"));

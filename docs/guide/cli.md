@@ -166,7 +166,10 @@ nym-vpnc ad-block set disabled
 
 ## LAN policy
 
-Whether LAN devices can reach each other and local services while the VPN is up.
+Whether LAN devices can reach each other and local services while the VPN is up. Which zones
+reach the tunnel at all is the firewall's: the package declares a `nym` zone and a `lan -> nym`
+forwarding, so a guest or IoT zone needs its own forwarding to `nym` (Network → Firewall in LuCI,
+or a `config forwarding` section) before its clients can use the VPN.
 
 ```bash
 nym-vpnc lan get

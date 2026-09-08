@@ -298,6 +298,12 @@ the GitHub release notes.
 
 ### Changed
 
+- The tunnel plane — masquerade, the TCP MSS clamp and LAN-to-tunnel
+  forwarding — is a firewall zone `nym` (`device 'nym+'`) with a `lan -> nym`
+  forwarding in `/etc/config/firewall`, declared at install, shown on LuCI's
+  firewall page and rendered by fw3/fw4 on every reload; the daemon and the
+  firewall includes no longer install it. A guest zone that should reach the
+  VPN needs its own forwarding to `nym`.
 - The emergency and boot-time kill-switch rule sets are now defined once, in
   Rust (`nym-firewall/src/openwrt/boot_rules.rs`), and rendered at build time
   into `fw-rules.sh`, which the fw3 and fw4 firewall includes source. The
