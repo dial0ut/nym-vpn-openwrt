@@ -68,8 +68,7 @@
       "ios": "2.2.0",
       "macos": "2.4.0",
       "tauri": "1.9.0"
-    },
-    "statistics_api": "https://nym-statistics-api-staging.nymte.ch"
+    }
   },
   "network_compatibility": {
     "core": "1.21.0",

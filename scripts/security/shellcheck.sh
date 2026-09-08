@@ -15,11 +15,9 @@ SHELLCHECK="${SHELLCHECK:-shellcheck}"
 git ls-files -z \
     '*.sh' \
     'luci-app-nym-vpn/root/etc/init.d/*' \
-    'luci-app-nym-vpn/root/etc/hotplug.d/iface/*' \
     'luci-app-nym-vpn/root/usr/libexec/rpcd/*' \
     'scripts/ipk/postinst' \
     'scripts/ipk/prerm' \
-    'scripts/ipk/nym-vpn-watchdog' \
     | xargs -0 $SHELLCHECK --severity=error --external-sources "$@"
 
 echo "shellcheck: OK"

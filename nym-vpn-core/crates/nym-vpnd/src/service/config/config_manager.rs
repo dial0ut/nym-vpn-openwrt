@@ -236,6 +236,45 @@ impl VpnServiceConfigManager {
         }
     }
 
+    /// Always On: connect on daemon start and keep retrying error states.
+    /// A policy switch consulted by the service loop, not a tunnel setting,
+    /// so flipping it never touches the running tunnel.
+    pub async fn set_always_on(&mut self, always_on: bool) -> Result<(), String> {
+        if self.config.always_on != always_on {
+            self.config.always_on = always_on;
+            self.save_config_and_send_event().await
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Gateway independence: every criterion (node family, ASN, subnet) on or
+    /// off at once. The reminder switch is left alone.
+    pub async fn set_gateway_independence_enabled(&mut self, enabled: bool) -> Result<(), String> {
+        let mut gateway_independence = self.config.gateway_independence;
+        gateway_independence.set_enabled(enabled);
+        if self.config.gateway_independence != gateway_independence {
+            self.config.gateway_independence = gateway_independence;
+            self.save_config_and_send_event().await
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Whether to remind the user when the selected pair is not independent.
+    /// A UI hint only: never touches the tunnel.
+    pub async fn set_gateway_independence_notifications(
+        &mut self,
+        enabled: bool,
+    ) -> Result<(), String> {
+        if self.config.gateway_independence.enable_notifications != enabled {
+            self.config.gateway_independence.enable_notifications = enabled;
+            self.save_config_and_send_event().await
+        } else {
+            Ok(())
+        }
+    }
+
     pub async fn set_inbound_exemptions(
         &mut self,
         exemptions: Vec<nym_vpn_lib_types::InboundExemption>,
@@ -294,20 +333,6 @@ impl VpnServiceConfigManager {
         if self.config.min_gateway_vpn_performance != min_gateway_vpn_performance {
             self.config.min_gateway_vpn_performance =
                 min_gateway_vpn_performance.map(|u| u.min(100));
-            let _ = self.save_config_and_send_event().await;
-        }
-    }
-
-    pub async fn set_netstats_allow_disconnected(&mut self, allow_disconnected: bool) {
-        if self.config.network_stats.allow_disconnected != allow_disconnected {
-            self.config.network_stats.allow_disconnected = allow_disconnected;
-            let _ = self.save_config_and_send_event().await;
-        }
-    }
-
-    pub async fn set_netstats_enabled(&mut self, enabled: bool) {
-        if self.config.network_stats.enabled != enabled {
-            self.config.network_stats.enabled = enabled;
             let _ = self.save_config_and_send_event().await;
         }
     }
@@ -419,6 +444,7 @@ impl VpnServiceConfigManager {
         tracing::info!("Using config: {:?}", self.config);
 
         // `stealth_api` is deliberately absent: changing it must not reconnect.
+        // `always_on` likewise: it drives the service loop, not the tunnel.
 
         let gateway_options = GatewayPerformanceOptions {
             mixnet_min_performance: self.config.mixnet_traffic.min_gateway_mixnet_performance,
@@ -514,6 +540,7 @@ impl VpnServiceConfigManager {
                     ex
                 })
                 .collect(),
+            gateway_independence: self.config.gateway_independence,
         }
     }
 }

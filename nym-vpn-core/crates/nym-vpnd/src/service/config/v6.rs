@@ -7,7 +7,6 @@ use crate::service::{
         VpnServiceConfigExt,
         entry_exit::v2::{EntryPoint, ExitPoint},
         mixnet_traffic::v5::MixnetTrafficConfig,
-        network_stats::v1::NetworkStatisticsConfig,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -28,7 +27,6 @@ pub struct VpnServiceConfig {
     pub enable_custom_dns: bool,
     pub custom_dns: Vec<String>,
     pub mixnet_traffic: MixnetTrafficConfig,
-    pub network_stats: NetworkStatisticsConfig,
 }
 
 impl From<VpnServiceConfig> for VpnServiceConfigExt {
@@ -56,8 +54,6 @@ impl TryFrom<VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
 
         let mixnet_traffic = nym_vpn_lib_types::MixnetTrafficConfig::from(value.mixnet_traffic);
 
-        let network_stats = nym_vpn_lib_types::NetworkStatisticsConfig::from(value.network_stats);
-
         let config = nym_vpn_lib_types::VpnServiceConfig {
             entry_point,
             exit_point,
@@ -72,10 +68,11 @@ impl TryFrom<VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
             mixnet_traffic,
             enable_custom_dns: value.enable_custom_dns,
             custom_dns,
-            network_stats,
             killswitch: false,
             legacy_split_tunnel: false,
             stealth_api: false,
+            always_on: false,
+            gateway_independence: Default::default(),
             ..Default::default()
         };
 

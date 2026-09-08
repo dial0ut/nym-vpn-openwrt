@@ -247,6 +247,11 @@ pub enum ErrorStateReason {
     /// Same entry and exit gateway are unsupported.
     SameEntryAndExitGateway,
 
+    /// The entry and exit gateways that satisfy the current settings are not
+    /// independent (same node family, ASN or subnet); a pair exists only once
+    /// the independence criteria are relaxed.
+    NeedsRelaxedIndependenceCriteria,
+
     /// Failure to select any entry gateway after trying all performance tiers.
     PerformantEntryGatewayUnavailable,
 
@@ -305,6 +310,9 @@ impl std::fmt::Display for ErrorStateReason {
             Self::TunnelProvider => f.write_str("TunnelProvider"),
             Self::Ipv6Unavailable => f.write_str("Ipv6Unavailable"),
             Self::SameEntryAndExitGateway => f.write_str("SameEntryAndExitGateway"),
+            Self::NeedsRelaxedIndependenceCriteria => {
+                f.write_str("NeedsRelaxedIndependenceCriteria")
+            }
             Self::PerformantEntryGatewayUnavailable => {
                 f.write_str("PerformantEntryGatewayUnavailable")
             }

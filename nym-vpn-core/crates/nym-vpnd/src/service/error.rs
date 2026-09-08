@@ -62,14 +62,6 @@ pub enum Error {
     StartDiscoveryRefresh(#[source] nym_vpn_network_config::Error),
 }
 
-#[derive(Clone, Debug, thiserror::Error)]
-pub enum GlobalConfigError {
-    #[error("failed to read config")]
-    ReadConfig(String),
-    #[error("failed to write config")]
-    WriteConfig(String),
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum ListGatewaysError {
     #[error("failed to get gateways ({gw_type:?})")]

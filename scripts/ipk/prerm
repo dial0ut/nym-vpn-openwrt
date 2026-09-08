@@ -22,10 +22,9 @@ if [ "$PKG_UPGRADE" = "1" ]; then
     } > "$nym_rpcd_state"
 fi
 
-# The watchdog would fight postinst's restart. On an upgrade the daemon keeps
-# running through the file swap; postinst restarts it via the new init
-# script, whose restart path keeps the kill-switch armed.
-/etc/init.d/nym-vpn-watchdog stop 2>/dev/null
+# On an upgrade the daemon keeps running through the file swap; postinst
+# restarts it via the new init script, whose restart path keeps the
+# kill-switch armed.
 if [ "$PKG_UPGRADE" != "1" ]; then
     /etc/init.d/nym-vpnd stop 2>/dev/null
 fi
@@ -33,7 +32,6 @@ fi
 # Removal only: if postinst never runs after an upgrade (interrupted
 # transaction), a disabled service would stay disabled across reboots.
 if [ "$PKG_UPGRADE" != "1" ]; then
-    /etc/init.d/nym-vpn-watchdog disable 2>/dev/null
     /etc/init.d/nym-vpnd disable 2>/dev/null
 fi
 
@@ -146,6 +144,7 @@ fi
 
 rm -f /tmp/dnsmasq.d/nym-adblock.conf 2>/dev/null
 rm -f /tmp/nym-dns-backup /tmp/resolv.conf.nymbackup 2>/dev/null
+# State file of the retired shell watchdog (<= 1.34.x).
 rm -f /var/run/nym-watchdog.state /tmp/nym-watchdog.state 2>/dev/null
 
 # Removal only: on an upgrade the new daemon reconverges DNS without a

@@ -22,6 +22,23 @@ the GitHub release notes.
   never handed to dnsmasq before, so the setting had no effect at all; while
   disconnected, dnsmasq now uses the LAN resolver instead of the WAN-provided
   ones the kill-switch rejects.
+- Always On now lives in the daemon. With the setting on, the tunnel
+  connects at boot, waits for a default route instead of polling for one,
+  retries error states with backoff (5 s doubling to 5 min for
+  firewall/routing/DNS/TUN failures, 60 s then 5 min for missing gateways,
+  clock skew or exhausted bandwidth) while moving off blacklisted gateways,
+  forces a fresh gateway selection after ten minutes of Connecting, stops on
+  errors that need a change from you (account state, a non-independent pinned
+  pair) until the configuration or account changes, and pauses when you
+  disconnect. After six consecutive infrastructure failures the daemon exits
+  for procd to respawn it with the kill-switch table still in place, and an
+  in-process liveness check does the same for a service loop that stops
+  answering. Set it with `nym-vpnc tunnel set --always-on on` or the Tunnel
+  Settings row; `nym-vpnc status` and the LuCI row show what it is doing
+  (`Always on: retrying in 42 s (attempt 3, last error SetRouting)`). The
+  bridge reports the daemon's Offline state as `offline` instead of
+  `unknown`, so the web UI says "Waiting for network" during a WAN outage.
+  An upgrade carries UCI `always_on=1` over to the daemon setting. Closes #6.
 - `nym-vpnc gateway test` probes gateways with ICMP echo from the router and
   prints RTT min/avg/max and packet loss per gateway, plus a summed pair RTT
   for every entry/exit combination. Without options it tests the configured
@@ -45,9 +62,55 @@ the GitHub release notes.
   config. CLI and web
   UI both say so when the network environment publishes no cover domains, in
   which case the setting has nothing to route through.
-- LuCI **Privacy** card with the anonymous statistics switch, previously
-  reachable only through `nym-vpnc network-stats`. The rpcd bridge gained
-  `stats_get`/`stats_set` for it.
+- Gateway independence, the same guarantee upstream calls node families: the
+  entry and exit gateway of a two-hop tunnel must be run by unrelated
+  parties. The daemon now picks the exit first and only accepts an entry in
+  a different node family (operator group), a different ASN and a
+  non-overlapping announced prefix, for random and country selections as
+  well as pinned gateways. All three criteria are on by default and apply to
+  existing installs without a migration; `nym-vpnc tunnel set
+  --gateway-independence on|off` switches them together and
+  `--family-reminders on|off` controls the reminder shown by user interfaces.
+  When only a related pair matches the settings the connect stops in a
+  distinct error state that says so instead of quietly pairing them;
+  `nym-vpnc connect-v2 --relax-independence` connects anyway for that
+  session only (automatic reconnects keep it, the next disconnect ends it)
+  and never changes the persisted setting. `nym-vpnc gateway tentative`
+  previews the pair a connect would pick, or reports that relaxed criteria
+  are needed, without connecting or creating key material; `gateway list`
+  gained a Family column and `status` names each gateway's family. The rpcd
+  bridge exposes all of it for LuCI: a `gateway_independence` object in the
+  tunnel config, `tunnel_set` toggles, a `relax_independence` flag on
+  `connect`, a `tentative_gateways` method and family fields on gateway rows
+  and on the status entry/exit.
+- Gateway independence in LuCI (the NymVPN apps' *node families*): a
+  **Gateway Independence** switch and a **Server Family Reminders** switch in
+  the Tunnel Settings card, the operator family as a chip on every gateway
+  picker row and under the connected entry and exit (both marked in amber
+  when they share one), and a pre-connect check that asks the daemon which
+  pair it would pick. A same-family pair brings up "The selected servers are
+  in the same operator family!" with **Connect anyway** — relaxing the
+  criteria for that connection only — and **Change servers**; with reminders
+  off the connect goes ahead relaxed and a notice says so. The check is
+  bounded to a few seconds and falls back to a plain connect on an older
+  daemon, and the `NEEDS_RELAXED_INDEPENDENCE_CRITERIA` error state offers
+  the same two choices. The bridge's `tentative_gateways` method is now in
+  the LuCI ACL.
+
+### Removed
+
+- The `nym-vpn-watchdog` service, its WAN hotplug hook, `/tmp/nym-watchdog.state`
+  and the UCI `always_on`/`watchdog_interval`/`watchdog_max_retries` options,
+  replaced by the daemon's Always On above. The rpcd `watchdog_get`/
+  `watchdog_set` methods and the interval pills in the web UI go with them.
+- All telemetry. The daemon no longer collects or reports anonymous network
+  statistics and no longer carries Sentry crash reporting; neither can be
+  turned on. `nym-vpnc network-stats`, `nym-vpnc sentry`, the matching gRPC
+  calls and the rpcd `stats_get`/`stats_set` methods behind the web UI's
+  Privacy switch are gone, as is the local `stats.db`. Existing daemon
+  configs that still contain the old `network_stats`, `sentry_monitoring`
+  or `collect_network_statistics` fields load unchanged; the fields are
+  ignored and dropped on the next save.
 
 ### Security
 
@@ -59,9 +122,8 @@ the GitHub release notes.
   mode checks, so an unprivileged local process can no longer plant a stop
   marker to keep the boot block off or a rules file for the fw3 include to
   load. The daemon writes state with create-new, no-follow temp files.
-  The package hooks' rpcd stash and the always-on watchdog's state file
-  moved out of `/tmp` for the same reason (`/var/run`, root-only parent), and
-  the rpcd bridge refuses to read a state file that is not a regular file.
+  The package hooks' rpcd stash moved out of `/tmp` for the same reason
+  (`/var/run`, root-only parent).
 - CI now runs the workspace test suite and a fast security job on every push
   to `develop` and feature branches: secret scanning of the pushed commits,
   dependency policy and advisory checks (`cargo deny`), shellcheck over the
@@ -273,14 +335,6 @@ the GitHub release notes.
   multi-architecture runner and the single-machine helper scripts that used
   to sit next to it were removed: the runner could not start under `set -u`
   and everything it covered the harness covers.
-- The always-on watchdog now reacts to WAN link events instead of only
-  noticing a dropped tunnel at its next poll. A hotplug hook wakes it on
-  `ifup`/`ifdown` of a WAN-facing interface (`wan`, `wan6`, anything in the
-  `wan` firewall zone or carrying a default route — PPPoE and renamed WANs
-  included), so after an outage or re-dial the tunnel is checked at once and
-  re-checked a few times while the daemon catches up. A link change also
-  resets the retry escalation, so a WAN flap no longer counts towards a
-  daemon restart. The periodic poll stays as the fallback.
 - Less background traffic while the daemon is up but not connected (reported
   from a mirrored-port capture by a forum user). The account state is now
   re-checked every 30 minutes instead of every 2 while the tunnel is down and
@@ -299,6 +353,19 @@ the GitHub release notes.
   reboot. Existing registrations are reconciled on upgrade, and `prerm` no
   longer deletes the include on upgrades, so an interrupted upgrade cannot
   leave the router without it.
+- LuCI page redesign. **Split Tunneling** is its own card; **Tunnel
+  Settings** groups its switches into *Protection* (Always On, Kill-Switch
+  with Inbound Services nested under it, Gateway Independence, Server Family
+  Reminders) and *Transport* (Two-Hop, Circumvention Transports, Stealth API
+  Connect, IPv6), with a `reconnect` tag on switches that apply on the next
+  connect. Every switch row carries one short clause with the full
+  explanation behind an ⓘ expander that links to the LuCI guide; amber notes
+  stay only for live state. Gateway picker rows are a fixed-height ledger
+  (name, performance tier, `No CT` tag, load/uptime/city line, operator
+  family) and the hero gives the pickers most of its width. Nothing changes
+  in what the switches do or send. Behind the page, the view was split into
+  a module tree (`api`, `store`, `components/`, `flows/`, `cards/`) with a
+  jsdom test harness under `luci-app-nym-vpn/tests/`.
 
 ## [1.34.0] - 2026-08-21
 

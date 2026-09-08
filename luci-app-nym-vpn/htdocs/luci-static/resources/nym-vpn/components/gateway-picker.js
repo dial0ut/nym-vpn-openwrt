@@ -1,0 +1,366 @@
+'use strict';
+'require baseclass';
+'require dom';
+'require nym-vpn.countries as countries';
+
+// The two gateway pickers (entry and exit): a country dropdown filled on
+// first focus, a per-country server list (one ledger row per gateway: name
+// and a telemetry line on the left, a fixed status column with the tier and
+// the No CT marker on the right), and the restore of the daemon's saved
+// selection after a disconnect.
+
+var E = dom.create.bind(dom);
+
+var perfRank = function(p) {
+    p = p || '';
+    return p.indexOf('High') >= 0 ? 3 :
+           p.indexOf('Medium') >= 0 ? 2 :
+           p.indexOf('Offline') >= 0 ? 0 : 1;
+};
+
+// The bridge reports performance as one string, "High (load: Low, uptime:
+// 95%)" (or "N/A"). Split it into the tier and its two components so the
+// row can show the tier as a label and the rest as telemetry; anything that
+// does not match keeps the raw string as its telemetry line.
+var TIERS = { high: 'High', medium: 'Medium', low: 'Low', offline: 'Offline' };
+var parsePerformance = function(raw) {
+    var s = String(raw || '').trim();
+    var m = /^(\w+)\s*\(load:\s*(\w+),\s*uptime:\s*(\d+)%\)$/i.exec(s);
+    var rank = perfRank(s);
+    var tier = rank === 3 ? 'high' : rank === 2 ? 'medium' : rank === 0 ? 'offline' : 'low';
+    if (!m) {
+        // Only a known tier word is a real tier; "N/A"/"Unknown" is neither.
+        var known = /high|medium|low|offline/i.test(s);
+        var shown = s && !known && !/^n\/?a$/i.test(s) ? s : '';
+        return { tier: known ? tier : 'unknown', label: known ? TIERS[tier] : 'N/A', telemetry: shown, raw: s };
+    }
+    return {
+        tier: tier,
+        label: TIERS[tier],
+        telemetry: 'load ' + m[2].toLowerCase() + ' · uptime ' + m[3] + '%',
+        raw: s
+    };
+};
+
+var selectHasOption = function(select, value) {
+    for (var i = 0; i < select.options.length; i++)
+        if (select.options[i].value === value) return true;
+    return false;
+};
+
+return baseclass.extend({
+    // Returns the picker pair. Each side exposes {select, list}; the pair
+    // exposes markDirty/invalidate/settle/restore/selection.
+    create: function(store, api) {
+        // The daemon persists entry/exit points across disconnects; restore()
+        // prefills the pickers from that saved config so the explicit-choice
+        // guard in the connect flow passes with the previous selection
+        // visible. dirty stops a restore from stomping on picks the user is
+        // making right now; generation aborts stale in-flight restores when
+        // the state moves on (connect, reconnect).
+        var dirty = false;
+        var generation = 0;
+        var markDirty = function() { dirty = true; };
+
+        var populateCountrySelect = function(select, countryList) {
+            while (select.options.length > 0) select.remove(0);
+            select.appendChild(E('option', { 'value': 'none' }, '— Select Country —'));
+            select.appendChild(E('option', { 'value': 'random' }, '🌐 Random'));
+            // The directory returns countries in ISO-code order; sort by the
+            // displayed name so the dropdown reads alphabetically.
+            var sorted = countryList.slice().sort(function(a, b) {
+                return countries.getDisplay(a.code).name.localeCompare(countries.getDisplay(b.code).name);
+            });
+            sorted.forEach(function(c) {
+                var info = countries.getDisplay(c.code);
+                select.appendChild(E('option', { 'value': c.code },
+                    info.flag + ' ' + info.name + ' (' + c.count + ')'));
+            });
+        };
+
+        var createCountrySelect = function(gwType, name, onSelect) {
+            var select = E('select', {
+                'class': 'nym-select',
+                'name': name,
+                'change': onSelect
+            }, [E('option', { 'value': 'none' }, '— Select Country —')]);
+
+            // Populate options on demand: first focus, or a programmatic
+            // prefill via ensureLoaded(). The promise is cached so the options
+            // are only built once; a failed load clears it so the next attempt
+            // retries.
+            var loadPromise = null;
+            select.ensureLoaded = function() {
+                if (!loadPromise) {
+                    loadPromise = api.gatewayCountries(gwType).then(function(list) {
+                        populateCountrySelect(select, list);
+                    }).catch(function() {
+                        loadPromise = null;
+                        select.options[0].textContent = '— Failed to load —';
+                    });
+                }
+                return loadPromise;
+            };
+            select.addEventListener('focus', function() { select.ensureLoaded(); });
+            return select;
+        };
+
+        var loadGatewaysForCountry = function(country, type, container) {
+            if (!country || country === 'none') {
+                dom.content(container, E('div', { 'class': 'nym-gateway-loading' }, 'Select a country above'));
+                return Promise.resolve();
+            }
+            if (country === 'random') {
+                dom.content(container, '');
+                return Promise.resolve();
+            }
+
+            dom.content(container, E('div', { 'class': 'nym-gateway-loading' }, 'Loading gateways...'));
+
+            return api.gatewaysForCountry(type, country).then(function(result) {
+                if (!result || !result.gateways || result.gateways.length === 0) {
+                    dom.content(container, E('div', { 'class': 'nym-gateway-loading' }, 'No gateways available'));
+                    return;
+                }
+
+                var inputName = type === 'mixnet-entry' ? 'entry_gateway_id' : 'exit_gateway_id';
+                // Circumvention Transports gating: when CT is on, only bridge-
+                // capable gateways are valid ENTRY gateways. For the entry
+                // picker only, sink incompatible gateways and disable selecting
+                // them. gw.bridges is only present when the daemon reports it,
+                // so treat strictly === false to stay graceful against an
+                // older daemon.
+                var ctFilter = (inputName === 'entry_gateway_id') && store.circumvention;
+
+                var sorted = result.gateways.slice().sort(function(a, b) {
+                    if (ctFilter) {
+                        var ca = (a.bridges === false) ? 1 : 0;
+                        var cb = (b.bridges === false) ? 1 : 0;
+                        if (ca !== cb) return ca - cb;
+                    }
+                    return perfRank(b.performance) - perfRank(a.performance);
+                });
+
+                var gatewayList = E('div', { 'class': 'nym-gateway-list' });
+
+                var selectOption = function(option) {
+                    container.querySelectorAll('.nym-gateway-option').forEach(function(el) {
+                        el.classList.remove('selected');
+                    });
+                    option.classList.add('selected');
+                };
+
+                // One ledger row, a two-column grid. Row 1: the name (two-
+                // line clamp, full text in the title) beside a status column
+                // sized by its own content, so the tier label and the No CT
+                // marker can never be pushed under the name's ellipsis. Rows
+                // 2 and 3 span the full width: a telemetry line (load,
+                // uptime, city) and the operator family, each a single line
+                // that ellipsises rather than wraps.
+                // Every string here comes from the directory (operator-
+                // controlled) and is array-wrapped so it renders as text.
+                //   row: {name, value, checked, disabled, perf, city, family,
+                //         noCt, note, compact, index}
+                var buildRow = function(row) {
+                    var inputAttrs = { 'type': 'radio', 'name': inputName, 'value': row.value };
+                    if (row.checked) inputAttrs.checked = 'checked';
+                    if (row.disabled) inputAttrs.disabled = 'disabled';
+
+                    var name = String(row.name || 'Unknown');
+                    var meta = [];
+                    if (row.perf && row.perf.telemetry) {
+                        // One span: the parsed "load · uptime" line, or the raw
+                        // string for a bridge whose format the parser does not
+                        // know. "N/A" has nothing to say here and is skipped
+                        // (the tier label already reads N/A).
+                        meta.push(E('span', { 'class': 'nym-gateway-option-perf', 'title': row.perf.raw }, [row.perf.telemetry]));
+                    }
+                    // City last: the country is already known from the
+                    // dropdown, so it is the token to lose if the line clips.
+                    if (row.city) meta.push(E('span', { 'class': 'nym-gateway-option-city' }, [String(row.city)]));
+                    if (row.note) meta.push(E('span', { 'class': 'nym-gateway-option-note' }, [row.note]));
+
+                    var status = [];
+                    if (row.perf) {
+                        status.push(E('span', {
+                            'class': 'nym-gateway-tier ' + row.perf.tier,
+                            'title': row.perf.raw
+                        }, [row.perf.label]));
+                    }
+                    if (row.noCt) {
+                        status.push(E('span', {
+                            'class': 'nym-gateway-ct-tag',
+                            'title': 'No circumvention transport: not selectable while Circumvention Transports is on'
+                        }, 'No CT'));
+                    }
+
+                    var children = [
+                        E('input', inputAttrs),
+                        E('div', { 'class': 'nym-gateway-option-name', 'title': name }, [name])
+                    ];
+                    if (status.length) children.push(E('div', { 'class': 'nym-gateway-option-status' }, status));
+                    // The telemetry and family lines are always present (empty
+                    // when there is nothing to say) and the name has a two-line
+                    // slot, so every gateway row in a list is the same height.
+                    // The Random row is compact instead: it always sits at the
+                    // top, has no telemetry or family, and would only waste
+                    // height by reserving the slots.
+                    children.push(E('div', { 'class': 'nym-gateway-option-meta' }, meta));
+                    if (!row.compact) {
+                        var familyAttrs = { 'class': 'nym-gateway-option-family' };
+                        if (row.family) familyAttrs.title = 'Operator family: ' + row.family;
+                        children.push(E('div', familyAttrs, row.family ? [row.family] : []));
+                    }
+
+                    var option = E('label', {
+                        'class': 'nym-gateway-option' + (row.compact ? ' compact' : '') + (row.checked ? ' selected' : '') + (row.disabled ? ' disabled' : ''),
+                        // Staggered entrance; capped so a long list settles quickly.
+                        'style': '--i:' + Math.min(row.index || 0, 10)
+                    }, children);
+                    if (!row.disabled) {
+                        option.addEventListener('click', function() { selectOption(option); });
+                    }
+                    return option;
+                };
+
+                gatewayList.appendChild(buildRow({
+                    name: '🎲 Any Gateway (Random)',
+                    value: '',
+                    checked: true,
+                    note: 'picked by the daemon at connect',
+                    compact: true,
+                    index: 0
+                }));
+
+                sorted.forEach(function(gw, i) {
+                    var ctIncompatible = ctFilter && (gw.bridges === false);
+                    // Operator family is null or absent on gateways without
+                    // one and on an older bridge; city likewise.
+                    var family = (typeof gw.family === 'string' && gw.family.trim()) ? gw.family.trim() : '';
+                    var city = (typeof gw.city === 'string' && gw.city.trim()) ? gw.city.trim() : '';
+                    gatewayList.appendChild(buildRow({
+                        name: gw.name,
+                        value: gw.id || '',
+                        disabled: ctIncompatible,
+                        noCt: ctIncompatible,
+                        perf: parsePerformance(gw.performance),
+                        city: city,
+                        family: family,
+                        index: i + 1
+                    }));
+                });
+
+                dom.content(container, [
+                    E('label', { 'class': 'nym-form-label' }, 'Gateway'),
+                    gatewayList,
+                    E('div', { 'style': 'font-size: 11px; color: var(--text-muted); margin-top: 8px' },
+                        result.gateways.length + ' gateways available')
+                ]);
+            }).catch(function(err) {
+                dom.content(container, E('div', { 'class': 'nym-gateway-loading', 'style': 'color: var(--danger)' },
+                    'Error: ' + err.message));
+            });
+        };
+
+        var makeSide = function(gwType, selectName) {
+            var side = { type: gwType };
+            side.select = createCountrySelect(gwType, selectName, function(ev) {
+                markDirty();
+                loadGatewaysForCountry(ev.target.value, gwType, side.list);
+            });
+            // 'change' only fires on user interaction (radio clicks bubble;
+            // programmatic prefill doesn't), so it is exactly the dirty
+            // signal we want.
+            side.list = E('div', { 'class': 'nym-form-group', 'style': 'margin-bottom: 0', 'change': markDirty },
+                E('div', { 'class': 'nym-gateway-loading' }, 'Select a country'));
+            return side;
+        };
+
+        var entry = makeSide('mixnet-entry', 'entry_country');
+        var exit = makeSide('mixnet-exit', 'exit_country');
+
+        // Prefill one side. saved = {type, country, id} from gateway_get:
+        // type 'random' selects the Random option; 'country' opens the saved
+        // country with the default "Any Gateway" radio; 'gateway' additionally
+        // checks the saved gateway's radio, degrading to country-level when
+        // the gateway is gone from the directory or CT-disabled.
+        var restoreSide = function(side, saved, gen) {
+            var select = side.select, container = side.list;
+            if (!select || !saved || !saved.type) return Promise.resolve();
+            var stale = function() { return gen !== generation || dirty; };
+            return select.ensureLoaded().then(function() {
+                if (stale()) return;
+                if (saved.type === 'random') {
+                    if (selectHasOption(select, 'random')) {
+                        select.value = 'random';
+                        return loadGatewaysForCountry('random', side.type, container);
+                    }
+                    return;
+                }
+                if (!saved.country || !selectHasOption(select, saved.country)) return;
+                select.value = saved.country;
+                return loadGatewaysForCountry(saved.country, side.type, container).then(function() {
+                    if (stale() || saved.type !== 'gateway' || !saved.id || !container) return;
+                    var radio = container.querySelector('input[value="' + saved.id + '"]');
+                    if (!radio || radio.disabled) return;
+                    radio.checked = true;
+                    container.querySelectorAll('.nym-gateway-option').forEach(function(el) {
+                        el.classList.remove('selected');
+                    });
+                    var opt = radio.closest('.nym-gateway-option');
+                    if (opt) opt.classList.add('selected');
+                });
+            });
+        };
+
+        var checkedId = function(side, name) {
+            var radio = side.list ? side.list.querySelector('input[name="' + name + '"]:checked') : null;
+            return radio ? radio.value : null;
+        };
+
+        // Warm the picker data shortly after load instead of on first click:
+        // the transfer happens while the user is still looking at the
+        // dashboard, and a daemon whose directory cache is still cold (e.g.
+        // right after a restart) gets its fetch out of the way early. Errors
+        // are swallowed — the pickers retry on interaction.
+        window.setTimeout(function() {
+            api.gatewayList('mixnet-entry').catch(function() {});
+            api.gatewayList('mixnet-exit').catch(function() {});
+        }, 1500);
+
+        return {
+            entry: entry,
+            exit: exit,
+            markDirty: markDirty,
+            // Abort any in-flight restore: what the pickers show now stands.
+            invalidate: function() { generation++; },
+            // The picks have reached the daemon; the dirty flag has served
+            // its purpose.
+            settle: function() { dirty = false; },
+            restore: function() {
+                if (dirty) return;
+                var gen = ++generation;
+                api.gatewayGet().then(function(cfg) {
+                    if (!cfg || gen !== generation || dirty) return;
+                    restoreSide(entry, { type: cfg.entry_type, country: cfg.entry_country, id: cfg.entry_id }, gen);
+                    restoreSide(exit, { type: cfg.exit_type, country: cfg.exit_country, id: cfg.exit_id }, gen);
+                }).catch(function() {});
+            },
+            // Raw picker state: country values ('none', 'random' or a code)
+            // and the checked gateway ids (null when none).
+            selection: function() {
+                return {
+                    entry_country: entry.select ? entry.select.value : 'none',
+                    exit_country: exit.select ? exit.select.value : 'none',
+                    entry_id: checkedId(entry, 'entry_gateway_id'),
+                    exit_id: checkedId(exit, 'exit_gateway_id')
+                };
+            },
+            focus: function() {
+                if (entry.select) {
+                    try { entry.select.focus({ preventScroll: true }); } catch (e) { entry.select.focus(); }
+                }
+            }
+        };
+    }
+});

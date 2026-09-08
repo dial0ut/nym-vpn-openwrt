@@ -58,8 +58,7 @@
       "ios": "2.15.1",
       "macos": "2.15.1",
       "tauri": "1.21.0"
-    },
-    "statistics_api": "https://nym-statistics-api.nymtech.cc"
+    }
   },
   "feature_flags": {
     "domain_fronting": {

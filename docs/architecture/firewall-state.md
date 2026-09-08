@@ -67,7 +67,7 @@ already gone.
 | `/etc/config/firewall` `include 'nym_vpn'` | `uci-defaults/luci-app-nym-vpn`, run by postinst and by the boot-time defaults runner; fails loudly so it is retried | prerm (removal only) | fw3/fw4 | left in place across an interrupted upgrade on purpose |
 | `/usr/share/nym-vpn/{fw3-include,fw4-include,fw-backend,fw-boot-guard,fw-rules}.sh` | package (build-ipk.sh / build-apk.sh copy them from the crate) | package manager | fw3/fw4, init, prerm | `fw-rules.sh` is generated; never edit it by hand |
 | `/var/run/nym-vpn.rpcd-state` | prerm (upgrade) | postinst (consumed), prerm (removal) | postinst | rpcd refresh decision; root-only parent directory |
-| `/var/run/nym-watchdog.state` | always-on watchdog | watchdog, prerm | rpcd bridge (regular-file check, `O_NOFOLLOW`) | not firewall state; listed because it used to live in `/tmp` |
+| `/var/run/nym-watchdog.state`, `/tmp/nym-watchdog.state` | retired shell watchdog (packages ≤ 1.34.x) | postinst (upgrade), prerm | nobody | legacy; Always On lives in the daemon config now |
 
 ## Synchronization, per writer
 

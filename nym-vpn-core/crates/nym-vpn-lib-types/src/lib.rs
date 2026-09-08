@@ -31,10 +31,10 @@ mod connection_data;
 mod device;
 mod diagnostic;
 mod gateway;
+mod gateway_independence;
 mod gateway_test;
 mod log_path;
 mod network;
-mod network_stats;
 mod privy;
 mod rpc_requests;
 mod service;
@@ -70,6 +70,7 @@ pub use gateway::{
     LookupGatewayFilters, Lp, NodeIdentity, ParseRecipientError, Performance, Probe, ProbeOutcome,
     QuicClientOptions, Recipient, Score, Socks5,
 };
+pub use gateway_independence::{GatewayIndependence, TentativeGateways};
 pub use gateway_test::{
     DEFAULT_PROBE_COUNT, DEFAULT_PROBE_TIMEOUT_MS, DEFAULT_TOP_CANDIDATES, GatewayPairResult,
     GatewayTestParams, GatewayTestParamsError, GatewayTestReport, GatewayTestResult,
@@ -82,15 +83,14 @@ pub use network::{
     NetworkCompatibility, NymContracts, NymNetworkDetails, NymVpnNetwork, ParsedAccountLinks,
     SystemConfiguration, SystemMessage, ValidatorDetails,
 };
-pub use network_stats::{NetworkStatisticsConfig, NetworkStatisticsIdentity};
 pub use privy::PrivyDerivationMessage;
 pub use rpc_requests::{
     AccountBalanceResponse, AccountCommandResponse, Coin, DecentralisedObtainTicketbooksRequest,
     ListGatewaysOptions, StoreAccountRequest,
 };
 pub use service::{
-    DnsUpstreamOwner, InboundExemption, InboundExemptionProtocol, MixnetTrafficConfig, TargetState,
-    VpnServiceConfig, VpnServiceInfo,
+    AlwaysOnStatus, DnsUpstreamOwner, InboundExemption, InboundExemptionProtocol,
+    MixnetTrafficConfig, TargetState, VpnServiceConfig, VpnServiceInfo,
 };
 pub use socks5::{EnableSocks5Request, HttpRpcSettings, Socks5Settings, Socks5State, Socks5Status};
 pub use tunnel_event::{

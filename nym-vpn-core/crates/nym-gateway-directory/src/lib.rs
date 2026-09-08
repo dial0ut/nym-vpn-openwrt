@@ -9,7 +9,10 @@ mod gateway_client;
 mod helpers;
 
 pub use nym_sdk::mixnet::{NodeIdentity, Recipient};
-pub use nym_vpn_api_client::types::{GatewayMinPerformance, NaiveFloat, Percent};
+pub use nym_vpn_api_client::{
+    response::{NodeFamily, NodeStaking},
+    types::{GatewayMinPerformance, NaiveFloat, Percent},
+};
 
 pub use crate::{
     blacklisted_gateways::BlacklistedGateways,

@@ -79,8 +79,10 @@ mkdir -p "$BUILD_DIR/data/www/luci-static/resources/view/nym-vpn"
 cp "$LUCI_DIR/htdocs/luci-static/resources/view/nym-vpn/"*.js \
    "$BUILD_DIR/data/www/luci-static/resources/view/nym-vpn/"
 
+# Module tree (api, store, components/, flows/, cards/, theme, ...) — the
+# view requires these by dotted name, so the directory layout must survive.
 mkdir -p "$BUILD_DIR/data/www/luci-static/resources/nym-vpn"
-cp "$LUCI_DIR/htdocs/luci-static/resources/nym-vpn/"*.js \
+cp -R "$LUCI_DIR/htdocs/luci-static/resources/nym-vpn/." \
    "$BUILD_DIR/data/www/luci-static/resources/nym-vpn/"
 
 echo "=== Adding RPC backend ==="
@@ -100,19 +102,6 @@ echo "=== Adding init scripts ==="
 mkdir -p "$BUILD_DIR/data/etc/init.d"
 cp "$LUCI_DIR/root/etc/init.d/nym-vpnd" "$BUILD_DIR/data/etc/init.d/"
 chmod 755 "$BUILD_DIR/data/etc/init.d/nym-vpnd"
-cp "$LUCI_DIR/root/etc/init.d/nym-vpn-watchdog" "$BUILD_DIR/data/etc/init.d/"
-chmod 755 "$BUILD_DIR/data/etc/init.d/nym-vpn-watchdog"
-
-echo "=== Adding watchdog script ==="
-cp "$SCRIPT_DIR/nym-vpn-watchdog" "$BUILD_DIR/data/usr/sbin/"
-chmod 755 "$BUILD_DIR/data/usr/sbin/nym-vpn-watchdog"
-
-# Sourced by hotplug-call, so no exec bit.
-echo "=== Adding hotplug hook ==="
-mkdir -p "$BUILD_DIR/data/etc/hotplug.d/iface"
-cp "$LUCI_DIR/root/etc/hotplug.d/iface/90-nym-vpn-watchdog" \
-   "$BUILD_DIR/data/etc/hotplug.d/iface/"
-chmod 644 "$BUILD_DIR/data/etc/hotplug.d/iface/90-nym-vpn-watchdog"
 
 echo "=== Adding config and UCI defaults ==="
 mkdir -p "$BUILD_DIR/data/etc/config"

@@ -7,7 +7,7 @@ use nym_vpn_proto::rpc_client::RpcClient;
 
 use crate::{
     boolean_option::BooleanOption,
-    display_helpers::{LEWES_PROTOCOL_LINE, display_on_off},
+    display_helpers::{LEWES_PROTOCOL_LINE, display_on_off, gateway_independence_summary},
 };
 use clap::builder::ValueParser;
 
@@ -54,6 +54,23 @@ pub struct SetParams {
     /// takes effect on the next request; no reconnect or restart needed.
     #[arg(long, value_parser = clap::value_parser!(BooleanOption))]
     stealth_api: Option<BooleanOption>,
+
+    /// Require the entry and exit gateway to be independent: different node
+    /// family, ASN and subnet. Switches all three criteria at once. When no
+    /// independent pair exists the connect fails and asks to relax the
+    /// criteria (see `connect-v2 --relax-independence`).
+    #[arg(long, value_parser = clap::value_parser!(BooleanOption))]
+    gateway_independence: Option<BooleanOption>,
+
+    /// Remind the user when the selected entry and exit are not independent.
+    #[arg(long, value_parser = clap::value_parser!(BooleanOption))]
+    family_reminders: Option<BooleanOption>,
+
+    /// Always On: connect when the daemon starts (once a default route
+    /// exists) and keep retrying error states with backoff. A disconnect
+    /// pauses it until the next connect or daemon start; the setting stays.
+    #[arg(long, value_parser = clap::value_parser!(BooleanOption))]
+    always_on: Option<BooleanOption>,
 
     /// Enable Circumvention Transport (CT) wrapping for the connection to the entry gateway in two hop wireguard mode.
     #[arg(long, alias = "ct", value_parser = clap::value_parser!(BooleanOption))]
@@ -134,6 +151,15 @@ impl Command {
                         " (no cover domains available)"
                     }
                 );
+                println!(
+                    "Gateway independence: {}",
+                    gateway_independence_summary(&config.gateway_independence)
+                );
+                println!(
+                    "Family reminders: {}",
+                    display_on_off(config.gateway_independence.enable_notifications)
+                );
+                println!("Always on: {}", display_on_off(config.always_on));
                 if config.inbound_exemptions.is_empty() {
                     println!("Inbound exemptions: none");
                 } else {
@@ -162,6 +188,22 @@ impl Command {
 
                 if let Some(stealth_api) = params.stealth_api {
                     rpc_client.set_stealth_api(*stealth_api).await?;
+                }
+
+                if let Some(gateway_independence) = params.gateway_independence {
+                    rpc_client
+                        .set_enable_gateway_independence(*gateway_independence)
+                        .await?;
+                }
+
+                if let Some(family_reminders) = params.family_reminders {
+                    rpc_client
+                        .set_gateway_independence_notifications(*family_reminders)
+                        .await?;
+                }
+
+                if let Some(always_on) = params.always_on {
+                    rpc_client.set_always_on(*always_on).await?;
                 }
 
                 if let Some(two_hop) = params.two_hop {

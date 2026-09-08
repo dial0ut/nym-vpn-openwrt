@@ -7,7 +7,6 @@ use crate::service::{
         VpnServiceConfigExt,
         entry_exit::v2::{EntryPoint, ExitPoint},
         mixnet_traffic::v5::MixnetTrafficConfig,
-        network_stats::v1::NetworkStatisticsConfig,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -29,7 +28,6 @@ pub struct VpnServiceConfig {
     pub custom_dns: Vec<String>,
     pub enable_ad_blocking: bool,
     pub mixnet_traffic: MixnetTrafficConfig,
-    pub network_stats: NetworkStatisticsConfig,
     #[serde(default = "default_killswitch")]
     pub killswitch: bool,
     #[serde(default)]
@@ -38,6 +36,11 @@ pub struct VpnServiceConfig {
     pub inbound_exemptions: Vec<InboundExemption>,
     #[serde(default)]
     pub stealth_api: bool,
+    #[serde(default)]
+    pub gateway_independence: GatewayIndependence,
+    /// Added after V8 shipped; a file without the key loads with it off.
+    #[serde(default)]
+    pub always_on: bool,
 }
 
 // A v8 file without the key is hand-edited (serde writes every field), and the
@@ -46,6 +49,57 @@ pub struct VpnServiceConfig {
 // `fw-boot-guard.sh`, which both treat an absent setting as on.
 fn default_killswitch() -> bool {
     true
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Gateway independence criteria. Its own object with per-field defaults so a
+/// file written before a criterion existed loads with that criterion on.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub struct GatewayIndependence {
+    #[serde(default = "default_true")]
+    pub enable_notifications: bool,
+    #[serde(default = "default_true")]
+    pub different_node_family: bool,
+    #[serde(default = "default_true")]
+    pub different_asn: bool,
+    #[serde(default = "default_true")]
+    pub different_subnet: bool,
+}
+
+impl Default for GatewayIndependence {
+    fn default() -> Self {
+        Self {
+            enable_notifications: true,
+            different_node_family: true,
+            different_asn: true,
+            different_subnet: true,
+        }
+    }
+}
+
+impl From<GatewayIndependence> for nym_vpn_lib_types::GatewayIndependence {
+    fn from(value: GatewayIndependence) -> Self {
+        Self {
+            enable_notifications: value.enable_notifications,
+            different_node_family: value.different_node_family,
+            different_asn: value.different_asn,
+            different_subnet: value.different_subnet,
+        }
+    }
+}
+
+impl From<&nym_vpn_lib_types::GatewayIndependence> for GatewayIndependence {
+    fn from(value: &nym_vpn_lib_types::GatewayIndependence) -> Self {
+        Self {
+            enable_notifications: value.enable_notifications,
+            different_node_family: value.different_node_family,
+            different_asn: value.different_asn,
+            different_subnet: value.different_subnet,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Hash)]
@@ -88,8 +142,6 @@ impl TryFrom<VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
 
         let mixnet_traffic = nym_vpn_lib_types::MixnetTrafficConfig::from(value.mixnet_traffic);
 
-        let network_stats = nym_vpn_lib_types::NetworkStatisticsConfig::from(value.network_stats);
-
         let config = nym_vpn_lib_types::VpnServiceConfig {
             entry_point,
             exit_point,
@@ -105,7 +157,6 @@ impl TryFrom<VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
             enable_custom_dns: value.enable_custom_dns,
             custom_dns,
             enable_ad_blocking: value.enable_ad_blocking,
-            network_stats,
             killswitch: value.killswitch,
             legacy_split_tunnel: value.legacy_split_tunnel,
             inbound_exemptions: value
@@ -125,6 +176,8 @@ impl TryFrom<VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
                 })
                 .collect(),
             stealth_api: value.stealth_api,
+            gateway_independence: value.gateway_independence.into(),
+            always_on: value.always_on,
         };
 
         Ok(config)

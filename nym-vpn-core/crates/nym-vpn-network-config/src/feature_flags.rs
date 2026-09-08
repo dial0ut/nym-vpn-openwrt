@@ -3,7 +3,6 @@
 
 use std::{collections::HashMap, fmt, str::FromStr};
 
-use nym_sdk::mixnet::Recipient;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -36,11 +35,6 @@ impl FeatureFlags {
     /// Convert feature flags into a `HashMap<String, FlagValue>`
     pub fn into_hash_map(self) -> HashMap<String, FlagValue> {
         self.flags
-    }
-
-    /// Get statistics recipient, if set
-    pub fn stats_recipient(&self) -> Option<Recipient> {
-        self.get_group_flag("statistics", "recipient")
     }
 
     /// Get the version of the gateway from where the metadata endpoint should start to be used, if set

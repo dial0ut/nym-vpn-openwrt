@@ -211,7 +211,8 @@ impl TunnelStateHandler for ConnectedState {
             Some(command) = command_rx.recv() => {
                 tracing::debug!("ConnectedState received command: {command:?}");
                 match command {
-                    TunnelCommand::Connect => {
+                    TunnelCommand::Connect { relax_independence } => {
+                        shared_state.relax_independence = relax_independence;
                         self.disconnect(PrivateActionAfterDisconnect::Reconnect { gateways: None }, shared_state).await
                     },
                     TunnelCommand::Disconnect => {

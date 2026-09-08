@@ -16,19 +16,11 @@ use tokio_stream::StreamExt;
 use nym_vpn_lib_types::{TunnelEvent, TunnelState, VpnServiceInfo};
 use nym_vpn_proto::rpc_client::RpcClient;
 
-use crate::table_style::TableStyle;
+use crate::{display_helpers::error_state_hint, table_style::TableStyle};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Rust ignores SIGPIPE; restore the default so `nym-vpnc ... | grep -q`
-    // exits quietly instead of "failed printing to stdout: Broken pipe".
-    // SAFETY: signal(2) with a valid signal and SIG_DFL has no preconditions;
-    // the disposition is process-wide, so the runtime's worker threads
-    // (already running under #[tokio::main]) are irrelevant.
-    unsafe {
-        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
-    }
-
+    restore_default_sigpipe();
     let args = ProgramArgs::parse();
 
     // The rpcd bridge connects lazily per method: it must keep answering
@@ -63,6 +55,13 @@ pub enum Command {
         /// Blocks until the connection is established or failed
         #[arg(short, long)]
         wait: bool,
+
+        /// Connect even if the entry and exit gateways are not independent
+        /// (same node family, ASN or subnet). Applies to this connect session
+        /// only, including its automatic reconnects; the persisted gateway
+        /// independence setting is untouched.
+        #[arg(long)]
+        relax_independence: bool,
     },
 
     /// Reconnect the tunnel to any matching gateway
@@ -137,22 +136,10 @@ pub enum Command {
         subcommand: commands::network::Command,
     },
 
-    /// Sentry integration
-    Sentry {
-        #[command(subcommand)]
-        subcommand: commands::sentry::Command,
-    },
-
     /// SOCKS5 proxy
     Socks5 {
         #[command(subcommand)]
         subcommand: commands::socks5::Command,
-    },
-
-    /// Anonymous network statistics collection
-    NetworkStats {
-        #[command(subcommand)]
-        subcommand: commands::network_stats::Command,
     },
 
     /// Diagnostic tool
@@ -166,10 +153,25 @@ pub enum Command {
     Rpcd(commands::rpcd::Args),
 }
 
+/// The Rust runtime ignores SIGPIPE, so `nym-vpnc ... | head` ends with a
+/// write to a closed pipe that panics, and the release profile turns the
+/// panic into an abort. Behave like any Unix tool instead: die quietly on
+/// SIGPIPE.
+fn restore_default_sigpipe() {
+    // SAFETY: SIG_DFL is a valid disposition, signal() has no other
+    // preconditions, and the effect is process-wide and thread-safe.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+}
+
 impl Command {
     pub async fn execute(self, rpc_client: RpcClient) -> Result<()> {
         match self {
-            Command::Connect { wait } => Self::connect(rpc_client, wait).await,
+            Command::Connect {
+                wait,
+                relax_independence,
+            } => Self::connect(rpc_client, wait, relax_independence).await,
             Command::Reconnect => Self::reconnect(rpc_client).await,
             Command::Disconnect { wait } => Self::disconnect(rpc_client, wait).await,
             Command::Status { listen } => Self::status(rpc_client, listen).await,
@@ -184,9 +186,7 @@ impl Command {
             Command::Network { subcommand } => subcommand.execute(rpc_client).await,
             Command::Account { subcommand } => subcommand.execute(rpc_client).await,
             Command::Device(args) => args.execute(rpc_client).await,
-            Command::Sentry { subcommand } => subcommand.execute(rpc_client).await,
             Command::Socks5 { subcommand } => subcommand.execute(rpc_client).await,
-            Command::NetworkStats { subcommand } => subcommand.execute(rpc_client).await,
             Command::Diagnostic { subcommand } => {
                 commands::diagnostic::execute(subcommand, rpc_client).await
             }
@@ -194,8 +194,8 @@ impl Command {
         }
     }
 
-    async fn connect(mut rpc_client: RpcClient, wait: bool) -> Result<()> {
-        rpc_client.connect_tunnel().await?;
+    async fn connect(mut rpc_client: RpcClient, wait: bool, relax_independence: bool) -> Result<()> {
+        rpc_client.connect_tunnel(relax_independence).await?;
 
         if wait {
             println!("Waiting until connected or failed");
@@ -217,6 +217,7 @@ impl Command {
                 continue;
             };
             println!("{new_state}");
+            Self::print_state_details(&new_state);
 
             match new_state {
                 TunnelState::Connected { .. } => {
@@ -229,13 +230,38 @@ impl Command {
                         bail!("Device is offline");
                     }
                 }
-                TunnelState::Error(reason) => {
-                    bail!("Tunnel entered error state {reason:?}");
-                }
+                TunnelState::Error(reason) => match error_state_hint(&reason) {
+                    Some(hint) => bail!("Tunnel entered error state {reason:?}: {hint}"),
+                    None => bail!("Tunnel entered error state {reason:?}"),
+                },
                 _ => {}
             }
         }
         Ok(())
+    }
+
+    /// Lines under `State:` that the state's one-liner has no room for: the
+    /// operator family of each gateway when the daemon knows it, and advice
+    /// for error states the user can act on.
+    fn print_state_details(state: &TunnelState) {
+        match state {
+            TunnelState::Connected { connection_data } => {
+                for (side, gateway) in [
+                    ("Entry", &connection_data.entry_gateway),
+                    ("Exit", &connection_data.exit_gateway),
+                ] {
+                    if let Some(family) = &gateway.family_name {
+                        println!("{side} gateway family: {family}");
+                    }
+                }
+            }
+            TunnelState::Error(reason) => {
+                if let Some(hint) = error_state_hint(reason) {
+                    println!("Hint: {hint}");
+                }
+            }
+            _ => {}
+        }
     }
 
     async fn disconnect(mut rpc_client: RpcClient, wait: bool) -> Result<()> {
@@ -279,9 +305,21 @@ impl Command {
         }
     }
 
+    /// `Always on: …` under `State:` while the setting is on; silent when it
+    /// is off or the daemon predates it.
+    async fn print_always_on(rpc_client: &mut RpcClient) {
+        if let Ok(status) = rpc_client.get_always_on_status().await
+            && status.enabled
+        {
+            println!("Always on: {status}");
+        }
+    }
+
     async fn status(mut rpc_client: RpcClient, listen: bool) -> Result<()> {
         let state = rpc_client.get_tunnel_state().await?;
         println!("State: {state}");
+        Self::print_state_details(&state);
+        Self::print_always_on(&mut rpc_client).await;
 
         if !listen {
             return Ok(());
@@ -293,6 +331,8 @@ impl Command {
             match event {
                 Ok(TunnelEvent::NewState(new_state)) => {
                     println!("State: {new_state}");
+                    Self::print_state_details(&new_state);
+                    Self::print_always_on(&mut rpc_client).await;
                 }
                 Ok(TunnelEvent::ConfigChanged(new_config)) => {
                     let json = serde_json::to_string_pretty(&new_config)

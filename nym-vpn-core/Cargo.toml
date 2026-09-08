@@ -12,8 +12,6 @@ members = [
     "crates/nym-offline-monitor",
     "crates/nym-platform-metadata",
     "crates/nym-routing",
-    "crates/nym-statistics",
-    "crates/nym-statistics-api-client",
     "crates/nym-vpn-account-controller",
     "crates/nym-vpn-api-client",
     "crates/nym-vpn-lib-types",
@@ -120,7 +118,6 @@ rs-release = "0.1.11"
 rtnetlink = "0.18"
 rustls = { version = "0.23.36", default-features = false }
 semver = "1.0"
-sentry = { version = "0.46.2", default-features = false }
 serde = "1.0"
 serde_json = "1.0"
 serial_test = "3.3.1"
@@ -178,8 +175,6 @@ nym-ipc = { path = "crates/nym-ipc" }
 nym-offline-monitor = { path = "crates/nym-offline-monitor" }
 nym-platform-metadata = { path = "crates/nym-platform-metadata" }
 nym-routing = { path = "crates/nym-routing" }
-nym-statistics = { path = "crates/nym-statistics" }
-nym-statistics-api-client = { path = "crates/nym-statistics-api-client" }
 nym-vpn-account-controller = { path = "crates/nym-vpn-account-controller" }
 nym-vpn-api-client = { path = "crates/nym-vpn-api-client" }
 nym-vpn-lib = { path = "crates/nym-vpn-lib" }
