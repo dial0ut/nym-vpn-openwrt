@@ -16,11 +16,13 @@ scenario_inject() {
     rt '(setsid sh -c "flock /var/run/nym-firewall/lock sleep 60" </dev/null >/dev/null 2>&1 &); sleep 1; echo "fw3 lock held by a foreign process for 60 s from $(date +%T)"'
 }
 scenario_check() {
-    local applies0 applies t0 took tp st
-    applies0=$(rt 'logread | grep -c "Applying firewall policy"')
+    local applies t0 t0r took tp st
+    # The log ring buffer is full on a busy router, so count only lines
+    # stamped at or after the router's own clock when the change started.
+    t0r=$(rt 'date +%T')
     t0=$(epoch); rt 'nym-vpnc disconnect >/dev/null 2>&1; sleep 2; nym-vpnc connect --wait >/dev/null 2>&1'
     took=$(( $(epoch) - t0 ))
-    applies=$(( $(rt 'logread | grep -c "Applying firewall policy"') - applies0 ))
+    applies=$(rt "logread | grep 'Applying firewall policy' | awk -v t=$t0r '\$4 >= t { n++ } END { print n + 0 }'")
     log "with the lock held: disconnect+connect produced $applies policy applies in ${took}s"
     log "race: 12 fw4 reloads while disconnect+connect runs"
     rt 'nym-vpnc disconnect >/dev/null 2>&1; (setsid sh -c "nym-vpnc connect --wait" </dev/null >/dev/null 2>&1 &); for i in $(seq 1 12); do fw4 reload >/dev/null 2>&1; sleep 1; done'

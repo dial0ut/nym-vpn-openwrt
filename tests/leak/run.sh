@@ -77,6 +77,7 @@ run_scenario() {
     rm -f "$RES/$name.fail" "$RES/$name.inconclusive" "$RES/$name.skip"
     scenario_expect=noleak     # noleak | leak (the firewall is expected to be open)
     scenario_connected=1       # the tunnel must be Connected before the injection
+    scenario_tunnel_after=1    # =0: the injection removes the daemon, so no tunnel packets are expected afterwards
     scenario_mgmt=0            # =1: losing management access is a FAIL
     scenario_wait=15
     scenario_pre() { :; }
@@ -128,7 +129,7 @@ run_scenario() {
     local cap=live
     if [ "${CAP_ALIVE:-0}" != 1 ]; then cap="dead(tcpdump not running)"
     elif [ "$TOTAL" -eq 0 ]; then cap="dead(total=0)"
-    elif [ "$scenario_connected" = 1 ] && [ "$LEAK_WG" -eq 0 ] && [ "$LEAK_SYN" -eq 0 ]; then cap="dead(no wg to entry, no syn)"
+    elif [ "$scenario_connected" = 1 ] && [ "$scenario_tunnel_after" = 1 ] && [ "$LEAK_WG" -eq 0 ] && [ "$LEAK_SYN" -eq 0 ]; then cap="dead(no wg to entry, no syn)"
     fi
     {
         echo "--- capture: total=$TOTAL wg_to_entry=$LEAK_WG leak_syn_to_probe=$LEAK_SYN dns_to_upstream=$LEAK_DNS unattributed=$UNATTRIBUTED liveness=$cap"
