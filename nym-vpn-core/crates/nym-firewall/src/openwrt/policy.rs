@@ -138,7 +138,6 @@ pub(crate) fn compile_with(policy: &FirewallPolicy, uplink: &Uplink<'_>) -> Rule
             if let Some(tunnel) = tunnel {
                 for m in tunnel.inner_metadatas() {
                     allow_tunnel(&mut rs, &m.interface);
-                    rs.tunnel_interfaces.push(m.interface.clone());
                 }
             }
             exemption_filter_accepts(&mut rs, inbound_exemptions);
@@ -195,7 +194,6 @@ pub(crate) fn compile_with(policy: &FirewallPolicy, uplink: &Uplink<'_>) -> Rule
             }
             for m in tunnel.inner_metadatas() {
                 allow_tunnel(&mut rs, &m.interface);
-                rs.tunnel_interfaces.push(m.interface.clone());
                 if *allow_lan {
                     cve_2019_14899_protection(&mut rs, m);
                 }
@@ -757,7 +755,6 @@ mod tests {
         let rs = compile(&policy);
         assert!(rs.output_terminates_in_block());
         assert!(rs.forward_terminates_in_block());
-        assert!(rs.tunnel_interfaces.is_empty());
     }
 
     #[test]
@@ -825,35 +822,6 @@ mod tests {
                 "DNS hatch must not open the forward chain"
             );
         }
-    }
-
-    #[test]
-    fn connected_policy_collects_tunnel_interfaces() {
-        let policy = FirewallPolicy::Connected {
-            peer_endpoints: vec![ep([1, 2, 3, 4], 443)],
-            tunnel: tunnel_iface("wg0", [10, 64, 0, 2]),
-            allow_lan: true,
-            dns_config: dns_config(
-                &["10.64.0.1".parse().unwrap()],
-                &["1.1.1.1".parse().unwrap()],
-            ),
-            allowed_endpoints: vec![],
-            inbound_exemptions: vec![],
-        };
-        let rs = compile(&policy);
-        assert_eq!(rs.tunnel_interfaces, vec!["wg0".to_string()]);
-        assert!(rs.output_terminates_in_block());
-    }
-
-    #[test]
-    fn blocked_does_not_collect_tunnel_interfaces() {
-        let policy = FirewallPolicy::Blocked {
-            allow_lan: true,
-            allowed_endpoints: vec![],
-            dns_servers: vec![],
-        };
-        let rs = compile(&policy);
-        assert!(rs.tunnel_interfaces.is_empty());
     }
 
     #[test]

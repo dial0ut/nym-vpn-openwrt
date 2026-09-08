@@ -105,12 +105,17 @@ case_begin install
 initial_pkg="${PKG_PREV:-$PKG_CURRENT}"
 if [ -n "$initial_pkg" ]; then
     echo "==> installing nym-vpn from $initial_pkg"
-    if vpn_pkg_install "$OPENWRT_CTID" "$initial_pkg"; then
-        case_pass "$(vpn_version "$OPENWRT_CTID") from $(basename "$initial_pkg")"
-    else
+    if ! vpn_pkg_install "$OPENWRT_CTID" "$initial_pkg"; then
         case_fail "package install failed: $(basename "$initial_pkg")"
         exit 1
     fi
+    # Only the package under test is held to the current file list; PKG_PREV
+    # is an older artifact and cases/10-upgrade.sh checks the upgrade result.
+    if [ -z "${PKG_PREV:-}" ] && ! vpn_fw_helpers_present "$OPENWRT_CTID"; then
+        case_fail "package installed without every firewall helper under /usr/share/nym-vpn"
+        exit 1
+    fi
+    case_pass "$(vpn_version "$OPENWRT_CTID") from $(basename "$initial_pkg")"
 else
     echo "==> installing nym-vpn (feed install script — NOT the revision under test)"
     if pct_sh "$OPENWRT_CTID" "wget -qO- '${NYM_FEED_INSTALL_URL:-https://packages.dial0ut.org/install.sh}' | sh >/dev/null 2>&1"; then

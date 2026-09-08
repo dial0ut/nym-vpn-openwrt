@@ -425,10 +425,11 @@ impl Firewall {
     /// until this method is called again with another policy, or until `reset_policy` is called.
     pub fn apply_policy(&mut self, policy: FirewallPolicy) -> Result<(), Error> {
         if !self.killswitch {
-            // Routing into the tunnel is unconditional, so the forwarding
-            // plane (masquerade + accepts) is needed even with blocking off.
-            tracing::info!("Kill-switch disabled: installing tunnel forwarding plane only (no blocking)");
-            return self.inner.apply_forwarding_only(policy);
+            // Routing into the tunnel is unconditional and the `nym` zone in
+            // /etc/config/firewall NATs and forwards into it, so with
+            // blocking off the daemon has nothing to keep in the firewall.
+            tracing::info!("Kill-switch disabled: removing any blocking rules (no policy applied)");
+            return self.inner.reset_policy();
         }
         tracing::info!("Applying firewall policy: {}", policy);
         self.inner.apply_policy(policy)

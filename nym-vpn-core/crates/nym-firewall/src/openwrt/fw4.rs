@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 //! fw4 (nftables) backend: kill-switch rules in an own `inet nym` table at
-//! `filter - 10` (ahead of fw4), plus two owned chains inside `inet fw4`
-//! (`nym_postrouting` from `srcnat`, `nym_forward_lan` from `forward_lan`).
-//! `inet nym_boot` is the include's to create; every apply and reset lifts
-//! it last. No persisted state, but the runtime directory is still verified
-//! because the include trusts hints there only from a directory that passes.
+//! `filter - 10` (ahead of fw4). Nothing of ours lives inside `inet fw4`:
+//! masquerade, MSS clamp and LAN-to-tunnel forwarding come from the `nym`
+//! zone `uci-defaults` declares (`common::NYM_ZONE`), which fw4 renders on
+//! every reload. `inet nym_boot` is the include's to create; every apply
+//! and reset lifts it last. No persisted state, but the runtime directory
+//! is still verified because the include trusts hints there only from a
+//! directory that passes.
 
 use std::io::Write as IoWrite;
 use std::process::{Command, Stdio};
@@ -15,12 +17,7 @@ use super::render_nft;
 use super::rules::RuleSet;
 use super::{Error, Result};
 
-const NAT_CHAIN: &str = "nym_postrouting";
-const FORWARD_CHAIN: &str = "nym_forward_lan";
-const FW4_SRCNAT: &str = "srcnat";
-const FW4_FORWARD_LAN: &str = "forward_lan";
-
-/// Kill-switch table first, then fw4 integration, then lift the boot block.
+/// Kill-switch table first, then lift the boot block.
 pub fn apply(rs: &RuleSet) -> Result<()> {
     tracing::debug!("Applying firewall policy via fw4/nftables backend");
     ensure_runtime_dir()?;
@@ -28,36 +25,20 @@ pub fn apply(rs: &RuleSet) -> Result<()> {
     let script = render_nft::render(rs);
     run_nft_script(&script)?;
 
-    integrate_with_fw4(&rs.tunnel_interfaces)?;
-
     remove_boot_block()?;
 
     tracing::debug!("Firewall policy applied successfully");
     Ok(())
 }
 
-/// Kill-switch off: forwarding plane only, blocking table removed.
-pub fn apply_forwarding_only(rs: &RuleSet) -> Result<()> {
-    tracing::debug!("Applying tunnel forwarding plane (kill-switch off) via fw4/nftables");
-    ensure_runtime_dir()?;
-
-    delete_nym_table();
-
-    integrate_with_fw4(&rs.tunnel_interfaces)?;
-
-    remove_boot_block()?;
-
-    tracing::debug!("Tunnel forwarding plane applied successfully");
-    Ok(())
-}
-
 /// Best-effort, except a boot block that exists and cannot be removed: that
-/// would leave WAN egress blackholed, so it is reported.
+/// would leave WAN egress blackholed, so it is reported. Also what the
+/// kill-switch-off path runs: with no blocking wanted there is nothing left
+/// for the daemon to keep in nftables.
 pub fn reset() -> Result<()> {
     tracing::debug!("Resetting firewall policy via fw4/nftables backend");
     ensure_runtime_dir()?;
 
-    remove_integration();
     delete_nym_table();
     remove_boot_block()?;
 
@@ -136,182 +117,12 @@ fn run_nft_script(script: &str) -> Result<()> {
     Ok(())
 }
 
-fn integrate_with_fw4(interfaces: &[String]) -> Result<()> {
-    ensure_chain(NAT_CHAIN)?;
-    ensure_chain(FORWARD_CHAIN)?;
-    flush_chain(NAT_CHAIN)?;
-    flush_chain(FORWARD_CHAIN)?;
-
-    for iface in interfaces {
-        add_rule(&[
-            "add", "rule", "inet", "fw4", NAT_CHAIN, "oifname", iface, "counter", "masquerade",
-        ])?;
-        // MSS clamp: the 1340-MTU WG tun blackholes full-size segments when
-        // ICMP frag-needed is lost. `rt mtu` is inert for the 1500-MTU mixnet
-        // tun. Must precede the accepts.
-        add_rule(&[
-            "add", "rule", "inet", "fw4", FORWARD_CHAIN, "oifname", iface, "tcp", "flags",
-            "syn", "tcp", "option", "maxseg", "size", "set", "rt", "mtu",
-        ])?;
-        add_rule(&[
-            "add", "rule", "inet", "fw4", FORWARD_CHAIN, "iifname", iface, "tcp", "flags",
-            "syn", "tcp", "option", "maxseg", "size", "set", "rt", "mtu",
-        ])?;
-        add_rule(&[
-            "add", "rule", "inet", "fw4", FORWARD_CHAIN, "oifname", iface, "accept",
-        ])?;
-        // Return traffic to the LAN; `inet nym` only covers router-originated flows.
-        add_rule(&[
-            "add", "rule", "inet", "fw4", FORWARD_CHAIN, "iifname", iface, "ct", "state",
-            "established,related", "accept",
-        ])?;
-        tracing::debug!("Populated fw4 nym chains for interface {iface}");
-    }
-
-    ensure_jump(FW4_SRCNAT, NAT_CHAIN)?;
-    ensure_jump(FW4_FORWARD_LAN, FORWARD_CHAIN)?;
-    Ok(())
-}
-
-fn remove_integration() {
-    remove_jumps(FW4_SRCNAT, NAT_CHAIN);
-    remove_jumps(FW4_FORWARD_LAN, FORWARD_CHAIN);
-
-    for chain in [NAT_CHAIN, FORWARD_CHAIN] {
-        let output = Command::new("nft")
-            .args(["delete", "chain", "inet", "fw4", chain])
-            .output();
-        if let Ok(o) = output
-            && !o.status.success()
-        {
-            tracing::debug!(
-                "nft delete chain {chain} (non-fatal): {}",
-                String::from_utf8_lossy(&o.stderr).trim()
-            );
-        }
-    }
-}
-
-fn ensure_chain(name: &str) -> Result<()> {
-    // `nft add chain` exits non-zero with "File exists" on some versions.
-    let output = Command::new("nft")
-        .args(["add", "chain", "inet", "fw4", name])
-        .output()
-        .map_err(|e| Error::ApplyError(format!("spawn nft add chain: {e}")))?;
-    if output.status.success() {
-        return Ok(());
-    }
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if stderr.contains("File exists") || stderr.contains("exists") {
-        return Ok(());
-    }
-    Err(Error::ApplyError(format!(
-        "nft add chain {name} failed: {}",
-        stderr.trim()
-    )))
-}
-
-fn flush_chain(name: &str) -> Result<()> {
-    let output = Command::new("nft")
-        .args(["flush", "chain", "inet", "fw4", name])
-        .output()
-        .map_err(|e| Error::ApplyError(format!("spawn nft flush chain: {e}")))?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(Error::ApplyError(format!(
-            "nft flush chain {name} failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        )))
-    }
-}
-
-fn add_rule(args: &[&str]) -> Result<()> {
-    let output = Command::new("nft")
-        .args(args)
-        .output()
-        .map_err(|e| Error::ApplyError(format!("spawn nft add rule: {e}")))?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(Error::ApplyError(format!(
-            "nft {} failed: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&output.stderr).trim()
-        )))
-    }
-}
-
-fn ensure_jump(parent: &str, target: &str) -> Result<()> {
-    let listing = Command::new("nft")
-        .args(["list", "chain", "inet", "fw4", parent])
-        .output()
-        .map_err(|e| Error::ApplyError(format!("spawn nft list chain {parent}: {e}")))?;
-    if !listing.status.success() {
-        return Err(Error::ApplyError(format!(
-            "nft list chain {parent} failed: {}",
-            String::from_utf8_lossy(&listing.stderr).trim()
-        )));
-    }
-    let needle = format!("jump {target}");
-    if String::from_utf8_lossy(&listing.stdout).contains(&needle) {
-        return Ok(());
-    }
-    add_rule(&["add", "rule", "inet", "fw4", parent, "jump", target])
-}
-
-fn remove_jumps(parent: &str, target: &str) {
-    let listing = match Command::new("nft")
-        .args(["-a", "list", "chain", "inet", "fw4", parent])
-        .output()
-    {
-        Ok(o) if o.status.success() => o,
-        Ok(o) => {
-            tracing::debug!(
-                "nft list chain {parent} (non-fatal): {}",
-                String::from_utf8_lossy(&o.stderr).trim()
-            );
-            return;
-        }
-        Err(e) => {
-            tracing::debug!("spawn nft list chain {parent}: {e}");
-            return;
-        }
-    };
-    let needle = format!("jump {target}");
-    for line in String::from_utf8_lossy(&listing.stdout).lines() {
-        if !line.contains(&needle) {
-            continue;
-        }
-        let Some(handle) = line.split("# handle ").last() else {
-            continue;
-        };
-        let result = Command::new("nft")
-            .args([
-                "delete",
-                "rule",
-                "inet",
-                "fw4",
-                parent,
-                "handle",
-                handle.trim(),
-            ])
-            .output();
-        if let Ok(o) = result
-            && !o.status.success()
-        {
-            tracing::debug!(
-                "nft delete jump rule (non-fatal): {}",
-                String::from_utf8_lossy(&o.stderr).trim()
-            );
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::super::common::{FW4_POLICY_PATH, IFACES_PATH, RUNTIME_DIR};
+    use super::super::common::{FW4_POLICY_PATH, RUNTIME_DIR};
     use super::*;
+
+    const FW3_INCLUDE: &str = include_str!("../../scripts/fw3-include.sh");
 
     /// A rename on either side must fail here, not leave a table nobody deletes.
     const INCLUDE: &str = include_str!("../../scripts/fw4-include.sh");
@@ -359,6 +170,33 @@ mod tests {
         }
     }
 
+    /// Mirrors the fw3 test: no stand-in definitions for a missing helper.
+    #[test]
+    fn include_script_refuses_to_run_without_its_helpers() {
+        let all: Vec<&str> = lines().collect();
+        for helper in ["fw-boot-guard.sh", "fw-rules.sh"] {
+            let check = format!("[ -r \"$NYM_SHARE_DIR/{helper}\" ] || {{");
+            let at = all
+                .iter()
+                .position(|l| *l == check)
+                .unwrap_or_else(|| panic!("fw4-include.sh must test for {helper}"));
+            assert!(
+                all[at + 1].contains("CRITICAL") && all[at + 2] == "exit 1",
+                "a missing {helper} must log CRITICAL and exit"
+            );
+            let source = format!(". \"$NYM_SHARE_DIR/{helper}\"");
+            assert!(all.iter().skip(at).any(|l| *l == source));
+        }
+        for line in &all {
+            assert!(
+                !line.contains("nym_runtime_dir_trusted() {")
+                    && !line.contains("nym_boot_block_wanted() {")
+                    && !line.contains("nym_boot_block_nft() {"),
+                "fw4-include.sh must not define a stand-in for a helper function: {line}"
+            );
+        }
+    }
+
     #[test]
     fn include_script_reads_hints_from_the_runtime_dir_only() {
         let default = format!("NYM_RUNTIME_DIR=\"${{NYM_RUNTIME_DIR:-{RUNTIME_DIR}}}\"");
@@ -367,27 +205,41 @@ mod tests {
             "fw4-include.sh must define {default}"
         );
         let file = |full: &str| full.strip_prefix(RUNTIME_DIR).unwrap().to_owned();
-        for expected in [
-            format!("RULES_NFT=\"$NYM_RUNTIME_DIR{}\"", file(FW4_POLICY_PATH)),
-            format!("IFACES_FILE=\"$NYM_RUNTIME_DIR{}\"", file(IFACES_PATH)),
-        ] {
-            assert!(
-                lines().any(|l| l == expected),
-                "fw4-include.sh must define {expected}"
-            );
-        }
+        let expected = format!("RULES_NFT=\"$NYM_RUNTIME_DIR{}\"", file(FW4_POLICY_PATH));
+        assert!(
+            lines().any(|l| l == expected),
+            "fw4-include.sh must define {expected}"
+        );
         assert!(INCLUDE.contains("nym_runtime_dir_trusted"));
         for line in lines() {
             assert!(
                 !line.contains("/tmp/nym"),
                 "no runtime file outside the directory: {line}"
             );
-            for var in ["RULES_NFT", "IFACES_FILE"] {
-                assert!(
-                    !line.contains(&format!("[ -f \"${var}\""))
-                        && !line.contains(&format!("[ ! -f \"${var}\"")),
-                    "hints must be tested through have_state: {line}"
-                );
+            assert!(
+                !line.contains("[ -f \"$RULES_NFT\"") && !line.contains("[ ! -f \"$RULES_NFT\""),
+                "hints must be tested through have_state: {line}"
+            );
+        }
+    }
+
+    /// The tunnel plane (masquerade, MSS clamp, LAN-to-tunnel accepts) is
+    /// fw3/fw4's own, from the `nym` zone in /etc/config/firewall. Neither
+    /// include may carry a second implementation of it.
+    #[test]
+    fn includes_carry_no_tunnel_plane() {
+        for (name, script) in [("fw3-include.sh", FW3_INCLUDE), ("fw4-include.sh", INCLUDE)] {
+            for line in script
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.starts_with('#'))
+            {
+                for needle in ["MASQUERADE", "masquerade", "TCPMSS", "rt mtu", "ifaces"] {
+                    assert!(
+                        !line.contains(needle),
+                        "{name} must not implement the tunnel plane ({needle}): {line}"
+                    );
+                }
             }
         }
     }

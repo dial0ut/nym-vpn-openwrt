@@ -28,9 +28,6 @@ pub const FW3_TRANSITION_PATH: &str = "/var/run/nym-firewall/transition";
 /// test it, lose the CPU while the daemon lifted its block, then install an
 /// emergency block nobody removes. Never deleted while installed.
 pub const FW3_LOCK_PATH: &str = "/var/run/nym-firewall/lock";
-/// Tunnel interface list (one per line) for masquerade restore; the fw4
-/// include reads it as an optional hint.
-pub const IFACES_PATH: &str = "/var/run/nym-firewall/ifaces";
 /// Reserved: nothing writes it (fw4 pipes to `nft -f -`). Named so the
 /// include's forward-compatible read stays inside the trusted directory.
 #[allow(dead_code)]
@@ -91,12 +88,19 @@ pub fn ensure_runtime_dir_at(dir: &Path, expected_uid: u32) -> Result<()> {
 /// values to the scripts; the other runtime paths above are pinned by tests.
 pub use super::boot_rules::{FW3_HOOK_FORWARD, FW3_HOOK_INPUT, FW3_HOOK_OUTPUT, FW4_BOOT_TABLE};
 
+/// The firewall zone `uci-defaults/luci-app-nym-vpn` declares for the tunnel
+/// devices (`nym+`): masquerade, MSS clamp and the `lan -> nym` forwarding
+/// are fw3/fw4's own from then on. It masquerades, so [`wan_zone_devices`]
+/// has to know it is not an uplink.
+pub const NYM_ZONE: &str = "nym";
+
 /// Inbound-exemption reply mark (distinct from the tunnel fwmark `0x14d`),
 /// carried in `ct mark` and restored so replies route via the real WAN.
 pub const EXEMPT_FWMARK: u32 = 0x14e;
 
 /// L3 devices of every WAN zone: `uci show firewall` zones with `name='wan'`
-/// or `masq='1'`, their `network` members resolved through `ubus call
+/// or `masq='1'` (except our own [`NYM_ZONE`], which masquerades into the
+/// tunnel), their `network` members resolved through `ubus call
 /// network.interface dump` to `l3_device` (`pppoe-wan`, not the underlying
 /// ethernet; `device` when the interface is down), plus raw `device` members.
 /// Empty when either tool fails; callers fail closed on that. A zone, not a
@@ -206,7 +210,7 @@ fn wan_zone_members(uci_show: &str) -> (Vec<String>, Vec<String>) {
     let mut networks = Vec::new();
     let mut devices = Vec::new();
     for (_, s) in sections {
-        if !s.is_zone || !(s.name == "wan" || s.masq) {
+        if !s.is_zone || s.name == NYM_ZONE || !(s.name == "wan" || s.masq) {
             continue;
         }
         for n in s.networks {
@@ -340,6 +344,14 @@ firewall.@zone[1].network='wan' 'wanb'
 firewall.@forwarding[0]=forwarding
 firewall.@forwarding[0].src='lan'
 firewall.@forwarding[0].dest='wan'
+firewall.nym_zone=zone
+firewall.nym_zone.name='nym'
+firewall.nym_zone.device='nym+'
+firewall.nym_zone.masq='1'
+firewall.nym_zone.mtu_fix='1'
+firewall.nym_lan_fwd=forwarding
+firewall.nym_lan_fwd.src='lan'
+firewall.nym_lan_fwd.dest='nym'
 ";
 
     /// Shape of `ubus call network.interface dump` on OpenWrt 25.12 (tab
@@ -401,11 +413,13 @@ firewall.@forwarding[0].dest='wan'
 }
 ";
 
+    /// The `nym` zone masquerades like an uplink but is the tunnel; its
+    /// `nym+` device must never count as a WAN device.
     #[test]
     fn wan_zone_collects_every_network_of_the_wan_zone() {
         let (networks, devices) = wan_zone_members(UCI_FIREWALL_MULTI_WAN);
         assert_eq!(networks, ["wan", "wanb"]);
-        assert!(devices.is_empty());
+        assert!(devices.is_empty(), "the nym zone's device is not an uplink");
     }
 
     #[test]
@@ -597,7 +611,6 @@ firewall.@rule[0].network=lan
             FW3_RULES_V6_PATH,
             FW3_TRANSITION_PATH,
             FW3_LOCK_PATH,
-            IFACES_PATH,
             FW4_POLICY_PATH,
             STOP_MARKER_PATH,
         ] {
