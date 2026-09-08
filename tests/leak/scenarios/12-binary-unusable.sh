@@ -4,6 +4,7 @@
 # policy through the reload), no leak, ssh and LuCI stay reachable, and
 # restoring the binary + start brings the daemon's policy back.
 scenario_mgmt=1
+scenario_tunnel_after=0
 scenario_wait=6
 scenario_inject() {
     rt 'chmod 000 /usr/sbin/nym-vpnd; /etc/init.d/nym-vpnd restart >/dev/null 2>&1; echo "binary unusable, restart issued at $(date +%T)"'

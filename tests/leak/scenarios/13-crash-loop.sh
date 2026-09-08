@@ -4,6 +4,7 @@
 # time, no leak, ssh and LuCI stay reachable, and the real binary restarts
 # cleanly.
 scenario_mgmt=1
+scenario_tunnel_after=0
 scenario_wait=60
 scenario_inject() {
     rt 'mv /usr/sbin/nym-vpnd /usr/sbin/nym-vpnd.real; printf "#!/bin/sh\nexit 1\n" > /usr/sbin/nym-vpnd; chmod 755 /usr/sbin/nym-vpnd
