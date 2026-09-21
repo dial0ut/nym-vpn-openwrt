@@ -274,7 +274,11 @@ cap_start() {
     fi
     export CAP_PID CAP_ALIVE
 }
-cap_stop() { px "kill $CAP_PID 2>/dev/null; sleep 1"; }
+cap_stop() {
+    # A capture that died mid-scenario cannot prove the unobserved interval.
+    px "kill -0 $CAP_PID 2>/dev/null" || CAP_ALIVE=0
+    px "kill $CAP_PID 2>/dev/null; sleep 1"
+}
 cap_fetch() { px "cat $LEAK_HOST_DIR/$1.pcap" > "$2"; }
 
 # ---- management access ---------------------------------------------------------------
@@ -350,22 +354,25 @@ learn_gateways() {
 # with the tunnel up.
 analyze() {
     local name=$1 allow="" wg="" h
+    # Validate the complete file before counting: a truncated pcap may still
+    # print packets before tcpdump exits non-zero.
+    px "tcpdump -nr $LEAK_HOST_DIR/$name.pcap >/dev/null 2>&1" || return 1
     for h in $LEAK_ENTRY $LEAK_EXIT ${LEAK_LAST_ENTRY:-} ${LEAK_LAST_EXIT:-} $LEAK_DAEMON_HOSTS ${LEAK_OPERATOR_IP:-}; do
         [ -n "$h" ] && allow="$allow and not host $h"
     done
     for h in $LEAK_DAEMON_NETS; do allow="$allow and not net $h"; done
     for h in $LEAK_ENTRY ${LEAK_LAST_ENTRY:-}; do wg="$wg${wg:+ or }dst host $h"; done
     local base="src host $LEAK_ROUTER_WAN_IP and (tcp or udp) and not port 67 and not port 68 and not port 123 and not port 853 and not tcp src port 22"
-    LEAK_SYN=$(px "tcpdump -nr $LEAK_HOST_DIR/$name.pcap 'src host $LEAK_ROUTER_WAN_IP and dst host $LEAK_PROBE_IP and tcp[tcpflags] & tcp-syn != 0 and tcp[tcpflags] & tcp-ack == 0' 2>/dev/null | wc -l" | tr -d ' ')
-    LEAK_DNS=$(px "tcpdump -nr $LEAK_HOST_DIR/$name.pcap 'src host $LEAK_ROUTER_WAN_IP and udp dst port 53' 2>/dev/null | wc -l" | tr -d ' ')
+    LEAK_SYN=$(px "set -o pipefail; tcpdump -nr $LEAK_HOST_DIR/$name.pcap 'src host $LEAK_ROUTER_WAN_IP and dst host $LEAK_PROBE_IP and tcp[tcpflags] & tcp-syn != 0 and tcp[tcpflags] & tcp-ack == 0' 2>/dev/null | wc -l" | tr -d ' ') || return 1
+    LEAK_DNS=$(px "set -o pipefail; tcpdump -nr $LEAK_HOST_DIR/$name.pcap 'src host $LEAK_ROUTER_WAN_IP and (udp or tcp) and dst port 53' 2>/dev/null | wc -l" | tr -d ' ') || return 1
     if [ -n "$wg" ]; then
-        LEAK_WG=$(px "tcpdump -nr $LEAK_HOST_DIR/$name.pcap 'src host $LEAK_ROUTER_WAN_IP and udp and ($wg)' 2>/dev/null | wc -l" | tr -d ' ')
+        LEAK_WG=$(px "set -o pipefail; tcpdump -nr $LEAK_HOST_DIR/$name.pcap 'src host $LEAK_ROUTER_WAN_IP and udp and ($wg)' 2>/dev/null | wc -l" | tr -d ' ') || return 1
     else
         LEAK_WG=0
     fi
     UNATTRIBUTED_LIST=$(px "tcpdump -nr $LEAK_HOST_DIR/$name.pcap '$base $allow' 2>/dev/null | sed -nE 's/.* > ([0-9.]+)\.([0-9]+):.*/\1:\2/p' | sort | uniq -c | sort -rn | head -10")
     UNATTRIBUTED=$(printf '%s\n' "$UNATTRIBUTED_LIST" | awk '{s+=$1} END{print s+0}')
-    TOTAL=$(px "tcpdump -nr $LEAK_HOST_DIR/$name.pcap 2>/dev/null | wc -l" | tr -d ' ')
+    TOTAL=$(px "set -o pipefail; tcpdump -nr $LEAK_HOST_DIR/$name.pcap 2>/dev/null | wc -l" | tr -d ' ') || return 1
     : "${LEAK_SYN:=0}" "${LEAK_DNS:=0}" "${LEAK_WG:=0}" "${TOTAL:=0}"
     export LEAK_SYN LEAK_DNS LEAK_WG UNATTRIBUTED UNATTRIBUTED_LIST TOTAL
 }

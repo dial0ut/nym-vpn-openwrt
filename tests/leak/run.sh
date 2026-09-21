@@ -39,6 +39,8 @@ BED=${BED:-fw3-vm}
 . "$HERE/beds/$BED.env"
 # shellcheck source=lib.sh
 . "$HERE/lib.sh"
+# shellcheck source=verdict.sh
+. "$HERE/verdict.sh"
 
 TS=$(date -u +%Y%m%dT%H%M%SZ)
 RES=${LEAK_RESULTS_DIR:-$HERE/results/$TS}   # set to resume into an earlier run directory
@@ -70,6 +72,7 @@ inconclusive() { note "inconclusive: $*"; printf '%s\n' "$*" >> "$RES/${SCENARIO
 run_scenario() {
     local file=$1 name
     name=$(basename "$file" .sh)
+    [ "$name" != 01-control ] || CONTROL_OK=""
     export SCENARIO_LOG="$RES/$name.log" SCENARIO_NOTE_FILE="$RES/$name.note" SCENARIO_PROBE_FILE="$RES/$name.probe"
     : > "$SCENARIO_LOG"
     : > "$SCENARIO_NOTE_FILE"
@@ -80,14 +83,22 @@ run_scenario() {
     scenario_tunnel_after=1    # =0: the injection removes the daemon, so no tunnel packets are expected afterwards
     scenario_mgmt=0            # =1: losing management access is a FAIL
     scenario_wait=15
+    scenario_inject() { return 1; }
     scenario_pre() { :; }
     scenario_post() { :; }
     scenario_check() { :; }
     # shellcheck disable=SC1090
     . "$file"
-    if ! scenario_pre 2>&1 | tee -a "$SCENARIO_LOG"; then :; fi
+    if ! scenario_pre 2>&1 | tee -a "$SCENARIO_LOG"; then
+        inconclusive "scenario preparation failed"
+    fi
     if [ -s "$RES/$name.skip" ]; then
         verdict "$name" SKIP "$(cat "$RES/$name.skip")"
+        return
+    fi
+    if [ -s "$RES/$name.inconclusive" ]; then
+        verdict "$name" INCONCLUSIVE "$(cat "$RES/$name.inconclusive")"
+        scenario_post 2>&1 | tee -a "$SCENARIO_LOG"
         return
     fi
     learn_gateways
@@ -109,9 +120,13 @@ run_scenario() {
     mgmt_start
     sleep 3
     log "inject"
-    scenario_inject 2>&1 | tee -a "$SCENARIO_LOG"
+    if ! scenario_inject 2>&1 | tee -a "$SCENARIO_LOG"; then
+        inconclusive "scenario injection failed"
+    fi
     sleep "$scenario_wait"
-    scenario_check 2>&1 | tee -a "$SCENARIO_LOG"
+    if ! scenario_check 2>&1 | tee -a "$SCENARIO_LOG"; then
+        not_recovered "scenario check failed"
+    fi
     mgmt_stop
     {
         echo "--- router watcher (1 s samples):"
@@ -120,9 +135,10 @@ run_scenario() {
         probe_stop | tee -a "$SCENARIO_PROBE_FILE" | awk '{$1=""; print}' | uniq -c
     } | tee -a "$SCENARIO_LOG"
     cap_stop
-    cap_fetch "$name" "$RES/$name.pcap"
+    cap_fetch "$name" "$RES/$name.pcap" || inconclusive "capture retrieval failed"
     learn_gateways
-    analyze "$name"
+    LEAK_SYN=0 LEAK_DNS=0 LEAK_WG=0 UNATTRIBUTED=0 UNATTRIBUTED_LIST="" TOTAL=0
+    analyze "$name" || inconclusive "capture analysis failed"
     # Capture liveness: an empty capture proves nothing, and one taken with
     # the tunnel up must contain the tunnel's own packets to the entry
     # gateway (or, for the control, the probe's SYNs).
@@ -140,36 +156,28 @@ run_scenario() {
     failed=$(grep -o 'egress=probe-failed[^ ]*' "$SCENARIO_PROBE_FILE" | sort | uniq -c | awk '{printf "%s x%s ", $2, $1}')
     note=$(tr '\n' ' ' < "$SCENARIO_NOTE_FILE")
     summary="syn=$LEAK_SYN dns=$LEAK_DNS lan_leak=$leaks unattributed=$UNATTRIBUTED total=$TOTAL capture=$cap mgmt=$(mgmt_ok && echo ok || echo lost)${note:+; $note}"
-    if [ "$scenario_expect" = leak ]; then
-        # The firewall is expected to be open: a leak MUST be visible, or the
-        # capture and probes cannot be trusted.
-        if [ -s "$RES/$name.fail" ]; then v=FAIL
-        elif [ "$scenario_mgmt" = 1 ] && ! mgmt_ok; then v=FAIL
-        elif [ "$sig" -gt 0 ] || [ "$leaks" -gt 0 ]; then v=PASS; CONTROL_OK=1
-        else v=FAIL; [ "$name" = 01-control ] && CONTROL_OK=""; fi
-        verdict "$name" "$v" "expected open: $summary"
-    else
-        if [ "$sig" -gt 0 ] || [ "$leaks" -gt 0 ] || [ -s "$RES/$name.fail" ]; then v=FAIL
-        elif [ "$scenario_mgmt" = 1 ] && ! mgmt_ok; then v=FAIL
-        elif [ "$cap" != live ]; then v=INCONCLUSIVE
-        elif [ -z "$CONTROL_OK" ]; then v=INCONCLUSIVE; summary="no positive control yet; $summary"
-        elif [ -s "$RES/$name.inconclusive" ]; then v=INCONCLUSIVE
-        elif [ -n "$failed" ]; then v=INCONCLUSIVE; summary="probe failed: $failed; $summary"
-        else v=PASS; fi
-        verdict "$name" "$v" "$summary"
-    fi
+    evaluate_verdict
+    [ "$scenario_expect" != leak ] || summary="expected open: $summary"
+    verdict "$name" "$v" "$summary"
     scenario_post 2>&1 | tee -a "$SCENARIO_LOG"
 }
 
-echo "bed: $BED  results: $RES"
-bed_up || exit 2
-ensure_connected
 if [ $# -gt 0 ]; then
     list=()
     for s in "$@"; do list+=("$HERE/scenarios/$s.sh"); done
 else
     list=("$HERE"/scenarios/*.sh)
 fi
+# Reject misspelled selections before touching the bed; discard stale per-case verdicts.
+for f in "${list[@]}"; do
+    [ -f "$f" ] || { echo "scenario not found: $f" >&2; exit 2; }
+done
+for f in "${list[@]}"; do
+    rm -f "$RES/$(basename "$f" .sh).verdict"
+done
+echo "bed: $BED  results: $RES"
+bed_up || exit 2
+ensure_connected
 for f in "${list[@]}"; do
     SCENARIO_NAME=$(basename "$f" .sh)
     export SCENARIO_NAME
@@ -181,4 +189,4 @@ echo "== verdicts"
 column -t -s'|' "$RES/verdicts.txt"
 [ -n "${KEEP_BED:-}" ] || bed_down
 if grep -qE '\|(FAIL|INCONCLUSIVE)\|' "$RES/verdicts.txt"; then exit 1; fi
-exit 0
+check_results "${list[@]}"

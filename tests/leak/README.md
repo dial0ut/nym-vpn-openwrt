@@ -1,7 +1,7 @@
 # Packet-level kill-switch evidence suite
 
-Proves what the kill-switch does under failure with a WAN capture, not with a
-grep of the rules, and whether the router stays manageable and recovers. Runs
+Measures kill-switch behavior under failure using WAN captures, management probes
+and recovery checks. Results apply to the tested package, bed and scenarios. Runs
 from a dev machine against one of two Proxmox beds:
 
 | Bed (`BED=`) | Router | Control path | LAN client | Capture |
@@ -51,7 +51,7 @@ the pcap analysis.
 | `12b-binary-unusable-stop-opens` | any | then `nym-vpnd stop` | expected open (the escape hatch works without the binary); start re-arms |
 | `13-crash-loop` | any | binary exits 1, 60 s | block held; real binary restarts; management kept |
 | `14-lock-and-reload-race` | fw4 | fw3 lock held; 12 reloads during connect | policy changes not blocked; `policy=yes boot=no`, Connected |
-| `15-untrusted-runtime-dir` | any | dir mode 0755, stop, reload | no marker, boot block installed; `chmod 0700` + start recovers |
+| `15-untrusted-runtime-dir` | any | dir mode 0755, stop, reload | fw4 opens after stop; fw3 keeps policy; no marker; reload blocks; `chmod 0700` + start recovers |
 | `16a-killswitch-off-reload` | any | disconnected, kill-switch off, reload | expected open, stays open across the reload |
 | `16b-killswitch-on-reload` | any | off then on before capture, reload | re-armed, stays armed |
 | `17-wan-flap` | any | host-side WAN link down 15 s | no leak, reconnects after link up |
@@ -61,10 +61,21 @@ the pcap analysis.
 
 | Verdict | Meaning |
 |---|---|
-| `PASS` | no leak signal, the scenario's gate held, the capture was live and trusted |
-| `FAIL` | a leak signal fired (SYN from the router's WAN address to the probe target, plain DNS to the upstream resolver, or a LAN probe answered on the real egress address), the scenario reported `not_recovered`, or management access was lost in a scenario that gates on it; for `01-control`, `12b` and `16a` (expected open): nothing fired |
-| `INCONCLUSIVE` | the evidence cannot be trusted: tcpdump not running, an empty capture, no tunnel packets to the entry gateway in a connected scenario, no positive control yet, a connected scenario that was not Connected before the injection, or a probe that failed for a reason other than being blocked |
+| `PASS` | protected scenario: no leak signal, recovery/management gates held, live capture and positive control available; expected-open scenario: a live capture recorded a packet-level leak signal and its recovery/management gates held |
+| `FAIL` | a leak signal fired (SYN from the router's WAN address to the probe target, plain DNS to the upstream resolver, or a LAN probe answered on the real egress address), the scenario reported `not_recovered`, or management access was lost in a scenario that gates on it; for `01-control`, `12b`, `15` and `16a` (expected open): nothing fired |
+| `INCONCLUSIVE` | the evidence cannot be trusted: tcpdump not running, an empty capture, no tunnel packets to the entry gateway when the scenario requires the tunnel after injection, no positive control yet, a connected scenario that was not Connected before the injection, or a probe that failed for a reason other than being blocked |
 | `SKIP` | the bed cannot exercise the scenario; the reason is printed |
+
+All scenarios require a live capture and LAN probe results, with no probe errors or
+inconclusive gate. Expected-open cases require a packet-level leak signal; a LAN leak alone
+is insufficient to validate the capture. Only a passing `01-control` establishes the positive
+control. Rerunning it clears any previous control first. A missing or invalid selected verdict
+fails the run; preparation/injection failures are inconclusive and failed recovery checks fail.
+
+Run the offline regressions with `bash tests/leak/tests/verdict.sh` and
+`bash tests/leak/tests/analyze.sh` (Python 3 and tcpdump required for packet fixtures),
+plus `bash tests/leak/tests/runtime-dir.sh` for backend-specific recovery gates.
+The analyzer rejects unreadable/truncated captures and counts both UDP and TCP DNS.
 
 The LAN probe classifies from curl's exit code: 7/28 = `blocked`, 6 =
 `dns-blocked`, 0 with an address = `LEAK:<ip>` on the real egress address or
@@ -78,4 +89,6 @@ exits non-zero on any `FAIL` or `INCONCLUSIVE`.
 Results land in `results/<timestamp>/` (gitignored): one `.pcap`, `.log`,
 `.probe` and `.verdict` per scenario plus `verdicts.txt`. `LEAK_RESULTS_DIR`
 resumes into an earlier directory and `LEAK_CONTROL_OK=1` trusts a positive
-control recorded there. The recorded runs are in `docs/evidence/`.
+control recorded there. Keep results with the tested product and harness revisions, package
+hashes, bed configuration, invocation and skip reasons. Retain captures and logs with the
+results; a verdict alone does not validate a later revision.
