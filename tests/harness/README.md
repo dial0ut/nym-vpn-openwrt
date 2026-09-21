@@ -88,12 +88,14 @@ ssh proxmox 'cd /root/nym-harness/harness && sed -i "s/^PROXMOX_HOST=.*/PROXMOX_
   tunnel case needs it. With an inactive subscription the API answers
   `Inactive subscription`, `account-set` is a FAIL and the tunnel cases SKIP
   with that state; the install, procd and upgrade cases still run.
-- **Fresh-install registration with the default kill-switch.** The daemon's
-  idle Blocked policy admits no API hosts until an endpoint cache exists
-  (issue #15), so on a brand-new install `account set` cannot reach the API
-  while the kill-switch is on. The harness records that as the `account-set`
-  failure it is on every release, then retries with the kill-switch off for
-  the registration only. Do not read that failure as a harness bug.
+- **Fresh-install registration with the default kill-switch.** The daemon
+  resolves and admits its API endpoints while disconnected, so registration
+  is expected to work without an existing endpoint cache. The harness records
+  failure with the kill-switch on as `account-set` FAIL, then retries with it
+  off only to allow later cases to run. That fallback does not turn the
+  original failure into a pass. Earlier reports of issue #15 predate the idle
+  API fixes; verify the package under test rather than assuming the issue is
+  still present or that an old run validates the fix.
 
 ## What this harness does not cover
 

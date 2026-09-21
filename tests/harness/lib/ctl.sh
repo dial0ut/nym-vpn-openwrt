@@ -163,7 +163,7 @@ pct_create_openwrt() {
     pmx "pct create $ctid local:vztmpl/$rootfs \
         --hostname openwrt-${version//./-}-${ctid} \
         --memory 512 --swap 256 --rootfs local-lvm:2 \
-        --net0 name=eth0,bridge=$wan_bridge,hwaddr=BC:24:11:00:04:$hwaddr_oct,firewall=0 \
+        --net0 name=eth0,bridge=$lan_bridge,hwaddr=BC:24:11:00:04:$hwaddr_oct,firewall=0 \
         --net1 name=eth1,bridge=$lan_bridge,hwaddr=BC:24:11:00:14:$hwaddr_oct,firewall=0 \
         --features nesting=1,keyctl=1 --ostype unmanaged --unprivileged 0 --onboot 0" \
         >/dev/null 2>&1 || true
@@ -174,6 +174,9 @@ pct_create_openwrt() {
         echo 'lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file' >> /etc/pve/lxc/${ctid}.conf
     }"
 
+    # Stock OpenWrt initially assigns 192.168.1.1 to eth0. Keep it on the
+    # isolated test bridge until our WAN configuration replaces that LAN
+    # default, so first boot cannot advertise the lab gateway's address.
     pmx "pct start $ctid"
     sleep 3
 
@@ -197,6 +200,8 @@ config interface \"lan\"
 	option netmask \"$lan_mask\"
 EOF
 /etc/init.d/network restart >/dev/null 2>&1; sleep 3'"
+
+    pmx "pct set $ctid --net0 name=eth0,bridge=$wan_bridge,hwaddr=BC:24:11:00:04:$hwaddr_oct,firewall=0" >/dev/null
 
     # Stock template's resolv.conf points at 127.0.0.1 expecting dnsmasq,
     # which is half-broken in our LXCs. Pin upstreams directly.
