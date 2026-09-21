@@ -133,7 +133,7 @@ return baseclass.extend({
             id: 'dns-toggle',
             title: 'Custom DNS',
             desc: 'Uses your own resolvers instead of the VPN\'s.',
-            more: 'Add servers one at a time; they replace the VPN\'s default resolvers for every client that uses the router for DNS, and the queries ride the tunnel while connected. If dnsmasq is set to noresolv (AdGuard Home, https-dns-proxy, stubby) the daemon steps aside and the card says so.',
+            more: 'Add servers one at a time; they replace the VPN\'s default resolvers for every client that uses the router for DNS, and public resolvers use the tunnel while connected. Private resolvers on non-WAN interfaces remain reachable with the kill-switch on, even while disconnected. If dnsmasq is set to noresolv (AdGuard Home, https-dns-proxy, stubby) the daemon steps aside and the card says so.',
             docs: 'custom-dns',
             checked: !!dns_config.enabled,
             onChange: toggle.saver({

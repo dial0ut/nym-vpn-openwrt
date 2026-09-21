@@ -76,7 +76,7 @@ return baseclass.extend({
             title: 'Disable Poisson Delays',
             desc: 'Sends traffic at once, skipping the random schedule.',
             more: 'Real traffic is sent immediately instead of on a randomised Poisson schedule. Much faster, less private: timing becomes easier to correlate. Mixnet (5-hop) mode only; the defaults are the private end.',
-            docs: 'mixnet-tuning',
+            docs: 'disable-poisson-delays',
             checked: tunnel_config.disable_poisson === 'true',
             onChange: save
         });
@@ -85,7 +85,7 @@ return baseclass.extend({
             title: 'Disable Background Cover Traffic',
             desc: 'Stops sending decoy traffic.',
             more: 'No background cover traffic. Saves bandwidth and CPU, less private: your real packets are no longer hidden among decoys. Mixnet (5-hop) mode only.',
-            docs: 'mixnet-tuning',
+            docs: 'disable-background-cover-traffic',
             checked: tunnel_config.disable_cover === 'true',
             onChange: save
         });

@@ -192,6 +192,15 @@ async function scenarioDisclosure() {
   const bad = hrefs.filter((h) => h.indexOf('https://docs.dial0ut.org/guide/luci/#') !== 0 || headings.indexOf(h.split('#')[1]) === -1);
   check(hrefs.length === rowsWithMore.length + groupsWithMore.length && bad.length === 0, 'every Learn more anchor is a heading in docs/guide/luci.md' + (bad.length ? ' — missing ' + JSON.stringify(bad) : ''));
 
+  const mismatched = qa(t, '.nym-info-btn').filter((button) => {
+    const label = button.getAttribute('aria-label').replace(/^More about /, '');
+    const panel = byId(t, button.getAttribute('aria-controls'));
+    const help = panel && panel.querySelector('a.nym-learn-more');
+    return !help || help.hash !== '#' + slugify(label);
+  }).map((button) => button.getAttribute('aria-label'));
+  check(mismatched.length === 0, 'every help button links to its own named section' +
+    (mismatched.length ? ' — mismatched ' + JSON.stringify(mismatched) : ''));
+
   check(t.window.localStorage.getItem('nym-more:killswitch-toggle') === '1', 'open state remembered in localStorage');
   const again = t.modules['nym-vpn.cards.tunnel-settings'].render(t.modules['nym-vpn.store'], t.modules['nym-vpn.api']);
   const againRow = again.querySelector('#killswitch-row');

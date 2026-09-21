@@ -9,7 +9,7 @@
 'require nym-vpn.flows.connect as connectFlow';
 'require nym-vpn.cards.inbound-services as inboundServices';
 
-// Tunnel Settings — the daemon's tunnel switches in three groups:
+// Tunnel Settings — the daemon's tunnel switches in two groups:
 //
 //   Protection  Always On first (whose status line follows the daemon's
 //               supervisor), then the kill-switch with its inbound-service
@@ -90,7 +90,7 @@ return baseclass.extend({
             id: 'killswitch-toggle',
             title: 'Kill-Switch',
             tag: 'reconnect',
-            desc: 'Blocks all traffic outside the tunnel.',
+            desc: 'Blocks WAN traffic except permitted exemptions.',
             more: 'A firewall block only: traffic is routed into the tunnel whenever connected regardless of this setting. Off, LAN traffic falls back to the WAN in the clear while the tunnel is down. Split-tunnel exclusions work with it on. Greyed while the legacy PBR switch owns the routing.',
             docs: 'kill-switch',
             extra: [killswitchWarn],
