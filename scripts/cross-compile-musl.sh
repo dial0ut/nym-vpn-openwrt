@@ -61,9 +61,9 @@ check_arch() {
 install_system_deps() {
     log_info "Installing system dependencies..."
 
-    # Check Rust version - edition 2024 requires Rust 1.85+
+    # Check Rust version - the workspace MSRV (rust-version in Cargo.toml)
     local current_version=$(rustc --version | grep -oE '[0-9]+\.[0-9]+' | head -1)
-    local required_version="1.85"
+    local required_version="1.95"
     log_info "Current Rust: $current_version, Required: $required_version+"
 
     if [ "$(printf '%s\n' "$required_version" "$current_version" | sort -V | head -n1)" != "$required_version" ]; then

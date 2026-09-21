@@ -40,7 +40,7 @@ homepage = "https://docs.dial0ut.org"
 documentation = "https://docs.dial0ut.org"
 edition = "2024"
 license = "GPL-3.0-only"
-rust-version = "1.88"
+rust-version = "1.95"
 
 [profile.release]
 lto = true
