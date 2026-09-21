@@ -81,7 +81,7 @@ is left to fw3/fw4 (management is never ours to break).
 | IPv6 newly enabled while a v4-only policy is persisted (fw3) | the next include run installs a v6 emergency block until the daemon re-applies; the daemon installs a v6 first-activation block on its next apply | same | same | this row *is* the v6 story | as boot block | `fw3-include.sh:restore_policy` (`kernel_ipv6_enabled` without `v6.rules`), `fw3.rs:apply` per-family `jumps_present` | daemon re-apply | **unverified** on a device |
 | Kernel IPv6 up, `ip6tables` unusable (fw3) | daemon refuses to apply any policy (Error state); whatever was live stays | same | same | **not protected** on a fresh boot: the boot block's v6 half fails (CRITICAL) and nothing else filters v6 | as before | `fw3.rs:apply` `Ipv6Status::Unusable` → `Err`; `fw3-include.sh:handle_no_policy` logs CRITICAL | install `ip6tables`/`kmod-ip6tables` or disable IPv6 | **unverified** |
 | Corrupt or missing daemon config | boot guard takes the daemon's defaults (kill-switch on) — block installed | same | same | same | same | `fw-boot-guard.sh:nym_config_bool` → `nym_boot_block_wanted`; daemon `config_manager.rs:new` renames an unparseable file to `.json.bak` and starts with defaults | daemon starts with defaults and lifts the block | device (mock run of the guard with valid/corrupt/absent files, 2026-09-07); **unverified** end to end |
-| Runtime directory untrusted (wrong owner/mode, symlink) | fw4: marker and hints ignored, boot-block decision proceeds; fw3: include takes the lockless path — live policy left alone, or boot block if nothing is hooked; daemon refuses to apply on top of it | same | same | same | same | `common.rs:ensure_runtime_dir_at`, `fw-boot-guard.sh:nym_runtime_dir_trusted`, `fw3-include.sh:run_without_lock` | fix the directory; `stop` still opens (marker ignored → **`stop` cannot open a boot block while the directory is untrusted**; remove the directory instead) | unit:`runtime_dir_rejects_*`, `every_runtime_path_lives_in_the_runtime_dir`, `scripts_derive_every_state_path_from_the_runtime_dir`; device (fw4: marker ignored with the directory at 0755, block kept, logged) |
+| Runtime directory untrusted (wrong owner/mode, symlink) | fw4: marker and hints ignored, boot-block decision proceeds; fw3: include takes the lockless path — live policy left alone, or boot block if nothing is hooked; daemon refuses to apply on top of it | same | same | same | same | `common.rs:ensure_runtime_dir_at`, `fw-boot-guard.sh:nym_runtime_dir_trusted`, `fw3-include.sh:run_without_lock` | repair ownership/mode, then stop again to open WAN or start to restore service; while untrusted, fw4 Stop removes tables only until reload, fw3 skips locked teardown | unit:`runtime_dir_rejects_*`, `every_runtime_path_lives_in_the_runtime_dir`, `scripts_derive_every_state_path_from_the_runtime_dir`; device (fw4: marker ignored with the directory at 0755, block kept, logged) |
 | `flock` missing (fw3 only) | include never reconciles unlocked: hooked policy left as is; nothing hooked → boot block, re-checked; init `stop` skips the teardown and leaves it to the next locked include run | same | same | same | same | `fw3-include.sh:run_without_lock`; init script stop-time lock check | restore `flock`, `firewall reload` (the stop marker is honoured first); daemon applies still work (they use `flock(2)`, not the binary) | device (fw3 VM 902 with `/usr/bin/flock` moved away, 2026-09-07: all three branches observed). Note OpenWrt's own `procd.sh` also requires `flock`, so this is not a realistic image |
 
 ## Traps
@@ -136,18 +136,11 @@ Things that cost a debugging session at least once. Read before changing anythin
 
 ## Evidence
 
-Captures referenced above were taken on 2026-09-07 with tcpdump on the Proxmox host's tap/veth
-of each router's WAN, a LAN client polling its egress address over HTTPS and DNS through the
-router every second, and a state watcher on the router:
+The capture and device observations in the tables are historical, not a validation of every
+subsequent revision. Unit and source-text checks do not establish packet-level protection.
 
-- fw4: OpenWrt 25.12.4 x86_64, LXC 425 (`openwrt25`), LAN client `ubuntu-dev` (VM 114).
-- fw3: OpenWrt 21.02.7 x86_64, VM 902, LAN client LXC 903 (Alpine).
-
-The changelog entry for the unreleased version summarises them; the recorded runs are under
-`docs/evidence/`. The capture files themselves were not committed. The reproducible harness
-lives in `tests/harness/` (LXC); its kill-switch cases are `30-killswitch-disconnected`,
-`32-killswitch-connected` and `33-killswitch-error`. Fault injection under a WAN capture
-(crash mid-apply, interrupted upgrade, failed rule application, corrupt config, crash loop,
-WAN flap, reboot) is `tests/leak/`, run against an fw3 VM or an fw4 container bed; IPv6
-transitions are still not exercised (the beds have no v6 upstream), and every row marked
-**unverified** is a candidate for a new scenario there.
+`tests/harness/` exercises package lifecycle and connected/disconnected behavior in LXC.
+`tests/leak/` injects failures under a WAN capture on fw3 VM and fw4 container beds. Re-run
+relevant scenarios against the exact release artifacts after policy or harness changes. Global
+IPv6 transitions require a working IPv6 upstream, and an fw3 restart capture with no observed
+leak does not close the documented restart exposure.

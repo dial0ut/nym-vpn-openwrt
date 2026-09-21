@@ -57,9 +57,9 @@ So during a restart the router passes through three phases:
 
 A plain `reload` has none of this: `fw3_flush_rules(reload=true)` skips user chains and touches
 only fw3-tagged rules. The measured behaviour (2026-09-07, VM 902, tunnel up) showed the policy
-hooked at every one-second sample and zero LAN egress across a restart, which bounds the window
-below a second on that box but does not measure it. The exposure is real and inherent to how
-fw3 rebuilds; the include cannot run earlier than fw3 lets it.
+hooked at every one-second sample and no observed LAN egress across a restart. Sampling does
+not establish continuous protection or a reliable upper bound on the exposure window. The
+exposure is real and inherent to how fw3 rebuilds; the include cannot run earlier than fw3 lets it.
 
 ## Options
 

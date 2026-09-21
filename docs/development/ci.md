@@ -1,6 +1,29 @@
 # CI/CD
 
-Two workflows: `release-musl.yml` builds and ships releases, `docs.yml` deploys this site.
+Three workflows: `ci.yml` checks development changes, `release-musl.yml` builds and ships
+releases, and `docs.yml` deploys this site.
+
+## Development checks
+
+`ci.yml` runs on pushes to `develop`, `feat/**`, `fix/**` and `ci/**`, pull requests targeting
+`develop`, manual dispatch, and a weekly schedule.
+
+- Rust: `cargo test --workspace --locked --no-fail-fast` on an Ubuntu runner with the required
+  native libraries and unprivileged ICMP sockets enabled.
+- Security: secret scanning, dependency license/source/ban checks, dependency advisories,
+  ShellCheck and workflow linting. **Advisory failures are non-blocking** while the backlog is
+  being triaged; the other checks fail their job on errors.
+
+The docs/UI/harness job runs `npm ci` and `npm test` in `luci-app-nym-vpn/tests/`,
+`mkdocs build --strict` after installing `docs/requirements.txt`, and
+the shell tests in `tests/leak/tests/` (packet fixtures require tcpdump). The LuCI suite verifies that help buttons target matching
+guide headings; the offline harness tests reject invalid captures, failed probes, failed
+recovery and missing results. These commands can also be run locally.
+
+The Proxmox integration and leak suites require a separate configured test environment and are
+not run by these workflows. Cross-compilation proves a target builds, not that it works on a
+router. Device validation must identify the tested package and scenarios, including any
+skipped or inconclusive cases.
 
 ## Release
 

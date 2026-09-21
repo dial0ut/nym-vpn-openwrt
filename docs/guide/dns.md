@@ -32,10 +32,17 @@ Default DNS: 9.9.9.9 149.112.112.112 2620:fe::fe 2620:fe::fe:9
 IPv6 servers are dropped when IPv6 is off. Set your own with `nym-vpnc dns set <ip>...` or in the
 web UI.
 
-Whichever servers are in use, the queries travel through the tunnel, so the resolver sees the exit
-gateway rather than your ISP connection. That holds in the default split-tunnelling mode, and it
-holds for excluded devices too — see [Caveats](#caveats). It does **not** hold under legacy
-(inclusive/PBR) split tunnelling.
+While connected, queries to public resolvers travel through the tunnel, so the resolver sees the
+exit gateway rather than your ISP connection. Configured private resolvers on non-WAN interfaces
+(such as a LAN Pi-hole) are reached directly on their local interface, including with the
+kill-switch on. A private resolver reached through the WAN is not permitted outside the tunnel.
+
+Public DNS also uses the tunnel for excluded devices — see [Caveats](#caveats). Legacy
+(inclusive/PBR) split tunnelling does not provide this routing guarantee.
+
+While disconnected, dnsmasq uses configured private non-WAN resolvers when available. With the
+kill-switch on, WAN-provided upstreams are omitted from that resolver list; with it off, they
+remain available. Disabling custom DNS restores the WAN resolver list, subject to the firewall.
 
 ## These queries are not encrypted
 
@@ -88,9 +95,10 @@ upstream servers.
 
 ## Caveats
 
-**In the default (exclusion) mode, DNS is tunnelled — including for excluded devices.** An
-excluded device's lookup goes to the router, and the router's own upstream query follows the
-default route into the tunnel. Two consequences:
+**In the default (exclusion) mode, public DNS is tunnelled — including for excluded devices.**
+An excluded device's lookup goes to the router, and the router's own public upstream query
+follows the default route into the tunnel. Private non-WAN custom resolvers use their local
+interface instead. Two consequences:
 
 - Answers are chosen from the exit gateway's vantage point, while the device then connects from
   your real address. On unicast geo-DNS — Netflix, Akamai, non-anycast Fastly — that can steer an

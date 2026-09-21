@@ -2,44 +2,26 @@
 
 ## Firewall stuck after a crash
 
-If `nym-vpnd` is killed or crashes while the kill-switch is on, its fail-closed firewall table
-stays loaded and nothing reaches the internet.
+If `nym-vpnd` crashes with the kill-switch on, its firewall policy remains loaded. WAN traffic
+outside the policy's exceptions stays blocked until the daemon recovers. DNS availability
+depends on the active policy and resolver configuration; it is not a reliable crash indicator.
 
-The signature is distinctive: DNS names still resolve — the blocked policy permits the configured
-public resolvers — but every connection hangs, and the router itself cannot reach the WAN
-(`ping: sendto: Operation not permitted`).
+To restart the daemon while keeping protection enabled:
 
-**v1.32.0+:**
-
-```
-/etc/init.d/nym-vpnd stop      # or restart
+```sh
+/etc/init.d/nym-vpnd restart
 ```
 
-The init script tears the table down after the daemon is gone, whether or not the daemon was in
-any state to disconnect. Since v1.32.0 procd also respawns indefinitely, so a crash-looping daemon
-keeps re-owning its firewall instead of being abandoned with the kill-switch up.
+To stop the VPN and restore ordinary WAN access:
 
-**By hand, fw4 (OpenWrt 22.03+):**
-
-```
-nft delete table inet nym 2>/dev/null
+```sh
+/etc/init.d/nym-vpnd stop
 ```
 
-**By hand, older iptables builds:**
-
-```
-iptables -F NYM_INPUT 2>/dev/null
-iptables -F NYM_OUTPUT 2>/dev/null
-iptables -F NYM_FORWARD 2>/dev/null
-iptables -t nat -F NYM_NAT 2>/dev/null
-
-iptables -D input_rule -j NYM_INPUT 2>/dev/null
-iptables -D output_rule -j NYM_OUTPUT 2>/dev/null
-iptables -D forwarding_rule -j NYM_FORWARD 2>/dev/null
-iptables -t nat -D postrouting_rule -j NYM_NAT 2>/dev/null
-
-/etc/init.d/firewall restart
-```
+Explicit Stop removes protection after the daemon exits; Restart preserves it. Procd also
+respawns crashed processes. If Stop cannot remove protection, check the runtime directory as
+described below. Deleting individual firewall chains is not a lasting recovery: a daemon policy
+update or firewall reload can restore them.
 
 ## Upgrade interrupted half-way
 
@@ -47,24 +29,25 @@ If the package manager is killed during an upgrade (power loss, a closed
 SSH session without `nohup`, an OOM kill), the new files may already be on
 disk while the package database still records the old version, and
 `opkg configure` does nothing because no package is in the "unpacked" state.
-The running daemon is untouched and the kill-switch stays armed. Recovery is
-to run the same install command again (`opkg install <file>.ipk` or
+The upgrade hooks are designed to preserve the enabled kill-switch, but the daemon's state
+depends on where the interruption occurred. Recovery is to run the same install command again (`opkg install <file>.ipk` or
 `apk add --allow-untrusted <file>.apk`): it completes the transaction and
-restarts the daemon through the new init script. Reproduced on OpenWrt 21.02
-and 25.12 (failure-injection and recovery suites, scenario 8).
+restarts the daemon through the new init script. The packet-level test suite exercises
+interrupted upgrades in `08-interrupted-upgrade` (opkg) and `18-upgrade-interrupted-apk` (apk).
 
 ## Kill-switch stays on after `nym-vpnd stop`
 
-`/etc/init.d/nym-vpnd stop` opens the network by writing a stop marker into
-`/var/run/nym-firewall/` and removing the kill-switch tables. The firewall
-includes honour that marker only while the directory is what the daemon
-created: owned by root, mode `0700`, not a symlink. If the directory has been
-altered (for example `chmod 0755`), the includes ignore the marker, log
-`ignoring /var/run/nym-firewall/stopped: … is not a private root-owned
-directory`, and keep the boot-time block. Restore the mode
-(`chmod 0700 /var/run/nym-firewall`) or remove the directory, then run
-`/etc/init.d/firewall reload`. Reproduced on OpenWrt 25.12 (recovery suite,
-scenario 5).
+An explicit Stop normally removes protection and writes a stop marker in
+`/var/run/nym-firewall/`. The directory must be owned by root, mode `0700`, and not a symlink.
+If it is untrusted, Stop cannot write the marker. On fw4, Stop can still remove the tables,
+but the next firewall reload installs a boot block. On fw3, teardown cannot safely take the
+state lock, so existing protection remains.
+
+For an otherwise valid root-owned directory with the wrong mode, restore it with
+`chmod 0700 /var/run/nym-firewall`. Then run `/etc/init.d/nym-vpnd stop` again if you intend to
+open WAN access, or `/etc/init.d/nym-vpnd start` to restore VPN service. Reloading the firewall
+alone does not create the missing stop marker. If ownership or the path itself is wrong,
+repair that first rather than trusting files in the directory.
 
 ## "No related RPC reply" on GL.iNet devices
 
