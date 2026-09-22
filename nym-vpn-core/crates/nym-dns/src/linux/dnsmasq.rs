@@ -413,16 +413,43 @@ fn staged_repoints(changes: &str, managed_file: &str) -> Vec<String> {
     sections
 }
 
+struct DhcpCommit {
+    committed: Result<()>,
+    /// Staging our repoint again after the commit.
+    restaged: Result<()>,
+}
+
 /// `uci commit dhcp` that leaves our repoint staged. Committed, it would
 /// outlive the daemon: after a reboot dnsmasq would read a file nothing
 /// writes. uci cannot commit around one delta, so ours is reverted, the rest
 /// committed and ours staged again.
-fn commit_dhcp_keeping_repoint<S: Sys>(sys: &S, managed_file: &str) -> Result<()> {
-    let sections = staged_repoints(&sys.uci_changes("dhcp")?, managed_file);
+fn commit_dhcp_keeping_repoint<S: Sys>(sys: &S, managed_file: &str) -> DhcpCommit {
+    let sections = match sys.uci_changes("dhcp") {
+        Ok(changes) => staged_repoints(&changes, managed_file),
+        Err(e) => {
+            return DhcpCommit {
+                committed: Err(e),
+                restaged: Ok(()),
+            };
+        }
+    };
     for section in &sections {
         sys.uci_revert_option(&format!("dhcp.{}.resolvfile", section));
     }
-    let committed = sys.uci_commit("dhcp");
+    // A revert can fail without saying so; commit only once the repoint is
+    // really gone from the staged changes.
+    let reverted = if sections.is_empty() {
+        Ok(())
+    } else {
+        match sys.uci_changes("dhcp") {
+            Ok(changes) if staged_repoints(&changes, managed_file).is_empty() => Ok(()),
+            Ok(_) => Err(Error::UciCommand(
+                "resolvfile repoint still staged after revert; dhcp left uncommitted".into(),
+            )),
+            Err(e) => Err(e),
+        }
+    };
+    let committed = reverted.and_then(|()| sys.uci_commit("dhcp"));
     // Even when the commit failed: without it the next dnsmasq restart
     // drops the managed file.
     let mut restaged = Ok(());
@@ -430,7 +457,29 @@ fn commit_dhcp_keeping_repoint<S: Sys>(sys: &S, managed_file: &str) -> Result<()
         let result = sys.uci_set(&format!("dhcp.{}.resolvfile", section), managed_file);
         restaged = restaged.and(result);
     }
-    committed.and(restaged)
+    DhcpCommit {
+        committed,
+        restaged,
+    }
+}
+
+/// A repoint that could not be staged again is converged back at once, not
+/// at the next connect: the caller is about to restart dnsmasq.
+fn handle_commit_dhcp<S: Sys>(sys: &S, paths: &Paths, scheme: &mut Option<Scheme>) -> Result<()> {
+    let managed = paths.managed.display().to_string();
+    let DhcpCommit {
+        committed,
+        restaged,
+    } = commit_dhcp_keeping_repoint(sys, &managed);
+    if let Err(e) = restaged {
+        tracing::warn!(
+            "Re-staging the resolvfile repoint failed ({}); re-converging",
+            e
+        );
+        *scheme = None;
+        ensure_converged(sys, paths, scheme)?;
+    }
+    committed
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -669,8 +718,7 @@ async fn run_actor<S: Sys>(sys: S, paths: Paths, mut rx: mpsc::Receiver<Cmd>) {
                         let _ = ack.send(result);
                     }
                     Cmd::CommitDhcp(ack) => {
-                        let managed = paths.managed.display().to_string();
-                        let _ = ack.send(commit_dhcp_keeping_repoint(&sys, &managed));
+                        let _ = ack.send(handle_commit_dhcp(&sys, &paths, &mut scheme));
                     }
                 }
             }
@@ -811,8 +859,10 @@ mod converge_tests {
     #[derive(Default)]
     pub(super) struct FakeSys {
         pub calls: Mutex<Vec<String>>,
-        /// `uci changes dhcp` output.
+        /// `uci changes dhcp` output before any revert or set.
         pub changes: String,
+        pub stuck_reverts: bool,
+        pub failing_sets: std::sync::atomic::AtomicUsize,
         pub commit_fails: bool,
         pub committed: String,
         pub section: Option<String>,
@@ -827,11 +877,35 @@ mod converge_tests {
             self.calls.lock().unwrap().push(format!("revert {key}"));
         }
         fn uci_set(&self, key: &str, value: &str) -> Result<()> {
+            use std::sync::atomic::Ordering;
+            if self.failing_sets.load(Ordering::SeqCst) > 0 {
+                self.failing_sets.fetch_sub(1, Ordering::SeqCst);
+                self.calls.lock().unwrap().push(format!("failed set {key}"));
+                return Err(Error::UciCommand("set failed".into()));
+            }
             self.calls.lock().unwrap().push(format!("set {key}={value}"));
             Ok(())
         }
+        /// `changes` as the reverts and sets made since leave it.
         fn uci_changes(&self, _package: &str) -> Result<String> {
-            Ok(self.changes.clone())
+            let calls = self.calls.lock().unwrap();
+            let mut out = String::new();
+            for line in self.changes.lines() {
+                let key = line.split_once('=').map_or(line, |(key, _)| key);
+                let mut staged = true;
+                for call in calls.iter() {
+                    if call == &format!("revert {key}") && !self.stuck_reverts {
+                        staged = false;
+                    } else if call.starts_with(&format!("set {key}=")) {
+                        staged = true;
+                    }
+                }
+                if staged {
+                    out.push_str(line);
+                    out.push('\n');
+                }
+            }
+            Ok(out)
         }
         fn uci_commit(&self, package: &str) -> Result<()> {
             self.calls.lock().unwrap().push(format!("commit {package}"));
@@ -972,7 +1046,9 @@ mod converge_tests {
             ),
             ..Default::default()
         };
-        commit_dhcp_keeping_repoint(&sys, MANAGED_FILE).unwrap();
+        let outcome = commit_dhcp_keeping_repoint(&sys, MANAGED_FILE);
+        outcome.committed.unwrap();
+        outcome.restaged.unwrap();
         assert_eq!(
             *sys.calls.lock().unwrap(),
             [
@@ -995,7 +1071,9 @@ mod converge_tests {
                 changes: changes.into(),
                 ..Default::default()
             };
-            commit_dhcp_keeping_repoint(&sys, MANAGED_FILE).unwrap();
+            commit_dhcp_keeping_repoint(&sys, MANAGED_FILE)
+                .committed
+                .unwrap();
             assert_eq!(*sys.calls.lock().unwrap(), ["commit dhcp".to_string()]);
         }
     }
@@ -1007,11 +1085,53 @@ mod converge_tests {
             commit_fails: true,
             ..Default::default()
         };
-        assert!(commit_dhcp_keeping_repoint(&sys, MANAGED_FILE).is_err());
+        let outcome = commit_dhcp_keeping_repoint(&sys, MANAGED_FILE);
+        assert!(outcome.committed.is_err());
+        outcome.restaged.unwrap();
         assert_eq!(
             sys.calls.lock().unwrap().last().unwrap(),
             &format!("set dhcp.cfg01411c.resolvfile={MANAGED_FILE}")
         );
+    }
+
+    #[test]
+    fn commit_dhcp_never_commits_a_repoint_the_revert_left_staged() {
+        let sys = FakeSys {
+            changes: format!("dhcp.cfg01411c.resolvfile='{MANAGED_FILE}'\n"),
+            stuck_reverts: true,
+            ..Default::default()
+        };
+        let outcome = commit_dhcp_keeping_repoint(&sys, MANAGED_FILE);
+        assert!(outcome.committed.is_err());
+        let calls = sys.calls.lock().unwrap();
+        assert!(!calls.iter().any(|c| c.starts_with("commit")), "{calls:?}");
+    }
+
+    #[test]
+    fn commit_dhcp_reconverges_when_the_repoint_cannot_be_restaged() {
+        let sys = FakeSys {
+            changes: format!("dhcp.cfg01411c.resolvfile='{MANAGED_FILE}'\n"),
+            failing_sets: 1.into(),
+            section: Some("cfg01411c".into()),
+            generated: Mutex::new(vec![Some(managed_line())]),
+            running: true,
+            ..Default::default()
+        };
+        let mut scheme = Some(Scheme::ManagedFile);
+        handle_commit_dhcp(&sys, &Paths::real(), &mut scheme).unwrap();
+        let calls = sys.calls.lock().unwrap();
+        let commit = calls.iter().position(|c| c == "commit dhcp").unwrap();
+        let failed = calls
+            .iter()
+            .position(|c| c.starts_with("failed set"))
+            .unwrap();
+        assert!(commit < failed, "{calls:?}");
+        // Converge staged it again right away.
+        assert_eq!(
+            calls.last().unwrap(),
+            &format!("set dhcp.@dnsmasq[0].resolvfile={MANAGED_FILE}")
+        );
+        assert!(scheme == Some(Scheme::ManagedFile));
     }
 
     #[test]
