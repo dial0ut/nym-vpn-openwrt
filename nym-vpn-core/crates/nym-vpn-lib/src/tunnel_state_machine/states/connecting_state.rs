@@ -308,6 +308,8 @@ impl ConnectingState {
 
         shared_state.allow_networking().await;
 
+        self.settle_entry_gateway_suspect(shared_state).await;
+
         Self::force_account_refresh_if_time_desynced(self.retry_attempt, shared_state).await;
 
         self.start_tunnel_monitor(Some(resolved_gateway_config), shared_state)
@@ -511,6 +513,34 @@ impl ConnectingState {
         self.selected_gateways = None;
     }
 
+    /// Runs once the firewall admits the API endpoints. A reachable API rules
+    /// out the local network, so an entry gateway whose sessions keep ending
+    /// early is blamed and replaced; otherwise it is kept.
+    async fn settle_entry_gateway_suspect(&mut self, shared_state: &mut SharedState) {
+        let Some(suspect) = shared_state.entry_gateway_suspect.take() else {
+            return;
+        };
+        if self
+            .selected_gateways
+            .as_ref()
+            .is_none_or(|gateways| gateways.entry_gateway().identity != suspect)
+        {
+            return;
+        }
+        if !Self::any_api_endpoint_reachable(shared_state).await {
+            tracing::warn!(
+                "Sessions via entry gateway {suspect} keep ending early, but the VPN API is \
+                 unreachable too; keeping the gateway"
+            );
+            return;
+        }
+        shared_state.entry_gateway_grace = None;
+        shared_state.clear_short_session_strikes();
+        shared_state.blacklist_entry_gateway(suspect, "short sessions");
+        self.selected_gateways = None;
+        self.connection_data = None;
+    }
+
     fn make_connecting_tunnel_state(
         &self,
         shared_state: &SharedState,
@@ -680,7 +710,9 @@ impl TunnelStateHandler for ConnectingState {
                         NextTunnelState::SameState(self)
                     }
                     TunnelMonitorEvent::BandwidthFailed { entry_culpable } => {
-                        self.handle_gateway_failure(entry_culpable, "bandwidth failure", shared_state).await;
+                        if let Some(entry_culpable) = entry_culpable {
+                            self.handle_gateway_failure(entry_culpable, "bandwidth failure", shared_state).await;
+                        }
                         NextTunnelState::SameState(self)
                     }
                 }

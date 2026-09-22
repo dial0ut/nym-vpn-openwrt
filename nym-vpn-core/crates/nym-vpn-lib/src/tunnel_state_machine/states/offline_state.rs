@@ -47,6 +47,8 @@ impl OfflineState {
         shared_state: &mut SharedState,
     ) -> (Box<dyn TunnelStateHandler>, PrivateTunnelState) {
         shared_state.disallow_networking().await;
+        // Sessions cut short by an outage say nothing about the gateway.
+        shared_state.clear_short_session_strikes();
 
         let firewall_policy_params = BlockedPolicyParameters {
             allow_lan: shared_state.tunnel_settings.allow_lan,

@@ -652,6 +652,44 @@ impl From<TunnelInterface> for nym_firewall::TunnelInterface {
 /// outlast a PPPoE/LTE resync; a reachable API ends the shield early.
 const GATEWAY_BLAME_GRACE: std::time::Duration = std::time::Duration::from_secs(120);
 
+/// A session that ends sooner than this counts against its entry gateway.
+const SHORT_SESSION: Duration = Duration::from_secs(60);
+
+/// Short sessions in a row via one entry gateway before it is suspected.
+const SHORT_SESSION_STRIKES: u32 = 3;
+
+/// Short sessions in a row via one entry gateway. Up clears the blacklist and
+/// a drop re-arms the grace, so without these a gateway that passes the
+/// connectivity check and then dies would be retried forever.
+#[derive(Debug, Default)]
+struct ShortSessionStrikes {
+    entry: Option<NodeIdentity>,
+    count: u32,
+}
+
+impl ShortSessionStrikes {
+    /// Records how long a session via `entry` lasted. Returns whether the
+    /// gateway has struck out; it stays so until a session lasts.
+    fn record(&mut self, entry: NodeIdentity, lifetime: Duration) -> bool {
+        if lifetime >= SHORT_SESSION {
+            self.reset();
+            return false;
+        }
+        if self.entry != Some(entry) {
+            *self = Self {
+                entry: Some(entry),
+                count: 0,
+            };
+        }
+        self.count = self.count.saturating_add(1);
+        self.count >= SHORT_SESSION_STRIKES
+    }
+
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
+}
+
 pub struct SharedState {
     route_handler: RouteHandler,
     firewall: Firewall,
@@ -672,6 +710,12 @@ pub struct SharedState {
     /// Entry gateway shielded from blame after a drop; see [`GATEWAY_BLAME_GRACE`].
     /// On the tokio clock so that tests can advance it.
     entry_gateway_grace: Option<(NodeIdentity, tokio::time::Instant)>,
+    /// See [`ShortSessionStrikes`].
+    short_session_strikes: ShortSessionStrikes,
+    /// Entry gateway that struck out, until an API probe decides whether it
+    /// is to blame. Connecting runs the probe: Connected's firewall admits
+    /// no API endpoints.
+    entry_gateway_suspect: Option<NodeIdentity>,
     /// Whether the current connect session relaxed the gateway independence
     /// criteria ("connect anyway"). Set by Connect, kept across automatic
     /// reconnects, cleared on disconnect.
@@ -831,6 +875,13 @@ impl SharedState {
         } else {
             tracing::warn!("Blacklisted entry gateway {entry} due to repeated {failure_kind}");
         }
+    }
+
+    /// Short sessions only count against a gateway within one run of
+    /// automatic reconnects on a working network.
+    fn clear_short_session_strikes(&mut self) {
+        self.short_session_strikes.reset();
+        self.entry_gateway_suspect = None;
     }
 
     /// Idle firewall and the pins that go with it (see the module table).
@@ -1077,6 +1128,8 @@ impl TunnelStateMachine {
             user_agent,
             blacklisted_entry_gateways,
             entry_gateway_grace: None,
+            short_session_strikes: ShortSessionStrikes::default(),
+            entry_gateway_suspect: None,
             relax_independence: false,
             api_endpoints,
             api_resolution: None,
@@ -1632,6 +1685,59 @@ mod tests {
         let mut new = old.clone();
         new.gateway_independence.enable_notifications = false;
         assert!(old.diff(&new).is_none());
+    }
+
+    fn gateway(base58: &str) -> NodeIdentity {
+        NodeIdentity::from_base58_string(base58).expect("valid test identity")
+    }
+
+    #[test]
+    fn short_session_strikes_table() {
+        let a = gateway("7CWjY3QFoA9dgE535u9bQiXCfzgMZvSpJu842GA1Wn42");
+        let b = gateway("2djmrzZ62M8jpzpYb7MMq6QjP15CkbnKHf3ZV3kSCXUE");
+        // (entry, session lifetime in seconds, struck out)
+        let cases = [
+            (a, 10, false),
+            (a, 59, false),
+            (a, 30, true),
+            // Stays struck out until a session lasts.
+            (a, 5, true),
+            (a, 60, false),
+            (a, 1, false),
+            // Another entry gateway starts over.
+            (b, 1, false),
+            (b, 1, false),
+            (a, 1, false),
+            (a, 1, false),
+            (a, 1, true),
+        ];
+        let mut strikes = ShortSessionStrikes::default();
+        for (i, (entry, lifetime, struck_out)) in cases.into_iter().enumerate() {
+            assert_eq!(
+                strikes.record(entry, Duration::from_secs(lifetime)),
+                struck_out,
+                "case {i}"
+            );
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn sessions_are_timed_on_the_tokio_clock() {
+        let entry = gateway("7CWjY3QFoA9dgE535u9bQiXCfzgMZvSpJu842GA1Wn42");
+        let mut strikes = ShortSessionStrikes::default();
+        for session in 1..=SHORT_SESSION_STRIKES {
+            let connected_at = tokio::time::Instant::now();
+            tokio::time::advance(SHORT_SESSION - Duration::from_secs(1)).await;
+            assert_eq!(
+                strikes.record(entry, connected_at.elapsed()),
+                session == SHORT_SESSION_STRIKES
+            );
+        }
+
+        let connected_at = tokio::time::Instant::now();
+        tokio::time::advance(SHORT_SESSION).await;
+        assert!(!strikes.record(entry, connected_at.elapsed()));
+        assert_eq!(strikes.count, 0);
     }
 
     #[test]

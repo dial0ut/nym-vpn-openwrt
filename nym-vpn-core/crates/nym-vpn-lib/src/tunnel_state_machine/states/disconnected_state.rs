@@ -24,6 +24,7 @@ impl DisconnectedState {
         // The post-drop gateway grace window and the "connect anyway" relaxation
         // of the independence criteria are scoped to a connect session.
         shared_state.entry_gateway_grace = None;
+        shared_state.clear_short_session_strikes();
         shared_state.relax_independence = false;
 
         drop(tombstone);

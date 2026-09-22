@@ -187,11 +187,14 @@ pub enum TunnelMonitorEvent {
     /// entry gateway must NOT be blacklisted.
     RegistrationFailed { entry_culpable: bool },
 
-    /// The bandwidth controller ended the session because a gateway kept
-    /// failing its queries or top-ups while the tunnel still carried
-    /// traffic. `entry_culpable` as for `RegistrationFailed`. Sent before
-    /// `Down`.
-    BandwidthFailed { entry_culpable: bool },
+    /// The bandwidth controller ended the session while the tunnel still
+    /// carried traffic. Sent before `Down`.
+    BandwidthFailed {
+        /// As for `RegistrationFailed` when a gateway kept failing its
+        /// queries or top-ups; `None` when the failure was on this side
+        /// (no ticket), so that no gateway is blamed.
+        entry_culpable: Option<bool>,
+    },
 }
 
 pub struct TunnelMonitorHandle {
@@ -948,9 +951,6 @@ impl TunnelMonitor {
         last_connection_status: Option<ConnectionStatusEvent>,
     ) {
         trace_err_chain!(err, "Bandwidth controller ended the session");
-        let Some(entry_culpable) = err.entry_culpable() else {
-            return;
-        };
         if matches!(
             last_connection_status,
             Some(ConnectionStatusEvent::IntermittentFailure { .. } | ConnectionStatusEvent::Failed)
@@ -958,7 +958,9 @@ impl TunnelMonitor {
             tracing::info!("The tunnel was failing too; not blaming the gateway");
             return;
         }
-        self.send_event(TunnelMonitorEvent::BandwidthFailed { entry_culpable });
+        self.send_event(TunnelMonitorEvent::BandwidthFailed {
+            entry_culpable: err.entry_culpable(),
+        });
     }
 
     fn send_event(&mut self, event: TunnelMonitorEvent) {

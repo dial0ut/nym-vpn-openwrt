@@ -5,7 +5,7 @@ use std::net::SocketAddr;
 
 use nym_dns::ResolvedDnsConfig;
 use nym_vpn_lib_types::{ErrorStateReason, TunnelType};
-use tokio::sync::mpsc;
+use tokio::{sync::mpsc, time::Instant};
 use tokio_util::sync::CancellationToken;
 
 use crate::tunnel_state_machine::{
@@ -28,9 +28,10 @@ pub struct ConnectedState {
     selected_gateways: SelectedGateways,
     tunnel_interface: TunnelInterface,
     firewall_policy_params: ConnectedPolicyParameters,
-    /// Set when the bandwidth controller ended the session; whether the
-    /// entry gateway is to blame.
-    bandwidth_failure: Option<bool>,
+    /// Set when the bandwidth controller ended the session, to the gateway
+    /// to blame as in `TunnelMonitorEvent::BandwidthFailed`.
+    bandwidth_failure: Option<Option<bool>>,
+    connected_at: Instant,
 }
 
 impl ConnectedState {
@@ -81,6 +82,7 @@ impl ConnectedState {
             tunnel_interface,
             firewall_policy_params,
             bandwidth_failure: None,
+            connected_at: Instant::now(),
         };
 
         if let Err(e) =
@@ -184,7 +186,7 @@ impl ConnectedState {
             (Some(block_reason), _) => {
                 NextTunnelState::NewState(ErrorState::enter(block_reason, shared_state).await)
             }
-            (None, Some(entry_culpable)) => {
+            (None, Some(Some(entry_culpable))) => {
                 // The tunnel carried traffic until a gateway failed its
                 // bandwidth checks, so the local network is not the cause:
                 // no grace, and a fresh pair after a short backoff.
@@ -201,19 +203,42 @@ impl ConnectedState {
                 }
                 NextTunnelState::NewState(ConnectingState::enter(1, None, shared_state).await)
             }
-            (None, None) => {
+            (None, bandwidth_failure) => {
                 // This session was viable moments ago, so reconnect failures in
                 // the near future are far more likely a local outage than the
                 // gateway's fault. Grant the entry gateway a grace window during
                 // which failures are retried against it instead of blacklisting
                 // it and switching the user to a different server.
+                let entry = self.selected_gateways.entry_gateway().identity;
                 shared_state.entry_gateway_grace = Some((
-                    self.selected_gateways.entry_gateway().identity,
+                    entry,
                     tokio::time::Instant::now() + crate::tunnel_state_machine::GATEWAY_BLAME_GRACE,
                 ));
 
+                // Unless the grace keeps forgiving a gateway whose sessions
+                // never last: Connecting then probes the API to decide. A
+                // session this side's bandwidth failure ended does not count.
+                let lifetime = self.connected_at.elapsed();
+                let retry_attempt = if bandwidth_failure.is_none()
+                    && shared_state.short_session_strikes.record(entry, lifetime)
+                {
+                    tracing::warn!(
+                        "Session via entry gateway {entry} lasted only {}s, again; checking whether the gateway is to blame",
+                        lifetime.as_secs()
+                    );
+                    shared_state.entry_gateway_suspect = Some(entry);
+                    1
+                } else {
+                    0
+                };
+
                 NextTunnelState::NewState(
-                    ConnectingState::enter(0, Some(self.selected_gateways), shared_state).await,
+                    ConnectingState::enter(
+                        retry_attempt,
+                        Some(self.selected_gateways),
+                        shared_state,
+                    )
+                    .await,
                 )
             }
         }
