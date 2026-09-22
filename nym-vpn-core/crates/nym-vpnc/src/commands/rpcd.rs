@@ -2208,29 +2208,68 @@ fn regen_split() -> Result<(), String> {
     let wanted = (!domains.is_empty() && nftset_supported()).then_some(domains.as_slice());
     let dhcp_changed = sync_split_ipset(&mut SystemUci, wanted)?;
 
-    if clients.is_empty() && domains.is_empty() {
+    let nft_file = if clients.is_empty() && domains.is_empty() {
         match std::fs::remove_file(SPLIT_NFT) {
             Err(err) if err.kind() != std::io::ErrorKind::NotFound => {
-                return Err(format!("remove {SPLIT_NFT}: {err}"));
+                Err(format!("remove {SPLIT_NFT}: {err}"))
             }
-            _ => {}
+            _ => Ok(()),
         }
     } else {
         write_split_nft(&render_split_nft(&clients, &domains))
-            .map_err(|err| format!("write {SPLIT_NFT}: {err}"))?;
-    }
+            .map_err(|err| format!("write {SPLIT_NFT}: {err}"))
+    };
 
+    apply_split(&mut SystemApply, dhcp_changed, wanted.is_some(), nft_file)
+}
+
+/// The system steps that apply a split edit, behind a trait so their order
+/// can be tested.
+trait SplitApply {
+    fn reload_firewall(&mut self) -> Result<(), String>;
+    fn reload_dnsmasq(&mut self) -> Result<(), String>;
+    fn hup_dnsmasq(&mut self);
+}
+
+struct SystemApply;
+
+impl SplitApply for SystemApply {
+    fn reload_firewall(&mut self) -> Result<(), String> {
+        reload_firewall()
+    }
+    fn reload_dnsmasq(&mut self) -> Result<(), String> {
+        initd_run_checked("dnsmasq", "reload")
+    }
+    fn hup_dnsmasq(&mut self) {
+        hup_dnsmasq()
+    }
+}
+
+/// Runs every step even after an earlier one failed: dhcp is already
+/// committed, and a later edit compares against committed UCI, so a dnsmasq
+/// reload skipped here would never be retried. The errors are combined.
+fn apply_split(
+    sys: &mut impl SplitApply,
+    dhcp_changed: bool,
+    has_domains: bool,
+    nft_file: Result<(), String>,
+) -> Result<(), String> {
+    let mut errors: Vec<String> = nft_file.err().into_iter().collect();
     // Firewall first so the sets exist before dnsmasq references them. The
     // reload recreates them empty; dnsmasq adds addresses only on upstream
     // answers, so without a new domain list a cache flush (SIGHUP) is what
     // makes the next lookups refill them.
-    reload_firewall()?;
+    errors.extend(sys.reload_firewall().err());
     if dhcp_changed {
-        initd_run_checked("dnsmasq", "reload")?;
-    } else if wanted.is_some() {
-        hup_dnsmasq();
+        errors.extend(sys.reload_dnsmasq().err());
+    } else if has_domains {
+        sys.hup_dnsmasq();
     }
-    Ok(())
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("; "))
+    }
 }
 
 /// The domains `dhcp.nym_split_ipset` holds, None without the section. A
@@ -3157,6 +3196,71 @@ dhcp.nym_split_ipset=ipset
         );
         assert!(uci.calls.iter().any(|c| c == "revert dhcp.nym_split_ipset"));
         assert!(!uci.calls.iter().any(|c| c == "commit dhcp"));
+    }
+
+    /// Records the apply steps; `fail` names the steps that return an error.
+    #[derive(Default)]
+    struct FakeApply {
+        steps: Vec<&'static str>,
+        fail: Vec<&'static str>,
+    }
+
+    impl FakeApply {
+        fn step(&mut self, name: &'static str) -> Result<(), String> {
+            self.steps.push(name);
+            if self.fail.contains(&name) {
+                Err(format!("{name} failed"))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    impl SplitApply for FakeApply {
+        fn reload_firewall(&mut self) -> Result<(), String> {
+            self.step("firewall")
+        }
+        fn reload_dnsmasq(&mut self) -> Result<(), String> {
+            self.step("dnsmasq")
+        }
+        fn hup_dnsmasq(&mut self) {
+            let _ = self.step("hup");
+        }
+    }
+
+    #[test]
+    fn split_apply_order() {
+        let mut sys = FakeApply::default();
+        assert_eq!(apply_split(&mut sys, true, true, Ok(())), Ok(()));
+        assert_eq!(sys.steps, vec!["firewall", "dnsmasq"]);
+
+        let mut sys = FakeApply::default();
+        assert_eq!(apply_split(&mut sys, false, true, Ok(())), Ok(()));
+        assert_eq!(sys.steps, vec!["firewall", "hup"]);
+
+        let mut sys = FakeApply::default();
+        assert_eq!(apply_split(&mut sys, false, false, Ok(())), Ok(()));
+        assert_eq!(sys.steps, vec!["firewall"]);
+    }
+
+    #[test]
+    fn committed_dhcp_reaches_dnsmasq_after_earlier_failures() {
+        let mut sys = FakeApply {
+            fail: vec!["firewall"],
+            ..FakeApply::default()
+        };
+        let result = apply_split(&mut sys, true, true, Err("write nft failed".to_owned()));
+        assert_eq!(sys.steps, vec!["firewall", "dnsmasq"]);
+        assert_eq!(result, Err("write nft failed; firewall failed".to_owned()));
+
+        let mut sys = FakeApply {
+            fail: vec!["dnsmasq"],
+            ..FakeApply::default()
+        };
+        assert_eq!(
+            apply_split(&mut sys, true, true, Ok(())),
+            Err("dnsmasq failed".to_owned())
+        );
     }
 
     #[test]
