@@ -1,8 +1,11 @@
 'use strict';
 'require baseclass';
+'require dom';
 
 // Small presentational helpers shared by the cards: uptime formatting, the
 // legacy uptime storage key, the connected-gateway panel and clipboard copy.
+
+var E = dom.create.bind(dom);
 
 return baseclass.extend({
     UPTIME_STORAGE_KEY: 'nym_vpn_connection_start',
@@ -42,7 +45,7 @@ return baseclass.extend({
     renderGatewayInfo: function(container, name, id, ip, country, countryData) {
         if (!container) return;
         if (!name && !ip && !id) {
-            container.innerHTML = '<div class="nym-gateway-empty">—</div>';
+            dom.content(container, E('div', { 'class': 'nym-gateway-empty' }, '—'));
             return;
         }
         // Curated flag if we have one; otherwise derive it from the ISO code
@@ -58,11 +61,14 @@ return baseclass.extend({
                                             0x1F1E6 + cc.charCodeAt(1) - 65);
             }
         }
-        var html = '<div class="nym-gateway-flag">' + flag + '</div>';
-        if (name) html += '<div class="nym-gateway-name" title="' + (name || '') + '">' + name + '</div>';
-        if (id) html += '<div class="nym-gateway-id">' + id + '</div>';
-        if (ip) html += '<div class="nym-gateway-ip">' + ip + '</div>';
-        container.innerHTML = html;
+        // Every field comes from the daemon (the name is the operator's own
+        // moniker): array children render as text and the title is an
+        // attribute value, never spliced into markup.
+        var children = [E('div', { 'class': 'nym-gateway-flag' }, [flag])];
+        if (name) children.push(E('div', { 'class': 'nym-gateway-name', 'title': String(name) }, [String(name)]));
+        if (id) children.push(E('div', { 'class': 'nym-gateway-id' }, [String(id)]));
+        if (ip) children.push(E('div', { 'class': 'nym-gateway-ip' }, [String(ip)]));
+        dom.content(container, children);
     },
 
     // Copy `text` to the clipboard and call done(ok). Prefers the async

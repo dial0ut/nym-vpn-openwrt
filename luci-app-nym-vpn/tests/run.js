@@ -923,6 +923,72 @@ async function scenarioLogsAndDiagnostics() {
   check(Array.from(diag.querySelectorAll('.nym-diag-group-title')).map((e) => e.textContent).join('|') === 'DNS Resolution|VPN API (HTTP)|Gateway', 'groups in order');
 }
 
+// LuCI's dom.append assigns a bare string child through innerHTML, so any
+// daemon, directory, UCI or lease string that reaches E() unwrapped is
+// markup. Feed one hostile value into every data field the page shows and
+// check that it comes back as text and never as elements. The icon SVGs
+// carry no event handlers, so any img or on* attribute is an injection.
+async function scenarioHostileStrings() {
+  section('untrusted strings render as text');
+  const H = '"><svg onload="window.__xss=1"><img src=x onerror="window.__xss=1">';
+  const injected = (t) => qa(t, 'img, [onerror], [onload]').length;
+  const texts = (t, sel) => qa(t, sel).map((e) => e.textContent);
+  const shows = (t, sel) => texts(t, sel).some((s) => s.indexOf(H) !== -1);
+
+  const st = { state: 'connected', connected: true, connected_seconds: 5,
+    entry_name: H, entry_id: H, entry_ip: H, entry_country: H, entry_family: H,
+    exit_name: H, exit_id: H, exit_ip: H, exit_country: H, exit_family: H };
+  const t = setup({
+    rpc: { status: st },
+    init: baseInit({
+      status: st,
+      info: { version: H },
+      network: { network: H },
+      account: { identity: H, state: H },
+      inbound_exemptions: [{ proto: 'tcp', dport: H, label: H }],
+      split_exclusions: [{ id: 'x1', type: 'client', mac: H, label: H, enabled: 1 }, { id: 'x2', type: 'domain', domain: H, label: H, enabled: 1 }],
+      clients: [{ mac: H, ip: H, hostname: H }],
+    }),
+  });
+  check(injected(t) === 0, 'connected page with hostile fields: no injected elements (' + injected(t) + ')');
+  check(qa(t, '.nym-gateway-name').length === 2 && qa(t, '.nym-gateway-name').every((e) => e.textContent === H && e.title === H), 'gateway name kept as text and as a plain title');
+  check(eq(texts(t, '.nym-gateway-id'), [H, H]) && eq(texts(t, '.nym-gateway-ip'), [H, H]) && eq(texts(t, '.nym-gateway-family'), [H, H]), 'gateway id, ip and family round-trip');
+  check(eq(texts(t, '.nym-footer-item span'), [H, H]), 'footer version and network round-trip');
+  check(q(t, '.nym-info-frame-value').textContent === H && q(t, '.nym-card-status-text').textContent === H, 'account identity and state round-trip');
+  check(shows(t, '.nym-exemption-port') && shows(t, '.nym-exemption-row .nym-exemption-label'), 'inbound port and label round-trip');
+  check(texts(t, '.nym-split-row .nym-exemption-label').filter((s) => s === H || s === H + ' (' + H + ')').length === 4, 'split device, domain and labels round-trip');
+  check(Array.from(byId(t, 'nym-split-client').options).some((o) => o.textContent === H + ' — ' + H + ' — ' + H), 'lease hostname, ip and mac round-trip in the device list');
+
+  const tErr = setup({ init: baseInit({ account: { identity: 'X', state: 'Error' + H } }) });
+  check(injected(tErr) === 0 && shows(tErr, '.nym-account-state'), 'account error state round-trips');
+
+  // Pickers, the pre-connect modal and the failure toast.
+  const gws = [{ id: H, name: H, country: H, performance: H, city: H, family: H, bridges: true }];
+  const tent = { status: 'needs_relaxed', entry: { id: H, name: H, family: H }, exit: { id: H, name: H, family: H } };
+  const t2 = connectEnv({ gateway_list_full: { gateways: gws }, tentative_gateways: tent, connect: { success: false, error: H } });
+  await pickGateways(t2, H, H);
+  check(injected(t2) === 0, 'hostile directory: no injected elements (' + injected(t2) + ')');
+  check(Array.from(q(t2, 'select[name="entry_country"]').options).some((o) => o.textContent.indexOf(H) !== -1), 'unknown country code shown as text in the dropdown');
+  check(qa(t2, '.nym-gateway-option-name').filter((e) => e.textContent === H && e.title === H).length === 2, 'picker row names round-trip');
+  check(shows(t2, '.nym-gateway-option-perf') && shows(t2, '.nym-gateway-option-city') && shows(t2, '.nym-gateway-option-family'), 'performance, city and family round-trip');
+  actionBtn(t2).click();
+  await sleep(60);
+  check(!!modal(t2) && modal(t2).querySelector('.nym-modal-message').textContent.indexOf('Entry ' + H + ' and exit ' + H + ' are both run by ' + H) === 0 && injected(t2) === 0, 'same-family modal names the gateways as text');
+  clickModalButton(t2, 'Connect anyway');
+  await sleep(100);
+  check(toasts(t2).indexOf('Connection failed: ' + H) !== -1 && injected(t2) === 0, 'daemon error toast round-trips');
+
+  const t3 = setup({ rpc: { gateway_list_full: { error: 'no bridge' }, gateway_list_countries: { countries: [{ code: 'DE', count: 1 }] }, gateway_list_by_country: () => { throw new Error(H); } } });
+  await pickGateways(t3, 'DE', 'DE');
+  check(injected(t3) === 0 && texts(t3, '.nym-gateway-loading').filter((s) => s === 'Error: ' + H).length === 2, 'picker load error round-trips');
+
+  const t4 = setup({ rpc: { split_add: { success: false, error: H } } });
+  byId(t4, 'nym-split-domain').value = 'example.com';
+  byId(t4, 'nym-split-domain-save').click();
+  await sleep(20);
+  check(injected(t4) === 0 && toasts(t4).indexOf(H) !== -1, 'split add error toast round-trips');
+}
+
 (async () => {
   const started = Date.now();
   await scenarioStructure();
@@ -947,6 +1013,7 @@ async function scenarioLogsAndDiagnostics() {
   await scenarioService();
   await scenarioAlwaysOn();
   await scenarioLogsAndDiagnostics();
+  await scenarioHostileStrings();
   console.log('\n' + total + ' checks, ' + failures + ' failure(s), ' + (Date.now() - started) + ' ms');
   process.exit(failures ? 1 : 0);
 })().catch((e) => {

@@ -28,14 +28,15 @@ return baseclass.extend({
         }
     },
 
-    // type: 'success' (default), 'error' or 'warning'
+    // type: 'success' (default), 'error' or 'warning'. The message is
+    // rendered as text: it often carries daemon or API error strings.
     show: function(message, type) {
         var self = this;
         var container = this.ensureContainer();
         var icons = { success: '✓', error: '✕', warning: '⚠' };
         var toast = E('div', { 'class': 'nym-toast ' + (type || 'success') }, [
             E('span', { 'class': 'nym-toast-icon' }, icons[type] || '✓'),
-            E('span', { 'class': 'nym-toast-message' }, message),
+            E('span', { 'class': 'nym-toast-message' }, [message == null ? '' : String(message)]),
             E('button', { 'class': 'nym-toast-close', 'click': function() { self.remove(toast); } }, '×')
         ]);
         container.appendChild(toast);

@@ -49,8 +49,9 @@ return baseclass.extend({
                 'data-id': ex.id
             }, [
                 E('div', { 'class': 'nym-exemption-proto' }, ex.type === 'domain' ? 'DOMAIN' : 'DEVICE'),
-                E('div', { 'class': 'nym-exemption-label' }, valueOf(ex)),
-                E('div', { 'class': 'nym-exemption-label' }, ex.label || '—'),
+                // UCI values and lease hostnames: text, never markup.
+                E('div', { 'class': 'nym-exemption-label' }, [String(valueOf(ex))]),
+                E('div', { 'class': 'nym-exemption-label' }, [String(ex.label || '—')]),
                 E('label', { 'class': 'nym-toggle nym-toggle-sm', 'title': on ? 'Enabled' : 'Disabled' }, [
                     E('input', {
                         'type': 'checkbox',
@@ -170,7 +171,7 @@ return baseclass.extend({
         var clientOptions = [E('option', { 'value': '' }, clients.length ? 'Select a device…' : 'No DHCP leases found')];
         clients.forEach(function(c) {
             var name = (c.hostname ? c.hostname + ' — ' : '') + (c.ip ? c.ip + ' — ' : '') + c.mac;
-            clientOptions.push(E('option', { 'value': c.mac }, name));
+            clientOptions.push(E('option', { 'value': c.mac }, [name]));
         });
 
         clientSel = E('select', { 'class': 'nym-select', 'id': 'nym-split-client', 'style': 'flex: 2' }, clientOptions);

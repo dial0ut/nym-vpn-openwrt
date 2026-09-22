@@ -73,8 +73,9 @@ return baseclass.extend({
             });
             sorted.forEach(function(c) {
                 var info = countries.getDisplay(c.code);
+                // An unknown code is shown as-is, so it is text too.
                 select.appendChild(E('option', { 'value': c.code },
-                    info.flag + ' ' + info.name + ' (' + c.count + ')'));
+                    [info.flag + ' ' + info.name + ' (' + c.count + ')']));
             });
         };
 
@@ -258,7 +259,7 @@ return baseclass.extend({
                 ]);
             }).catch(function(err) {
                 dom.content(container, E('div', { 'class': 'nym-gateway-loading', 'style': 'color: var(--danger)' },
-                    'Error: ' + err.message));
+                    ['Error: ' + (err && err.message ? err.message : err)]));
             });
         };
 

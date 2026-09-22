@@ -29,9 +29,10 @@ return baseclass.extend({
                 'data-proto': ex.proto,
                 'data-dport': String(ex.dport)
             }, [
-                E('div', { 'class': 'nym-exemption-proto' }, ex.proto.toUpperCase()),
-                E('div', { 'class': 'nym-exemption-port' }, String(ex.dport)),
-                E('div', { 'class': 'nym-exemption-label' }, ex.label || '—'),
+                // UCI values: text, never markup.
+                E('div', { 'class': 'nym-exemption-proto' }, [String(ex.proto).toUpperCase()]),
+                E('div', { 'class': 'nym-exemption-port' }, [String(ex.dport)]),
+                E('div', { 'class': 'nym-exemption-label' }, [String(ex.label || '—')]),
                 E('div', { 'class': 'nym-exemption-status ' + statusClass }, statusText),
                 E('div', {
                     'class': 'nym-exemption-delete',

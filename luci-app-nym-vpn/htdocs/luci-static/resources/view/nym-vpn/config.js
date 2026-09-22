@@ -67,11 +67,11 @@ return view.extend({
             E('div', { 'class': 'nym-footer-info' }, [
                 E('div', { 'class': 'nym-footer-item' }, [
                     'Version: ',
-                    E('span', {}, store.data.info.version || 'Unknown')
+                    E('span', {}, [String(store.data.info.version || 'Unknown')])
                 ]),
                 E('div', { 'class': 'nym-footer-item' }, [
                     'Network: ',
-                    E('span', {}, store.data.network.network || 'mainnet')
+                    E('span', {}, [String(store.data.network.network || 'mainnet')])
                 ])
             ])
         ]));

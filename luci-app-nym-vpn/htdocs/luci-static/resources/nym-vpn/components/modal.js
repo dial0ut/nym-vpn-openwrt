@@ -7,6 +7,14 @@
 
 var E = dom.create.bind(dom);
 
+// A bare string child would be assigned via innerHTML; the title and
+// message can name gateways and operator families, so strings become text
+// nodes. Elements and arrays pass through.
+var asText = function(v) {
+    if (v == null) return [];
+    return Array.isArray(v) ? v : [dom.elem(v) ? v : String(v)];
+};
+
 return baseclass.extend({
     __init__: function() {
         this.activeModal = null;
@@ -29,8 +37,8 @@ return baseclass.extend({
                         E('div', { 'class': 'nym-modal-icon' }, icon || '◐')
                     ])
                 ]),
-                E('div', { 'class': 'nym-modal-title' }, title),
-                E('div', { 'class': 'nym-modal-message' }, message)
+                E('div', { 'class': 'nym-modal-title' }, asText(title)),
+                E('div', { 'class': 'nym-modal-message' }, asText(message))
             ])
         ]);
         document.body.appendChild(this.activeModal);
@@ -82,8 +90,8 @@ return baseclass.extend({
                         E('div', { 'class': 'nym-modal-icon' }, icon || '⚠')
                     ])
                 ]),
-                E('div', { 'class': 'nym-modal-title' }, title),
-                E('div', { 'class': 'nym-modal-message' }, message),
+                E('div', { 'class': 'nym-modal-title' }, asText(title)),
+                E('div', { 'class': 'nym-modal-message' }, asText(message)),
                 E('div', { 'class': 'nym-modal-buttons' }, [
                     E('button', {
                         'class': 'nym-btn nym-btn-primary',

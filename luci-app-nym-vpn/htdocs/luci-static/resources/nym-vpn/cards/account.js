@@ -283,12 +283,12 @@ return baseclass.extend({
                         E('div', { 'class': 'nym-info-frame-label' }, 'Device Identity'),
                         E('div', { 'class': 'nym-info-frame-main' }, [
                             E('div', { 'class': 'nym-info-frame-id-row' }, [
-                                E('div', { 'class': 'nym-info-frame-value' }, identity),
+                                E('div', { 'class': 'nym-info-frame-value' }, [String(identity)]),
                                 copyBtn
                             ]),
                             E('div', { 'class': 'nym-card-status' }, [
                                 E('span', { 'class': 'nym-card-status-indicator' }),
-                                E('span', { 'class': 'nym-card-status-text' }, accountStatusLabel)
+                                E('span', { 'class': 'nym-card-status-text' }, [accountStatusLabel])
                             ])
                         ])
                     ]),
@@ -302,7 +302,7 @@ return baseclass.extend({
 
             if (flags.hasError) {
                 return E('div', { 'class': 'nym-account-logged-in' }, [
-                    E('div', { 'class': 'nym-account-state', 'style': 'background: var(--danger-dim); color: var(--danger)' }, state || identity),
+                    E('div', { 'class': 'nym-account-state', 'style': 'background: var(--danger-dim); color: var(--danger)' }, [String(state || identity)]),
                     E('div', { 'class': 'nym-state-note', 'style': 'margin: 16px 0' }, 'There is an issue with the account. You may need to logout and try again.'),
                     E('button', { 'class': 'nym-btn nym-btn-danger', 'style': 'width: 100%', 'click': logout }, 'Logout'),
                     E('button', { 'class': 'nym-btn nym-btn-secondary', 'style': 'width: 100%; margin-top: 8px', 'click': reset }, 'Reset account state'),
