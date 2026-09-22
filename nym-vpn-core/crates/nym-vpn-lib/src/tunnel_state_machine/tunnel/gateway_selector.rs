@@ -58,6 +58,7 @@ impl SelectedGateways {
 
 /// The constraints one selection runs under: the configured entry and exit
 /// points plus the filters derived from the settings and the blacklist.
+#[derive(Clone)]
 struct PairSelection {
     entry_point: EntryPoint,
     exit_point: ExitPoint,
@@ -92,6 +93,20 @@ impl PairSelection {
         }
     }
 
+    /// Whether the blacklist rules out every entry gateway that the entry
+    /// point allows, as in a country with one gateway. The blacklist only
+    /// steers the choice, so the blamed gateway is then tried again rather
+    /// than failing the connection outright.
+    fn blacklist_rules_out_every_entry(&self, entry_gateways: &GatewayList) -> bool {
+        self.entry_filters.iter().next().is_some()
+            && entry_gateways
+                .find_best_entry_gateway(&self.entry_point, &self.entry_filters)
+                .is_err()
+            && entry_gateways
+                .find_best_entry_gateway(&self.entry_point, &GatewayFilters::default())
+                .is_ok()
+    }
+
     /// Pick an entry/exit pair honouring `criteria`. When the criteria are
     /// active and rule every pair out, check whether relaxing them would yield
     /// one: if so the caller gets [`GatewayDirectoryError::NeedsRelaxedIndependenceCriteria`]
@@ -102,14 +117,29 @@ impl PairSelection {
         exit_gateways: &GatewayList,
         criteria: GatewayIndependence,
     ) -> Result<(Gateway, Gateway), GatewayDirectoryError> {
-        let strict_error = match self.select_with_criteria(entry_gateways, exit_gateways, criteria)
-        {
-            Ok(pair) => return Ok(pair),
-            Err(err) if !criteria.active() => return Err(err),
-            Err(err) => err,
+        let without_blacklist;
+        let selection = if self.blacklist_rules_out_every_entry(entry_gateways) {
+            tracing::warn!(
+                "Every entry gateway the settings allow is blacklisted after recent failures; \
+                 ignoring the blacklist"
+            );
+            without_blacklist = Self {
+                entry_filters: GatewayFilters::default(),
+                ..self.clone()
+            };
+            &without_blacklist
+        } else {
+            self
         };
 
-        match self.select_with_criteria(
+        let strict_error =
+            match selection.select_with_criteria(entry_gateways, exit_gateways, criteria) {
+                Ok(pair) => return Ok(pair),
+                Err(err) if !criteria.active() => return Err(err),
+                Err(err) => err,
+            };
+
+        match selection.select_with_criteria(
             entry_gateways,
             exit_gateways,
             GatewayIndependence::disabled(),
@@ -659,5 +689,69 @@ mod tests {
             assert_eq!(entry.identity(), identity(0));
             assert_eq!(exit.identity(), identity(1));
         }
+    }
+
+    fn blacklisting(mut selection: PairSelection, indices: &[usize]) -> PairSelection {
+        let blacklist = BlacklistedGateways::new();
+        for index in indices {
+            blacklist.add(identity(*index)).unwrap();
+        }
+        selection.entry_filters = GatewayFilters::from(&[GatewayFilter::NotBlacklisted(blacklist)]);
+        selection
+    }
+
+    /// Entry in AT (gateways 3 and 4), exit in DE (gateway 2).
+    fn at_entry_de_exit() -> (GatewayList, PairSelection) {
+        let gateways = list(vec![
+            gateway(2, "DE", "AS200", "10.2.0.0/16", None),
+            gateway(3, "AT", "AS300", "10.3.0.0/16", None),
+            gateway(4, "AT", "AS400", "10.4.0.0/16", None),
+        ]);
+        let (entry_point, _) = country("AT");
+        let (_, exit_point) = country("DE");
+        (gateways, selection(entry_point, exit_point))
+    }
+
+    #[test]
+    fn blacklisted_entry_is_avoided_while_another_qualifies() {
+        let (gateways, selection) = at_entry_de_exit();
+        let selection = blacklisting(selection, &[3]);
+        for _ in 0..20 {
+            let (entry, _) = selection
+                .select(&gateways, &gateways, GatewayIndependence::disabled())
+                .unwrap();
+            assert_eq!(entry.identity(), identity(4));
+        }
+    }
+
+    #[test]
+    fn blacklist_is_ignored_when_it_rules_out_every_entry() {
+        let (gateways, selection) = at_entry_de_exit();
+        let selection = blacklisting(selection, &[3, 4]);
+        let (entry, exit) = selection
+            .select(&gateways, &gateways, GatewayIndependence::disabled())
+            .unwrap();
+        assert!([identity(3), identity(4)].contains(&entry.identity()));
+        assert_eq!(exit.identity(), identity(2));
+    }
+
+    #[test]
+    fn blacklist_fallback_keeps_the_original_error() {
+        let (gateways, selection) = at_entry_de_exit();
+        let (entry_point, _) = country("FR");
+        let selection = blacklisting(
+            PairSelection {
+                entry_point,
+                ..selection
+            },
+            &[3],
+        );
+        let err = selection
+            .select(&gateways, &gateways, GatewayIndependence::disabled())
+            .unwrap_err();
+        assert!(
+            matches!(err, GatewayDirectoryError::EntryGatewayUnavailable(_)),
+            "got {err:?}"
+        );
     }
 }
