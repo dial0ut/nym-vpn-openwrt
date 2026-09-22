@@ -106,6 +106,27 @@ if [ -f "$LUCI_DIR/root/etc/uci-defaults/luci-app-nym-vpn" ]; then
     chmod 755 "$DATA_DIR/etc/uci-defaults/luci-app-nym-vpn"
 fi
 
+echo "=== Adding sysupgrade keep list ==="
+mkdir -p "$DATA_DIR/lib/upgrade/keep.d"
+cp "$IPK_SCRIPT_DIR/sysupgrade-keep" "$DATA_DIR/lib/upgrade/keep.d/nym-vpn"
+
+# apk has no control-file conffiles. OpenWrt's buildroot ships them as
+# /lib/apk/packages/<pkg>.conffiles plus a .conffiles_static of
+# "<path> <sha256>" lines, which sysupgrade reads to find changed config.
+echo "=== Adding conffiles ==="
+mkdir -p "$DATA_DIR/lib/apk/packages"
+cp "$IPK_SCRIPT_DIR/conffiles" "$DATA_DIR/lib/apk/packages/nym-vpn.conffiles"
+: > "$DATA_DIR/lib/apk/packages/nym-vpn.conffiles_static"
+while IFS= read -r conffile; do
+    [ -n "$conffile" ] || continue
+    if [ ! -f "$DATA_DIR$conffile" ]; then
+        echo "Error: conffile $conffile is not in the package payload" >&2
+        exit 1
+    fi
+    echo "$conffile $(sha256sum "$DATA_DIR$conffile" | cut -d' ' -f1)" \
+        >> "$DATA_DIR/lib/apk/packages/nym-vpn.conffiles_static"
+done < "$IPK_SCRIPT_DIR/conffiles"
+
 echo "=== Adding firewall scripts ==="
 mkdir -p "$DATA_DIR/usr/share/nym-vpn"
 

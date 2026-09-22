@@ -115,6 +115,10 @@ if [ -f "$LUCI_DIR/root/etc/uci-defaults/luci-app-nym-vpn" ]; then
     chmod 755 "$BUILD_DIR/data/etc/uci-defaults/luci-app-nym-vpn"
 fi
 
+echo "=== Adding sysupgrade keep list ==="
+mkdir -p "$BUILD_DIR/data/lib/upgrade/keep.d"
+cp "$SCRIPT_DIR/sysupgrade-keep" "$BUILD_DIR/data/lib/upgrade/keep.d/nym-vpn"
+
 echo "=== Adding firewall scripts ==="
 mkdir -p "$BUILD_DIR/data/usr/share/nym-vpn"
 
