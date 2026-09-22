@@ -16,7 +16,13 @@ pub enum Family {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verdict {
+    /// Final on fw3 (it ends the builtin chain our chain is jumped from),
+    /// only "let fw4 decide" on fw4. Never use it for traffic the zones must
+    /// still judge; that is [`Verdict::Return`].
     Accept,
+    /// Hand the packet back to the firewall framework: its zones decide, on
+    /// both backends.
+    Return,
     Drop,
     Reject,
     /// Non-terminal `ct mark set`.
@@ -120,6 +126,9 @@ impl Rule {
 
     pub fn accept(family: Family) -> Self {
         Self::new(family, Verdict::Accept)
+    }
+    pub fn return_(family: Family) -> Self {
+        Self::new(family, Verdict::Return)
     }
     pub fn drop_(family: Family) -> Self {
         Self::new(family, Verdict::Drop)

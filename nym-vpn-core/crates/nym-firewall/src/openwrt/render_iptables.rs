@@ -139,6 +139,7 @@ fn render_rule(rule: &Rule, family: AddrFamily) -> String {
 
     match rule.verdict {
         Verdict::Accept => parts.push("-j ACCEPT".into()),
+        Verdict::Return => parts.push("-j RETURN".into()),
         Verdict::Drop => parts.push("-j DROP".into()),
         Verdict::Reject => parts.push(format!("-j REJECT --reject-with {}", reject_with(rule, family))),
         Verdict::SetCtMark(n) => parts.push(format!("-j CONNMARK --set-mark {n:#x}")),

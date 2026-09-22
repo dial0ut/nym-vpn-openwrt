@@ -187,8 +187,14 @@ mod e2e_tests {
         assert!(script.contains("meta skuid 0 udp dport 53 limit rate 30/minute burst 20 packets accept"));
         assert!(script.contains("meta skuid 0 tcp dport 53 limit rate 30/minute burst 20 packets accept"));
 
-        assert!(script.contains("ip saddr 10.0.0.0/8 accept"));
-        assert!(script.contains("ip daddr 192.168.0.0/16 accept"));
+        // LAN destinations: the router may reach them; forwards to them are
+        // the zones' decision.
+        let output = extract_chain(&script, "chain output");
+        let forward = extract_chain(&script, "chain forward");
+        assert!(output.contains("ip daddr 192.168.0.0/16 accept"));
+        assert!(forward.contains("ip daddr 192.168.0.0/16 return"));
+        assert!(!forward.contains("ip daddr 192.168.0.0/16 accept"));
+        assert!(!script.contains("ip saddr 10.0.0.0/8"), "no INPUT LAN accept");
 
         let chunks: Vec<_> = script.split("chain ").collect();
         for (name, body) in chunks
@@ -229,7 +235,8 @@ mod e2e_tests {
         let nft = render_nft::render(&rs);
         // CVE-2019-14899 guard.
         assert!(nft.contains("iifname != \"wg0\" ip daddr 10.64.0.2 drop"));
-        assert!(nft.contains("iifname \"wg0\" accept"));
+        assert!(!nft.contains("iifname \"wg0\" accept"), "INPUT is the zones'");
+        assert!(extract_chain(&nft, "chain forward").contains("iifname \"wg0\" return"));
         assert!(nft.contains("oifname \"wg0\" accept"));
         assert!(nft.contains("oifname \"wg0\" ip daddr 10.64.0.1 udp dport 53 accept"));
         assert!(nft.contains("ip daddr 1.1.1.1 udp dport 53 accept"));
@@ -340,10 +347,10 @@ mod e2e_tests {
                 }
             }
         }
-        assert!(
-            nft.contains("iifname \"wg0\" ct state established,related accept"),
-            "expected tunnel-scoped established accept in forward chain:\n{nft}"
-        );
+        // Replies from the tunnel are the zones' established accept.
+        let forward = extract_chain(&nft, "chain forward");
+        assert!(forward.contains("iifname \"wg0\" return"), "{forward}");
+        assert!(!forward.contains("established"), "{forward}");
     }
 
     fn extract_chain<'a>(nft: &'a str, header: &str) -> &'a str {

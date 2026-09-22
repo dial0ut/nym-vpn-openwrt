@@ -147,6 +147,7 @@ fn render_rule(rule: &Rule) -> String {
 
     let verdict: String = match rule.verdict {
         Verdict::Accept => "accept".into(),
+        Verdict::Return => "return".into(),
         Verdict::Drop => "drop".into(),
         Verdict::Reject => "reject".into(),
         Verdict::SetCtMark(n) => format!("ct mark set {n:#x}"),
