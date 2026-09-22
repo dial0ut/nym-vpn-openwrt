@@ -6,6 +6,7 @@ use std::{net::IpAddr, time::Duration};
 use nym_authenticator_client::AuthenticatorClient;
 use nym_bandwidth_controller::{BandwidthTicketProvider, DEFAULT_TICKETS_TO_SPEND};
 use nym_registration_common::WireguardConfiguration;
+use tokio::time::Instant;
 use tokio_stream::{StreamExt, wrappers::IntervalStream};
 use tokio_util::sync::CancellationToken;
 
@@ -30,6 +31,40 @@ const MINIMUM_RAMAINING_BANDWIDTH: u64 = 500 * 1024 * 1024; // 500 MB, the same 
 const DEFAULT_CLIENT_RETRIES: usize = 1;
 // The HTTP client's 30 s default would hold up a check, and teardown, that long.
 const DEFAULT_CLIENT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Consecutive failed queries that end the session.
+const QUERY_FAILURES_TO_ESCALATE: u32 = 2;
+
+/// Until a side has answered once, its failures must also persist this long
+/// before they end the session: the gateway may still be coming up
+/// (upstream nym-vpn-client #5405).
+const FIRST_ANSWER_GRACE: Duration = Duration::from_secs(60);
+
+/// Bandwidth query outcomes of one gateway. One side answering says nothing
+/// about the other.
+#[derive(Debug, Default)]
+struct QueryHealth {
+    answered: bool,
+    consecutive_failures: u32,
+    failing_since: Option<Instant>,
+}
+
+impl QueryHealth {
+    fn record_success(&mut self) {
+        *self = Self {
+            answered: true,
+            ..Self::default()
+        };
+    }
+
+    /// Whether this failure ends the session.
+    fn record_failure(&mut self, now: Instant) -> bool {
+        self.consecutive_failures = self.consecutive_failures.saturating_add(1);
+        let failing_since = *self.failing_since.get_or_insert(now);
+        self.consecutive_failures >= QUERY_FAILURES_TO_ESCALATE
+            && (self.answered || now.saturating_duration_since(failing_since) >= FIRST_ANSWER_GRACE)
+    }
+}
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -529,10 +564,9 @@ pub(crate) struct BandwidthController {
     timeout_check_interval: IntervalStream,
     entry_depletion_rate: DepletionRate,
     exit_depletion_rate: DepletionRate,
-    entry_previous_error_query: bool,
-    exit_previous_error_query: bool,
+    entry_query_health: QueryHealth,
+    exit_query_health: QueryHealth,
     shutdown_token: CancellationToken,
-    successful_checks: u64,
     upgrade_mode_enabled_on_last_check: bool,
 }
 
@@ -555,10 +589,9 @@ impl BandwidthController {
             timeout_check_interval,
             entry_depletion_rate: Default::default(),
             exit_depletion_rate: Default::default(),
-            entry_previous_error_query: false,
-            exit_previous_error_query: false,
+            entry_query_health: Default::default(),
+            exit_query_health: Default::default(),
             shutdown_token,
-            successful_checks: 0,
             upgrade_mode_enabled_on_last_check: false,
         }
     }
@@ -604,6 +637,14 @@ impl BandwidthController {
             &mut self.entry_depletion_rate
         } else {
             &mut self.exit_depletion_rate
+        }
+    }
+
+    fn query_health(&mut self, entry: bool) -> &mut QueryHealth {
+        if entry {
+            &mut self.entry_query_health
+        } else {
+            &mut self.exit_query_health
         }
     }
 
@@ -791,34 +832,18 @@ impl BandwidthController {
     async fn handle_bandwidth_query_error(&mut self, entry: bool, err: SpecificGatewayError) {
         tracing::warn!("{err}");
         let gateway_id = self.gateway_id(entry);
-        if (entry && self.entry_previous_error_query) || (!entry && self.exit_previous_error_query)
-        {
-            // Only treat repeated failures as a hard error — and tear the tunnel
-            // down — once we've actually had a successful bandwidth check. Before
-            // the first success, transient query failures are expected (e.g. the
-            // gateway is still coming up) and must not escalate or spam the log at
-            // error level (upstream nym-vpn-client #5405).
-            if self.successful_checks != 0 {
-                tracing::error!("gateway {gateway_id} is erroring out");
-                self.shutdown_token.cancel();
-            } else {
-                tracing::warn!(
-                    "gateway {gateway_id} bandwidth query failing before any successful check; not escalating"
-                );
-            }
-        } else {
-            if entry {
-                self.entry_previous_error_query = true;
-            } else {
-                self.exit_previous_error_query = true;
-            }
+        let side = if entry { "entry" } else { "exit" };
+        let health = self.query_health(entry);
+        if health.record_failure(Instant::now()) {
+            tracing::error!("gateway {gateway_id} is erroring out");
+            self.shutdown_token.cancel();
+        } else if health.consecutive_failures == 1 {
             tracing::info!(
-                "Empty query for {} gateway bandwidth check. This is normal, as long as it is not repeating for the same gateway",
-                if entry {
-                    "entry".to_string()
-                } else {
-                    "exit".to_string()
-                }
+                "Empty query for {side} gateway bandwidth check. This is normal, as long as it is not repeating for the same gateway"
+            );
+        } else {
+            tracing::warn!(
+                "gateway {gateway_id} bandwidth query failing before any successful check; not escalating yet"
             );
         }
     }
@@ -833,13 +858,7 @@ impl BandwidthController {
         let gw_upgrade_mode = query_result.upgrade_mode;
         let gateway_id = self.gateway_id(entry);
 
-        self.successful_checks += 1;
-
-        if entry {
-            self.entry_previous_error_query = false;
-        } else {
-            self.exit_previous_error_query = false;
-        }
+        self.query_health(entry).record_success();
 
         let current_depletion_rate = self.depletion_rate(entry);
 
@@ -1094,6 +1113,61 @@ mod tests {
         // when we get bellow a convinient dynamic threshold, we start reqwesting more bandwidth (returning None)
         assert!(current_bandwidth < 500 * BW_1MB);
         assert!(ret.is_none());
+    }
+
+    fn secs(v: u64) -> Duration {
+        Duration::from_secs(v)
+    }
+
+    #[test]
+    fn answered_side_escalates_on_the_second_failure_in_a_row() {
+        let t0 = Instant::now();
+        let mut health = QueryHealth::default();
+        health.record_success();
+        assert!(!health.record_failure(t0));
+        assert!(health.record_failure(t0 + secs(5)));
+    }
+
+    #[test]
+    fn an_answer_resets_the_failure_streak() {
+        let t0 = Instant::now();
+        let mut health = QueryHealth::default();
+        health.record_success();
+        assert!(!health.record_failure(t0));
+        health.record_success();
+        assert!(!health.record_failure(t0 + secs(5)));
+        assert!(health.record_failure(t0 + secs(10)));
+    }
+
+    #[test]
+    fn unanswered_side_escalates_only_after_the_grace() {
+        let t0 = Instant::now();
+        let mut health = QueryHealth::default();
+        for elapsed in (0..FIRST_ANSWER_GRACE.as_secs()).step_by(5) {
+            assert!(!health.record_failure(t0 + secs(elapsed)), "{elapsed}s");
+        }
+        assert!(health.record_failure(t0 + FIRST_ANSWER_GRACE));
+    }
+
+    #[test]
+    fn grace_runs_from_the_first_failure_of_the_streak() {
+        let t0 = Instant::now();
+        let mut health = QueryHealth::default();
+        assert!(!health.record_failure(t0 + secs(30)));
+        assert!(!health.record_failure(t0 + secs(60)));
+        assert!(health.record_failure(t0 + secs(90)));
+    }
+
+    /// The entry answering must not shorten the exit's grace.
+    #[test]
+    fn sides_are_tracked_apart() {
+        let t0 = Instant::now();
+        let mut entry = QueryHealth::default();
+        let mut exit = QueryHealth::default();
+        entry.record_success();
+        assert!(!exit.record_failure(t0));
+        assert!(!exit.record_failure(t0 + secs(5)));
+        assert!(!entry.record_failure(t0 + secs(5)));
     }
 
     #[test]
