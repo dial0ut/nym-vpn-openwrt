@@ -824,6 +824,14 @@ impl SharedState {
         }
     }
 
+    fn blacklist_entry_gateway(&mut self, entry: NodeIdentity, failure_kind: &str) {
+        if let Err(e) = self.blacklisted_entry_gateways.add(entry) {
+            tracing::error!("Failed to add gateway {entry} to blacklisted entry gateway list: {e}");
+        } else {
+            tracing::warn!("Blacklisted entry gateway {entry} due to repeated {failure_kind}");
+        }
+    }
+
     /// Idle firewall and the pins that go with it (see the module table).
     /// Failures propagate; `DisconnectedState` escalates, `ErrorState` logs.
     async fn enter_idle_firewall(&mut self) -> Result<()> {

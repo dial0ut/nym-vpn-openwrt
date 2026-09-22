@@ -484,18 +484,7 @@ impl ConnectingState {
 
         shared_state.entry_gateway_grace = None;
         if entry_culpable {
-            if let Err(e) = shared_state
-                .blacklisted_entry_gateways
-                .add(entry_gateway_identifier)
-            {
-                tracing::error!(
-                    "Failed to add gateway {entry_gateway_identifier} to blacklisted entry gateway list: {e}"
-                );
-            } else {
-                tracing::warn!(
-                    "Blacklisted entry gateway {entry_gateway_identifier} due to repeated {failure_kind}"
-                );
-            }
+            shared_state.blacklist_entry_gateway(entry_gateway_identifier, failure_kind);
         } else {
             tracing::warn!(
                 "Repeated {failure_kind} at the exit gateway; re-selecting without blacklisting the entry gateway"
@@ -670,6 +659,10 @@ impl TunnelStateHandler for ConnectingState {
                         // An exit rejection must not blacklist the innocent entry
                         // gateway; re-selection still happens so a Random exit moves.
                         self.handle_gateway_failure(entry_culpable, "registration failure", shared_state).await;
+                        NextTunnelState::SameState(self)
+                    }
+                    TunnelMonitorEvent::BandwidthFailed { entry_culpable } => {
+                        self.handle_gateway_failure(entry_culpable, "bandwidth failure", shared_state).await;
                         NextTunnelState::SameState(self)
                     }
                 }

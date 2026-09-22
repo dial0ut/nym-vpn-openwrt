@@ -88,6 +88,24 @@ impl Error {
     pub fn internal(msg: impl Into<String>) -> Self {
         Error::Internal(msg.into())
     }
+
+    fn gateway(entry: bool, err: SpecificGatewayError) -> Self {
+        if entry {
+            Error::EntryGateway(err)
+        } else {
+            Error::ExitGateway(err)
+        }
+    }
+
+    /// The gateway at fault: `Some(true)` for the entry, `Some(false)` for
+    /// the exit, `None` when neither is.
+    pub(crate) fn entry_culpable(&self) -> Option<bool> {
+        match self {
+            Error::EntryGateway(err) if err.is_gateway_fault() => Some(true),
+            Error::ExitGateway(err) if err.is_gateway_fault() => Some(false),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -157,6 +175,11 @@ impl SpecificGatewayError {
             SpecificGatewayError::DeprecatedTopUpWireguard { .. }
                 | SpecificGatewayError::TopUpWireguard { .. }
         )
+    }
+
+    /// Failing to obtain a ticket locally is not the gateway's doing.
+    fn is_gateway_fault(&self) -> bool {
+        !matches!(self, SpecificGatewayError::RequestCredential { .. })
     }
 
     pub fn from_deprecated_topup_wireguard(
@@ -567,6 +590,8 @@ pub(crate) struct BandwidthController {
     entry_query_health: QueryHealth,
     exit_query_health: QueryHealth,
     shutdown_token: CancellationToken,
+    /// Why the controller ended the session, if it did.
+    failure: Option<Error>,
     upgrade_mode_enabled_on_last_check: bool,
 }
 
@@ -592,8 +617,15 @@ impl BandwidthController {
             entry_query_health: Default::default(),
             exit_query_health: Default::default(),
             shutdown_token,
+            failure: None,
             upgrade_mode_enabled_on_last_check: false,
         }
+    }
+
+    /// Ends the session, keeping the first reason.
+    fn fail(&mut self, err: Error) {
+        self.failure.get_or_insert(err);
+        self.shutdown_token.cancel();
     }
 
     fn construct_bandwidth_client(
@@ -836,7 +868,7 @@ impl BandwidthController {
         let health = self.query_health(entry);
         if health.record_failure(Instant::now()) {
             tracing::error!("gateway {gateway_id} is erroring out");
-            self.shutdown_token.cancel();
+            self.fail(Error::gateway(entry, err));
         } else if health.consecutive_failures == 1 {
             tracing::info!(
                 "Empty query for {side} gateway bandwidth check. This is normal, as long as it is not repeating for the same gateway"
@@ -928,7 +960,9 @@ impl BandwidthController {
                         error!("error sending message to the account controller: {err}");
                         // we need to trigger a shutdown here because this message must not fail,
                         // if it did, AC won't exit upgrade mode state and won't resume acquiring zk-nyms
-                        self.shutdown_token.cancel();
+                        self.fail(Error::internal(format!(
+                            "failed to report the end of upgrade mode: {err}"
+                        )));
                         return None;
                     }
                     // we continue sending zk-nym
@@ -943,9 +977,7 @@ impl BandwidthController {
 
         if let Err(e) = self.top_up_bandwidth(entry).await {
             tracing::warn!("Error topping up with more bandwidth {e:?}");
-            // TODO: try to return this error in the JoinHandle instead
-            // For now let's keep the old behavior of stopping
-            self.shutdown_token.cancel();
+            self.fail(Error::gateway(entry, e));
         }
 
         None
@@ -982,7 +1014,9 @@ impl BandwidthController {
         None
     }
 
-    pub(crate) async fn run(mut self) {
+    /// Returns why the controller ended the session; `None` when it was
+    /// shut down from outside.
+    pub(crate) async fn run(mut self) -> Option<Error> {
         // Skip the first, immediate tick
         self.timeout_check_interval.next().await;
         while !self.shutdown_token.is_cancelled() {
@@ -1016,6 +1050,7 @@ impl BandwidthController {
         }
 
         tracing::debug!("BandwidthController: Exiting");
+        self.failure
     }
 }
 
@@ -1168,6 +1203,33 @@ mod tests {
         assert!(!exit.record_failure(t0));
         assert!(!exit.record_failure(t0 + secs(5)));
         assert!(!entry.record_failure(t0 + secs(5)));
+    }
+
+    #[test]
+    fn failures_blame_the_gateway_on_their_side() {
+        let query_failure = || SpecificGatewayError::QueryBandwidth {
+            gateway_id: "gw".to_owned(),
+            source: Box::new(MetadataClientError::Internal("down".to_owned())),
+        };
+        let no_ticket = || SpecificGatewayError::RequestCredential {
+            gateway_id: "gw".to_owned(),
+            ticketbook_type: TicketType::V1WireguardEntry,
+            source: Box::new(
+                nym_bandwidth_controller::error::BandwidthControllerError::NoCredentialsAvailable,
+            ),
+        };
+
+        assert_eq!(
+            Error::gateway(true, query_failure()).entry_culpable(),
+            Some(true)
+        );
+        assert_eq!(
+            Error::gateway(false, query_failure()).entry_culpable(),
+            Some(false)
+        );
+        assert_eq!(Error::gateway(true, no_ticket()).entry_culpable(), None);
+        assert_eq!(Error::gateway(false, no_ticket()).entry_culpable(), None);
+        assert_eq!(Error::internal("account controller").entry_culpable(), None);
     }
 
     #[test]

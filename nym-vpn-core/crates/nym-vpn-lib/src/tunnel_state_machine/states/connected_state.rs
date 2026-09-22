@@ -28,6 +28,9 @@ pub struct ConnectedState {
     selected_gateways: SelectedGateways,
     tunnel_interface: TunnelInterface,
     firewall_policy_params: ConnectedPolicyParameters,
+    /// Set when the bandwidth controller ended the session; whether the
+    /// entry gateway is to blame.
+    bandwidth_failure: Option<bool>,
 }
 
 impl ConnectedState {
@@ -77,6 +80,7 @@ impl ConnectedState {
             selected_gateways,
             tunnel_interface,
             firewall_policy_params,
+            bandwidth_failure: None,
         };
 
         if let Err(e) =
@@ -176,11 +180,28 @@ impl ConnectedState {
         Self::reset_dns(shared_state).await;
         Self::reset_routes(shared_state).await;
 
-        match error_state_reason {
-            Some(block_reason) => {
+        match (error_state_reason, self.bandwidth_failure) {
+            (Some(block_reason), _) => {
                 NextTunnelState::NewState(ErrorState::enter(block_reason, shared_state).await)
             }
-            None => {
+            (None, Some(entry_culpable)) => {
+                // The tunnel carried traffic until a gateway failed its
+                // bandwidth checks, so the local network is not the cause:
+                // no grace, and a fresh pair after a short backoff.
+                shared_state.entry_gateway_grace = None;
+                if entry_culpable {
+                    shared_state.blacklist_entry_gateway(
+                        self.selected_gateways.entry_gateway().identity,
+                        "bandwidth failure",
+                    );
+                } else {
+                    tracing::warn!(
+                        "Bandwidth failure at the exit gateway; re-selecting without blacklisting the entry gateway"
+                    );
+                }
+                NextTunnelState::NewState(ConnectingState::enter(1, None, shared_state).await)
+            }
+            (None, None) => {
                 // This session was viable moments ago, so reconnect failures in
                 // the near future are far more likely a local outage than the
                 // gateway's fault. Grant the entry gateway a grace window during
@@ -267,6 +288,10 @@ impl TunnelStateHandler for ConnectedState {
                     TunnelMonitorEvent::Down { error_state_reason, reply_tx } => {
                         _ = reply_tx.send(());
                         self.handle_tunnel_down(error_state_reason, shared_state).await
+                    }
+                    TunnelMonitorEvent::BandwidthFailed { entry_culpable } => {
+                        self.bandwidth_failure = Some(entry_culpable);
+                        NextTunnelState::SameState(self)
                     }
                     _ => {
                         NextTunnelState::SameState(self)
