@@ -975,9 +975,16 @@ impl BandwidthController {
             }
         }
 
-        if let Err(e) = self.top_up_bandwidth(entry).await {
-            tracing::warn!("Error topping up with more bandwidth {e:?}");
-            self.fail(Error::gateway(entry, e));
+        match self.top_up_bandwidth(entry).await {
+            Ok(_) => {}
+            // Nothing was sent, and a new session would need a ticket too.
+            Err(e @ SpecificGatewayError::RequestCredential { .. }) => {
+                tracing::warn!("No ticket to top up with, retrying on the next check: {e:?}");
+            }
+            Err(e) => {
+                tracing::warn!("Error topping up with more bandwidth {e:?}");
+                self.fail(Error::gateway(entry, e));
+            }
         }
 
         None
