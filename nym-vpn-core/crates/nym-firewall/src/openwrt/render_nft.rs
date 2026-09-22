@@ -76,6 +76,20 @@ fn render_rule(rule: &Rule) -> String {
     let mut parts: Vec<String> = Vec::new();
     let m = &rule.matches;
 
+    // inet chains see both families: without an address or ICMP type to
+    // imply one, a V4/V6 rule would match the other family too.
+    let implied = m.saddr.is_some()
+        || m.daddr.is_some()
+        || m.icmpv4_type.is_some()
+        || m.icmpv6_type.is_some();
+    if !implied {
+        match rule.family {
+            Family::V4 => parts.push("meta nfproto ipv4".into()),
+            Family::V6 => parts.push("meta nfproto ipv6".into()),
+            Family::Inet => {}
+        }
+    }
+
     if let Some(iface) = &m.iif {
         parts.push(format!("iifname \"{iface}\""));
     }
@@ -202,7 +216,26 @@ mod tests {
     #[test]
     fn renders_dhcpv4_client() {
         let rule = Rule::accept(Family::V4).proto(Proto::Udp).sport(68).dport(67);
-        assert_eq!(render_rule(&rule), "udp sport 68 udp dport 67 accept");
+        assert_eq!(
+            render_rule(&rule),
+            "meta nfproto ipv4 udp sport 68 udp dport 67 accept"
+        );
+    }
+
+    #[test]
+    fn family_is_pinned_only_when_nothing_implies_it() {
+        let v6 = Rule::accept(Family::V6).proto(Proto::Udp).sport(546).dport(547);
+        assert_eq!(
+            render_rule(&v6),
+            "meta nfproto ipv6 udp sport 546 udp dport 547 accept"
+        );
+        let inet = Rule::reject(Family::Inet).proto(Proto::Udp).dport(53);
+        assert_eq!(render_rule(&inet), "udp dport 53 reject");
+        let resolver: std::net::IpAddr = "9.9.9.9".parse().unwrap();
+        let addressed = Rule::accept(Family::V4).proto(Proto::Udp).daddr(resolver);
+        assert!(!render_rule(&addressed).contains("nfproto"));
+        let icmp = Rule::accept(Family::V6).icmpv6_type(IcmpV6Type::NeighborSolicit);
+        assert!(!render_rule(&icmp).contains("nfproto"));
     }
 
     #[test]

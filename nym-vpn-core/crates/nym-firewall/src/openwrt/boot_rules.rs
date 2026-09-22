@@ -175,10 +175,10 @@ pub fn nft_boot_block() -> String {
          \x20       type filter hook output priority filter - 20; policy accept;\n\
          \x20       oifname \"lo\" accept\n\
          \x20       ct state established,related ct direction reply accept\n\
-         \x20       udp sport 68 udp dport 67 accept\n\
-         \x20       udp sport 67 udp dport 68 accept\n\
-         \x20       udp sport 546 udp dport 547 accept\n\
-         \x20       udp sport 547 udp dport 546 accept\n\
+         \x20       meta nfproto ipv4 udp sport 68 udp dport 67 accept\n\
+         \x20       meta nfproto ipv4 udp sport 67 udp dport 68 accept\n\
+         \x20       meta nfproto ipv6 udp sport 546 udp dport 547 accept\n\
+         \x20       meta nfproto ipv6 udp sport 547 udp dport 546 accept\n\
          \x20       icmpv6 type {{ nd-router-solicit, nd-neighbor-solicit, nd-neighbor-advert }} accept\n\
          \x20       udp dport 53 reject\n\
          \x20       tcp dport 53 reject\n\
@@ -496,10 +496,10 @@ mod tests {
                 );
                 assert!(chain[lan4].contains(MULTICAST_V4) && chain[lan6].contains(MULTICAST_V6));
                 for must in [
-                    "udp sport 68 udp dport 67 accept",
-                    "udp sport 67 udp dport 68 accept",
-                    "udp sport 546 udp dport 547 accept",
-                    "udp sport 547 udp dport 546 accept",
+                    "meta nfproto ipv4 udp sport 68 udp dport 67 accept",
+                    "meta nfproto ipv4 udp sport 67 udp dport 68 accept",
+                    "meta nfproto ipv6 udp sport 546 udp dport 547 accept",
+                    "meta nfproto ipv6 udp sport 547 udp dport 546 accept",
                 ] {
                     assert!(chain.contains(&must), "{must}");
                 }

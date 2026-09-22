@@ -134,10 +134,10 @@ table inet nym_boot {
         type filter hook output priority filter - 20; policy accept;
         oifname "lo" accept
         ct state established,related ct direction reply accept
-        udp sport 68 udp dport 67 accept
-        udp sport 67 udp dport 68 accept
-        udp sport 546 udp dport 547 accept
-        udp sport 547 udp dport 546 accept
+        meta nfproto ipv4 udp sport 68 udp dport 67 accept
+        meta nfproto ipv4 udp sport 67 udp dport 68 accept
+        meta nfproto ipv6 udp sport 546 udp dport 547 accept
+        meta nfproto ipv6 udp sport 547 udp dport 546 accept
         icmpv6 type { nd-router-solicit, nd-neighbor-solicit, nd-neighbor-advert } accept
         udp dport 53 reject
         tcp dport 53 reject
