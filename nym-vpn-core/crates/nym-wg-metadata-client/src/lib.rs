@@ -1,14 +1,16 @@
 // Copyright 2025 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::net::{IpAddr, SocketAddr};
+use std::{
+    net::{IpAddr, SocketAddr},
+    time::Duration,
+};
 
 use nym_credentials_interface::CredentialSpendingData;
 use nym_gateway_directory::NodeIdentity;
 use nym_http_api_client::ReqwestClientBuilder;
 use nym_wireguard_private_metadata_client::WireguardMetadataApiClient;
 use nym_wireguard_private_metadata_shared::{AvailableBandwidth, Version, v1, v2};
-use tokio::sync::OnceCell;
 use url::Url;
 
 use error::Result;
@@ -39,6 +41,7 @@ impl LazyMetadataClient {
         mut base_url: Url,
         bind_ip: IpAddr,
         retries: usize,
+        timeout: Duration,
         sent_data: TunUpSendData,
     ) -> Result<Self> {
         let reqwest_builder = ReqwestClientBuilder::new();
@@ -65,6 +68,7 @@ impl LazyMetadataClient {
             builder
                 .with_reqwest_builder(reqwest_builder)
                 .with_retries(retries)
+                .with_timeout(timeout)
                 .build()
         })?;
         let version = inner.version().await?;
@@ -74,8 +78,13 @@ impl LazyMetadataClient {
 }
 
 pub struct MetadataClient {
-    lazy_client: OnceCell<Result<LazyMetadataClient>>,
+    /// Built on first use. A failed build is not kept: the next call
+    /// builds again.
+    client: Option<LazyMetadataClient>,
+    /// The tunnel-up signal, kept so that the client can be rebuilt.
+    tun_data: Option<TunUpSendData>,
     lazy_client_retries: usize,
+    lazy_client_timeout: Duration,
     gateway_id: NodeIdentity,
     base_url: Url,
     bind_ip: IpAddr,
@@ -83,28 +92,39 @@ pub struct MetadataClient {
 }
 
 impl MetadataClient {
-    async fn lazy_client(&mut self) -> &Result<LazyMetadataClient> {
-        self.lazy_client
-            .get_or_init(|| async {
-                let data = self
-                    .signal_channel
-                    .take()
-                    .ok_or(MetadataClientError::Internal(
-                        "signal channel already consumed".to_string(),
-                    ))?
-                    .await
-                    .map_err(|_| {
-                        MetadataClientError::Internal("interface up signal never sent".to_string())
-                    })?;
-                LazyMetadataClient::new(
+    /// Cancel-safe: the signal channel is only borrowed while awaited, and
+    /// the signal is stored before the client is built.
+    async fn lazy_client(&mut self) -> Result<&LazyMetadataClient> {
+        match self.client {
+            Some(ref client) => Ok(client),
+            None => {
+                let data = self.tun_up_data().await?;
+                let client = LazyMetadataClient::new(
                     self.base_url.clone(),
                     self.bind_ip,
                     self.lazy_client_retries,
+                    self.lazy_client_timeout,
                     data,
                 )
-                .await
-            })
-            .await
+                .await?;
+                Ok(self.client.insert(client))
+            }
+        }
+    }
+
+    async fn tun_up_data(&mut self) -> Result<TunUpSendData> {
+        if let Some(data) = &self.tun_data {
+            return Ok(data.clone());
+        }
+        let never_sent =
+            || MetadataClientError::Internal("interface up signal never sent".to_string());
+        let signal_channel = self.signal_channel.as_mut().ok_or_else(never_sent)?;
+        let received = signal_channel.await;
+        // A resolved oneshot receiver must not be polled again.
+        self.signal_channel = None;
+        let data = received.map_err(|_| never_sent())?;
+        self.tun_data = Some(data.clone());
+        Ok(data)
     }
 
     pub fn new(
@@ -113,10 +133,13 @@ impl MetadataClient {
         bind_ip: IpAddr,
         signal_channel: TunUpReceiver,
         lazy_client_retries: usize,
+        lazy_client_timeout: Duration,
     ) -> Self {
         Self {
-            lazy_client: OnceCell::new(),
+            client: None,
+            tun_data: None,
             lazy_client_retries,
+            lazy_client_timeout,
             gateway_id,
             bind_ip,
             base_url,
@@ -151,11 +174,7 @@ impl MetadataClient {
     }
 
     pub async fn query_bandwidth(&mut self) -> Result<AvailableBandwidth> {
-        let client = self
-            .lazy_client()
-            .await
-            .as_ref()
-            .map_err(|err| MetadataClientError::Internal(err.to_string()))?;
+        let client = self.lazy_client().await?;
         let request = match client.version {
             Version::V1 => v1::AvailableBandwidthRequest {}.try_into()?,
             Version::V2 => v2::AvailableBandwidthRequest {}.try_into()?,
@@ -173,11 +192,7 @@ impl MetadataClient {
         &mut self,
         credential: CredentialSpendingData,
     ) -> Result<AvailableBandwidth> {
-        let client = self
-            .lazy_client()
-            .await
-            .as_ref()
-            .map_err(|err| MetadataClientError::Internal(err.to_string()))?;
+        let client = self.lazy_client().await?;
         let request = match client.version {
             Version::V1 => v1::TopUpRequest { credential }.try_into()?,
             Version::V2 => v2::TopUpRequest {
@@ -195,11 +210,7 @@ impl MetadataClient {
     }
 
     pub async fn check_upgrade_mode(&mut self, upgrade_mode_jwt: String) -> Result<bool> {
-        let client = self
-            .lazy_client()
-            .await
-            .as_ref()
-            .map_err(|err| MetadataClientError::Internal(err.to_string()))?;
+        let client = self.lazy_client().await?;
 
         let request = match client.version {
             Version::V1 => return Err(MetadataClientError::UnsupportedMetadataEndpointVersion),
@@ -217,5 +228,76 @@ impl MetadataClient {
         };
 
         Ok(upgrade_mode_enabled)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::{Ipv4Addr, TcpListener};
+
+    use tokio::sync::oneshot;
+
+    use super::*;
+
+    /// A client pointed at a loopback port nothing listens on.
+    fn client_for_closed_port(signal_channel: TunUpReceiver) -> MetadataClient {
+        let port = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .and_then(|listener| listener.local_addr())
+            .expect("bind an ephemeral port")
+            .port();
+        let identity =
+            NodeIdentity::from_base58_string("7CWjY3QFoA9dgE535u9bQiXCfzgMZvSpJu842GA1Wn42")
+                .expect("valid test identity");
+        MetadataClient::new(
+            Url::parse(&format!("http://127.0.0.1:{port}")).expect("valid url"),
+            identity,
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            signal_channel,
+            0,
+            Duration::from_secs(2),
+        )
+    }
+
+    #[tokio::test]
+    async fn failed_init_is_retried() {
+        let (tx, rx) = oneshot::channel();
+        let mut client = client_for_closed_port(rx);
+        tx.send(TunUpSendData::Signal).ok();
+
+        for attempt in 0..2 {
+            let err = client.query_bandwidth().await.unwrap_err();
+            assert!(
+                matches!(err, MetadataClientError::HttpClientError(_)),
+                "attempt {attempt}: {err}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelled_wait_keeps_the_signal_channel() {
+        let (tx, rx) = oneshot::channel();
+        let mut client = client_for_closed_port(rx);
+
+        let wait = tokio::time::timeout(Duration::from_millis(10), client.query_bandwidth());
+        assert!(wait.await.is_err(), "no signal yet, the query must wait");
+
+        tx.send(TunUpSendData::Signal).ok();
+        let err = client.query_bandwidth().await.unwrap_err();
+        assert!(
+            matches!(err, MetadataClientError::HttpClientError(_)),
+            "{err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn dropped_signal_fails_every_call() {
+        let (tx, rx) = oneshot::channel();
+        let mut client = client_for_closed_port(rx);
+        drop(tx);
+
+        for _ in 0..2 {
+            let err = client.query_bandwidth().await.unwrap_err();
+            assert!(matches!(err, MetadataClientError::Internal(_)), "{err}");
+        }
     }
 }

@@ -28,6 +28,8 @@ const DEFAULT_BANDWIDTH_DEPLETION_RATE: u64 = 1024 * 1024; // 1 MB/s
 const MINIMUM_RAMAINING_BANDWIDTH: u64 = 500 * 1024 * 1024; // 500 MB, the same as a wireguard ticket size (but it doesn't have to be)
 
 const DEFAULT_CLIENT_RETRIES: usize = 1;
+// The HTTP client's 30 s default would hold up a check, and teardown, that long.
+const DEFAULT_CLIENT_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -579,6 +581,7 @@ impl BandwidthController {
             bind_ip,
             signal_channel,
             DEFAULT_CLIENT_RETRIES,
+            DEFAULT_CLIENT_TIMEOUT,
         );
         TemporaryBandwidthClient::new(
             gateway,
