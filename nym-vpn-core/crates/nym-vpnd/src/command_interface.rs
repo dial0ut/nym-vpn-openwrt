@@ -1032,6 +1032,9 @@ impl NymVpnService for CommandInterface {
                     Socks5Error::LazySocks5Error(_) => {
                         tonic::Status::internal(format!("Failed to enable SOCKS5 proxy: {err}"))
                     }
+                    Socks5Error::LookupTimeout(_) => {
+                        tonic::Status::deadline_exceeded(err.to_string())
+                    }
                 }
             })?;
 

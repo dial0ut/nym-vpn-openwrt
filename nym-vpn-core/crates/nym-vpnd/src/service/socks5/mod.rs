@@ -51,6 +51,9 @@ pub enum Socks5Error {
 
     #[error("Lazy SOCKS5 error: {0}")]
     LazySocks5Error(#[from] LazySocks5Error),
+
+    #[error("SOCKS5 gateway lookup timed out after {}s", .0.as_secs())]
+    LookupTimeout(Duration),
 }
 
 /// Internal service state

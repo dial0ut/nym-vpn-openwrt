@@ -73,6 +73,9 @@ const TENTATIVE_GATEWAYS_TIMEOUT: Duration = Duration::from_secs(5);
 /// the liveness probe one strike at most.
 const REGISTER_DIAGNOSTIC_TIMEOUT: Duration = Duration::from_secs(45);
 
+/// Upper bound on the gateway lookups of a SOCKS5 enable.
+const SOCKS5_LOOKUP_TIMEOUT: Duration = Duration::from_secs(30);
+
 type Locale = String;
 
 #[allow(clippy::large_enum_variant)]
@@ -214,6 +217,16 @@ fn warn_if_no_cover_domains(network: &Network) {
     }
 }
 
+/// What a SOCKS5 enable needs from the service, taken on the loop so the
+/// gateway lookups can run in a task.
+struct Socks5EnableContext {
+    gateway_cache: GatewayCacheHandle,
+    tunnel_state: Arc<RwLock<TunnelState>>,
+    residential_exit: bool,
+    data_dir: PathBuf,
+    network_details: nym_sdk::NymNetworkDetails,
+}
+
 pub struct NymVpnServiceParameters {
     pub log_path: Option<LogPath>,
     pub network_env: Box<Network>,
@@ -306,6 +319,10 @@ pub struct NymVpnService {
 
     // Lazy SOCKS5 proxy service handle
     socks5_service: Socks5Service,
+
+    // Held by every SOCKS5 enable (lookups included), disable and
+    // auto-disable, so they apply in turn.
+    socks5_ops: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl NymVpnService {
@@ -558,6 +575,7 @@ impl NymVpnService {
             discovery_refresher_command_tx,
             idle: false,
             socks5_service,
+            socks5_ops: Arc::new(tokio::sync::Mutex::new(())),
         })
     }
 
@@ -817,13 +835,19 @@ impl NymVpnService {
                 .on_tunnel_state(new_state, std::time::Instant::now());
             self.apply_always_on(action);
 
-            // Auto-disable SOCKS5 when VPN disconnects
-            if matches!(new_state, TunnelState::Disconnected | TunnelState::Error(_))
-                && self.socks5_service.is_enabled()
-            {
-                tracing::info!("VPN disconnected, auto-disabling SOCKS5 proxy");
+            // Auto-disable SOCKS5 when VPN disconnects. Checked in the task,
+            // under the lock: an enable in flight reads as disabled here.
+            if matches!(new_state, TunnelState::Disconnected | TunnelState::Error(_)) {
                 let socks5_service = self.socks5_service.clone();
+                let socks5_ops = self.socks5_ops.clone();
                 tokio::spawn(async move {
+                    let _op = socks5_ops.lock().await;
+                    // Exact under the lock: only enable and disable write the
+                    // state, and both hold it.
+                    if !socks5_service.is_enabled() {
+                        return;
+                    }
+                    tracing::info!("VPN disconnected, auto-disabling SOCKS5 proxy");
                     if let Err(e) = socks5_service.disable().await {
                         tracing::error!("Failed to auto-disable SOCKS5 on VPN disconnect: {}", e);
                     }
@@ -1113,12 +1137,10 @@ impl NymVpnService {
                 let _ = tx.send(());
             }
             VpnServiceCommand::EnableSocks5(tx, enable_socks5_request) => {
-                let result = self.handle_enable_socks5(enable_socks5_request).await;
-                let _ = tx.send(result);
+                self.handle_enable_socks5(enable_socks5_request, tx);
             }
             VpnServiceCommand::DisableSocks5(tx, ()) => {
-                let result = self.handle_disable_socks5().await;
-                let _ = tx.send(result);
+                self.handle_disable_socks5(tx);
             }
             VpnServiceCommand::GetSocks5Status(tx, ()) => {
                 let result = self.handle_get_socks5_status().await;
@@ -1573,15 +1595,68 @@ impl NymVpnService {
         });
     }
 
-    async fn handle_enable_socks5(
-        &mut self,
+    /// The gateway lookups can take directory round trips, so the enable runs
+    /// in a task. `socks5_ops` orders it with disable and the auto-disable: a
+    /// disable sent mid-lookup waits, then wins.
+    fn handle_enable_socks5(
+        &self,
         enable_socks5_request: EnableSocks5Request,
-    ) -> Result<(), Socks5Error> {
+        completion_tx: oneshot::Sender<Result<(), Socks5Error>>,
+    ) {
+        let ctx = Socks5EnableContext {
+            gateway_cache: self.gateway_cache_handle.clone(),
+            tunnel_state: self.tunnel_state.clone(),
+            residential_exit: self.config_manager.config().residential_exit,
+            data_dir: self.data_dir.clone(),
+            // Clone at once: watch::Ref is not Send and must not cross an await.
+            network_details: self.network_tx.borrow().nym_network_details().clone(),
+        };
+        let socks5_service = self.socks5_service.clone();
+        let socks5_ops = self.socks5_ops.clone();
+
+        tokio::spawn(async move {
+            let _op = socks5_ops.lock().await;
+            // `closed()` needs `&mut`; the sender is ours alone from here.
+            let mut completion_tx = completion_tx;
+            // Only the lookups are abandoned: a started enable binds listeners
+            // and spawns tasks, and must not stop halfway.
+            let lookup = tokio::time::timeout(
+                SOCKS5_LOOKUP_TIMEOUT,
+                Self::socks5_enable_config(ctx, enable_socks5_request),
+            );
+            let config = tokio::select! {
+                _ = completion_tx.closed() => {
+                    tracing::info!("SOCKS5 enable cancelled: the caller went away");
+                    return;
+                }
+                config = lookup => {
+                    config.unwrap_or(Err(Socks5Error::LookupTimeout(SOCKS5_LOOKUP_TIMEOUT)))
+                }
+            };
+            let result = match config {
+                Ok(config) => socks5_service.enable(config).await,
+                Err(err) => Err(err),
+            };
+            if result.is_ok() {
+                tracing::info!("Lazy SOCKS5 proxy service enabled successfully");
+                tracing::info!(
+                    "Mixnet will initialize on first SOCKS5 connection and shut down after {}s of inactivity",
+                    socks5_idle_timeout().as_secs()
+                );
+            }
+            completion_tx.send(result).ok();
+        });
+    }
+
+    async fn socks5_enable_config(
+        ctx: Socks5EnableContext,
+        enable_socks5_request: EnableSocks5Request,
+    ) -> Result<Socks5EnableConfig, Socks5Error> {
         tracing::info!("Enabling SOCKS5 client: {:?}", enable_socks5_request);
 
         // All Wg gateways with SOCKS5 probe data, not just MixnetExit.
-        let exit_gateways: nym_gateway_directory::GatewayList = self
-            .gateway_cache_handle
+        let exit_gateways: nym_gateway_directory::GatewayList = ctx
+            .gateway_cache
             .lookup_nymnodes_for_socks5()
             .await
             .map_err(|e| {
@@ -1618,7 +1693,7 @@ impl NymVpnService {
 
                 let exit_point: nym_gateway_directory::ExitPoint = exit_point.clone().into();
 
-                let exit_filters = if self.config_manager.config().residential_exit {
+                let exit_filters = if ctx.residential_exit {
                     GatewayFilters::from(&[GatewayFilter::Residential, GatewayFilter::Exit])
                 } else {
                     GatewayFilters::default()
@@ -1645,7 +1720,7 @@ impl NymVpnService {
             ExitPoint::Country { .. } | ExitPoint::Region { .. } => {
                 // While connected, prefer the VPN's own exit gateway (avoids
                 // firewall routing issues) if it supports SOCKS5.
-                let tunnel_state = self.tunnel_state.read().await.clone();
+                let tunnel_state = ctx.tunnel_state.read().await.clone();
 
                 let selected_identity = if let TunnelState::Connected { connection_data } =
                     tunnel_state
@@ -1659,8 +1734,8 @@ impl NymVpnService {
                     match NodeIdentity::from_base58_string(vpn_gateway_id) {
                         Ok(vpn_gateway_identity) => {
                             // Direct lookup: a Wg gateway may also be MixnetExit-capable.
-                            let gateway_full = self
-                                .gateway_cache_handle
+                            let gateway_full = ctx
+                                .gateway_cache
                                 .lookup_nymnode_by_identity(vpn_gateway_identity)
                                 .await
                                 .ok();
@@ -1727,7 +1802,7 @@ impl NymVpnService {
 
                     let exit_point: nym_gateway_directory::ExitPoint = exit_point.clone().into();
 
-                    let exit_filters = if self.config_manager.config().residential_exit {
+                    let exit_filters = if ctx.residential_exit {
                         GatewayFilters::from(&[GatewayFilter::Residential, GatewayFilter::Exit])
                     } else {
                         GatewayFilters::default()
@@ -1755,8 +1830,8 @@ impl NymVpnService {
         };
 
         // The NR address is only checked, not used: the NR is picked at random.
-        let gateway = self
-            .gateway_cache_handle
+        let gateway = ctx
+            .gateway_cache
             .lookup_nymnode_by_identity(gateway_identity)
             .await
             .map_err(|e| {
@@ -1777,11 +1852,11 @@ impl NymVpnService {
         // connection is active. Starting from a random NR (None) avoids
         // correlating VPN and SOCKS5 traffic.
         let network_requester_rotation_interval = Some(Duration::from_secs(15 * 60)); // 15 minutes
-        let gateway_cache_handle = Some(self.gateway_cache_handle.clone());
+        let gateway_cache_handle = Some(ctx.gateway_cache.clone());
 
         // Excluded from the random selection.
         let vpn_exit_gateway_identity = {
-            let tunnel_state = self.tunnel_state.read().await;
+            let tunnel_state = ctx.tunnel_state.read().await;
             if let TunnelState::Connected {
                 ref connection_data,
             } = *tunnel_state
@@ -1792,43 +1867,39 @@ impl NymVpnService {
             }
         };
 
-        // Clone at once: watch::Ref is not Send and must not cross an await.
-        let network_details = Some(self.network_tx.borrow().nym_network_details().clone());
+        let network_details = Some(ctx.network_details);
 
         tracing::info!(
             "Starting SOCKS5 with random Network Requester selection (excluding VPN exit gateway for privacy)"
         );
 
-        self.socks5_service
-            .enable(Socks5EnableConfig {
-                data_dir: self.data_dir.clone(),
-                socks5_listen_address: enable_socks5_request.socks5_settings.listen_address,
-                http_rpc_proxy_listen_address: enable_socks5_request
-                    .http_rpc_settings
-                    .listen_address,
-                network_requester_address: None, // Start with random selection for privacy
-                network_requester_rotation_interval,
-                gateway_cache_handle,
-                request_timeout,
-                idle_timeout,
-                network_details,
-                vpn_exit_gateway_identity, // Exclude VPN exit gateway during random selection
-            })
-            .await?;
-
-        tracing::info!("Lazy SOCKS5 proxy service enabled successfully");
-        tracing::info!(
-            "Mixnet will initialize on first SOCKS5 connection and shut down after {}s of inactivity",
-            idle_timeout.as_secs()
-        );
-        Ok(())
+        Ok(Socks5EnableConfig {
+            data_dir: ctx.data_dir,
+            socks5_listen_address: enable_socks5_request.socks5_settings.listen_address,
+            http_rpc_proxy_listen_address: enable_socks5_request.http_rpc_settings.listen_address,
+            network_requester_address: None, // Start with random selection for privacy
+            network_requester_rotation_interval,
+            gateway_cache_handle,
+            request_timeout,
+            idle_timeout,
+            network_details,
+            vpn_exit_gateway_identity, // Exclude VPN exit gateway during random selection
+        })
     }
 
-    async fn handle_disable_socks5(&mut self) -> Result<(), Socks5Error> {
-        tracing::info!("Disabling lazy SOCKS5 proxy service");
-        self.socks5_service.disable().await?;
-        tracing::info!("Lazy SOCKS5 proxy service disabled successfully");
-        Ok(())
+    /// In a task: it waits behind an enable still looking up its gateway.
+    fn handle_disable_socks5(&self, completion_tx: oneshot::Sender<Result<(), Socks5Error>>) {
+        let socks5_service = self.socks5_service.clone();
+        let socks5_ops = self.socks5_ops.clone();
+        tokio::spawn(async move {
+            let _op = socks5_ops.lock().await;
+            tracing::info!("Disabling lazy SOCKS5 proxy service");
+            let result = socks5_service.disable().await;
+            if result.is_ok() {
+                tracing::info!("Lazy SOCKS5 proxy service disabled successfully");
+            }
+            completion_tx.send(result).ok();
+        });
     }
 
     async fn handle_get_socks5_status(&self) -> Result<Socks5Status, Socks5Error> {

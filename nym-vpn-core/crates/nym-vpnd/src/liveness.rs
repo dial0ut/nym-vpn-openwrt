@@ -12,9 +12,11 @@
 //! procd respawns it. Abrupt on purpose: the shutdown path would tear the
 //! kill-switch table down for the respawn window.
 //!
-//! Inline service commands are all bounded well under a minute (diagnostics:
-//! 2–10 s per step; account calls carry API timeouts), so a single slow
-//! command can cost at most one strike before the next probe answers.
+//! Commands that can take long (ad-blocking, diagnostic runs, account reads,
+//! SOCKS5 enable) run off the loop. What stays inline is bounded well under a
+//! minute: the registration diagnostic is capped at 45 s and account
+//! mutations carry API timeouts. So a single slow command can cost at most
+//! one strike before the next probe answers.
 
 use std::{future::Future, time::Duration};
 
