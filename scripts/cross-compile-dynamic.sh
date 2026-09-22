@@ -297,6 +297,13 @@ build_nym_vpnd() {
 
     log_info "RUSTFLAGS=${RUSTFLAGS}"
 
+    # 32-bit targets need the nym ecash usize fix (patch-crates.sh decides
+    # from the target). It edits the nym git checkout, so fetch first.
+    log_info "Fetching dependencies..."
+    cargo fetch --target="${TARGET}"
+    bash "$SCRIPT_DIR/../docker/tier3-musl/patch-crates.sh" --ecash-only \
+        "${CARGO_HOME:-$HOME/.cargo}" "$TARGET" "$PWD/Cargo.toml"
+
     # Build with release profile
     log_info "Running: cargo build --target=${TARGET} --bins --release"
     cargo build \

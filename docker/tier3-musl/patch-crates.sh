@@ -6,9 +6,13 @@
 # finds whatever version cargo resolved.
 #
 # Usage:
-#   ./patch-crates.sh <cargo-home> <target> <cargo-toml-path>
+#   ./patch-crates.sh [--ecash-only] <cargo-home> <target> <cargo-toml-path>
 #
 # Arguments:
+#   --ecash-only    Only the in-place nym ecash fix, on 32-bit targets; no
+#                   crate copies, Cargo.toml untouched. For the Tier 2 build
+#                   (scripts/cross-compile-dynamic.sh). Run it after
+#                   `cargo fetch`, so the nym git checkout exists.
 #   cargo-home      Path to CARGO_HOME (e.g., /root/.cargo)
 #   target          Rust target triple (e.g., mips-unknown-linux-musl)
 #   cargo-toml-path Path to workspace Cargo.toml to append [patch.crates-io]
@@ -35,13 +39,38 @@ else
     log_error() { echo -e "\033[0;31m[PATCH]\033[0m $1" >&2; }
 fi
 
+PATCH_MODE=all
+if [ "${1:-}" = "--ecash-only" ]; then
+    PATCH_MODE=ecash
+    shift
+fi
 CARGO_HOME="${CARGO_HOME:-${1:-}}"
 TARGET="${TARGET:-${2:-}}"
 CARGO_TOML="${CARGO_TOML:-${3:-}}"
 PATCH_DIR="/tmp/patches"
 
-is_32bit_target() {
-    [[ "$TARGET" == mips* ]] || [[ "$TARGET" == armv5te* ]]
+# Which patches a target needs follows from what rustc says the target
+# lacks, not from a list of triple names that can miss one (armv7 and i686
+# shipped without the ecash fix that way). load_target_cfg runs once in
+# main, outside any pipeline, so a rustc failure stops the script instead
+# of reading as "not needed".
+TARGET_CFG=""
+load_target_cfg() {
+    if ! TARGET_CFG=$(rustc --print cfg --target "$TARGET") || [ -z "$TARGET_CFG" ]; then
+        log_error "rustc cannot describe target '$TARGET'"
+        exit 1
+    fi
+}
+
+# Every 32-bit target: ecash serialises usize lengths, 4 bytes there.
+needs_ecash_patch() {
+    grep -qx 'target_pointer_width="32"' <<< "$TARGET_CFG"
+}
+
+# Targets without 64-bit atomics (mips, armv5te): std has no
+# AtomicU64/AtomicI64 there, so those crates switch to portable-atomic.
+needs_atomic_patches() {
+    ! grep -qx 'target_has_atomic="64"' <<< "$TARGET_CFG"
 }
 
 # Get the version of a crate from Cargo.lock.
@@ -441,11 +470,36 @@ patch_schemars() {
 # ============================================================================
 # Main
 # ============================================================================
+# The nym ecash fix, in place in the nym git checkout. Every 32-bit target
+# needs it, Tier 2 (armv7, i686) as much as Tier 3.
+apply_nym_ecash_patch() {
+    if ! needs_ecash_patch; then
+        log_info "64-bit target: ecash serialises 8-byte lengths already"
+        return
+    fi
+    log_info "32-bit target detected — applying the ecash usize fix"
+    local nym_dir
+    nym_dir=$(find_nym)
+    if [ -z "$nym_dir" ]; then
+        log_warn "nym git checkout not found — skipping ecash patch"
+        return
+    fi
+    patch_nym_ecash "$nym_dir"
+}
+
 main() {
     if [ -z "$CARGO_HOME" ] || [ -z "$TARGET" ] || [ -z "$CARGO_TOML" ]; then
-        echo "Usage: $0 <cargo-home> <target> <cargo-toml-path>" >&2
+        echo "Usage: $0 [--ecash-only] <cargo-home> <target> <cargo-toml-path>" >&2
         echo "  Or set CARGO_HOME, TARGET, CARGO_TOML environment variables" >&2
         exit 1
+    fi
+
+    load_target_cfg
+
+    if [ "$PATCH_MODE" = ecash ]; then
+        log_info "=== ecash patch for target: ${TARGET} ==="
+        apply_nym_ecash_patch
+        return
     fi
 
     log_info "=== Build-time crate patching for target: ${TARGET} ==="
@@ -466,9 +520,9 @@ main() {
     patch_schemars "$schemars_dir"
     patches="schemars = { path = \"$schemars_dir\" }"
 
-    # coarsetime + prometheus: needed only for 32-bit targets (no AtomicU64)
-    if is_32bit_target; then
-        log_info "32-bit target detected — applying portable-atomic patches"
+    # coarsetime, prometheus, ...: only where std has no AtomicU64
+    if needs_atomic_patches; then
+        log_info "No 64-bit atomics — applying portable-atomic patches"
 
         local coarsetime_src coarsetime_dir
         coarsetime_src=$(find_crate "coarsetime")
@@ -509,13 +563,14 @@ opentelemetry_sdk = { path = \"$otel_sdk_dir\" }"
         local nym_dir
         nym_dir=$(find_nym)
         if [ -n "$nym_dir" ]; then
-            patch_nym_ecash "$nym_dir"
             patch_nym_gateway_client "$nym_dir"
             patch_nym_lp "$nym_dir"
         else
             log_warn "nym git checkout not found — skipping nym patches"
         fi
     fi
+
+    apply_nym_ecash_patch
 
     # Append [patch.crates-io] to Cargo.toml
     cat >> "$CARGO_TOML" << PATCH_EOF
