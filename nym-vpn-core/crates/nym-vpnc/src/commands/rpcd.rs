@@ -2006,23 +2006,27 @@ fn staged_nym_resolvfile_sections(changes: &str) -> Vec<String> {
 /// again afterwards. nym-vpnd commits dhcp with the same sequence.
 fn commit_dhcp(uci: &mut impl Uci) -> Result<(), String> {
     let sections = staged_nym_resolvfile_sections(&uci.run(&["changes", "dhcp"])?);
-    let mut reverted: Vec<&str> = Vec::new();
-    let mut result = Ok(());
     for section in &sections {
-        match uci.run(&["revert", &format!("dhcp.{section}.resolvfile")]) {
-            Ok(_) => reverted.push(section),
-            Err(err) => {
-                result = Err(err);
-                break;
-            }
-        }
+        let _ = uci.run(&["revert", &format!("dhcp.{section}.resolvfile")]);
     }
-    // Never commit while any repoint is still staged.
+    // A revert can fail without saying so; commit only once the repoint is
+    // really gone from the staged changes.
+    let mut result = if sections.is_empty() {
+        Ok(())
+    } else {
+        match uci.run(&["changes", "dhcp"]) {
+            Ok(changes) if staged_nym_resolvfile_sections(&changes).is_empty() => Ok(()),
+            Ok(_) => Err(
+                "resolvfile repoint still staged after revert; dhcp left uncommitted".to_owned(),
+            ),
+            Err(err) => Err(err),
+        }
+    };
     if result.is_ok() {
         result = uci.run(&["commit", "dhcp"]).map(drop);
     }
-    // Staged again even when the commit failed: the revert already dropped it.
-    for section in reverted {
+    // Staged again even when the commit failed: the revert may have dropped it.
+    for section in &sections {
         let restaged = uci.run(&[
             "set",
             &format!("dhcp.{section}.resolvfile={NYM_RESOLV_FILE}"),
@@ -3021,11 +3025,18 @@ nym-vpn.dom_ok.domain='Ok.Example.ORG'
     }
 
     /// Records every `uci` call; replies come from `replies` keyed by the
-    /// joined args, anything else succeeds with no output.
+    /// joined args, anything else succeeds with no output. With `staged`
+    /// set, `changes dhcp` answers it as the reverts and sets made since
+    /// leave it.
     #[derive(Default)]
     struct FakeUci {
         calls: Vec<String>,
         replies: BTreeMap<String, Result<String, String>>,
+        staged: Option<String>,
+        /// Reverts exit 0 but change nothing.
+        stuck_reverts: bool,
+        /// Only the first `changes dhcp` read succeeds.
+        failing_reread: bool,
     }
 
     impl FakeUci {
@@ -3034,12 +3045,44 @@ nym-vpn.dom_ok.domain='Ok.Example.ORG'
             self.replies.insert(args.to_owned(), reply);
             self
         }
+
+        fn staged(mut self, changes: &str) -> Self {
+            self.staged = Some(changes.to_owned());
+            self
+        }
+
+        fn changes(&self) -> Result<String, String> {
+            let reads = self.calls.iter().filter(|c| *c == "changes dhcp").count();
+            if self.failing_reread && reads > 1 {
+                return Err("uci changes dhcp: I/O error".to_owned());
+            }
+            let mut out = String::new();
+            for line in self.staged.as_deref().unwrap_or_default().lines() {
+                let key = line.split_once('=').map_or(line, |(key, _)| key);
+                let mut staged = true;
+                for call in &self.calls {
+                    if *call == format!("revert {key}") && !self.stuck_reverts {
+                        staged = false;
+                    } else if call.starts_with(&format!("set {key}=")) {
+                        staged = true;
+                    }
+                }
+                if staged {
+                    out.push_str(line);
+                    out.push('\n');
+                }
+            }
+            Ok(out)
+        }
     }
 
     impl Uci for FakeUci {
         fn run(&mut self, args: &[&str]) -> Result<String, String> {
             let key = args.join(" ");
             self.calls.push(key.clone());
+            if key == "changes dhcp" && self.staged.is_some() {
+                return self.changes();
+            }
             self.replies.get(&key).cloned().unwrap_or(Ok(String::new()))
         }
     }
@@ -3059,13 +3102,14 @@ dhcp.nym_split_ipset=ipset
 
     #[test]
     fn commit_dhcp_reverts_the_repoint_around_the_commit() {
-        let mut uci = FakeUci::default().reply("changes dhcp", Ok(STAGED_REPOINT));
+        let mut uci = FakeUci::default().staged(STAGED_REPOINT);
         assert_eq!(commit_dhcp(&mut uci), Ok(()));
         assert_eq!(
             uci.calls,
             vec![
                 "changes dhcp",
                 "revert dhcp.cfg01411c.resolvfile",
+                "changes dhcp",
                 "commit dhcp",
                 "set dhcp.cfg01411c.resolvfile=/tmp/resolv.conf.d/nym-resolv.conf",
             ]
@@ -3084,7 +3128,7 @@ dhcp.nym_split_ipset=ipset
     #[test]
     fn commit_dhcp_restages_after_a_failed_commit() {
         let mut uci = FakeUci::default()
-            .reply("changes dhcp", Ok(STAGED_REPOINT))
+            .staged(STAGED_REPOINT)
             .reply("commit dhcp", Err("uci commit dhcp: I/O error"));
         assert_eq!(
             commit_dhcp(&mut uci),
@@ -3098,11 +3142,44 @@ dhcp.nym_split_ipset=ipset
 
     #[test]
     fn commit_dhcp_never_commits_a_repoint_it_could_not_revert() {
-        let mut uci = FakeUci::default()
-            .reply("changes dhcp", Ok(STAGED_REPOINT))
-            .reply("revert dhcp.cfg01411c.resolvfile", Err("busy"));
+        let restage = "set dhcp.cfg01411c.resolvfile=/tmp/resolv.conf.d/nym-resolv.conf";
+
+        // The revert says it failed, and did.
+        let mut uci = FakeUci {
+            stuck_reverts: true,
+            ..FakeUci::default()
+        }
+        .staged(STAGED_REPOINT)
+        .reply("revert dhcp.cfg01411c.resolvfile", Err("busy"));
         assert!(commit_dhcp(&mut uci).is_err());
         assert!(!uci.calls.iter().any(|c| c == "commit dhcp"));
+        assert_eq!(uci.calls.last().map(String::as_str), Some(restage));
+
+        // The revert exits 0 and leaves the repoint staged.
+        let mut uci = FakeUci {
+            stuck_reverts: true,
+            ..FakeUci::default()
+        }
+        .staged(STAGED_REPOINT);
+        assert!(commit_dhcp(&mut uci).is_err());
+        assert!(!uci.calls.iter().any(|c| c == "commit dhcp"));
+        assert_eq!(uci.calls.last().map(String::as_str), Some(restage));
+
+        // The revert worked but the check cannot read the changes back.
+        let mut uci = FakeUci {
+            failing_reread: true,
+            ..FakeUci::default()
+        }
+        .staged(STAGED_REPOINT);
+        assert!(commit_dhcp(&mut uci).is_err());
+        assert!(!uci.calls.iter().any(|c| c == "commit dhcp"));
+        assert_eq!(uci.calls.last().map(String::as_str), Some(restage));
+
+        // A revert that reported failure but worked is fine.
+        let mut uci = FakeUci::default()
+            .staged(STAGED_REPOINT)
+            .reply("revert dhcp.cfg01411c.resolvfile", Err("busy"));
+        assert_eq!(commit_dhcp(&mut uci), Ok(()));
 
         let mut uci = FakeUci::default().reply("changes dhcp", Err("no uci"));
         assert!(commit_dhcp(&mut uci).is_err());
