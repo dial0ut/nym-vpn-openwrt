@@ -990,28 +990,36 @@ impl BandwidthController {
         } else {
             &mut self.wg_exit_gateway_client
         };
-        tokio::select! {
-            _ = self.shutdown_token.cancelled() => {
-                tracing::trace!("BandwidthController: Received shutdown");
+        match bw_client
+            .query_bandwidth_with_retries(DEFAULT_CLIENT_RETRIES)
+            .await
+        {
+            Ok(query_res) => {
+                tracing::info!(
+                    "Bandwidth query for {side} gateway: {} bytes, upgrade_mode={:?}",
+                    query_res.bandwidth_bytes,
+                    query_res.upgrade_mode
+                );
+                return self
+                    .handle_bandwidth_query(entry, current_period, query_res)
+                    .await;
             }
-            ret = bw_client.query_bandwidth_with_retries(DEFAULT_CLIENT_RETRIES) => {
-                match ret {
-                    Ok(query_res) => {
-                        tracing::info!(
-                            "Bandwidth query for {side} gateway: {} bytes, upgrade_mode={:?}",
-                            query_res.bandwidth_bytes,
-                            query_res.upgrade_mode
-                        );
-                        return self.handle_bandwidth_query(entry, current_period, query_res).await;
-                    }
-                    Err(err) => {
-                        tracing::warn!("Bandwidth query failed for {side} gateway: {err}");
-                        self.handle_bandwidth_query_error(entry, err).await;
-                    }
-                }
+            Err(err) => {
+                tracing::warn!("Bandwidth query failed for {side} gateway: {err}");
+                self.handle_bandwidth_query_error(entry, err).await;
             }
         }
         None
+    }
+
+    /// Checks both gateways; returns the check period to switch to, if any.
+    async fn check_both(&mut self, current_period: Duration) -> Option<Duration> {
+        let entry_duration = self.check_bandwidth(true, current_period).await;
+        let exit_duration = self.check_bandwidth(false, current_period).await;
+        match (entry_duration, exit_duration) {
+            (Some(d1), Some(d2)) => Some(d1.min(d2)),
+            (d1, d2) => d1.or(d2),
+        }
     }
 
     /// Returns why the controller ended the session; `None` when it was
@@ -1027,20 +1035,17 @@ impl BandwidthController {
                 }
                 _ = self.timeout_check_interval.next() => {
                     let current_period = self.timeout_check_interval.as_ref().period();
-                    let entry_duration = self.check_bandwidth(true, current_period).await;
-                    let exit_duration = self.check_bandwidth(false, current_period).await;
-                    if let Some(minimal_duration) = match (entry_duration, exit_duration) {
-                        (Some(d1), Some(d2)) => {
-                            if d1 < d2 {
-                                Some(d1)
-                            } else {
-                                Some(d2)
-                            }
-                        },
-                        (Some(d), None) => Some(d),
-                        (None, Some(d)) => Some(d),
-                        _ => None,
-                    } {
+                    // Top-ups included: the monitor waits for this task
+                    // before it reports the tunnel down.
+                    let shutdown_token = self.shutdown_token.clone();
+                    let Some(next_period) = shutdown_token
+                        .run_until_cancelled(self.check_both(current_period))
+                        .await
+                    else {
+                        tracing::trace!("BandwidthController: Received shutdown");
+                        break;
+                    };
+                    if let Some(minimal_duration) = next_period {
                         self.timeout_check_interval = IntervalStream::new(tokio::time::interval(minimal_duration));
                         // Skip the first, immediate tick
                         self.timeout_check_interval.next().await;

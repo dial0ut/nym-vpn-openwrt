@@ -23,4 +23,4 @@ tracing.workspace = true
 url.workspace = true
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt", "time"] }
+tokio = { workspace = true, features = ["macros", "net", "rt", "time"] }

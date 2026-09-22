@@ -44,7 +44,11 @@ impl LazyMetadataClient {
         timeout: Duration,
         sent_data: TunUpSendData,
     ) -> Result<Self> {
-        let reqwest_builder = ReqwestClientBuilder::new();
+        // Set on reqwest itself: with a custom reqwest builder the API
+        // client's own `with_timeout` only takes effect on wasm.
+        let reqwest_builder = ReqwestClientBuilder::new()
+            .timeout(timeout)
+            .connect_timeout(timeout);
         let reqwest_builder = match sent_data {
             #[cfg(not(target_os = "windows"))]
             TunUpSendData::InterfaceName(interface) => {
@@ -68,7 +72,6 @@ impl LazyMetadataClient {
             builder
                 .with_reqwest_builder(reqwest_builder)
                 .with_retries(retries)
-                .with_timeout(timeout)
                 .build()
         })?;
         let version = inner.version().await?;
@@ -239,12 +242,11 @@ mod tests {
 
     use super::*;
 
-    /// A client pointed at a loopback port nothing listens on.
-    fn client_for_closed_port(signal_channel: TunUpReceiver) -> MetadataClient {
-        let port = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
-            .and_then(|listener| listener.local_addr())
-            .expect("bind an ephemeral port")
-            .port();
+    fn client_for_port(
+        port: u16,
+        signal_channel: TunUpReceiver,
+        timeout: Duration,
+    ) -> MetadataClient {
         let identity =
             NodeIdentity::from_base58_string("7CWjY3QFoA9dgE535u9bQiXCfzgMZvSpJu842GA1Wn42")
                 .expect("valid test identity");
@@ -254,8 +256,45 @@ mod tests {
             IpAddr::V4(Ipv4Addr::LOCALHOST),
             signal_channel,
             0,
-            Duration::from_secs(2),
+            timeout,
         )
+    }
+
+    /// A client pointed at a loopback port nothing listens on.
+    fn client_for_closed_port(signal_channel: TunUpReceiver) -> MetadataClient {
+        let port = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .and_then(|listener| listener.local_addr())
+            .expect("bind an ephemeral port")
+            .port();
+        client_for_port(port, signal_channel, Duration::from_secs(2))
+    }
+
+    #[tokio::test]
+    async fn silent_endpoint_times_out() {
+        let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .expect("bind an ephemeral port");
+        let port = listener.local_addr().expect("local address").port();
+        // Accepts every connection and never answers.
+        tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((stream, _)) = listener.accept().await {
+                held.push(stream);
+            }
+        });
+
+        let (tx, rx) = oneshot::channel();
+        let mut client = client_for_port(port, rx, Duration::from_millis(200));
+        tx.send(TunUpSendData::Signal).ok();
+
+        let err = tokio::time::timeout(Duration::from_secs(5), client.query_bandwidth())
+            .await
+            .expect("the request timeout must end the query")
+            .unwrap_err();
+        assert!(
+            matches!(err, MetadataClientError::HttpClientError(_)),
+            "{err}"
+        );
     }
 
     #[tokio::test]
