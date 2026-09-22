@@ -158,16 +158,24 @@ fn parse_route_get_device(route_get: &str) -> Option<String> {
 }
 
 /// `(network members, device members)` of the WAN zones in `uci show
-/// firewall` output. Sections may be anonymous (`@zone[1]`) or named; list
-/// values are space-separated, quoted on current uci and bare on 18.06.
+/// firewall` output: zones named `wan` or masquerading, but not the `nym`
+/// zone and not a zone that forwards into one of them. Masquerade on a
+/// LAN-side zone is unusual but legal, and the forward chain hands arrivals
+/// on a WAN device back to the zones: counting such a zone would let its
+/// clients' egress skip the kill-switch. Sections may be anonymous
+/// (`@zone[1]`) or named; list values are space-separated, quoted on current
+/// uci and bare on 18.06.
 fn wan_zone_members(uci_show: &str) -> (Vec<String>, Vec<String>) {
     #[derive(Default)]
     struct Section {
         is_zone: bool,
+        is_forwarding: bool,
         name: String,
         masq: bool,
         networks: Vec<String>,
         devices: Vec<String>,
+        src: String,
+        dest: String,
     }
     let unquote = |v: &str| v.trim().trim_matches('\'').to_string();
     let list = |v: &str| {
@@ -198,8 +206,13 @@ fn wan_zone_members(uci_show: &str) -> (Vec<String>, Vec<String>) {
         };
         let section = &mut sections[idx].1;
         match option {
-            None => section.is_zone = unquote(value) == "zone",
+            None => {
+                section.is_zone = unquote(value) == "zone";
+                section.is_forwarding = unquote(value) == "forwarding";
+            }
             Some("name") => section.name = unquote(value),
+            Some("src") => section.src = unquote(value),
+            Some("dest") => section.dest = unquote(value),
             Some("masq") => section.masq = unquote(value) == "1",
             Some("network") => section.networks = list(value),
             Some("device") => section.devices = list(value),
@@ -207,20 +220,36 @@ fn wan_zone_members(uci_show: &str) -> (Vec<String>, Vec<String>) {
         }
     }
 
+    let masq_zones: Vec<&str> = sections
+        .iter()
+        .map(|(_, s)| s)
+        .filter(|s| s.is_zone && s.masq && s.name != NYM_ZONE)
+        .map(|s| s.name.as_str())
+        .collect();
+    let clients: Vec<&str> = sections
+        .iter()
+        .map(|(_, s)| s)
+        .filter(|s| {
+            s.is_forwarding
+                && (s.dest == "wan" || s.dest == NYM_ZONE || masq_zones.contains(&s.dest.as_str()))
+        })
+        .map(|s| s.src.as_str())
+        .collect();
     let mut networks = Vec::new();
     let mut devices = Vec::new();
-    for (_, s) in sections {
-        if !s.is_zone || s.name == NYM_ZONE || !(s.name == "wan" || s.masq) {
+    for (_, s) in &sections {
+        let uplink = s.name == "wan" || (s.masq && !clients.contains(&s.name.as_str()));
+        if !s.is_zone || s.name == NYM_ZONE || !uplink {
             continue;
         }
-        for n in s.networks {
-            if !networks.contains(&n) {
-                networks.push(n);
+        for n in &s.networks {
+            if !networks.contains(n) {
+                networks.push(n.clone());
             }
         }
-        for d in s.devices {
-            if !devices.contains(&d) {
-                devices.push(d);
+        for d in &s.devices {
+            if !devices.contains(d) {
+                devices.push(d.clone());
             }
         }
     }
@@ -446,6 +475,38 @@ firewall.@rule[0].network=lan
         let (networks, devices) = wan_zone_members(uci);
         assert_eq!(networks, ["wan", "wwan"]);
         assert_eq!(devices, ["usb0"]);
+    }
+
+    /// A masquerading zone that forwards into an uplink (or the tunnel)
+    /// holds clients: its devices must not be handed back to the zones.
+    #[test]
+    fn a_zone_forwarding_to_an_uplink_is_not_one() {
+        let uci = "\
+firewall.@zone[0]=zone
+firewall.@zone[0].name='lan'
+firewall.@zone[0].network='lan'
+firewall.@zone[0].masq='1'
+firewall.@zone[1]=zone
+firewall.@zone[1].name='wan'
+firewall.@zone[1].network='wan' 'wan6'
+firewall.@zone[1].masq='1'
+firewall.@zone[2]=zone
+firewall.@zone[2].name='iot'
+firewall.@zone[2].network='iot'
+firewall.@zone[2].masq='1'
+firewall.@forwarding[0]=forwarding
+firewall.@forwarding[0].src='lan'
+firewall.@forwarding[0].dest='wan'
+firewall.@forwarding[1]=forwarding
+firewall.@forwarding[1].src='iot'
+firewall.@forwarding[1].dest='nym'
+firewall.@forwarding[2]=forwarding
+firewall.@forwarding[2].src='wan'
+firewall.@forwarding[2].dest='lan'
+";
+        let (networks, devices) = wan_zone_members(uci);
+        assert_eq!(networks, ["wan", "wan6"], "wan -> lan does not make wan a client");
+        assert!(devices.is_empty());
     }
 
     #[test]
