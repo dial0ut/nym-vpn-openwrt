@@ -1,6 +1,8 @@
 # Installed as /lib/upgrade/keep.d/nym-vpn: sysupgrade backs these up and
 # restores them into the new image. /etc/nym is the account (mnemonic,
 # device keys, ticket databases with their -wal/-shm files) and the daemon
-# settings, including the kill-switch flag the boot guard reads.
+# settings, including the kill-switch flag the boot guard reads. The split
+# tunnel's fw4 include travels with the dhcp ipset section that refers to it.
 /etc/config/nym-vpn
 /etc/nym/
+/etc/nftables.d/30-nym-split.nft
