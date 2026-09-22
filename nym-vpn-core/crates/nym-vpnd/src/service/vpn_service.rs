@@ -604,7 +604,7 @@ impl NymVpnService {
                     self.handle_service_command_timed(command).await;
                 }
                 Some(event) = self.event_receiver.recv() => {
-                    self.handle_tunnel_event(event);
+                    self.handle_tunnel_event(event).await;
                 }
                 Some(account_state) = account_state_rx.next() => {
                     self.handle_account_state_change(account_state);
@@ -643,7 +643,7 @@ impl NymVpnService {
                     }
                     event = self.event_receiver.recv() => {
                         match event {
-                            Some(event) => self.handle_tunnel_event(event),
+                            Some(event) => self.handle_tunnel_event(event).await,
                             None => break,
                         }
                     }
@@ -821,13 +821,12 @@ impl NymVpnService {
             .ok();
     }
 
-    fn handle_tunnel_event(&mut self, event: TunnelEvent) {
+    async fn handle_tunnel_event(&mut self, event: TunnelEvent) {
         if let TunnelEvent::NewState(ref new_state) = event {
-            if let Ok(mut state) = self.tunnel_state.try_write() {
-                *state = new_state.clone();
-            } else {
-                tracing::error!("Failed to update tunnel state to {new_state}");
-            }
+            // Waits out a reader rather than dropping the update. Every reader
+            // clones the state and releases its guard without awaiting, so the
+            // wait is short and cannot deadlock.
+            *self.tunnel_state.write().await = new_state.clone();
             self.update_idle_hint(new_state);
 
             let action = self
