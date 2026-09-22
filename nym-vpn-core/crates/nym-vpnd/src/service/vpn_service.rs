@@ -48,7 +48,7 @@ use nym_vpn_lib::{
 };
 use nym_vpn_lib_types::{
     AccountBalanceResponse, AccountCommandError, AccountControllerState, AlwaysOnStatus,
-    DecentralisedObtainTicketbooksRequest, DeeplinkClient, DeeplinkKind, DiagnosticRegisterParams,
+    DecentralisedObtainTicketbooksRequest, DiagnosticRegisterParams,
     DiagnosticReport, DiagnosticRunParams, DnsUpstreamOwner, EnableSocks5Request, EntryPoint,
     ExitPoint, FeatureFlags, Gateway, GatewayTestParams, GatewayTestReport, GetDeeplinkParams,
     ListGatewaysOptions, LogPath, LookupGatewayFilters, MixnetTrafficConfig, NetworkCompatibility,
@@ -451,7 +451,7 @@ impl NymVpnService {
                 .map_err(Error::CreateGatewayClient)?;
 
         let (network_tx, network_rx) = watch::channel(parameters.network_env.clone());
-        let off_loop = OffLoop::new(network_tx.subscribe());
+        let off_loop = OffLoop::new(account_command_tx.clone(), network_tx.subscribe());
         let nym_config = NymConfig {
             config_path: Some(config_dir.clone()),
             data_path: Some(network_data_dir.clone()),
@@ -1048,13 +1048,13 @@ impl NymVpnService {
                 let _ = tx.send(self.handle_store_account(account).await);
             }
             VpnServiceCommand::DecentralisedBalance(tx, ()) => {
-                let _ = tx.send(self.handle_decentralised_balance().await);
+                self.off_loop.decentralised_balance(tx);
             }
             VpnServiceCommand::DecentralisedObtainTicketbooks(tx, request) => {
                 let _ = tx.send(self.handle_decentralised_obtain_ticketbooks(request).await);
             }
             VpnServiceCommand::IsAccountStored(tx, ()) => {
-                let _ = tx.send(self.handle_is_account_stored().await);
+                self.off_loop.is_account_stored(tx);
             }
             VpnServiceCommand::ForgetAccount(tx, ()) => {
                 let _ = tx.send(self.handle_forget_account().await);
@@ -1063,10 +1063,10 @@ impl NymVpnService {
                 let _ = tx.send(self.handle_rotate_keys().await);
             }
             VpnServiceCommand::GetAccountIdentity(tx, ()) => {
-                let _ = tx.send(self.handle_get_account_identity().await);
+                self.off_loop.account_identity(tx);
             }
             VpnServiceCommand::GetAccountLinks(tx, locale) => {
-                let _ = tx.send(self.handle_get_account_links(locale).await);
+                self.off_loop.account_links(tx, locale);
             }
             VpnServiceCommand::GetAccountState(tx, ()) => {
                 let _ = tx.send(self.handle_get_account_state().await);
@@ -1076,28 +1076,28 @@ impl NymVpnService {
                 let _ = tx.send(());
             }
             VpnServiceCommand::GetAccountUsage(tx, ()) => {
-                let _ = tx.send(self.handle_get_usage().await);
+                self.off_loop.account_usage(tx);
             }
             VpnServiceCommand::ResetDeviceIdentity(tx, seed) => {
                 let _ = tx.send(self.handle_reset_device_identity(seed).await);
             }
             VpnServiceCommand::GetDeviceIdentity(tx, ()) => {
-                let _ = tx.send(self.handle_get_device_identity().await);
+                self.off_loop.device_identity(tx);
             }
             VpnServiceCommand::GetDevices(tx, ()) => {
-                let _ = tx.send(self.handle_get_devices().await);
+                self.off_loop.devices(tx);
             }
             VpnServiceCommand::GetActiveDevices(tx, ()) => {
-                let _ = tx.send(self.handle_get_active_devices().await);
+                self.off_loop.active_devices(tx);
             }
             VpnServiceCommand::GetAvailableTickets(tx, ()) => {
-                let _ = tx.send(self.handle_get_available_tickets().await);
+                self.off_loop.available_tickets(tx);
             }
             VpnServiceCommand::GetAccountSummary(tx, ()) => {
-                let _ = tx.send(self.handle_get_account_summary().await);
+                self.off_loop.account_summary(tx);
             }
             VpnServiceCommand::GetDeeplink(tx, params) => {
-                let _ = tx.send(self.handle_get_deeplink(params).await);
+                self.off_loop.deeplink(tx, params);
             }
             VpnServiceCommand::DeeplinkStoreAccount(tx, deeplink_callback_url) => {
                 let _ = tx.send(
@@ -1859,16 +1859,6 @@ impl NymVpnService {
         }
     }
 
-    async fn handle_decentralised_balance(&mut self) -> AccountBalanceResponse {
-        AccountBalanceResponse {
-            result: self
-                .account_command_tx
-                .decentralised_balance()
-                .await
-                .map(|v| v.into_iter().map(nym_vpn_lib_types::Coin::from).collect()),
-        }
-    }
-
     async fn handle_decentralised_obtain_ticketbooks(
         &mut self,
         request: DecentralisedObtainTicketbooksRequest,
@@ -1879,14 +1869,6 @@ impl NymVpnService {
         self.account_command_tx
             .decentralised_obtain_ticketbooks(amount)
             .await
-    }
-
-    async fn handle_is_account_stored(&self) -> bool {
-        self.account_command_tx
-            .get_account_id()
-            .await
-            .map(|id| id.is_some())
-            .unwrap_or(false)
     }
 
     async fn handle_forget_account(&mut self) -> Result<(), AccountCommandError> {
@@ -1921,33 +1903,6 @@ impl NymVpnService {
         self.account_command_tx.rotate_keys().await
     }
 
-    async fn handle_get_account_identity(&self) -> Result<Option<String>, AccountCommandError> {
-        self.account_command_tx.get_account_id().await
-    }
-
-    async fn handle_get_account_links(
-        &self,
-        locale: String,
-    ) -> Result<ParsedAccountLinks, AccountLinksError> {
-        let account_id = self
-            .handle_get_account_identity()
-            .await
-            .map_err(|_| AccountLinksError::FailedToParseAccountLinks)?;
-
-        self.network_tx
-            .borrow()
-            .nym_vpn_network
-            .account_management
-            .clone()
-            .ok_or(AccountLinksError::AccountManagementNotConfigured)?
-            .try_into_parsed_links(&locale, account_id.as_deref())
-            .map(ParsedAccountLinks::from)
-            .map_err(|err| {
-                tracing::error!("Failed to parse account links: {:?}", err);
-                AccountLinksError::FailedToParseAccountLinks
-            })
-    }
-
     async fn handle_get_account_state(&self) -> AccountControllerState {
         self.account_state_rx.get_state()
     }
@@ -1957,13 +1912,6 @@ impl NymVpnService {
             .account_command_tx
             .background_refresh_account_state()
             .await;
-    }
-
-    async fn handle_get_usage(&self) -> Result<Vec<NymVpnUsage>, AccountCommandError> {
-        self.account_command_tx
-            .get_usage()
-            .await
-            .map(|s| s.into_iter().map(NymVpnUsage::from).collect())
     }
 
     async fn handle_reset_device_identity(
@@ -1979,73 +1927,6 @@ impl NymVpnService {
         self.account_command_tx.reset_device_identity(seed).await?;
 
         Ok(())
-    }
-
-    async fn handle_get_device_identity(&self) -> Result<Option<String>, AccountCommandError> {
-        self.account_command_tx.get_device_identity().await
-    }
-
-    async fn handle_get_devices(&self) -> Result<Vec<NymVpnDevice>, AccountCommandError> {
-        Ok(self
-            .account_command_tx
-            .get_devices()
-            .await?
-            .into_iter()
-            .map(NymVpnDevice::from)
-            .collect())
-    }
-
-    async fn handle_get_active_devices(&self) -> Result<Vec<NymVpnDevice>, AccountCommandError> {
-        Ok(self
-            .account_command_tx
-            .get_active_devices()
-            .await?
-            .into_iter()
-            .map(NymVpnDevice::from)
-            .collect())
-    }
-
-    async fn handle_get_available_tickets(
-        &self,
-    ) -> Result<AvailableTicketbooks, AccountCommandError> {
-        self.account_command_tx.get_available_tickets().await
-    }
-
-    async fn handle_get_account_summary(
-        &self,
-    ) -> Result<Option<VpnAccountSummary>, AccountCommandError> {
-        self.account_command_tx.get_account_summary().await
-    }
-
-    async fn handle_get_deeplink(
-        &self,
-        params: GetDeeplinkParams,
-    ) -> Result<String, AccountCommandError> {
-        let base_url = match params.kind {
-            DeeplinkKind::Privy => {
-                let Some(ref account_management) =
-                    self.network_tx.borrow().nym_vpn_network.account_management
-                else {
-                    return Err(AccountCommandError::DeeplinkError(
-                        "No account management data is available at this time".to_string(),
-                    ));
-                };
-
-                let opt_url = match params.client {
-                    DeeplinkClient::Mobile => account_management.privy_mobile_url(&params.locale),
-                    DeeplinkClient::Desktop => account_management.privy_desktop_url(&params.locale),
-                    DeeplinkClient::Web => account_management.privy_web_url(&params.locale),
-                };
-
-                opt_url.ok_or(AccountCommandError::DeeplinkError(
-                    "The privy path could not be determined".to_string(),
-                ))?
-            }
-        };
-
-        self.account_command_tx
-            .get_deeplink(params.kind, params.name, base_url)
-            .await
     }
 
     async fn handle_deeplink_store_account(

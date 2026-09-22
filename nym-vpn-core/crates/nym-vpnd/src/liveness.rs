@@ -82,7 +82,7 @@ where
 }
 
 /// One production probe: `GetTunnelState` with a `TIMEOUT`.
-async fn probe_service(tx: &mpsc::UnboundedSender<VpnServiceCommand>) -> Probe {
+pub(crate) async fn probe_service(tx: &mpsc::UnboundedSender<VpnServiceCommand>) -> Probe {
     let (reply_tx, reply_rx) = oneshot::channel();
     if tx
         .send(VpnServiceCommand::GetTunnelState(reply_tx, ()))
