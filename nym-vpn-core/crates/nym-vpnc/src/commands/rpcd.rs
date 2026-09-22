@@ -2003,7 +2003,9 @@ fn staged_nym_resolvfile_sections(changes: &str) -> Vec<String> {
 /// repoint: a committed one points dnsmasq at a file that only exists while
 /// nym-vpnd runs, so LAN DNS dies on a boot without it. uci cannot commit
 /// part of a package, so the repoint is reverted for the commit and staged
-/// again afterwards. nym-vpnd commits dhcp with the same sequence.
+/// again afterwards. Keep in step with nym-dns's
+/// `commit_dhcp_keeping_repoint`, the daemon's copy; nothing serialises this
+/// bridge's dhcp commits against the daemon's.
 fn commit_dhcp(uci: &mut impl Uci) -> Result<(), String> {
     let sections = staged_nym_resolvfile_sections(&uci.run(&["changes", "dhcp"])?);
     for section in &sections {
