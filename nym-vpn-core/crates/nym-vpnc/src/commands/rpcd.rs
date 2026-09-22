@@ -1870,12 +1870,102 @@ fn logs_get(args: &Value) -> Value {
 const SPLIT_NFT: &str = "/etc/nftables.d/30-nym-split.nft";
 const SPLIT_MARK: &str = "0x14e";
 
+/// Where nym-vpnd repoints dnsmasq's `resolvfile` (nym-dns, OpenWrt dnsmasq
+/// backend). The daemon stages that with `uci set` and never commits it, so
+/// dnsmasq falls back to the stock resolv file on a boot without the daemon.
+const NYM_RESOLV_FILE: &str = "/tmp/resolv.conf.d/nym-resolv.conf";
+
 fn uci_run(args: &[&str]) -> bool {
     std::process::Command::new("uci")
         .args(args)
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+/// The `uci` CLI, behind a trait so the commit sequence can be tested.
+trait Uci {
+    /// Runs `uci <args>`: stdout on success, the error text otherwise.
+    fn run(&mut self, args: &[&str]) -> Result<String, String>;
+}
+
+struct SystemUci;
+
+impl Uci for SystemUci {
+    fn run(&mut self, args: &[&str]) -> Result<String, String> {
+        let output = std::process::Command::new("uci")
+            .args(args)
+            .output()
+            .map_err(|err| format!("uci {}: {err}", args.join(" ")))?;
+        if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+        } else {
+            Err(format!(
+                "uci {}: {}",
+                args.join(" "),
+                String::from_utf8_lossy(&output.stderr).trim()
+            ))
+        }
+    }
+}
+
+/// Sections whose staged `resolvfile` is the daemon's repoint, from
+/// `uci changes dhcp` lines like `dhcp.cfg01411c.resolvfile='<path>'`.
+fn staged_nym_resolvfile_sections(changes: &str) -> Vec<String> {
+    let value = format!("'{NYM_RESOLV_FILE}'");
+    let mut sections: Vec<String> = Vec::new();
+    for line in changes.lines() {
+        let Some((key, staged)) = line.trim().split_once('=') else {
+            continue;
+        };
+        let section = key
+            .strip_prefix("dhcp.")
+            .and_then(|rest| rest.strip_suffix(".resolvfile"));
+        if let Some(section) = section.filter(|s| !s.is_empty() && !s.contains('.'))
+            && staged == value
+            && !sections.iter().any(|s| s == section)
+        {
+            sections.push(section.to_owned());
+        }
+    }
+    sections
+}
+
+/// `uci commit dhcp` without persisting the daemon's staged `resolvfile`
+/// repoint: a committed one points dnsmasq at a file that only exists while
+/// nym-vpnd runs, so LAN DNS dies on a boot without it. uci cannot commit
+/// part of a package, so the repoint is reverted for the commit and staged
+/// again afterwards. nym-vpnd commits dhcp with the same sequence.
+fn commit_dhcp(uci: &mut impl Uci) -> Result<(), String> {
+    let sections = staged_nym_resolvfile_sections(&uci.run(&["changes", "dhcp"])?);
+    let mut reverted: Vec<&str> = Vec::new();
+    let mut result = Ok(());
+    for section in &sections {
+        match uci.run(&["revert", &format!("dhcp.{section}.resolvfile")]) {
+            Ok(_) => reverted.push(section),
+            Err(err) => {
+                result = Err(err);
+                break;
+            }
+        }
+    }
+    // Never commit while any repoint is still staged.
+    if result.is_ok() {
+        result = uci.run(&["commit", "dhcp"]).map(drop);
+    }
+    // Staged again even when the commit failed: the revert already dropped it.
+    for section in reverted {
+        let restaged = uci.run(&[
+            "set",
+            &format!("dhcp.{section}.resolvfile={NYM_RESOLV_FILE}"),
+        ]);
+        if let Err(err) = restaged
+            && result.is_ok()
+        {
+            result = Err(err);
+        }
+    }
+    result
 }
 
 fn initd_run(service: &str, action: &str) {
@@ -2059,7 +2149,9 @@ fn regen_split() {
         uci_run(&["set", "dhcp.nym_split_ipset.table=fw4"]);
         uci_run(&["set", "dhcp.nym_split_ipset.table_family=inet"]);
     }
-    uci_run(&["commit", "dhcp"]);
+    if let Err(err) = commit_dhcp(&mut SystemUci) {
+        log_warn(&format!("split exclusions: {err}"));
+    }
 
     if clients.is_empty() && domains.is_empty() {
         let _ = std::fs::remove_file(SPLIT_NFT);
@@ -2646,6 +2738,95 @@ nym-vpn.dom_ok.domain='Ok.Example.ORG'
                 "ip6 daddr @nym_bypass6 meta mark set 0x14e",
             ]
         );
+    }
+
+    /// Records every `uci` call; replies come from `replies` keyed by the
+    /// joined args, anything else succeeds with no output.
+    #[derive(Default)]
+    struct FakeUci {
+        calls: Vec<String>,
+        replies: BTreeMap<String, Result<String, String>>,
+    }
+
+    impl FakeUci {
+        fn reply(mut self, args: &str, reply: Result<&str, &str>) -> Self {
+            let reply = reply.map(str::to_owned).map_err(str::to_owned);
+            self.replies.insert(args.to_owned(), reply);
+            self
+        }
+    }
+
+    impl Uci for FakeUci {
+        fn run(&mut self, args: &[&str]) -> Result<String, String> {
+            let key = args.join(" ");
+            self.calls.push(key.clone());
+            self.replies.get(&key).cloned().unwrap_or(Ok(String::new()))
+        }
+    }
+
+    const STAGED_REPOINT: &str = "\
+dhcp.cfg01411c.noresolv='0'
+dhcp.cfg01411c.resolvfile='/tmp/resolv.conf.d/nym-resolv.conf'
+dhcp.nym_split_ipset=ipset
+";
+
+    #[test]
+    fn commit_dhcp_without_staged_repoint_just_commits() {
+        let mut uci = FakeUci::default().reply("changes dhcp", Ok("dhcp.lan.start='50'\n"));
+        assert_eq!(commit_dhcp(&mut uci), Ok(()));
+        assert_eq!(uci.calls, vec!["changes dhcp", "commit dhcp"]);
+    }
+
+    #[test]
+    fn commit_dhcp_reverts_the_repoint_around_the_commit() {
+        let mut uci = FakeUci::default().reply("changes dhcp", Ok(STAGED_REPOINT));
+        assert_eq!(commit_dhcp(&mut uci), Ok(()));
+        assert_eq!(
+            uci.calls,
+            vec![
+                "changes dhcp",
+                "revert dhcp.cfg01411c.resolvfile",
+                "commit dhcp",
+                "set dhcp.cfg01411c.resolvfile=/tmp/resolv.conf.d/nym-resolv.conf",
+            ]
+        );
+    }
+
+    #[test]
+    fn commit_dhcp_leaves_other_resolvfile_values_alone() {
+        let changes = "dhcp.cfg01411c.resolvfile='/tmp/resolv.conf.d/resolv.conf.auto'\n\
+                       -dhcp.cfg01411c.resolvfile\n";
+        let mut uci = FakeUci::default().reply("changes dhcp", Ok(changes));
+        assert_eq!(commit_dhcp(&mut uci), Ok(()));
+        assert_eq!(uci.calls, vec!["changes dhcp", "commit dhcp"]);
+    }
+
+    #[test]
+    fn commit_dhcp_restages_after_a_failed_commit() {
+        let mut uci = FakeUci::default()
+            .reply("changes dhcp", Ok(STAGED_REPOINT))
+            .reply("commit dhcp", Err("uci commit dhcp: I/O error"));
+        assert_eq!(
+            commit_dhcp(&mut uci),
+            Err("uci commit dhcp: I/O error".to_owned())
+        );
+        assert_eq!(
+            uci.calls.last().map(String::as_str),
+            Some("set dhcp.cfg01411c.resolvfile=/tmp/resolv.conf.d/nym-resolv.conf")
+        );
+    }
+
+    #[test]
+    fn commit_dhcp_never_commits_a_repoint_it_could_not_revert() {
+        let mut uci = FakeUci::default()
+            .reply("changes dhcp", Ok(STAGED_REPOINT))
+            .reply("revert dhcp.cfg01411c.resolvfile", Err("busy"));
+        assert!(commit_dhcp(&mut uci).is_err());
+        assert!(!uci.calls.iter().any(|c| c == "commit dhcp"));
+
+        let mut uci = FakeUci::default().reply("changes dhcp", Err("no uci"));
+        assert!(commit_dhcp(&mut uci).is_err());
+        assert_eq!(uci.calls, vec!["changes dhcp"]);
     }
 
     #[test]
