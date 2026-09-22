@@ -78,6 +78,14 @@ var withSlowCallTimeout = function(call) {
     return pending.then(function(v) { restore(); return v; }, function(e) { restore(); throw e; });
 };
 
+// error_code of a bridge reply that gave up on a hung daemon. The older
+// per-country gateway RPCs ask the same daemon, so falling back to them
+// after one would only add another wait.
+var DAEMON_TIMEOUT = 'daemon_timeout';
+var isDaemonTimeout = function(err) {
+    return !!err && err.code === DAEMON_TIMEOUT;
+};
+
 // The daemon's error-state reason for a non-independent pair. The bridge
 // passes the variant name through (error_reason_ident), so match case- and
 // separator-insensitively: both NeedsRelaxedIndependenceCriteria and
@@ -190,14 +198,18 @@ return baseclass.extend({
     },
 
     // Full list for one gateway type, cached for the session. Rejects when
-    // the bridge cannot serve it (older backend); the failure is not cached
-    // so the next interaction retries.
+    // the bridge cannot serve it (older backend), with the reply's
+    // error_code as err.code; the failure is not cached so the next
+    // interaction retries.
     gatewayList: function(gwType) {
         var self = this;
         if (!this.gatewayListCache[gwType]) {
             this.gatewayListCache[gwType] = rpc.gatewayListFull(gwType).then(function(result) {
-                if (!result || !Array.isArray(result.gateways))
-                    throw new Error((result && result.error) || 'Invalid gateway list');
+                if (!result || !Array.isArray(result.gateways)) {
+                    var err = new Error((result && result.error) || 'Invalid gateway list');
+                    if (result && result.error_code) err.code = result.error_code;
+                    throw err;
+                }
                 if (result.error && result.gateways.length === 0)
                     throw new Error(result.error);
                 return result.gateways;
@@ -221,7 +233,8 @@ return baseclass.extend({
             return Object.keys(counts).sort().map(function(code) {
                 return { code: code, count: counts[code] };
             });
-        }).catch(function() {
+        }).catch(function(err) {
+            if (isDaemonTimeout(err)) throw err;
             return self.countryCache[gwType]
                 ? Promise.resolve(self.countryCache[gwType])
                 : rpc.gatewayListCountries(gwType).then(function(result) {
@@ -237,7 +250,8 @@ return baseclass.extend({
     gatewaysForCountry: function(gwType, country) {
         return this.gatewayList(gwType).then(function(list) {
             return { gateways: list.filter(function(gw) { return gw.country === country; }) };
-        }).catch(function() {
+        }).catch(function(err) {
+            if (isDaemonTimeout(err)) throw err;
             return rpc.gatewayListByCountry(gwType, country);
         });
     },

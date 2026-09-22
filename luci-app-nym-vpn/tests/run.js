@@ -986,6 +986,19 @@ async function scenarioDaemonTimeout() {
   await sleep(20);
   check(/Service not responding/.test(card(t2, 'Account').textContent) && !card(t2, 'Account').querySelector('textarea'), 'timed-out status poll: account card says the service is not responding, no login form');
 
+  // A timed-out gateway list does not fall back to the per-country RPCs,
+  // which would each wait on the same hung daemon again.
+  const hung = { success: false, error: TIMEOUT, error_code: 'daemon_timeout' };
+  const tGw = setup({ rpc: { gateway_list_full: hung, gateway_list_countries: { countries: [{ code: 'DE', count: 1 }] } } });
+  await q(tGw, 'select[name="entry_country"]').ensureLoaded();
+  check(callsTo(tGw, 'gateway_list_countries').length === 0 && q(tGw, 'select[name="entry_country"]').options[0].textContent === '— Failed to load —', 'timed-out gateway list: no per-country fallback, dropdown says it failed');
+  const tGw2 = setup({ rpc: { gateway_list_full: hung, gateway_list_by_country: { gateways: [GATEWAYS[0]] } } });
+  const rejected = await tGw2.modules['nym-vpn.api'].gatewaysForCountry('mixnet-entry', 'DE').then(() => null, (e) => e);
+  check(callsTo(tGw2, 'gateway_list_by_country').length === 0 && rejected && rejected.code === 'daemon_timeout' && rejected.message === TIMEOUT, 'timed-out gateway list: no per-country list fallback, rejects with the reason');
+  const tOld = setup({ rpc: { gateway_list_full: { error: 'no bridge' }, gateway_list_countries: { countries: [{ code: 'DE', count: 1 }] } } });
+  await q(tOld, 'select[name="entry_country"]').ensureLoaded();
+  check(callsTo(tOld, 'gateway_list_countries').length === 1, 'other failures still fall back for older backends');
+
   let diagTimeout;
   const t3 = setup({ rpc: { diagnostic_run: () => { diagTimeout = t3.L.env.rpctimeout; return { success: false, error: 'The VPN service did not answer within 28 s', error_code: 'daemon_timeout' }; } } });
   card(t3, 'Diagnostics').querySelector('button').click();
