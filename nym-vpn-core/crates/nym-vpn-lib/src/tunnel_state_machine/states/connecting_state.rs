@@ -9,7 +9,12 @@ use futures::{
     FutureExt,
     future::{BoxFuture, Fuse},
 };
-use tokio::{sync::mpsc, time::Instant};
+use nix::sys::socket::{SetSockOpt, sockopt::Mark};
+use tokio::{
+    net::{TcpSocket, TcpStream},
+    sync::mpsc,
+    time::Instant,
+};
 use tokio_util::sync::CancellationToken;
 
 use crate::tunnel_state_machine::Error;
@@ -436,14 +441,19 @@ impl ConnectingState {
     }
 
     /// Reaching any API endpoint proves the local network is up. No known
-    /// endpoints counts as unreachable, so the grace stands.
+    /// endpoints counts as unreachable, so the grace stands. The probe runs
+    /// while the tunnel routes may still be in place, so it carries the
+    /// tunnel fwmark to leave via the WAN; the firewall admits it as a
+    /// root-owned API connection (not on fw3 without the owner match, where
+    /// it fails and the grace stands).
     async fn any_api_endpoint_reachable(shared_state: &SharedState) -> bool {
-        let probes: Vec<_> = shared_state
-            .api_endpoints
-            .iter()
-            .take(2)
-            .map(|addr| Box::pin(tokio::net::TcpStream::connect(*addr)))
-            .collect();
+        let fwmark = shared_state.tunnel_constants.fwmark;
+        let probes: Vec<_> = api_probe_targets(
+            &shared_state.api_endpoints,
+            shared_state.tunnel_settings.enable_ipv6,
+        )
+        .map(|addr| Box::pin(connect_bypassing_tunnel(addr, fwmark)))
+        .collect();
         if probes.is_empty() {
             return false;
         }
@@ -899,6 +909,30 @@ fn wait_delay(retry_attempt: u32) -> Duration {
     }
 }
 
+/// At most two endpoints, of an address family the tunnel settings allow.
+fn api_probe_targets(
+    endpoints: &[SocketAddr],
+    enable_ipv6: bool,
+) -> impl Iterator<Item = SocketAddr> + '_ {
+    endpoints
+        .iter()
+        .filter(move |addr| addr.is_ipv4() || (enable_ipv6 && addr.is_ipv6()))
+        .take(2)
+        .copied()
+}
+
+/// Not bound to a device: the fwmark keeps the main table's choice of
+/// uplink, which multi-WAN setups (mwan3) rely on.
+async fn connect_bypassing_tunnel(addr: SocketAddr, fwmark: u32) -> std::io::Result<TcpStream> {
+    let socket = if addr.is_ipv4() {
+        TcpSocket::new_v4()?
+    } else {
+        TcpSocket::new_v6()?
+    };
+    Mark.set(&socket, &fwmark)?;
+    socket.connect(addr).await
+}
+
 /// Whether the post-drop grace still shields `entry` at `now`.
 fn grace_covers(entry: NodeIdentity, grace: Option<(NodeIdentity, Instant)>, now: Instant) -> bool {
     matches!(grace, Some((identity, deadline)) if identity == entry && now < deadline)
@@ -972,6 +1006,25 @@ mod test {
         assert!(!grace_pending);
         assert!(!keep_gateways(2, grace_pending, false));
         assert!(keep_gateways(2, grace_pending, true));
+    }
+
+    #[test]
+    fn api_probe_skips_disabled_ipv6_endpoints() {
+        let endpoints: Vec<SocketAddr> = [
+            "[2001:db8::1]:443",
+            "[2001:db8::2]:443",
+            "192.0.2.1:443",
+            "192.0.2.2:443",
+            "192.0.2.3:443",
+        ]
+        .iter()
+        .map(|addr| addr.parse().unwrap())
+        .collect();
+
+        let targets: Vec<_> = api_probe_targets(&endpoints, false).collect();
+        assert_eq!(targets, endpoints[2..4]);
+        let targets: Vec<_> = api_probe_targets(&endpoints, true).collect();
+        assert_eq!(targets, endpoints[..2]);
     }
 
     #[test]
