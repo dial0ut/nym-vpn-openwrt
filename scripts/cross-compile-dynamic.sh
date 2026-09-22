@@ -5,14 +5,13 @@
 # This script runs INSIDE the messense/rust-musl-cross container
 #
 # Unlike cross-compile-musl.sh (fully static), this produces dynamically linked
-# binaries that depend on the target system's musl libc, libmnl, and libnftnl.
-# This is the standard approach for OpenWrt packages — smaller binaries, shared
+# binaries that depend on the target system's musl libc and libgcc_s. This is
+# the standard approach for OpenWrt packages — smaller binaries, shared
 # libraries get security updates via opkg, and no duplicate musl in each binary.
 #
 # Runtime dependencies (provided by OpenWrt packages):
 #   libc          - musl libc (always present)
-#   libmnl        - minimalistic netlink library
-#   libnftnl      - nftables netlink library
+#   libgcc        - libgcc_s.so.1 (unwinding)
 #   kmod-tun      - TUN kernel module
 #
 # Usage from host:
@@ -49,7 +48,6 @@ if [ -z "${TARGET:-}" ]; then
     fi
 fi
 MUSL_PREFIX="/usr/local/musl/${TARGET}"
-BUILD_DIR="/tmp/musl-build"
 
 check_arch() {
     local arch=$(uname -m)
@@ -107,111 +105,6 @@ install_system_deps() {
     log_info "protoc version: $(protoc --version)"
 }
 
-compile_libmnl() {
-    log_info "Compiling libmnl ${LIBMNL_VERSION} (shared) for ${TARGET}..."
-
-    # Check if already installed (shared library)
-    if [ -f "${MUSL_PREFIX}/lib/libmnl.so" ]; then
-        log_info "libmnl already compiled, skipping..."
-        return 0
-    fi
-
-    mkdir -p "$BUILD_DIR"
-    cd "$BUILD_DIR"
-
-    local tarball="libmnl-${LIBMNL_VERSION}.tar.bz2"
-    if [ ! -f "$tarball" ]; then
-        log_info "Downloading libmnl..."
-        curl -fsSL "https://www.netfilter.org/projects/libmnl/files/${tarball}" -o "${tarball}"
-    fi
-
-    log_info "Extracting libmnl..."
-    tar xjf "${tarball}"
-    cd "libmnl-${LIBMNL_VERSION}"
-
-    log_info "Configuring libmnl..."
-    CC="${TARGET}-gcc" \
-    CFLAGS="-fPIC" \
-    ./configure \
-        --host="${TARGET}" \
-        --prefix="${MUSL_PREFIX}" \
-        --enable-shared \
-        --disable-static \
-        --quiet
-
-    log_info "Building libmnl..."
-    make -j$(nproc) > /dev/null
-
-    log_info "Installing libmnl..."
-    make install > /dev/null
-
-    log_info "libmnl compiled successfully (shared)"
-}
-
-compile_libnftnl() {
-    log_info "Compiling libnftnl ${LIBNFTNL_VERSION} (shared) for ${TARGET}..."
-
-    # Check if already installed (shared library)
-    if [ -f "${MUSL_PREFIX}/lib/libnftnl.so" ]; then
-        log_info "libnftnl already compiled, skipping..."
-        return 0
-    fi
-
-    mkdir -p "$BUILD_DIR"
-    cd "$BUILD_DIR"
-
-    local tarball="libnftnl-${LIBNFTNL_VERSION}.tar.bz2"
-    if [ ! -f "$tarball" ]; then
-        log_info "Downloading libnftnl..."
-        curl -fsSL "https://www.netfilter.org/projects/libnftnl/files/${tarball}" -o "${tarball}"
-    fi
-
-    log_info "Extracting libnftnl..."
-    tar xjf "${tarball}"
-    cd "libnftnl-${LIBNFTNL_VERSION}"
-
-    log_info "Configuring libnftnl..."
-    PKG_CONFIG_PATH="${MUSL_PREFIX}/lib/pkgconfig" \
-    CC="${TARGET}-gcc" \
-    CFLAGS="-fPIC" \
-    ./configure \
-        --host="${TARGET}" \
-        --prefix="${MUSL_PREFIX}" \
-        --enable-shared \
-        --disable-static \
-        --quiet
-
-    log_info "Building libnftnl..."
-    make -j$(nproc) > /dev/null
-
-    log_info "Installing libnftnl..."
-    make install > /dev/null
-
-    log_info "libnftnl compiled successfully (shared)"
-}
-
-verify_pkg_config() {
-    log_info "Verifying pkg-config setup..."
-
-    export PKG_CONFIG_PATH="${MUSL_PREFIX}/lib/pkgconfig"
-
-    if pkg-config --exists libmnl; then
-        log_info "✓ libmnl found via pkg-config"
-        pkg-config --libs --cflags libmnl
-    else
-        log_error "✗ libmnl NOT found via pkg-config"
-        exit 1
-    fi
-
-    if pkg-config --exists libnftnl; then
-        log_info "✓ libnftnl found via pkg-config"
-        pkg-config --libs --cflags libnftnl
-    else
-        log_error "✗ libnftnl NOT found via pkg-config"
-        exit 1
-    fi
-}
-
 build_nym_vpnd() {
     log_info "Building nym-vpnd for ${TARGET} (dynamic linking)..."
 
@@ -225,11 +118,11 @@ build_nym_vpnd() {
         rustup target add armv5te-unknown-linux-musleabi || true
 
         # Override TARGET to use ARMv5TE
-        # Note: We keep MUSL_PREFIX pointing to arm-unknown-linux-musleabi
-        # since that's where the C libraries were installed
+        # Note: MUSL_PREFIX keeps pointing at the arm-unknown-linux-musleabi
+        # toolchain sysroot
         TARGET="armv5te-unknown-linux-musleabi"
         log_info "Using Rust target: ${TARGET} (ARMv5TE soft-float, will use portable-atomic)"
-        log_info "C libraries path remains: ${MUSL_PREFIX}"
+        log_info "Sysroot remains: ${MUSL_PREFIX}"
 
         # Configure Cargo to use the arm-musleabi toolchain for armv5te target
         export CARGO_TARGET_ARMV5TE_UNKNOWN_LINUX_MUSLEABI_LINKER=arm-unknown-linux-musleabi-gcc
@@ -333,22 +226,13 @@ build_nym_vpnd() {
     fi
 }
 
-cleanup() {
-    log_info "Cleaning up build artifacts..."
-    rm -rf "$BUILD_DIR"
-    log_info "Cleanup complete"
-}
-
 main() {
     log_info "=== Cross-compiling nym-vpnd for OpenWrt/musl (${TARGET}) ==="
-    log_info "=== Dynamic linking — depends on system musl, libmnl, libnftnl ==="
+    log_info "=== Dynamic linking — depends on system musl and libgcc_s ==="
     log_info ""
 
     check_arch
     install_system_deps
-    compile_libmnl
-    compile_libnftnl
-    verify_pkg_config
     build_nym_vpnd
 
     log_info ""
@@ -359,8 +243,7 @@ main() {
     log_info ""
     log_info "These binaries are dynamically linked. The target OpenWrt device needs:"
     log_info "  - libc (musl — always present on OpenWrt)"
-    log_info "  - libmnl (opkg install libmnl)"
-    log_info "  - libnftnl (opkg install libnftnl)"
+    log_info "  - libgcc (libgcc_s.so.1)"
     log_info "  - kmod-tun (opkg install kmod-tun)"
     log_info ""
 }

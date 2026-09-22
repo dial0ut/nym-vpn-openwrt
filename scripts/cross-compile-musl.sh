@@ -50,7 +50,6 @@ if [ -z "${TARGET:-}" ]; then
     fi
 fi
 MUSL_PREFIX="/usr/local/musl/${TARGET}"
-BUILD_DIR="/tmp/musl-build"
 
 check_arch() {
     local arch=$(uname -m)
@@ -105,111 +104,6 @@ install_system_deps() {
     # Always ensure protoc is in PATH (may have been installed in previous run)
     export PATH="$PATH:$HOME/.local/bin"
     log_info "protoc version: $(protoc --version)"
-}
-
-compile_libmnl() {
-    log_info "Compiling libmnl ${LIBMNL_VERSION} for ${TARGET}..."
-
-    # Check if already installed
-    if [ -f "${MUSL_PREFIX}/lib/libmnl.a" ]; then
-        log_info "libmnl already compiled, skipping..."
-        return 0
-    fi
-
-    mkdir -p "$BUILD_DIR"
-    cd "$BUILD_DIR"
-
-    local tarball="libmnl-${LIBMNL_VERSION}.tar.bz2"
-    if [ ! -f "$tarball" ]; then
-        log_info "Downloading libmnl..."
-        curl -fsSL "https://www.netfilter.org/projects/libmnl/files/${tarball}" -o "${tarball}"
-    fi
-
-    log_info "Extracting libmnl..."
-    tar xjf "${tarball}"
-    cd "libmnl-${LIBMNL_VERSION}"
-
-    log_info "Configuring libmnl..."
-    CC="${TARGET}-gcc" \
-    CFLAGS="-fPIC" \
-    ./configure \
-        --host="${TARGET}" \
-        --prefix="${MUSL_PREFIX}" \
-        --enable-static \
-        --disable-shared \
-        --quiet
-
-    log_info "Building libmnl..."
-    make -j$(nproc) > /dev/null
-
-    log_info "Installing libmnl..."
-    make install > /dev/null
-
-    log_info "libmnl compiled successfully"
-}
-
-compile_libnftnl() {
-    log_info "Compiling libnftnl ${LIBNFTNL_VERSION} for ${TARGET}..."
-
-    # Check if already installed
-    if [ -f "${MUSL_PREFIX}/lib/libnftnl.a" ]; then
-        log_info "libnftnl already compiled, skipping..."
-        return 0
-    fi
-
-    mkdir -p "$BUILD_DIR"
-    cd "$BUILD_DIR"
-
-    local tarball="libnftnl-${LIBNFTNL_VERSION}.tar.bz2"
-    if [ ! -f "$tarball" ]; then
-        log_info "Downloading libnftnl..."
-        curl -fsSL "https://www.netfilter.org/projects/libnftnl/files/${tarball}" -o "${tarball}"
-    fi
-
-    log_info "Extracting libnftnl..."
-    tar xjf "${tarball}"
-    cd "libnftnl-${LIBNFTNL_VERSION}"
-
-    log_info "Configuring libnftnl..."
-    PKG_CONFIG_PATH="${MUSL_PREFIX}/lib/pkgconfig" \
-    CC="${TARGET}-gcc" \
-    CFLAGS="-fPIC" \
-    ./configure \
-        --host="${TARGET}" \
-        --prefix="${MUSL_PREFIX}" \
-        --enable-static \
-        --disable-shared \
-        --quiet
-
-    log_info "Building libnftnl..."
-    make -j$(nproc) > /dev/null
-
-    log_info "Installing libnftnl..."
-    make install > /dev/null
-
-    log_info "libnftnl compiled successfully"
-}
-
-verify_pkg_config() {
-    log_info "Verifying pkg-config setup..."
-
-    export PKG_CONFIG_PATH="${MUSL_PREFIX}/lib/pkgconfig"
-
-    if pkg-config --exists libmnl; then
-        log_info "✓ libmnl found via pkg-config"
-        pkg-config --libs --cflags libmnl
-    else
-        log_error "✗ libmnl NOT found via pkg-config"
-        exit 1
-    fi
-
-    if pkg-config --exists libnftnl; then
-        log_info "✓ libnftnl found via pkg-config"
-        pkg-config --libs --cflags libnftnl
-    else
-        log_error "✗ libnftnl NOT found via pkg-config"
-        exit 1
-    fi
 }
 
 build_nym_vpnd() {
@@ -340,12 +234,6 @@ build_nym_vpnd() {
     fi
 }
 
-cleanup() {
-    log_info "Cleaning up build artifacts..."
-    rm -rf "$BUILD_DIR"
-    log_info "Cleanup complete"
-}
-
 main() {
     log_info "=== Cross-compiling nym-vpnd for OpenWRT/musl (${TARGET}) ==="
     log_info "=== Using gotatun (pure Rust userspace WireGuard) ==="
@@ -353,9 +241,6 @@ main() {
 
     check_arch
     install_system_deps
-    compile_libmnl
-    compile_libnftnl
-    verify_pkg_config
     build_nym_vpnd
 
     log_info ""

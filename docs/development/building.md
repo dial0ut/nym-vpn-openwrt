@@ -2,9 +2,10 @@
 
 You need Docker and Git. Everything compiles inside containers — no local Rust toolchain.
 
-Binaries link dynamically against the target's musl libc, `libmnl` and `libnftnl`, which is the
-normal arrangement for OpenWrt packages: smaller binaries, and the shared libraries get security
-updates through the package manager instead of being frozen into every build.
+Binaries link dynamically against the target's musl libc and `libgcc_s`, which is the normal
+arrangement for OpenWrt packages: smaller binaries, and the shared libraries get security updates
+through the package manager instead of being frozen into every build. No other C library is
+linked; the firewall is driven through the `nft` and `iptables-restore` binaries.
 
 ## Tier 2 (stable Rust)
 
@@ -37,8 +38,8 @@ Inside the container, `cross-compile-dynamic.sh`:
 1. Detects the target from the available cross-compiler, unless `TARGET` is set
 2. Installs `pkg-config`, `curl`, and `protoc` 30.2 — the apt `protoc` is too old for
    `proto3 optional`
-3. Builds `libmnl` and `libnftnl` from source as shared libraries
-   (`--enable-shared --disable-static`, `CFLAGS=-fPIC`)
+3. On 32-bit targets (armv7, i686), applies the nym ecash fix via
+   `patch-crates.sh --ecash-only` after `cargo fetch`
 4. Builds `nym-vpnd` and `nym-vpnc` with `cargo build --bins --release`
 
 Binaries land in `nym-vpn-core/target/<triple>/release/`.
@@ -80,14 +81,15 @@ filesystem inside the container fixes it.
 1. Detects target and compiler triplet from the available GCC
 2. Switches to nightly, installs `rust-src`
 3. Copies the tree to `/tmp/nym-build`
-4. Builds `libmnl` and `libnftnl` with target CFLAGS
-5. Applies crate patches via `patch-crates.sh`:
+4. Applies crate patches via `patch-crates.sh`, which fails the build when one does not apply:
     - `schemars` — `BTreeMap` instead of `IndexMap`
-    - `coarsetime` — `portable-atomic` for `AtomicU64`
-    - `prometheus` — `portable-atomic` for `AtomicU64`/`AtomicI64`
-6. `cargo build --release -Z build-std=std,panic_abort`
-7. Strips with the target `strip`
-8. Copies binaries back to the mounted volume
+    - without 64-bit atomics (mips, armv5te): `portable-atomic` for `coarsetime`, `prometheus`,
+      `boringtun`, `opentelemetry_sdk`, gotatun and the nym gateway client
+    - every 32-bit target: the nym ecash fix (key lengths serialised as `u64`)
+5. `cargo build --release -Z build-std=std,panic_abort`, then fails if `Cargo.lock` lists an
+   unused patch (`scripts/ci/check-cargo-patches.sh`)
+6. Strips with the target `strip`
+7. Copies binaries back to the mounted volume
 
 Plain GCC is used as the linker. The CRT-path wrapper scripts in `docker/tier3-musl/` are only
 needed when Rust passes bare `crt*.o` filenames, which it does not do here.
@@ -114,4 +116,6 @@ As of v1.33.1:
 `nym-vpnd` is smallest on armv5te and riscv64 (~18 MB), ~24 MB on mips and mipsel, and 31–33 MB
 on aarch64, armv7, i686 and x86_64. Packaged `.ipk`/`.apk` compress to roughly half that.
 
-Runtime dependencies are `libc`, `libmnl`, `libnftnl` and `kmod-tun`, all declared by the package.
+The release workflow checks every binary with `scripts/ci/check-elf.sh`: it may need only
+`libc.so` and `libgcc_s.so.1`, and its imports must exist in musl 1.1.24 (OpenWrt 21.02), plus the
+time64 symbols on 32-bit.

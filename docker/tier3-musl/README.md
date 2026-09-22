@@ -67,7 +67,6 @@ objdump -p nym-vpn-core/target/mipsel-unknown-linux-musl/release/nym-vpnd | grep
 
 Expect 15-30 minutes per target due to:
 - Compiling rust-std from source (`-Z build-std`)
-- Cross-compiling native dependencies (libmnl, libnftnl)
 - Full release build with thin LTO
 
 ## Technical Details

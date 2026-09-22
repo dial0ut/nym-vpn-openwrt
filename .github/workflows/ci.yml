@@ -94,11 +94,11 @@ jobs:
 
       - name: Install build dependencies
         # protoc plus the google/protobuf well-known-type includes for
-        # nym-vpn-proto; libnftnl/libmnl headers for nym-firewall's sys crates.
+        # nym-vpn-proto.
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends \
-            protobuf-compiler libprotobuf-dev libnftnl-dev libmnl-dev pkg-config
+            protobuf-compiler libprotobuf-dev pkg-config
 
       - name: Install Rust
         run: |

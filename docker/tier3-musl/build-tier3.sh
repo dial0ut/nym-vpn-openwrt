@@ -84,58 +84,7 @@ rsync -a --exclude='target' --exclude='.git' --exclude='*.git' \
 
 log_info "Source copied to $BUILD_DIR"
 
-# Step 2: Build native dependencies (libmnl, libnftnl)
-log_info "Building native dependencies..."
-
-DEPS_DIR="/tmp/deps-build"
-
-mkdir -p "$DEPS_DIR"
-
-# Set target-specific CFLAGS for native dependencies
-NATIVE_CFLAGS="-fPIC"
-if [[ "$TARGET" == mips* ]]; then
-    # MIPS 24Kc cores require mips32r2 ISA and have no FPU (soft-float)
-    NATIVE_CFLAGS="-fPIC -mips32r2 -msoft-float"
-fi
-
-# Build libmnl if not present
-if [ ! -f "${MUSL_PREFIX}/${COMPILER_TRIPLET}/lib/libmnl.a" ]; then
-    log_info "Building libmnl ${LIBMNL_VERSION}..."
-    cd "$DEPS_DIR"
-    curl -fsSL "https://www.netfilter.org/projects/libmnl/files/libmnl-${LIBMNL_VERSION}.tar.bz2" -o libmnl.tar.bz2
-    tar xjf libmnl.tar.bz2
-    cd "libmnl-${LIBMNL_VERSION}"
-    CC="${COMPILER_TRIPLET}-gcc" CFLAGS="${NATIVE_CFLAGS}" ./configure \
-        --host="${COMPILER_TRIPLET}" \
-        --prefix="${MUSL_PREFIX}/${COMPILER_TRIPLET}" \
-        --enable-static --disable-shared --quiet
-    make -j$(nproc) > /dev/null
-    make install > /dev/null
-    log_info "libmnl installed"
-else
-    log_info "libmnl already installed"
-fi
-
-# Build libnftnl if not present
-if [ ! -f "${MUSL_PREFIX}/${COMPILER_TRIPLET}/lib/libnftnl.a" ]; then
-    log_info "Building libnftnl ${LIBNFTNL_VERSION}..."
-    cd "$DEPS_DIR"
-    curl -fsSL "https://www.netfilter.org/projects/libnftnl/files/libnftnl-${LIBNFTNL_VERSION}.tar.bz2" -o libnftnl.tar.bz2
-    tar xjf libnftnl.tar.bz2
-    cd "libnftnl-${LIBNFTNL_VERSION}"
-    PKG_CONFIG_PATH="${MUSL_PREFIX}/${COMPILER_TRIPLET}/lib/pkgconfig" \
-    CC="${COMPILER_TRIPLET}-gcc" CFLAGS="${NATIVE_CFLAGS}" ./configure \
-        --host="${COMPILER_TRIPLET}" \
-        --prefix="${MUSL_PREFIX}/${COMPILER_TRIPLET}" \
-        --enable-static --disable-shared --quiet
-    make -j$(nproc) > /dev/null
-    make install > /dev/null
-    log_info "libnftnl installed"
-else
-    log_info "libnftnl already installed"
-fi
-
-# Step 3: Build nym-vpn
+# Step 2: Build nym-vpn
 cd "$BUILD_DIR/nym-vpn-core"
 
 # Tier 3 Target Patches
@@ -275,7 +224,7 @@ cargo build \
 # that missed the resolved version would have built the unpatched crate.
 bash "$BUILD_DIR/scripts/ci/check-cargo-patches.sh" "$BUILD_DIR/nym-vpn-core/Cargo.lock"
 
-# Step 4: Strip binaries for size optimization
+# Step 3: Strip binaries for size optimization
 log_info "Stripping binaries..."
 BINARY_DIR="$BUILD_DIR/nym-vpn-core/target/${TARGET}/release"
 
@@ -286,7 +235,7 @@ if [ -f "$BINARY_DIR/nym-vpnc" ]; then
     ${COMPILER_TRIPLET}-strip "$BINARY_DIR/nym-vpnc"
 fi
 
-# Step 5: Copy binaries back to mounted volume
+# Step 4: Copy binaries back to mounted volume
 log_info "Copying binaries back to mounted volume..."
 OUTPUT_DIR="$MOUNT_DIR/nym-vpn-core/target/${TARGET}/release"
 
@@ -307,5 +256,5 @@ if [ -f "$OUTPUT_DIR/nym-vpnc" ]; then
 fi
 
 # Cleanup
-rm -rf "$BUILD_DIR" "$DEPS_DIR"
+rm -rf "$BUILD_DIR"
 log_info "Cleanup complete"

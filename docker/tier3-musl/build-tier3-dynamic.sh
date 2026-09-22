@@ -1,12 +1,11 @@
 #!/bin/bash
 # Build script for Tier 3 musl targets (mips, mipsel, riscv64) — dynamic linking
-# Produces dynamically linked binaries that depend on the target system's musl libc,
-# libmnl, and libnftnl. Smaller binaries than static, standard for OpenWrt packages.
+# Produces dynamically linked binaries that depend on the target system's musl libc
+# and libgcc_s. Smaller binaries than static, standard for OpenWrt packages.
 #
 # Based on build-tier3.sh but removes all static linking machinery:
 #   - No +crt-static, -static, -static-libgcc
 #   - No GCC wrapper scripts (only needed for CRT path fixups in static mode)
-#   - Shared libmnl/libnftnl instead of static
 #   - Uses plain GCC as linker for all targets
 
 set -euo pipefail
@@ -76,56 +75,7 @@ rsync -a --exclude='target' --exclude='.git' --exclude='*.git' \
 
 log_info "Source copied to $BUILD_DIR"
 
-# Step 2: Build native dependencies as shared libraries
-log_info "Building native dependencies (shared)..."
-
-DEPS_DIR="/tmp/deps-build"
-mkdir -p "$DEPS_DIR"
-
-# Set target-specific CFLAGS for native dependencies
-NATIVE_CFLAGS="-fPIC"
-if [[ "$TARGET" == mips* ]]; then
-    NATIVE_CFLAGS="-fPIC -mips32r2 -msoft-float"
-fi
-
-# Build libmnl (shared)
-if [ ! -f "${MUSL_PREFIX}/${COMPILER_TRIPLET}/lib/libmnl.so" ]; then
-    log_info "Building libmnl ${LIBMNL_VERSION} (shared)..."
-    cd "$DEPS_DIR"
-    curl -fsSL "https://www.netfilter.org/projects/libmnl/files/libmnl-${LIBMNL_VERSION}.tar.bz2" -o libmnl.tar.bz2
-    tar xjf libmnl.tar.bz2
-    cd "libmnl-${LIBMNL_VERSION}"
-    CC="${COMPILER_TRIPLET}-gcc" CFLAGS="${NATIVE_CFLAGS}" ./configure \
-        --host="${COMPILER_TRIPLET}" \
-        --prefix="${MUSL_PREFIX}/${COMPILER_TRIPLET}" \
-        --enable-shared --disable-static --quiet
-    make -j$(nproc) > /dev/null
-    make install > /dev/null
-    log_info "libmnl installed (shared)"
-else
-    log_info "libmnl already installed"
-fi
-
-# Build libnftnl (shared)
-if [ ! -f "${MUSL_PREFIX}/${COMPILER_TRIPLET}/lib/libnftnl.so" ]; then
-    log_info "Building libnftnl ${LIBNFTNL_VERSION} (shared)..."
-    cd "$DEPS_DIR"
-    curl -fsSL "https://www.netfilter.org/projects/libnftnl/files/libnftnl-${LIBNFTNL_VERSION}.tar.bz2" -o libnftnl.tar.bz2
-    tar xjf libnftnl.tar.bz2
-    cd "libnftnl-${LIBNFTNL_VERSION}"
-    PKG_CONFIG_PATH="${MUSL_PREFIX}/${COMPILER_TRIPLET}/lib/pkgconfig" \
-    CC="${COMPILER_TRIPLET}-gcc" CFLAGS="${NATIVE_CFLAGS}" ./configure \
-        --host="${COMPILER_TRIPLET}" \
-        --prefix="${MUSL_PREFIX}/${COMPILER_TRIPLET}" \
-        --enable-shared --disable-static --quiet
-    make -j$(nproc) > /dev/null
-    make install > /dev/null
-    log_info "libnftnl installed (shared)"
-else
-    log_info "libnftnl already installed"
-fi
-
-# Step 3: Build nym-vpn
+# Step 2: Build nym-vpn
 cd "$BUILD_DIR/nym-vpn-core"
 
 PATCH_SCRIPT="$BUILD_DIR/docker/tier3-musl/patch-crates.sh"
@@ -192,7 +142,7 @@ cargo build \
 # that missed the resolved version would have built the unpatched crate.
 bash "$BUILD_DIR/scripts/ci/check-cargo-patches.sh" "$BUILD_DIR/nym-vpn-core/Cargo.lock"
 
-# Step 4: Strip binaries
+# Step 3: Strip binaries
 log_info "Stripping binaries..."
 BINARY_DIR="$BUILD_DIR/nym-vpn-core/target/${TARGET}/release"
 
@@ -203,7 +153,7 @@ if [ -f "$BINARY_DIR/nym-vpnc" ]; then
     ${COMPILER_TRIPLET}-strip "$BINARY_DIR/nym-vpnc"
 fi
 
-# Step 5: Copy binaries back to mounted volume
+# Step 4: Copy binaries back to mounted volume
 log_info "Copying binaries back to mounted volume..."
 OUTPUT_DIR="$MOUNT_DIR/nym-vpn-core/target/${TARGET}/release"
 
@@ -224,8 +174,8 @@ fi
 
 log_info ""
 log_info "These binaries are dynamically linked. The target device needs:"
-log_info "  libc (musl), libmnl, libnftnl, kmod-tun"
+log_info "  libc (musl), libgcc (libgcc_s.so.1), kmod-tun"
 
 # Cleanup
-rm -rf "$BUILD_DIR" "$DEPS_DIR"
+rm -rf "$BUILD_DIR"
 log_info "Cleanup complete"

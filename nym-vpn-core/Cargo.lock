@@ -3336,17 +3336,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf370abdafd54d13e54a620e8c3e1145f28e46cc9d704bc6d94414559df41763"
 
 [[package]]
-name = "iptables"
-version = "0.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "587f29670d67df4c7af1631928dcc592e24e897e961f89b06b142b95702ce21f"
-dependencies = [
- "lazy_static",
- "nix 0.29.0",
- "regex",
-]
-
-[[package]]
 name = "iri-string"
 version = "0.7.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3971,27 +3960,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mnl"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f15c13b46a48d07ffae279f54a43ebfb0badee28a59a32aacdddc67effa2c4db"
-dependencies = [
- "libc",
- "log",
- "mnl-sys",
-]
-
-[[package]]
-name = "mnl-sys"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0f3c607af12ed53f3cade8ee7adeced5533800abc0b07f5b6bdc7081d1e0d4c"
-dependencies = [
- "libc",
- "pkg-config",
-]
-
-[[package]]
 name = "moka"
 version = "0.12.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4060,29 +4028,6 @@ dependencies = [
  "libc",
  "log",
  "tokio",
-]
-
-[[package]]
-name = "nftnl"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06a7491dd91b71643f65546389f25506da70723d1f1ec8c8d6d20444d1c23f27"
-dependencies = [
- "bitflags 2.11.0",
- "log",
- "nftnl-sys",
-]
-
-[[package]]
-name = "nftnl-sys"
-version = "0.6.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cffa28b4c81eea6a8a4fd454634d425e1a559250a50a926de4517dd9607fe9a4"
-dependencies = [
- "cfg-if",
- "libc",
- "mnl-sys",
- "pkg-config",
 ]
 
 [[package]]
@@ -4893,10 +4838,7 @@ name = "nym-firewall"
 version = "1.35.0"
 dependencies = [
  "ipnetwork",
- "iptables",
  "libc",
- "mnl",
- "nftnl",
  "nix 0.31.2",
  "nym-dns",
  "nym-firewall-config",
