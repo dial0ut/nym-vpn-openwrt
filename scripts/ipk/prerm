@@ -135,28 +135,46 @@ if [ "$PKG_UPGRADE" != "1" ]; then
     uci -q delete firewall.nym_lan_fwd
     uci -q delete firewall.nym_zone
     uci commit firewall 2>/dev/null
+    # The split-tunnel drop-in the rpcd bridge writes; fw4 includes every
+    # file in /etc/nftables.d, so it goes before the reload.
+    rm -f /etc/nftables.d/30-nym-split.nft 2>/dev/null
     if [ -x /etc/init.d/firewall ]; then
         /etc/init.d/firewall reload >/dev/null 2>&1
     fi
 fi
 
-rm -f /tmp/dnsmasq.d/nym-adblock.conf 2>/dev/null
 rm -f /tmp/nym-dns-backup /tmp/resolv.conf.nymbackup 2>/dev/null
 # State file of the retired shell watchdog (<= 1.34.x).
 rm -f /var/run/nym-watchdog.state /tmp/nym-watchdog.state 2>/dev/null
 
 # Removal only: on an upgrade the new daemon reconverges DNS without a
-# restart, and a dnsmasq restart here would be a LAN-wide outage.
+# restart, and a dnsmasq restart here would be a LAN-wide outage. The adblock
+# drop-in stays on upgrade too: the new daemon reuses it without a download.
 if [ "$PKG_UPGRADE" != "1" ]; then
-    # Targeted revert so the user's own staged dhcp edits survive.
+    nym_dnsmasq_restart=0
+    # Targeted revert so the user's own staged dhcp edits survive, and so the
+    # commits below cannot persist the staged repoint.
     uci -q revert dhcp.@dnsmasq[0].resolvfile
     # LuCI Save&Apply may have committed the staged repoint.
     if grep -q "nym-resolv.conf" /etc/config/dhcp 2>/dev/null; then
         uci -q delete dhcp.@dnsmasq[0].resolvfile
         uci -q commit dhcp
     fi
+    # The split-tunnel domain sets the rpcd bridge adds to dhcp.
+    if uci -q get dhcp.nym_split_ipset >/dev/null; then
+        uci -q delete dhcp.nym_split_ipset
+        uci -q commit dhcp
+        nym_dnsmasq_restart=1
+    fi
+    if [ -e /tmp/dnsmasq.d/nym-adblock.conf ]; then
+        rm -f /tmp/dnsmasq.d/nym-adblock.conf
+        nym_dnsmasq_restart=1
+    fi
     rm -f /tmp/resolv.conf.d/nym-resolv.conf /tmp/resolv.conf.d/.nym-resolv.tmp 2>/dev/null
     if grep -qs "resolv-file=.*nym-resolv.conf" /var/etc/dnsmasq.conf.* 2>/dev/null; then
+        nym_dnsmasq_restart=1
+    fi
+    if [ "$nym_dnsmasq_restart" = 1 ]; then
         /etc/init.d/dnsmasq restart 2>/dev/null
     fi
 fi
