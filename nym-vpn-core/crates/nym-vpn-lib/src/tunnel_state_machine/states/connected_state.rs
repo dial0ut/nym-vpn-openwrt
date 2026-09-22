@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::tunnel_state_machine::{
     ConnectionData, NextTunnelState, PrivateActionAfterDisconnect, PrivateTunnelState,
-    SessionStart, SharedState, TunnelCommand, TunnelInterface, TunnelStateHandler, short_session,
+    SessionStart, SharedState, TunnelCommand, TunnelInterface, TunnelStateHandler,
     states::{ConnectingState, DisconnectingState},
     tunnel::SelectedGateways,
     tunnel_monitor::{TunnelMonitorEvent, TunnelMonitorEventReceiver, TunnelMonitorHandle},
@@ -29,8 +29,10 @@ pub struct ConnectedState {
     tunnel_interface: TunnelInterface,
     firewall_policy_params: ConnectedPolicyParameters,
     /// Set when the bandwidth controller ended the session, to the gateway
-    /// to blame as in `TunnelMonitorEvent::BandwidthFailed`.
+    /// to blame as in `TunnelMonitorEvent::BandwidthChecks`.
     bandwidth_failure: Option<Option<bool>>,
+    /// Whether the session's bandwidth checks worked.
+    bandwidth_checks_worked: bool,
     connected_at: SessionStart,
 }
 
@@ -82,6 +84,7 @@ impl ConnectedState {
             tunnel_interface,
             firewall_policy_params,
             bandwidth_failure: None,
+            bandwidth_checks_worked: false,
             connected_at: SessionStart::now(),
         };
 
@@ -184,7 +187,7 @@ impl ConnectedState {
 
         let lifetime = self.connected_at.lifetime();
         let tunnel_type = shared_state.tunnel_settings.tunnel_type;
-        let lasted = lifetime >= short_session(tunnel_type);
+        let worked = self.bandwidth_checks_worked;
 
         match (error_state_reason, self.bandwidth_failure) {
             (Some(block_reason), _) => {
@@ -195,7 +198,7 @@ impl ConnectedState {
                 // failed, so the local network is not the cause: no grace,
                 // and a backoff that grows with the streak.
                 shared_state.entry_gateway_grace = None;
-                let retry_attempt = shared_state.bandwidth_failure_streak.record_failure(lasted);
+                let retry_attempt = shared_state.bandwidth_failure_streak.record_failure(worked);
                 if !shared_state.bandwidth_failure_streak.ends_sessions() {
                     tracing::warn!(
                         "Bandwidth failures ended {retry_attempt} sessions in a row; \
@@ -225,7 +228,7 @@ impl ConnectedState {
             (None, None) => {
                 shared_state
                     .bandwidth_failure_streak
-                    .record_other_end(lasted);
+                    .record_other_end(worked);
 
                 // This session was viable moments ago, so reconnect failures in
                 // the near future are far more likely a local outage than the
@@ -337,8 +340,9 @@ impl TunnelStateHandler for ConnectedState {
                         _ = reply_tx.send(());
                         self.handle_tunnel_down(error_state_reason, shared_state).await
                     }
-                    TunnelMonitorEvent::BandwidthFailed { entry_culpable } => {
-                        self.bandwidth_failure = Some(entry_culpable);
+                    TunnelMonitorEvent::BandwidthChecks { failure, worked } => {
+                        self.bandwidth_failure = failure;
+                        self.bandwidth_checks_worked = worked;
                         NextTunnelState::SameState(self)
                     }
                     _ => {

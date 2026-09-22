@@ -50,7 +50,7 @@ use super::{
 };
 use crate::{
     DEFAULT_MIN_GATEWAY_PERFORMANCE, DEFAULT_MIN_MIXNODE_PERFORMANCE, UserAgent,
-    bandwidth_controller::{self, BandwidthController},
+    bandwidth_controller::{BandwidthController, BandwidthOutcome},
     mixnet::VpnTopologyServiceHandle,
     tunnel_state_machine::{
         TunnelConstants, account, ipv6_availability,
@@ -187,13 +187,17 @@ pub enum TunnelMonitorEvent {
     /// entry gateway must NOT be blacklisted.
     RegistrationFailed { entry_culpable: bool },
 
-    /// The bandwidth controller ended the session while the tunnel still
-    /// carried traffic. Sent before `Down`.
-    BandwidthFailed {
-        /// As for `RegistrationFailed` when a gateway kept failing its
-        /// queries or top-ups; `None` when the failure was on this side
-        /// (no ticket), so that no gateway is blamed.
-        entry_culpable: Option<bool>,
+    /// How the bandwidth checks of a WireGuard session went. Sent before
+    /// `Down`.
+    BandwidthChecks {
+        /// Set when the bandwidth controller ended the session while the
+        /// tunnel still carried traffic: `entry_culpable` as for
+        /// `RegistrationFailed` when a gateway kept failing its queries or
+        /// top-ups; `None` when no gateway is to blame.
+        failure: Option<Option<bool>>,
+        /// Whether the checks worked in this session, so that a failure is
+        /// not the same one again.
+        worked: bool,
     },
 }
 
@@ -881,8 +885,7 @@ impl TunnelMonitor {
         // Shutdown WireGuard tunnel runtime
         if let Some(wg_tunnel_runtime) = wg_tunnel_runtime {
             match wg_tunnel_runtime.bandwidth_controller_handle.await {
-                Ok(Some(err)) => self.report_bandwidth_failure(err, last_connection_status),
-                Ok(None) => {}
+                Ok(outcome) => self.report_bandwidth_checks(outcome, last_connection_status),
                 Err(err) => {
                     tracing::error!("Failed to await bandwidth controller handle: {}", err);
                 }
@@ -948,21 +951,27 @@ impl TunnelMonitor {
     /// A gateway is blamed only while the tunnel still passed its probes:
     /// failing probes point at the local network, which also fails the
     /// bandwidth queries, so that case stays an ordinary drop.
-    fn report_bandwidth_failure(
+    fn report_bandwidth_checks(
         &mut self,
-        err: bandwidth_controller::Error,
+        outcome: BandwidthOutcome,
         last_connection_status: Option<ConnectionStatusEvent>,
     ) {
-        trace_err_chain!(err, "Bandwidth controller ended the session");
-        if matches!(
+        let tunnel_failing = matches!(
             last_connection_status,
             Some(ConnectionStatusEvent::IntermittentFailure { .. } | ConnectionStatusEvent::Failed)
-        ) {
-            tracing::info!("The tunnel was failing too; not blaming the gateway");
-            return;
-        }
-        self.send_event(TunnelMonitorEvent::BandwidthFailed {
-            entry_culpable: err.entry_culpable(),
+        );
+        let failure = outcome.failure.and_then(|err| {
+            trace_err_chain!(err, "Bandwidth controller ended the session");
+            if tunnel_failing {
+                tracing::info!("The tunnel was failing too; not blaming the gateway");
+                None
+            } else {
+                Some(err.entry_culpable())
+            }
+        });
+        self.send_event(TunnelMonitorEvent::BandwidthChecks {
+            failure,
+            worked: outcome.worked,
         });
     }
 
@@ -1495,7 +1504,7 @@ struct StartTunnelResult {
 }
 
 struct WgTunnelRuntime {
-    bandwidth_controller_handle: JoinHandle<Option<bandwidth_controller::Error>>,
+    bandwidth_controller_handle: JoinHandle<BandwidthOutcome>,
     transport_fwd_handle: Option<JoinHandle<()>>,
     authenticator_listener_handle: Option<AuthClientMixnetListenerHandle>,
 }

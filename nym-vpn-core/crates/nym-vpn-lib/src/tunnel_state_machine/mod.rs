@@ -719,7 +719,9 @@ const BANDWIDTH_FAILURE_SESSIONS: u32 = 3;
 /// tickets, so the reconnects back off, and after
 /// [`BANDWIDTH_FAILURE_SESSIONS`] later sessions are no longer ended by a
 /// failed check: they run until the gateway ends them, as before upstream
-/// #5685.
+/// #5685. Only sessions whose checks worked break the streak; how long a
+/// session lasted says nothing, as the checks take a minute to give up on a
+/// silent gateway.
 #[derive(Debug, Default)]
 struct BandwidthFailureStreak {
     count: u32,
@@ -731,21 +733,20 @@ impl BandwidthFailureStreak {
         self.count < BANDWIDTH_FAILURE_SESSIONS
     }
 
-    /// A bandwidth failure ended a session; `lasted` if it was not short.
-    /// Returns the retry attempt for the reconnect.
-    fn record_failure(&mut self, lasted: bool) -> u32 {
-        if lasted {
+    /// A bandwidth failure ended a session; `worked` if its checks worked
+    /// before, which makes it a new failure. Returns the retry attempt for
+    /// the reconnect.
+    fn record_failure(&mut self, worked: bool) -> u32 {
+        if worked {
             self.count = 0;
         }
         self.count = self.count.saturating_add(1);
         self.count
     }
 
-    /// A session ended for another reason. One that lasted ends the streak,
-    /// unless failures are already tolerated: such a session cannot report
-    /// one.
-    fn record_other_end(&mut self, lasted: bool) {
-        if lasted && self.ends_sessions() {
+    /// A session ended for another reason; `worked` if its checks worked.
+    fn record_other_end(&mut self, worked: bool) {
+        if worked {
             self.count = 0;
         }
     }
@@ -1820,39 +1821,55 @@ mod tests {
     #[test]
     fn bandwidth_failure_streak_table() {
         enum End {
-            Failure { lasted: bool },
-            Other { lasted: bool },
+            Failure { worked: bool },
+            Other { worked: bool },
         }
         use End::*;
         // (how a session ended, retry attempt if a failure, next session may be ended)
         let cases = [
-            (Failure { lasted: false }, Some(1), true),
-            (Other { lasted: false }, None, true),
-            (Failure { lasted: false }, Some(2), true),
-            (Other { lasted: true }, None, true),
-            (Failure { lasted: false }, Some(1), true),
-            // A failure after a long session starts a new streak.
-            (Failure { lasted: true }, Some(1), true),
-            (Failure { lasted: false }, Some(2), true),
-            (Failure { lasted: false }, Some(3), false),
-            // Tolerated from here on, however long sessions last.
-            (Other { lasted: true }, None, false),
-            (Other { lasted: false }, None, false),
+            (Failure { worked: false }, Some(1), true),
+            (Other { worked: false }, None, true),
+            (Failure { worked: false }, Some(2), true),
+            (Other { worked: true }, None, true),
+            (Failure { worked: false }, Some(1), true),
+            // Checks that worked before failing start a new streak.
+            (Failure { worked: true }, Some(1), true),
+            (Failure { worked: false }, Some(2), true),
+            (Failure { worked: false }, Some(3), false),
+            (Other { worked: false }, None, false),
+            // A session whose checks worked ends the tolerance.
+            (Other { worked: true }, None, true),
         ];
         let mut streak = BandwidthFailureStreak::default();
         for (i, (end, retry_attempt, ends_sessions)) in cases.into_iter().enumerate() {
             match end {
-                Failure { lasted } => assert_eq!(
-                    Some(streak.record_failure(lasted)),
+                Failure { worked } => assert_eq!(
+                    Some(streak.record_failure(worked)),
                     retry_attempt,
                     "case {i}"
                 ),
-                Other { lasted } => streak.record_other_end(lasted),
+                Other { worked } => streak.record_other_end(worked),
             }
             assert_eq!(streak.ends_sessions(), ends_sessions, "case {i}");
         }
         streak.reset();
         assert!(streak.ends_sessions());
+    }
+
+    /// Seen on hardware: the metadata endpoint dropped from the start, each
+    /// session ended by the controller after about 73 s without a single
+    /// answer. The fourth session must no longer be ended by the checks.
+    #[tokio::test(start_paused = true)]
+    async fn silent_metadata_endpoint_turns_tolerant_on_the_fourth_session() {
+        let mut streak = BandwidthFailureStreak::default();
+        for session in 1..=3 {
+            assert!(streak.ends_sessions(), "session {session}");
+            let connected_at = SessionStart::now();
+            tokio::time::advance(Duration::from_secs(73)).await;
+            assert!(connected_at.lifetime() >= short_session(TunnelType::Wireguard));
+            assert_eq!(streak.record_failure(false), session);
+        }
+        assert!(!streak.ends_sessions());
     }
 
     #[test]

@@ -710,10 +710,15 @@ impl TunnelStateHandler for ConnectingState {
                         self.handle_gateway_failure(entry_culpable, "registration failure", shared_state).await;
                         NextTunnelState::SameState(self)
                     }
-                    TunnelMonitorEvent::BandwidthFailed { entry_culpable } => {
-                        shared_state.bandwidth_failure_streak.record_failure(false);
-                        if let Some(entry_culpable) = entry_culpable {
-                            self.handle_gateway_failure(entry_culpable, "bandwidth failure", shared_state).await;
+                    TunnelMonitorEvent::BandwidthChecks { failure, worked } => {
+                        match failure {
+                            Some(entry_culpable) => {
+                                shared_state.bandwidth_failure_streak.record_failure(worked);
+                                if let Some(entry_culpable) = entry_culpable {
+                                    self.handle_gateway_failure(entry_culpable, "bandwidth failure", shared_state).await;
+                                }
+                            }
+                            None => shared_state.bandwidth_failure_streak.record_other_end(worked),
                         }
                         NextTunnelState::SameState(self)
                     }

@@ -40,21 +40,21 @@ const QUERY_FAILURES_TO_ESCALATE: u32 = 2;
 /// (upstream nym-vpn-client #5405).
 const FIRST_ANSWER_GRACE: Duration = Duration::from_secs(60);
 
-/// Bandwidth query outcomes of one gateway. One side answering says nothing
+/// Bandwidth check outcomes of one gateway. One side answering says nothing
 /// about the other.
 #[derive(Debug, Default)]
 struct QueryHealth {
     answered: bool,
+    topped_up: bool,
     consecutive_failures: u32,
     failing_since: Option<Instant>,
 }
 
 impl QueryHealth {
     fn record_success(&mut self) {
-        *self = Self {
-            answered: true,
-            ..Self::default()
-        };
+        self.answered = true;
+        self.consecutive_failures = 0;
+        self.failing_since = None;
     }
 
     /// Whether this failure ends the session.
@@ -64,6 +64,26 @@ impl QueryHealth {
         self.consecutive_failures >= QUERY_FAILURES_TO_ESCALATE
             && (self.answered || now.saturating_duration_since(failing_since) >= FIRST_ANSWER_GRACE)
     }
+}
+
+/// How a session's bandwidth checks went.
+#[derive(Debug, Default)]
+pub(crate) struct BandwidthOutcome {
+    /// Why the controller ended the session, if it did.
+    pub(crate) failure: Option<Error>,
+    /// Whether the checks worked in this session; see [`checks_worked`].
+    pub(crate) worked: bool,
+}
+
+/// The checks worked when every side answered a query and nothing failed
+/// that had not worked earlier in the session. A gateway that never answers,
+/// or answers but rejects every top-up, fails in every session alike.
+fn checks_worked(
+    failure_had_worked: Option<bool>,
+    entry: &QueryHealth,
+    exit: &QueryHealth,
+) -> bool {
+    failure_had_worked.unwrap_or(entry.answered && exit.answered)
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -597,6 +617,9 @@ pub(crate) struct BandwidthController {
     end_session_on_failure: bool,
     /// Why the controller ended the session, if it did.
     failure: Option<Error>,
+    /// Whether what failed and stopped the checks had worked earlier in the
+    /// session.
+    failure_had_worked: Option<bool>,
     upgrade_mode_enabled_on_last_check: bool,
 }
 
@@ -626,14 +649,17 @@ impl BandwidthController {
             shutdown_token,
             end_session_on_failure,
             failure: None,
+            failure_had_worked: None,
             upgrade_mode_enabled_on_last_check: false,
         }
     }
 
     /// Ends the session, keeping the first reason. When failures are
     /// tolerated, only the checks stop and the session runs until the
-    /// gateway ends it.
-    fn fail(&mut self, err: Error) {
+    /// gateway ends it. `had_worked`: the operation that failed succeeded
+    /// earlier in the session.
+    fn fail(&mut self, err: Error, had_worked: bool) {
+        self.failure_had_worked.get_or_insert(had_worked);
         if self.end_session_on_failure {
             self.failure.get_or_insert(err);
             self.shutdown_token.cancel();
@@ -888,7 +914,8 @@ impl BandwidthController {
         let health = self.query_health(entry);
         if health.record_failure(Instant::now()) {
             tracing::error!("gateway {gateway_id} is erroring out");
-            self.fail(Error::gateway(entry, err));
+            let had_worked = health.answered;
+            self.fail(Error::gateway(entry, err), had_worked);
         } else if health.consecutive_failures == 1 {
             tracing::info!(
                 "Empty query for {side} gateway bandwidth check. This is normal, as long as it is not repeating for the same gateway"
@@ -980,9 +1007,12 @@ impl BandwidthController {
                         error!("error sending message to the account controller: {err}");
                         // we need to trigger a shutdown here because this message must not fail,
                         // if it did, AC won't exit upgrade mode state and won't resume acquiring zk-nyms
-                        self.fail(Error::internal(format!(
-                            "failed to report the end of upgrade mode: {err}"
-                        )));
+                        self.fail(
+                            Error::internal(format!(
+                                "failed to report the end of upgrade mode: {err}"
+                            )),
+                            false,
+                        );
                         return None;
                     }
                     // we continue sending zk-nym
@@ -996,14 +1026,15 @@ impl BandwidthController {
         }
 
         match self.top_up_bandwidth(entry).await {
-            Ok(_) => {}
+            Ok(_) => self.query_health(entry).topped_up = true,
             // Nothing was sent, and a new session would need a ticket too.
             Err(e @ SpecificGatewayError::RequestCredential { .. }) => {
                 tracing::warn!("No ticket to top up with, retrying on the next check: {e:?}");
             }
             Err(e) => {
                 tracing::warn!("Error topping up with more bandwidth {e:?}");
-                self.fail(Error::gateway(entry, e));
+                let had_worked = self.query_health(entry).topped_up;
+                self.fail(Error::gateway(entry, e), had_worked);
             }
         }
 
@@ -1049,9 +1080,9 @@ impl BandwidthController {
         }
     }
 
-    /// Returns why the controller ended the session; `None` when it was
-    /// shut down from outside.
-    pub(crate) async fn run(mut self) -> Option<Error> {
+    /// Returns how the checks went, including why the controller ended the
+    /// session if it did.
+    pub(crate) async fn run(mut self) -> BandwidthOutcome {
         // Skip the first, immediate tick
         self.timeout_check_interval.next().await;
         while !self.stop_token.is_cancelled() {
@@ -1082,7 +1113,14 @@ impl BandwidthController {
         }
 
         tracing::debug!("BandwidthController: Exiting");
-        self.failure
+        BandwidthOutcome {
+            worked: checks_worked(
+                self.failure_had_worked,
+                &self.entry_query_health,
+                &self.exit_query_health,
+            ),
+            failure: self.failure,
+        }
     }
 }
 
@@ -1235,6 +1273,50 @@ mod tests {
         assert!(!exit.record_failure(t0));
         assert!(!exit.record_failure(t0 + secs(5)));
         assert!(!entry.record_failure(t0 + secs(5)));
+    }
+
+    #[test]
+    fn checks_worked_table() {
+        let t0 = Instant::now();
+        let answered = || {
+            let mut health = QueryHealth::default();
+            health.record_success();
+            health
+        };
+        let silent = || {
+            let mut health = QueryHealth::default();
+            health.record_failure(t0);
+            health
+        };
+        // (what failed had worked before, entry, exit, worked)
+        let cases = [
+            (None, answered(), answered(), true),
+            (None, answered(), silent(), false),
+            (None, silent(), silent(), false),
+            // Metadata endpoint unreachable from the start.
+            (Some(false), silent(), silent(), false),
+            // Queries answered, every top-up rejected.
+            (Some(false), answered(), answered(), false),
+            // Worked for a while, then broke.
+            (Some(true), answered(), answered(), true),
+        ];
+        for (i, (failure_had_worked, entry, exit, worked)) in cases.into_iter().enumerate() {
+            assert_eq!(
+                checks_worked(failure_had_worked, &entry, &exit),
+                worked,
+                "case {i}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_top_up_survives_later_answers() {
+        let mut health = QueryHealth::default();
+        health.record_success();
+        health.topped_up = true;
+        health.record_failure(Instant::now());
+        health.record_success();
+        assert!(health.topped_up);
     }
 
     #[test]
