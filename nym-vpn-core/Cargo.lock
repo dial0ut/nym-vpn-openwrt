@@ -4831,6 +4831,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "nym-ecash-compat-tests"
+version = "1.35.0"
+dependencies = [
+ "nym-compact-ecash",
+]
+
+[[package]]
 name = "nym-ecash-contract-common"
 version = "1.20.4"
 source = "git+https://github.com/nymtech/nym?branch=vpn%2Frelease%2F2026.9-venaco#7b858dfd69401ec25335912a0be8e76553330f7c"

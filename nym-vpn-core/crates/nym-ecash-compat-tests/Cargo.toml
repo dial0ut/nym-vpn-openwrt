@@ -1,0 +1,18 @@
+[package]
+name = "nym-ecash-compat-tests"
+description = "Cross-architecture checks for the pinned nym-compact-ecash (tests only)"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dev-dependencies]
+nym-compact-ecash.workspace = true
+
+[lints]
+workspace = true

@@ -6,6 +6,7 @@ members = [
     "crates/nym-diagnostic",
     "crates/nym-dbus",
     "crates/nym-dns",
+    "crates/nym-ecash-compat-tests",
     "crates/nym-firewall",
     "crates/nym-gateway-directory",
     "crates/nym-ipc",
