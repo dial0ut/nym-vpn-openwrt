@@ -163,7 +163,14 @@ fi
 
 # opkg sets PKG_UPGRADE=1 on upgrade; build-apk.sh exports it for apk.
 if [ "$PKG_UPGRADE" != "1" ]; then
-    rm -rf /etc/nym 2>/dev/null
+    # /etc/nym holds the account (mnemonic, device keys, paid tickets) and
+    # the daemon settings. A removal also runs on `opkg install
+    # --force-reinstall` and on remove-then-install, so it is never erased
+    # here; an environment flag cannot opt in, apk runs scripts with a fixed
+    # environment.
+    if [ -d /etc/nym ]; then
+        echo "nym-vpn: account and settings kept in /etc/nym; 'rm -rf /etc/nym' erases them."
+    fi
     rm -rf /var/log/nym-vpnd 2>/dev/null
     rm -f /var/run/nym-vpn.rpcd-state 2>/dev/null
 
