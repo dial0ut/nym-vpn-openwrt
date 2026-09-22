@@ -1,0 +1,2017 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Privacy-first VPN for OpenWrt routers, powered by the Nym mixnet">
+      
+      
+      
+        <link rel="canonical" href="https://docs.dial0ut.org/guide/luci/">
+      
+      
+        <link rel="prev" href="../../getting-started/quickstart/">
+      
+      
+        <link rel="next" href="../cli/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>LuCI Web Interface - NymVPN for OpenWrt</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#luci-web-interface" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="NymVPN for OpenWrt" class="md-header__button md-logo" aria-label="NymVPN for OpenWrt" data-md-component="logo">
+      
+  <img src="../../assets/logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            NymVPN for OpenWrt
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              LuCI Web Interface
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/dial0ut/nym-vpn-openwrt" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    dial0ut/nym-vpn-openwrt
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="NymVPN for OpenWrt" class="md-nav__button md-logo" aria-label="NymVPN for OpenWrt" data-md-component="logo">
+      
+  <img src="../../assets/logo.svg" alt="logo">
+
+    </a>
+    NymVPN for OpenWrt
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/dial0ut/nym-vpn-openwrt" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    dial0ut/nym-vpn-openwrt
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LuCI Web Interface
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LuCI Web Interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#tunnel-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tunnel Settings
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Tunnel Settings">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#protection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Protection
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Protection">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#always-on" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Always On
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kill-switch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kill-Switch
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inbound-services" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inbound Services
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gateway-independence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Gateway Independence
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#server-family-reminders" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server Family Reminders
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#transport" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Transport
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Transport">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#two-hop-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Two-Hop Mode
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#circumvention-transports" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Circumvention Transports
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stealth-api-connect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stealth API Connect
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ipv6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        IPv6
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#split-tunneling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Split Tunneling
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Split Tunneling">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#exclusions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exclusions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#legacy-split-tunneling-pbr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Legacy Split Tunneling (PBR)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mixnet-tuning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mixnet Tuning
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Mixnet Tuning">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#disable-poisson-delays" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disable Poisson Delays
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#disable-background-cover-traffic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disable Background Cover Traffic
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#delay-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Delay settings
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dns-ad-blocking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DNS &amp; Ad Blocking
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="DNS &amp; Ad Blocking">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#custom-dns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom DNS
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ad-blocking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ad Blocking
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#account" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Account
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#service-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Service Management
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#diagnostics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Diagnostics
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#daemon-logs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Daemon Logs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#notifications" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notifications
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inbound-services/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inbound Services
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../split-tunneling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Split Tunneling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dns/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    DNS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/wireguard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    WireGuard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/firewall/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Firewall Backends
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/killswitch-contract/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kill-Switch Contract
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/fw3-restart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    fw3 Restart Exposure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/firewall-state/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Firewall State Ownership
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../development/building/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building from Source
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../development/packaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Packaging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../development/ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CI/CD
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Supported Devices
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#tunnel-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tunnel Settings
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Tunnel Settings">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#protection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Protection
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Protection">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#always-on" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Always On
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kill-switch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kill-Switch
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inbound-services" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inbound Services
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gateway-independence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Gateway Independence
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#server-family-reminders" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server Family Reminders
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#transport" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Transport
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Transport">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#two-hop-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Two-Hop Mode
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#circumvention-transports" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Circumvention Transports
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stealth-api-connect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stealth API Connect
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ipv6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        IPv6
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#split-tunneling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Split Tunneling
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Split Tunneling">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#exclusions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exclusions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#legacy-split-tunneling-pbr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Legacy Split Tunneling (PBR)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mixnet-tuning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mixnet Tuning
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Mixnet Tuning">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#disable-poisson-delays" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disable Poisson Delays
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#disable-background-cover-traffic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disable Background Cover Traffic
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#delay-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Delay settings
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dns-ad-blocking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DNS &amp; Ad Blocking
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="DNS &amp; Ad Blocking">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#custom-dns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom DNS
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ad-blocking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ad Blocking
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#account" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Account
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#service-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Service Management
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#diagnostics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Diagnostics
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#daemon-logs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Daemon Logs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#notifications" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notifications
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/dial0ut/nym-vpn-openwrt/edit/openwrt/docs/guide/luci.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="luci-web-interface">LuCI Web Interface<a class="headerlink" href="#luci-web-interface" title="Permanent link">&para;</a></h1>
+<p>Your router's IP (usually <code>http://192.168.1.1</code>), then <strong>NymVPN</strong> in the navigation menu.</p>
+<p>The main view shows a connection status ring (green connected, pulsing connecting, grey
+disconnected), uptime since the tunnel came up, and the hop chain through entry and exit gateways.
+While connected, each gateway also shows its operator family when the directory knows one; if
+entry and exit turn out to share a family, both are marked <strong>Same operator family</strong> in amber.</p>
+<p>While disconnected, the two side panels are the gateway pickers — entry on one side, exit on the
+other. Choose a country (the dropdown shows how many gateways each has, or <strong>Random</strong>), then a row
+in the list under it. The first row, <strong>Any Gateway (Random)</strong>, leaves the pick within that country
+to NymVPN; each row below is one gateway, showing its name, a performance tier — <code>HIGH</code>,
+<code>MEDIUM</code>, <code>LOW</code>, <code>OFFLINE</code> or <code>N/A</code>, with a green / amber / red / grey dot — its current load, its
+24-hour uptime, its city, and, when known, its operator family, so you can avoid picking two
+servers from the same operator by hand. Rows are sorted best tier first; the selected row is
+outlined in green.</p>
+<p>Below the connection panel the settings come as expandable cards, in this order: <strong>Tunnel
+Settings</strong>, <strong>Split Tunneling</strong>, <strong>Mixnet Tuning</strong>, <strong>DNS &amp; Ad Blocking</strong>, <strong>Account</strong>, <strong>Service
+Management</strong>, <strong>Diagnostics</strong>, <strong>Daemon Logs</strong>.</p>
+<h2 id="tunnel-settings">Tunnel Settings<a class="headerlink" href="#tunnel-settings" title="Permanent link">&para;</a></h2>
+<p>Switches save the moment they are flipped. Each row states in a few words what the switch does;
+the small ⓘ button after the title unfolds the full explanation under the row and ends in a
+<strong>Learn more</strong> link to the matching section below. Rows marked with a small <code>reconnect</code> tag only
+take effect the next time you connect; the rest apply straight away.</p>
+<h3 id="protection">Protection<a class="headerlink" href="#protection" title="Permanent link">&para;</a></h3>
+<h4 id="always-on">Always On<a class="headerlink" href="#always-on" title="Permanent link">&para;</a></h4>
+<p>Keeps the tunnel up while the router is on, with nothing to schedule or tune. It connects once
+your internet connection is up, reconnects by itself after a drop or an outage, and keeps retrying
+failures — waiting longer between attempts and moving off a gateway that keeps failing. A connect
+that drags on for ten minutes starts over with a fresh gateway. If it still cannot recover it
+restarts itself, and the kill-switch stays in place throughout.</p>
+<p>The line under the switch says what it is doing: <em>Active</em>, <em>Waiting for network</em>, <em>Retrying in
+N s (attempt K)</em>, <em>Paused — disconnected by you</em> after you press <strong>Disconnect</strong> (the setting stays
+on and the next connect or reboot resumes it), or <em>Stopped: …</em> for errors that need you to change
+something first — an account problem, or a pinned entry/exit pair that fails the independence
+criteria. Fixing the configuration, a renewed subscription or pressing <strong>Connect</strong> resumes it. Its
+log lines are prefixed <code>always-on:</code> in the daemon log (<code>logread -e nym-vpnd</code>). The same switch is
+<code>nym-vpnc tunnel set --always-on on|off</code>.</p>
+<h4 id="kill-switch">Kill-Switch<a class="headerlink" href="#kill-switch" title="Permanent link">&para;</a></h4>
+<p>Stops anything leaving for the internet outside the tunnel, so nothing quietly falls back to your
+ordinary connection when the VPN is down. Connection setup and anything you have deliberately
+excluded still get through. Leaving it on does not change where your traffic goes while you are
+connected — that always uses the tunnel.</p>
+<p>Turn it off to let traffic fall back to the ordinary connection whenever the tunnel is down;
+while it is off the row shows an amber reminder that LAN traffic can leave the router unprotected
+at those times. You do <strong>not</strong> need to turn it off for
+<a href="../split-tunneling/">split-tunnel exclusions</a> — those work with it on. It is greyed out while
+legacy PBR split tunnelling is on, as the two cannot both be used.</p>
+<h4 id="inbound-services">Inbound Services<a class="headerlink" href="#inbound-services" title="Permanent link">&para;</a></h4>
+<p>Nested directly under the kill-switch, and shown only while it is on. Ports whose reply traffic
+bypasses the tunnel, so a service on the router (LuCI, SSH) or on the LAN (Jellyfin, a NAS) stays
+reachable from the WAN with the kill-switch on. <strong>+ Add exemption</strong> in the group's title bar opens
+the form (it is already open while the list is empty): pick <code>TCP</code> or <code>UDP</code>, type the port,
+optionally a label, <strong>Add</strong> (or <code>Enter</code>). <code>×</code> removes a row. Rows read <code>● Active</code> while the kill-switch is on
+and <code>● Inert</code> when it is off — an exemption is only meaningful while there is a block to be exempt
+from. For a LAN-hosted service, create the port forward in <strong>Network → Firewall → Port Forwards</strong>
+first, then add the exemption here using the <strong>WAN-side</strong> port.
+<a href="../inbound-services/">Inbound Services</a> has the recipes.</p>
+<h4 id="gateway-independence">Gateway Independence<a class="headerlink" href="#gateway-independence" title="Permanent link">&para;</a></h4>
+<p>On by default. Entry and exit must be run by different operators (<em>node families</em> in the NymVPN
+apps), sit in different networks (ASNs) and in different subnets. One operator seeing both ends of
+the tunnel could link your traffic going in and coming out, which is what the two hops are there
+to prevent; with this on, such a pair is refused. Turn it off to allow any combination. Takes
+effect on your next connect.</p>
+<h4 id="server-family-reminders">Server Family Reminders<a class="headerlink" href="#server-family-reminders" title="Permanent link">&para;</a></h4>
+<p>On by default. When you press <strong>Connect</strong>, NymVPN checks the entry/exit pair your selection would
+produce. If that pair fails the independence criteria, a warning — <em>The selected servers are in
+the same operator family!</em> — offers <strong>Connect anyway</strong>, which connects with the criteria relaxed
+for that connection only (the setting above is untouched), or <strong>Change servers</strong>, which returns
+you to the pickers. With reminders off the connection goes ahead relaxed and a notice says so.
+The check never holds up connecting: if it cannot complete, the connect goes ahead as usual and
+any refusal appears as a status error offering the same two choices.</p>
+<h3 id="transport">Transport<a class="headerlink" href="#transport" title="Permanent link">&para;</a></h3>
+<h4 id="two-hop-mode">Two-Hop Mode<a class="headerlink" href="#two-hop-mode" title="Permanent link">&para;</a></h4>
+<p>2-hop WireGuard instead of 5-hop mixnet routing. Faster, with less mixing: your packets are not
+delayed and blended with cover traffic on the way, so the two hops still hide your address from
+the exit but offer weaker protection against traffic analysis. Takes effect on your next connect.</p>
+<h4 id="circumvention-transports">Circumvention Transports<a class="headerlink" href="#circumvention-transports" title="Permanent link">&para;</a></h4>
+<p>Wraps the connection to the entry gateway so it is harder for a censor to recognise and block.
+Two-hop mode only; while it is on, entry gateways that cannot carry it sink to the bottom of the
+picker, greyed out with an amber <code>No CT</code> tag, and cannot be selected. Takes effect on your next
+connect.</p>
+<h4 id="stealth-api-connect">Stealth API Connect<a class="headerlink" href="#stealth-api-connect" title="Permanent link">&para;</a></h4>
+<p>The same switch as in the NymVPN apps. The daemon normally reaches the Nym API (account, gateway
+directory, discovery) directly and only falls back to <em>cover domains</em> (domain fronting through a
+CDN) when a direct request fails. On, every API request goes through the cover domains from the
+start. Use it where the API hosts are blocked; API calls — gateway lists, account sync, the setup
+phase of a connect — get slower. It affects only these background requests, so it applies
+immediately. If your network environment publishes no cover domains the row says so and the
+switch has no effect.</p>
+<h4 id="ipv6">IPv6<a class="headerlink" href="#ipv6" title="Permanent link">&para;</a></h4>
+<p>Off by default. Most exit gateways have no IPv6 egress, and IPv6 that gets tunnelled and then
+dropped makes dual-stack clients stall on every new connection. Turn it on only if your exit
+demonstrably carries IPv6. Takes effect on your next connect.</p>
+<h2 id="split-tunneling">Split Tunneling<a class="headerlink" href="#split-tunneling" title="Permanent link">&para;</a></h2>
+<p>Two ways of sending some traffic around the VPN. Everything not carved out stays in the tunnel,
+and the kill-switch keeps covering it.</p>
+<h3 id="exclusions">Exclusions<a class="headerlink" href="#exclusions" title="Permanent link">&para;</a></h3>
+<p>Carve specific devices or domains out to the WAN. Devices are stored by MAC, so they survive an IP
+change; domain rules need clients to use this router for DNS, and need <code>dnsmasq-full</code> (the card
+says so, with the <code>opkg</code> command, when it is missing). Each row has its own on/off switch and a
+<code>×</code>. See <a href="../split-tunneling/">Split Tunneling</a> for the caveats — particularly that an excluded
+device's DNS still goes through the tunnel.</p>
+<h3 id="legacy-split-tunneling-pbr">Legacy Split Tunneling (PBR)<a class="headerlink" href="#legacy-split-tunneling-pbr" title="Permanent link">&para;</a></h3>
+<p>Listed under <em>Policy-based routing</em>. Hands routing to <code>luci-app-pbr</code>: only the traffic PBR selects
+goes through the VPN, everything else uses your ordinary connection in the clear. It cannot be
+combined with the kill-switch or the exclusion list, so switching it on greys out the kill-switch
+in Tunnel Settings and replaces the exclusion list with a note saying PBR owns the routing. Switch
+it off to get both back (the kill-switch stays off until you turn it on again). Takes effect on
+your next connect.</p>
+<h2 id="mixnet-tuning">Mixnet Tuning<a class="headerlink" href="#mixnet-tuning" title="Permanent link">&para;</a></h2>
+<p>5-hop mode only. These trade anonymity for speed — the defaults are the private end. Turning off
+delays or cover traffic makes traffic analysis easier.</p>
+<h3 id="disable-poisson-delays">Disable Poisson Delays<a class="headerlink" href="#disable-poisson-delays" title="Permanent link">&para;</a></h3>
+<p>Send real traffic immediately instead of on a randomised schedule. Turning this on reduces
+latency but makes traffic timing easier to correlate.</p>
+<h3 id="disable-background-cover-traffic">Disable Background Cover Traffic<a class="headerlink" href="#disable-background-cover-traffic" title="Permanent link">&para;</a></h3>
+<p>Stop sending decoys. Turning this on saves bandwidth and CPU but makes real traffic easier
+to distinguish.</p>
+<h3 id="delay-settings">Delay settings<a class="headerlink" href="#delay-settings" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Cover traffic delay</strong> — 0–200 ms; blank leaves it as is</li>
+<li><strong>Mixing delay per hop</strong> — 0–200 ms; blank leaves it as is</li>
+<li><strong>Sending delay</strong> — 5–50 ms; blank leaves it as is</li>
+</ul>
+<p>The switches save at once; the three delays apply with <strong>Apply Tuning</strong>.</p>
+<h2 id="dns-ad-blocking">DNS &amp; Ad Blocking<a class="headerlink" href="#dns-ad-blocking" title="Permanent link">&para;</a></h2>
+<h3 id="custom-dns">Custom DNS<a class="headerlink" href="#custom-dns" title="Permanent link">&para;</a></h3>
+<p>Enable, then add servers one at a time (IPv4 or IPv6); <code>×</code> removes one. The servers replace the
+VPN's default resolvers for clients that use the router for DNS. Public resolvers use the tunnel
+while connected. Private resolvers on a non-WAN interface (such as a LAN Pi-hole) remain reachable
+with the kill-switch on, and are the ones used while you are disconnected; a private resolver
+reached through the WAN stays blocked outside the tunnel. See <a href="../dns/">DNS</a> for resolver setup
+and routing caveats.</p>
+<p>If the custom DNS setting appears to do nothing, dnsmasq is probably set to ignore its resolv
+file (<code>noresolv</code>, as set by AdGuard Home, https-dns-proxy or stubby); the card says so in amber,
+and <a href="../../troubleshooting/#custom-dns-setting-has-no-effect">Custom DNS setting has no effect</a>
+has the fix.</p>
+<h3 id="ad-blocking">Ad Blocking<a class="headerlink" href="#ad-blocking" title="Permanent link">&para;</a></h3>
+<p>Blocks ads, trackers and malware domains at the DNS level, on the resolvers the tunnel uses.</p>
+<h2 id="account">Account<a class="headerlink" href="#account" title="Permanent link">&para;</a></h2>
+<p>Logged in: device identity (with a copy button) and account state, with <strong>Rotate keys</strong> and
+<strong>Sign out</strong>. Logged out: recovery phrase field and <strong>Login</strong>. If the daemon reports a stuck or
+stale account, the card offers <strong>Reset account state</strong> as a last resort.</p>
+<h2 id="service-management">Service Management<a class="headerlink" href="#service-management" title="Permanent link">&para;</a></h2>
+<p>Shows whether <code>nym-vpnd</code> is running and enabled at boot. <strong>Start</strong> starts the daemon; Always On
+controls automatic connection. <strong>Restart</strong> restarts the daemon while preserving the enabled
+kill-switch. <strong>Stop</strong> stops the daemon and removes its kill-switch protection, allowing normal
+WAN routing. <strong>Disconnect</strong> in the connection panel leaves the daemon running and the enabled
+kill-switch in place. See <a href="../../troubleshooting/">Troubleshooting</a> if Stop cannot clear protection.</p>
+<h2 id="diagnostics">Diagnostics<a class="headerlink" href="#diagnostics" title="Permanent link">&para;</a></h2>
+<p><strong>Run Diagnostic</strong> runs the daemon's connectivity self-test — DNS resolution, the Nym VPN API
+over HTTP, the selected gateway's TCP/WebSocket handshake — and lists each probe as PASS or
+FAIL. <strong>Skip DNS</strong> and <strong>Skip HTTP</strong> leave those sections out.</p>
+<h2 id="daemon-logs">Daemon Logs<a class="headerlink" href="#daemon-logs" title="Permanent link">&para;</a></h2>
+<p>A live tail of <code>nym-vpnd</code> entries from the system log, started when the card is expanded. Pick
+how many lines, how often to refresh, and a level filter (<strong>Errors only</strong> or errors with ±10 /
+±30 lines of context); pause, resume and copy to the clipboard.</p>
+<p>The footer shows the daemon version and current network (mainnet or canary).</p>
+<h2 id="notifications">Notifications<a class="headerlink" href="#notifications" title="Permanent link">&para;</a></h2>
+<p>Toasts for status updates, modals to confirm anything destructive — disconnecting, forgetting an
+account — or risky, such as connecting through two gateways of the same operator family.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,1643 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Privacy-first VPN for OpenWrt routers, powered by the Nym mixnet">
+      
+      
+      
+        <link rel="canonical" href="https://docs.dial0ut.org/architecture/firewall-state/">
+      
+      
+        <link rel="prev" href="../fw3-restart/">
+      
+      
+        <link rel="next" href="../../development/building/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Firewall State Ownership - NymVPN for OpenWrt</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#firewall-state-ownership" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="NymVPN for OpenWrt" class="md-header__button md-logo" aria-label="NymVPN for OpenWrt" data-md-component="logo">
+      
+  <img src="../../assets/logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            NymVPN for OpenWrt
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Firewall State Ownership
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/dial0ut/nym-vpn-openwrt" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    dial0ut/nym-vpn-openwrt
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="NymVPN for OpenWrt" class="md-nav__button md-logo" aria-label="NymVPN for OpenWrt" data-md-component="logo">
+      
+  <img src="../../assets/logo.svg" alt="logo">
+
+    </a>
+    NymVPN for OpenWrt
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/dial0ut/nym-vpn-openwrt" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    dial0ut/nym-vpn-openwrt
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/luci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LuCI Web Interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/inbound-services/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inbound Services
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/split-tunneling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Split Tunneling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/dns/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    DNS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../wireguard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    WireGuard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../firewall/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Firewall Backends
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../killswitch-contract/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kill-Switch Contract
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fw3-restart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    fw3 Restart Exposure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Firewall State Ownership
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Firewall State Ownership
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#actors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Actors
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#runtime-directory-varrunnym-firewall" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Runtime directory /var/run/nym-firewall
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#live-firewall-objects" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Live firewall objects
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration-and-package-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration and package state
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#synchronization-per-writer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Synchronization, per writer
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#transitions-at-a-glance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Transitions at a glance
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../development/building/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building from Source
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../development/packaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Packaging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../development/ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CI/CD
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Supported Devices
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#actors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Actors
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#runtime-directory-varrunnym-firewall" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Runtime directory /var/run/nym-firewall
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#live-firewall-objects" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Live firewall objects
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration-and-package-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration and package state
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#synchronization-per-writer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Synchronization, per writer
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#transitions-at-a-glance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Transitions at a glance
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/dial0ut/nym-vpn-openwrt/edit/openwrt/docs/architecture/firewall-state.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="firewall-state-ownership">Firewall State Ownership<a class="headerlink" href="#firewall-state-ownership" title="Permanent link">&para;</a></h1>
+<p>Every piece of kill-switch runtime state has one owner. This page is the
+table a maintainer should be able to read before touching any of the
+scripts: who creates and removes each artefact, on which transition, under
+which lock, and what happens when it is stale or missing. The mechanics
+behind each row are in <a href="../firewall/">Firewall Backends</a>; the rule text the
+emergency and boot-time blocks install is defined once, in
+<code>nym-firewall/src/openwrt/boot_rules.rs</code>, and rendered into
+<code>scripts/fw-rules.sh</code> by the crate's <code>build.rs</code> (the build fails while the
+committed fragment is stale).</p>
+<h2 id="actors">Actors<a class="headerlink" href="#actors" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Actor</th>
+<th>Runs as</th>
+<th>When</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>daemon</strong></td>
+<td><code>nym-vpnd</code>, fw3/fw4 backend</td>
+<td>every policy apply, forwarding-only apply and reset</td>
+</tr>
+<tr>
+<td><strong>include</strong></td>
+<td><code>fw3-include.sh</code> / <code>fw4-include.sh</code>, run by fw3/fw4</td>
+<td>firewall start, reload, restart; explicitly by the init script and <code>prerm</code></td>
+</tr>
+<tr>
+<td><strong>init</strong></td>
+<td><code>/etc/init.d/nym-vpnd</code></td>
+<td>start, explicit <code>stop</code>; <code>restart</code> and <code>shutdown</code> take the keep path and touch nothing</td>
+</tr>
+<tr>
+<td><strong>prerm</strong></td>
+<td>package pre-removal hook</td>
+<td>real removal only; on upgrade it leaves the daemon running and touches no firewall state</td>
+</tr>
+<tr>
+<td><strong>postinst</strong></td>
+<td>package post-install hook</td>
+<td>install and upgrade (restarts the daemon through the new init script)</td>
+</tr>
+<tr>
+<td><strong>guard</strong></td>
+<td><code>fw-boot-guard.sh</code>, sourced by the includes, init, uci-defaults and prerm</td>
+<td>read-only helper: runtime-directory trust check, boot-block decision, fw3/fw4 detection (<code>nym_fw_backend</code>)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="runtime-directory-varrunnym-firewall">Runtime directory <code>/var/run/nym-firewall</code><a class="headerlink" href="#runtime-directory-varrunnym-firewall" title="Permanent link">&para;</a></h2>
+<p>Root-owned, mode 0700, under a root-owned 0755 parent, so nothing
+unprivileged can pre-create anything in it. The daemon creates it
+(<code>ensure_runtime_dir</code>) and refuses to run a policy unless it passes the
+symlink/owner/mode checks; the includes and the init script apply the same
+check (<code>nym_runtime_dir_prepare</code> / <code>nym_runtime_dir_trusted</code>) before they
+trust any file inside. Cleared by reboot (tmpfs) and by <code>prerm</code> on removal.</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Writer (creates / updates)</th>
+<th>Remover</th>
+<th>Readers</th>
+<th>Lock</th>
+<th>If stale or missing</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>v4.rules</code>, <code>v6.rules</code></td>
+<td>daemon (fw3 apply, forwarding-only apply): temp + rename, 0600</td>
+<td>daemon (fw3 reset); include (stop marker present)</td>
+<td>include (fw3 restart: restore; reload: reconcile)</td>
+<td>fw3 state lock</td>
+<td>missing = no policy persisted: include takes the no-policy path (boot block or cleanup). Stale: replaced atomically by the next apply</td>
+</tr>
+<tr>
+<td><code>transition</code></td>
+<td>daemon (fw3, first thing in every apply/reset)</td>
+<td>daemon (last step on success); include (stop marker present)</td>
+<td>include</td>
+<td>fw3 state lock</td>
+<td>present without the lock held = a daemon died mid-transition: include installs the transition emergency block and restores nothing</td>
+</tr>
+<tr>
+<td><code>lock</code></td>
+<td>daemon (created on first use, 0600, <code>O_NOFOLLOW</code>)</td>
+<td><code>prerm</code> (removal)</td>
+<td>daemon, fw3 include, init (fw3 teardown), prerm (fw3 teardown) — all <code>flock(2)</code> exclusive</td>
+<td>is the lock</td>
+<td>never deleted while installed; a missing <code>flock</code> binary makes every include run take the fail-closed <code>run_without_lock</code> path</td>
+</tr>
+<tr>
+<td><code>policy.nft</code></td>
+<td>nobody today (reserved; the fw4 backend pipes to <code>nft -f -</code>)</td>
+<td><code>prerm</code></td>
+<td>fw4 include (optional hint)</td>
+<td>none</td>
+<td>ignored when absent</td>
+</tr>
+<tr>
+<td><code>stopped</code></td>
+<td>init (<code>stop_service</code>, explicit stop only); prerm (before its locked teardown)</td>
+<td>init (<code>start_service</code>)</td>
+<td>guard (boot-block decision), fw3 include (stop wins over persisted state), init</td>
+<td>written before any teardown, so a racing include already sees it</td>
+<td>present = administrator wants the network open: no boot block, persisted fw3 state discarded. Absent after a crash, so reloads keep the block</td>
+</tr>
+<tr>
+<td><code>stop-pid</code></td>
+<td>init (<code>stop_service</code>)</td>
+<td>init (<code>service_stopped</code>)</td>
+<td>init</td>
+<td>none (init-private)</td>
+<td>stale pid is ignored via the <code>/proc/&lt;pid&gt;/cmdline</code> check</td>
+</tr>
+</tbody>
+</table>
+<p>The daemon and the include are the two legitimate writers of the fw3
+rules/transition files, with disjoint responsibilities: the daemon
+owns their content for as long as it lives, the include owns their removal
+after an explicit stop. The init script no longer removes them itself; it
+writes the marker and runs the include under the lock. <code>prerm</code> does the
+same and falls back to an inline chain teardown only when the include is
+already gone.</p>
+<h2 id="live-firewall-objects">Live firewall objects<a class="headerlink" href="#live-firewall-objects" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Object</th>
+<th>Creates</th>
+<th>Removes</th>
+<th>Reconciles</th>
+<th>Lock</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>inet nym</code> (fw4 policy table)</td>
+<td>daemon (<code>nft -f -</code>, atomic replace)</td>
+<td>daemon (reset); init (explicit stop); prerm (removal)</td>
+<td>— (fw4 include never touches it)</td>
+<td>none needed: single-transaction nft loads; the include only probes existence</td>
+</tr>
+<tr>
+<td><code>inet nym_boot</code> (fw4 boot block)</td>
+<td>fw4 include, from <code>nym_boot_block_nft</code></td>
+<td>daemon (last step of apply/reset); fw4 include (conditions no longer hold); init (explicit stop); prerm (removal)</td>
+<td>fw4 include re-checks after install and lifts if the daemon's table appeared</td>
+<td>none: atomic replace; the stop marker prevents re-arming; the include re-checks after install</td>
+</tr>
+<tr>
+<td><code>NYM_INPUT</code>, <code>NYM_OUTPUT</code>, <code>NYM_FORWARD</code> (+ <code>NYM_MANGLE_*</code>) and their jumps from <code>*_rule</code></td>
+<td>daemon (<code>iptables-restore --noflush</code>, jumps inserted at position 1 or ahead of a foreign rule)</td>
+<td>daemon (reset); include (no-policy path, stop marker); prerm (inline fallback only)</td>
+<td>include after an fw3 restart (restore from <code>v4.rules</code>/<code>v6.rules</code>), after a reload (re-hook if displaced)</td>
+<td>fw3 state lock</td>
+</tr>
+<tr>
+<td><code>NYM_EMERGENCY_OUT</code>, <code>NYM_EMERGENCY_FWD</code></td>
+<td>daemon (transition set, first activation of a family); include (transition set on a stale marker or failed restore; boot set at boot)</td>
+<td>daemon (last step of every apply/reset); include (conditions no longer hold, stop marker); prerm (inline fallback only)</td>
+<td>include re-checks after installing without a lock</td>
+<td>fw3 state lock; the unlocked fallback re-checks and lifts if the daemon hooked a policy meanwhile</td>
+</tr>
+<tr>
+<td>zone <code>nym</code> rules (masquerade, MSS clamp, <code>lan -&gt; nym</code> forwarding; fw3 <code>zone_nym_*</code> chains, fw4 <code>inet fw4</code> zone chains)</td>
+<td>fw3/fw4, from the <code>nym</code> zone and forwarding sections in <code>/etc/config/firewall</code></td>
+<td>fw3/fw4 on the reload after prerm deletes the sections</td>
+<td>fw3/fw4 on every reload and restart; the daemon and the includes never touch them</td>
+<td>none: fw3/fw4's own transaction</td>
+</tr>
+<tr>
+<td>fwmark <code>ip rule</code>s (0x14d → table 333, 0x14e → main)</td>
+<td>daemon</td>
+<td>daemon; prerm (removal only — the running daemon owns them across an upgrade)</td>
+<td>—</td>
+<td>none</td>
+</tr>
+</tbody>
+</table>
+<h2 id="configuration-and-package-state">Configuration and package state<a class="headerlink" href="#configuration-and-package-state" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Artefact</th>
+<th>Writer</th>
+<th>Remover</th>
+<th>Readers</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/etc/config/firewall</code> <code>include 'nym_vpn'</code></td>
+<td><code>uci-defaults/luci-app-nym-vpn</code>, run by postinst and by the boot-time defaults runner; fails loudly so it is retried</td>
+<td>prerm (removal only)</td>
+<td>fw3/fw4</td>
+<td>left in place across an interrupted upgrade on purpose</td>
+</tr>
+<tr>
+<td><code>/etc/config/firewall</code> zone <code>nym_zone</code> (name <code>nym</code>, device <code>nym+</code>, <code>masq</code>, <code>masq6</code>, <code>mtu_fix</code>, input/forward REJECT) and forwarding <code>nym_lan_fwd</code> (<code>lan -&gt; nym</code>)</td>
+<td><code>uci-defaults/luci-app-nym-vpn</code>, only when no zone named <code>nym</code> / no <code>lan -&gt; nym</code> forwarding exists; reloads the firewall when it changed anything</td>
+<td>prerm (removal only; only these two section names, an administrator's own <code>nym</code> zone stays)</td>
+<td>fw3/fw4 (the tunnel plane); <code>common.rs:wan_zone_devices</code> skips it despite <code>masq</code></td>
+<td>the LuCI firewall page shows it like any zone; a guest zone needs its own <code>forwarding</code> to <code>nym</code></td>
+</tr>
+<tr>
+<td><code>/usr/share/nym-vpn/{fw3-include,fw4-include,fw-boot-guard,fw-rules}.sh</code></td>
+<td>package (build-ipk.sh / build-apk.sh copy the fixed list from the crate and fail without any of them)</td>
+<td>package manager</td>
+<td>fw3/fw4, init, uci-defaults, prerm</td>
+<td>every consumer refuses to run without the two it sources; <code>fw-rules.sh</code> is generated, never edit it by hand</td>
+</tr>
+<tr>
+<td><code>/var/run/nym-vpn.rpcd-state</code></td>
+<td>prerm (upgrade)</td>
+<td>postinst (consumed), prerm (removal)</td>
+<td>postinst</td>
+<td>rpcd refresh decision; root-only parent directory</td>
+</tr>
+<tr>
+<td><code>/var/run/nym-watchdog.state</code>, <code>/tmp/nym-watchdog.state</code></td>
+<td>retired shell watchdog (packages ≤ 1.34.x)</td>
+<td>postinst (upgrade), prerm</td>
+<td>nobody</td>
+<td>legacy; Always On lives in the daemon config now</td>
+</tr>
+</tbody>
+</table>
+<h2 id="synchronization-per-writer">Synchronization, per writer<a class="headerlink" href="#synchronization-per-writer" title="Permanent link">&para;</a></h2>
+<p>The rule is the same on every path, normal or failing: <strong>no fw3 mutation
+without the fw3 state lock</strong>, and the stop marker is written before the
+teardown it authorizes.</p>
+<table>
+<thead>
+<tr>
+<th>Writer</th>
+<th>How it holds the lock</th>
+<th>Failure path</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>daemon fw3 backend</td>
+<td><code>flock</code> on <code>lock</code> for the whole apply / forwarding-only / reset; runtime directory verified first</td>
+<td>any error returns before the marker is cleared, so the include installs the transition block on its next run</td>
+</tr>
+<tr>
+<td>fw3 include</td>
+<td><code>exec 9&gt;lock; flock 9</code> before <code>main</code>; skipped only when the caller exports <code>NYM_FW_LOCKED=1</code> (init, prerm)</td>
+<td>untrusted directory, no <code>flock</code>, or <code>flock</code> failure → <code>run_without_lock</code>: leave a hooked policy untouched, otherwise install the boot block if wanted, log CRITICAL, exit 1; re-check after installing</td>
+</tr>
+<tr>
+<td>init <code>service_stopped</code> (explicit stop)</td>
+<td>writes <code>stopped</code> first; takes the lock; runs the include with <code>NYM_FW_LOCKED=1</code></td>
+<td>cannot lock → logs and exits; the marker makes the include complete the teardown on its next locked run</td>
+</tr>
+<tr>
+<td>prerm (removal)</td>
+<td>writes <code>stopped</code>; takes the lock; runs the include with <code>NYM_FW_LOCKED=1</code></td>
+<td>include or guard missing, or the locked run fails → inline teardown of the same chains</td>
+</tr>
+<tr>
+<td>daemon fw4 backend, fw4 include, init, prerm on fw4</td>
+<td>none</td>
+<td>each nft command is one atomic transaction; the include never touches <code>inet nym</code>, re-checks after installing <code>inet nym_boot</code>, and the stop marker stops it re-arming</td>
+</tr>
+</tbody>
+</table>
+<h2 id="transitions-at-a-glance">Transitions at a glance<a class="headerlink" href="#transitions-at-a-glance" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Transition</th>
+<th>fw3</th>
+<th>fw4</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>boot</td>
+<td>include installs the boot set (marker absent, kill-switch on, daemon enabled) → daemon applies its policy → lifts the emergency chains</td>
+<td>include installs <code>inet nym_boot</code> → daemon applies <code>inet nym</code> → deletes <code>inet nym_boot</code></td>
+</tr>
+<tr>
+<td>daemon crash mid-apply</td>
+<td><code>transition</code> stays → include installs the transition set on every reload until the daemon's next successful apply or an explicit stop</td>
+<td>policy table stays as it was (single transaction); nothing to do</td>
+</tr>
+<tr>
+<td>firewall reload</td>
+<td>fw3 leaves foreign chains alone and re-renders the <code>nym</code> zone; include reconciles (re-hook, lift stale block)</td>
+<td>fw4 rebuilds only its own table, the <code>nym</code> zone with it; include reconciles the boot block only</td>
+</tr>
+<tr>
+<td>firewall restart</td>
+<td>fw3 flushes everything, rebuilds, runs the include last, which restores from <code>v4.rules</code>/<code>v6.rules</code>. Known limit: fw3 itself runs with an ACCEPT policy between the flush and the include</td>
+<td><code>inet nym</code> survives; same as reload</td>
+</tr>
+<tr>
+<td>daemon restart, upgrade, shutdown</td>
+<td>init takes the keep path: nothing removed, policy stays live; the new daemon replaces it atomically</td>
+<td>same</td>
+</tr>
+<tr>
+<td>explicit stop</td>
+<td>marker → include discards persisted state, removes chains, no block</td>
+<td>marker → tables deleted</td>
+</tr>
+<tr>
+<td>removal</td>
+<td>prerm stops the daemon (as above), runs the include under the lock once more, removes the runtime directory, the UCI include and the <code>nym</code> zone, and reloads the firewall</td>
+<td>prerm deletes the tables, the UCI include and the <code>nym</code> zone, and reloads the firewall</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

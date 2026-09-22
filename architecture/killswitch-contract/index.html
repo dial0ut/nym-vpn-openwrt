@@ -1,0 +1,1764 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Privacy-first VPN for OpenWrt routers, powered by the Nym mixnet">
+      
+      
+      
+        <link rel="canonical" href="https://docs.dial0ut.org/architecture/killswitch-contract/">
+      
+      
+        <link rel="prev" href="../firewall/">
+      
+      
+        <link rel="next" href="../fw3-restart/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Kill-Switch Contract - NymVPN for OpenWrt</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#kill-switch-contract" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="NymVPN for OpenWrt" class="md-header__button md-logo" aria-label="NymVPN for OpenWrt" data-md-component="logo">
+      
+  <img src="../../assets/logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            NymVPN for OpenWrt
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Kill-Switch Contract
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/dial0ut/nym-vpn-openwrt" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    dial0ut/nym-vpn-openwrt
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="NymVPN for OpenWrt" class="md-nav__button md-logo" aria-label="NymVPN for OpenWrt" data-md-component="logo">
+      
+  <img src="../../assets/logo.svg" alt="logo">
+
+    </a>
+    NymVPN for OpenWrt
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/dial0ut/nym-vpn-openwrt" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    dial0ut/nym-vpn-openwrt
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/luci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LuCI Web Interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/inbound-services/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inbound Services
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/split-tunneling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Split Tunneling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/dns/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    DNS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../wireguard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    WireGuard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../firewall/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Firewall Backends
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kill-Switch Contract
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kill-Switch Contract
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#scope-and-vocabulary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scope and vocabulary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#steady-states" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Steady states
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#lifecycle-events" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lifecycle events
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#traps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Traps
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Evidence
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fw3-restart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    fw3 Restart Exposure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../firewall-state/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Firewall State Ownership
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../development/building/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building from Source
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../development/packaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Packaging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../development/ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CI/CD
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Supported Devices
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#scope-and-vocabulary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scope and vocabulary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#steady-states" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Steady states
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#lifecycle-events" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lifecycle events
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#traps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Traps
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Evidence
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/dial0ut/nym-vpn-openwrt/edit/openwrt/docs/architecture/killswitch-contract.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="kill-switch-contract">Kill-Switch Contract<a class="headerlink" href="#kill-switch-contract" title="Permanent link">&para;</a></h1>
+<p>What the kill-switch protects, in which situation, by which mechanism, and how each claim was
+verified. This is the reference for anyone changing the firewall code, the includes, the init
+script or the package hooks: every row names the code that enforces it, so a change to that code
+is a change to this contract. Where nothing enforces a cell it says <strong>not protected</strong>; where a
+cell is enforced but has never been observed on a device it says <strong>unverified</strong>.</p>
+<p>Companion pages: <a href="../firewall/">Firewall Integration</a> explains the mechanisms in prose;
+<a href="../fw3-restart/">fw3 restart exposure</a> is the decision record for the one known hole.</p>
+<h2 id="scope-and-vocabulary">Scope and vocabulary<a class="headerlink" href="#scope-and-vocabulary" title="Permanent link">&para;</a></h2>
+<p>The kill-switch is the setting <code>killswitch=true &amp;&amp; legacy_split_tunnel=false</code>
+(<code>nym-vpnd/src/service/config/config_manager.rs:519</code> computes the effective value; the boot guard
+mirrors it in <code>fw-boot-guard.sh:nym_boot_block_wanted</code>). Everything below assumes it is on unless
+the row says otherwise. With it off, nothing here applies and the router behaves like stock
+OpenWrt plus tunnel routing.</p>
+<p>Columns:</p>
+<ul>
+<li><strong>Router egress</strong>: new connections the router itself opens toward the WAN (its own processes,
+  including dnsmasq's upstream lookups). The daemon's own bootstrap traffic (API, DoT/DoH to its
+  resolvers, NTP, WireGuard to the entry gateway) is <em>always</em> allowed when a daemon policy is
+  live; the column says whether anything <em>else</em> gets out.</li>
+<li><strong>LAN forward</strong>: new connections forwarded from LAN clients toward the WAN.</li>
+<li><strong>DNS</strong>: port 53 leaving on the WAN, from the router (dnsmasq relaying LAN queries) or
+  forwarded from a LAN client directly. The router's own dnsmasq answering LAN clients from its
+  cache is never counted as a leak.</li>
+<li><strong>IPv6</strong>: whether the row's protection also covers IPv6, given the kernel has it enabled.</li>
+<li><strong>Management</strong>: SSH/LuCI from the LAN, and existing sessions from the WAN side.</li>
+<li><strong>Enforced by</strong>: file and function.</li>
+<li><strong>Recovery</strong>: what returns the router to normal operation.</li>
+<li><strong>Evidence</strong>: <code>unit:&lt;name&gt;</code> is a test in <code>nym-vpn-core/crates/nym-firewall/src/openwrt/</code>,
+  <code>capture</code> is a WAN-side packet capture with a LAN client probing, on the boxes listed under
+  <a href="#evidence">Evidence</a>; <code>device</code> is a manual on-device check without capture; <code>unverified</code> means
+  the code exists but no test or observation backs the cell.</li>
+</ul>
+<p>Three policies exist (<code>policy.rs:compile</code>): <strong>Blocked</strong> (idle and error states: loopback,
+DHCP, ND, mwan3 pings, cached API endpoints and the daemon's resolvers root-scoped, rate-limited
+root-scoped DNS and NTP hatches, the mark-scoped probe hatch, LAN if allowed, then reject),
+<strong>Connecting</strong> (Blocked plus the peer endpoints and the tunnel interface once it exists) and
+<strong>Connected</strong> (Connecting minus the DNS/NTP hatches, plus tunnel DNS and the CVE-2019-14899 drop).
+In every policy, OUTPUT and FORWARD end in a terminal reject (<code>policy.rs:final_reject</code>) and INPUT
+is left to fw3/fw4 (management is never ours to break).</p>
+<h2 id="steady-states">Steady states<a class="headerlink" href="#steady-states" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Router egress</th>
+<th>LAN forward</th>
+<th>DNS</th>
+<th>IPv6</th>
+<th>Management</th>
+<th>Enforced by</th>
+<th>Recovery</th>
+<th>Evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Daemon idle (Disconnected)</td>
+<td>blocked except daemon bootstrap and the resolved API endpoints (nyxd, nym-api, nym-vpn-api and their cover domains), root-scoped</td>
+<td>blocked (LAN-to-LAN allowed if <code>allow_lan</code>)</td>
+<td>rejected; root-scoped rate-limited hatch for the daemon only; a <strong>private</strong> custom resolver (LAN Pi-hole) is admitted on the one device it is routed on, unscoped, for the router and LAN clients (daemon-only instead when that device is a WAN zone device, or the WAN zone or route is unknown), and dnsmasq is pointed at it while idle (the WAN resolvers are dropped from its upstream list because they are rejected; kept only with the kill-switch off)</td>
+<td>yes when <code>enable_ipv6</code>; fw3 refuses to apply if kernel v6 is up and ip6tables is unusable</td>
+<td>LAN: fw3/fw4 INPUT policy; WAN sessions: reply direction</td>
+<td><code>tunnel_state_machine/mod.rs:apply_killswitch_policy</code> → <code>policy.rs:compile</code> Blocked; the allow-list comes from <code>mod.rs:resolve_api_endpoints</code> (the same resolver Connecting uses, through the DNS hatch, 30 s timeout), run by <code>states/disconnected_state.rs</code> on entry when nothing is known or the addresses are cache-only, then every hour (<code>API_ENDPOINT_REFRESH_INTERVAL</code>), with a 60 s retry after a failure; a successful resolution re-applies Blocked with the endpoints and pins the HTTP clients to them (<code>install_idle_api_access</code>). Until one succeeds the policy is Blocked with <strong>no</strong> endpoints — fail closed, so on a fresh install the API is unreachable only for the seconds the first resolution takes</td>
+<td>connect, or turn the kill-switch off</td>
+<td>unit:<code>blocked_policy_terminates_in_reject</code>, <code>blocked_state_blocks_forward_lan_to_wan</code>, <code>blocked_dns_exceptions_are_root_scoped</code>, <code>no_unscoped_dns_output_while_tunnel_down</code>, <code>idle_refresh_is_needed_when_nothing_is_known_or_only_cached</code>, <code>idle_refresh_follows_the_interval</code>, <code>idle_policy_without_endpoints_is_blocked_with_none</code>, <code>idle_policy_admits_resolved_endpoints_for_the_daemon_only</code>; capture (fw3, fw4: LAN client blocked while disconnected); harness <code>30-killswitch-disconnected</code>; <strong>unverified on a device</strong> that a fresh install registers with the kill-switch on after this change (acceptance test: <code>nym-vpnc account set</code> with the default settings)</td>
+</tr>
+<tr>
+<td>Connecting</td>
+<td>as Blocked plus peer endpoints and tunnel interface</td>
+<td>into the tunnel only</td>
+<td>rejected on the WAN; hatch root-scoped; private custom resolver pinned to its route device as when idle</td>
+<td>as above</td>
+<td>as above</td>
+<td><code>states/connecting_state.rs:set_firewall_policy</code> → Connecting</td>
+<td>connection completes or fails to Disconnected/Error</td>
+<td>unit:<code>connecting_policy_terminates_in_reject</code>, <code>connecting_dns_hatch_is_root_scoped</code>; capture (connect attempts observed, no LAN egress)</td>
+</tr>
+<tr>
+<td>Connected</td>
+<td>tunnel and peer endpoints only</td>
+<td>into the tunnel only</td>
+<td>tunnel resolvers via tunnel only; private custom resolver pinned to the one device it is routed on; public non-tunnel resolvers any interface; WAN port 53 otherwise rejected. WAN zone unknown, or the route device is a WAN device or the tunnel → private resolver tunnel-only (fail closed)</td>
+<td>as above</td>
+<td>as above</td>
+<td><code>states/connected_state.rs:set_firewall_policy</code> → Connected</td>
+<td>n/a</td>
+<td>unit:<code>connected_forward_output_have_no_unqualified_established_accept</code>, <code>connected_lan_emits_cve_drop</code>; capture baseline (fw3: 20 s connected, zero non-WireGuard egress); harness <code>32-killswitch-connected</code></td>
+</tr>
+<tr>
+<td>Disconnecting</td>
+<td>Connected policy stays until Disconnected applies Blocked</td>
+<td>same</td>
+<td>same</td>
+<td>same</td>
+<td>same</td>
+<td><code>states/disconnecting_state.rs</code> → <code>DisconnectedState::enter</code> → Blocked</td>
+<td>automatic</td>
+<td>unit only (state machine); <strong>unverified</strong> by capture across the transition</td>
+</tr>
+<tr>
+<td>Error state</td>
+<td>Blocked re-applied on entry; if that apply fails the previous policy (or the boot block) stays</td>
+<td>as Blocked</td>
+<td>as Blocked</td>
+<td>as Blocked</td>
+<td>as Blocked</td>
+<td><code>states/error_state.rs:enter</code> → <code>apply_killswitch_policy</code>; failure only logged</td>
+<td>settings change re-applies; <code>stop</code> opens</td>
+<td>harness <code>33-killswitch-error</code>; <strong>unverified</strong> for the apply-fails branch</td>
+</tr>
+<tr>
+<td>Offline (no WAN)</td>
+<td>Blocked-shaped policy with <code>allow_lan</code></td>
+<td>as Blocked</td>
+<td>as Blocked</td>
+<td>as Blocked</td>
+<td>as Blocked</td>
+<td><code>states/offline_state.rs:set_firewall_policy</code></td>
+<td>WAN returns → reconnect (Always On re-connects on the route event; without it the tunnel stays down)</td>
+<td><strong>unverified</strong> by capture (<code>tests/leak/scenarios/17-wan-flap.sh</code> observed the reconnect only)</td>
+</tr>
+<tr>
+<td>Exemptions configured</td>
+<td>unchanged: only <em>replies</em> to marked inbound flows leave via the WAN</td>
+<td>unchanged plus marked replies</td>
+<td>unchanged</td>
+<td>v4 and v6 restores share the <code>ct mark</code> scoping</td>
+<td>unchanged</td>
+<td><code>policy.rs:exemption_mangle_rules</code> (restores scoped to <code>ct mark 0x14e</code>; one set rule per WAN zone device), <code>exemption_filter_accepts</code>, <code>bypass_mark_forward_accept</code></td>
+<td>n/a</td>
+<td>unit:<code>exemption_mangle_restores_meta_mark_after_set</code>, <code>exemptions_emit_filter_mark_accepts_before_final_reject</code>, <code>unmarked_lan_to_wan_still_rejected_with_bypass_accept</code>; device (fw3 21.02: connmark fixes reproduced and verified, commits d33383d76, 15c93b7d4, 0e6ff520c); <strong>unverified</strong> by capture that an exempt service cannot originate outbound</td>
+</tr>
+<tr>
+<td><code>allow_lan</code> off</td>
+<td>unchanged</td>
+<td>LAN-to-LAN through the router rejected too</td>
+<td>unchanged</td>
+<td>unchanged</td>
+<td><strong>INPUT untouched</strong>, so LAN SSH/LuCI keep working (<code>policy.rs:final_reject</code> never touches INPUT)</td>
+<td><code>policy.rs:allow_lan_traffic</code> skipped</td>
+<td>turn <code>allow_lan</code> on</td>
+<td>unit (policy compiles without LAN accepts); <strong>unverified</strong> on device</td>
+</tr>
+<tr>
+<td>Legacy split tunnel on</td>
+<td><strong>not protected</strong> by design: effective kill-switch is off</td>
+<td>not protected</td>
+<td>not protected</td>
+<td>n/a</td>
+<td>normal</td>
+<td><code>config_manager.rs:519</code>; boot guard <code>nym_boot_block_wanted</code> returns 1</td>
+<td>n/a</td>
+<td>unit (guard text-scan); device (mock run of the guard, 2026-09-07)</td>
+</tr>
+<tr>
+<td>Kill-switch toggled off at runtime</td>
+<td><strong>not protected</strong> by design; <code>reset_policy</code> opens, boot table removed</td>
+<td>same</td>
+<td>same</td>
+<td>n/a</td>
+<td>normal</td>
+<td><code>apply_killswitch_policy</code> else-branch; fw4 <code>reset</code> / fw3 <code>reset</code></td>
+<td>n/a</td>
+<td>harness <code>30-killswitch-disconnected</code> (KS off leg); <strong>unverified</strong> by capture of the toggle instant</td>
+</tr>
+<tr>
+<td>Kill-switch toggled on at runtime</td>
+<td>Blocked applied immediately in idle states; Connecting/Connected re-applied via settings diff</td>
+<td>as row above</td>
+<td>as row above</td>
+<td>as row above</td>
+<td>as row above</td>
+<td><code>states/*:killswitch_changed()</code> → <code>set_firewall_policy</code> / <code>apply_killswitch_policy</code></td>
+<td>n/a</td>
+<td>unit (state diff tests in <code>tunnel_state_machine/mod.rs</code>); device (toggle observed, no capture)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="lifecycle-events">Lifecycle events<a class="headerlink" href="#lifecycle-events" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Router egress</th>
+<th>LAN forward</th>
+<th>DNS</th>
+<th>IPv6</th>
+<th>Management</th>
+<th>Enforced by</th>
+<th>Recovery</th>
+<th>Evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Boot: firewall start (S19) → daemon's first policy (S90)</td>
+<td>blocked: boot block drops new flows except loopback, DHCP/DHCPv6, ND, LAN/link-local/multicast destinations</td>
+<td>blocked except LAN/link-local destinations</td>
+<td><strong>rejected before the LAN accepts</strong>, so a private-address upstream resolver is covered</td>
+<td>fw4: <code>ip6 daddr</code> sets + drop; fw3: <code>ip6tables</code> boot block when kernel v6 is up — <strong>not protected if <code>ip6tables</code> is missing</strong> (logged CRITICAL)</td>
+<td>LAN: INPUT untouched; WAN-side sessions: reply-direction accept</td>
+<td><code>fw4-include.sh:install_boot_block</code>, <code>fw3-include.sh:emergency_block … boot</code>, decision in <code>fw-boot-guard.sh:nym_boot_block_wanted</code></td>
+<td>daemon's first <code>apply</code>/<code>reset</code> removes it last (<code>reset</code> is also the kill-switch-off path); <code>stop</code> writes the marker and removes it</td>
+<td>unit:<code>boot_block_keeps_the_router_reachable_and_ends_in_drop</code>, <code>boot_block_rejects_dns_before_the_lan_accepts</code>, <code>include_script_boot_rules_reject_dns_before_lan_accepts</code>; capture (fw4 CT 425 and fw3 VM 902 reboots 2026-09-07: block installed at firewall start, zero upstream DNS, zero LAN egress); capture (simulated block: LAN dig to private upstream refused, tcpdump 0 DNS packets on WAN)</td>
+</tr>
+<tr>
+<td>Boot: daemon's own bootstrap under the boot block</td>
+<td>daemon API/DoH/NTP are <strong>blocked</strong> until its first policy replaces the block (the block has no uid hatches)</td>
+<td>n/a</td>
+<td>n/a</td>
+<td>n/a</td>
+<td>n/a</td>
+<td>same</td>
+<td>daemon applies Blocked (which lifts the block); the idle state then resolves the API endpoints through the DNS hatch and admits them, so account sync, registration and the gateway directory work without a connect</td>
+<td>capture (first daemon egress appears seconds after the block is lifted). <strong>Not protected against a startup deadlock on a non-mainnet network with no cached discovery</strong>: environment discovery in <code>nym-vpnd/src/main.rs</code> runs before the service exists and therefore before the idle allow-list; on mainnet the embedded defaults cover it and the discovery refresher re-fetches once the endpoints are admitted, on other networks the daemon exits and the block stays (issue #15, startup ordering part)</td>
+</tr>
+<tr>
+<td>Daemon restart (<code>/etc/init.d/nym-vpnd restart</code>)</td>
+<td>Blocked/Connected policy left in place by the exiting daemon</td>
+<td>same</td>
+<td>same</td>
+<td>same</td>
+<td>same</td>
+<td><code>tunnel_state_machine/mod.rs:release_firewall_on_shutdown</code> (keeps policy when kill-switch on); init script <code>keep_killswitch</code> (action <code>restart</code>: no marker, no teardown)</td>
+<td>new daemon's first apply replaces the policy atomically</td>
+<td>capture (fw4 and fw3: policy present at every 1 s sample, LAN client zero leaks)</td>
+</tr>
+<tr>
+<td>Restart from the web UI or the account hard reset (rpcd <code>daemon_restart</code>, <code>account_reset</code>)</td>
+<td>as daemon restart: the bridge runs <code>/etc/init.d/nym-vpnd restart</code> and <code>reset_account</code> (an <code>EXTRA_COMMAND</code>: stop, wipe <code>/etc/nym/data</code>, start), both keep paths</td>
+<td>same</td>
+<td>same</td>
+<td>same</td>
+<td>same</td>
+<td><code>nym-vpnc/src/commands/rpcd.rs:daemon_restart</code>/<code>account_reset</code> → init script <code>keep_killswitch</code> (<code>restart</code>, <code>reset_account</code>). The bridge used to run <code>stop</code>, sleep and <code>start</code>, so the stop hook opened the firewall for the gap; <code>daemon_stop</code> still runs <code>stop</code>, the documented escape hatch</td>
+<td>new daemon's first apply</td>
+<td>harness <code>11-restart-paths</code> (table present at every 1 s sample across both calls); <strong>unverified</strong> by capture</td>
+</tr>
+<tr>
+<td>Package upgrade, apk (25.x) or opkg (≤24.10) from a package that already has <code>keep_killswitch</code></td>
+<td>as daemon restart: old daemon keeps running through the file swap</td>
+<td>same</td>
+<td>same</td>
+<td>same</td>
+<td>same</td>
+<td><code>scripts/ipk/prerm</code> (no daemon stop on <code>PKG_UPGRADE=1</code>, no firewall teardown, ip rules untouched), <code>scripts/ipk/postinst</code> (<code>restart</code> through the new init script)</td>
+<td>postinst restart</td>
+<td>capture (fw4 p8→p9→p10→p12 via apk, fw3 p10→p11→p12 via opkg: policy continuous, zero leaks)</td>
+</tr>
+<tr>
+<td>First upgrade from a package <em>without</em> <code>keep_killswitch</code> (≤1.34.0)</td>
+<td>apk: covered (the new pre-upgrade script runs). opkg: <strong>not protected</strong> for the seconds between the old prerm's <code>stop</code> and postinst's start; the old stop hook opens the firewall</td>
+<td>same</td>
+<td>same</td>
+<td>same</td>
+<td>normal</td>
+<td>package manager semantics: opkg runs the <em>old</em> prerm, apk runs the <em>new</em> pre-upgrade</td>
+<td>postinst start</td>
+<td>capture (apk p6→p8 on fw4: continuous); capture (apk p6→p7 before the fix: ~15 s open, one LAN request left on the real address — the measurement of the hole); opkg case <strong>unverified</strong> (no pre-keep opkg install available)</td>
+</tr>
+<tr>
+<td>Firewall reload (<code>/etc/init.d/firewall reload</code>)</td>
+<td>fw4: <code>inet nym</code> is not fw4's table, untouched. fw3: reload deletes only fw3-tagged rules and skips <code>*_rule</code> chains; our chains and jumps survive, the include reconciles. Both: the <code>nym</code> zone (masquerade, MSS clamp, <code>lan -&gt; nym</code>) is re-rendered by fw3/fw4 from <code>/etc/config/firewall</code>, nothing of the daemon's to restore</td>
+<td>same</td>
+<td>same</td>
+<td>same</td>
+<td>same</td>
+<td>fw4: table separation; fw3: firewall3 <code>fw3_flush_rules(reload=true)</code>, include <code>main → restore_policy</code> (idempotent); zone: <code>uci-defaults/luci-app-nym-vpn</code></td>
+<td>n/a</td>
+<td>capture (fw3: policy hooked at every sample, zero leaks; fw4: earlier session); unit:<code>include_script_names_the_same_tables</code>, <code>include_script_only_ever_deletes_the_boot_table</code></td>
+</tr>
+<tr>
+<td>Firewall restart (<code>/etc/init.d/firewall restart</code>)</td>
+<td>fw4: unaffected. fw3: <strong>not protected</strong> between fw3's flush (built-in policies set to ACCEPT, every chain deleted) and its include run at the end of <code>start</code>; only fw3's own zone rules apply once rebuilt</td>
+<td>same</td>
+<td>same</td>
+<td>same</td>
+<td>normal</td>
+<td>fw3 restore: <code>fw3-include.sh:restore_policy</code> from <code>/var/run/nym-firewall/{v4,v6}.rules</code> when the include finally runs</td>
+<td>the include</td>
+<td>capture (fw3 VM 902: policy hooked at every 1 s sample and zero leaks, i.e. the window is sub-second and the tunnel kept LAN traffic routed inside it; <strong>the window itself was not measured</strong>). Decision: <a href="../fw3-restart/">fw3-restart.md</a></td>
+</tr>
+<tr>
+<td>Explicit stop (<code>/etc/init.d/nym-vpnd stop</code>)</td>
+<td><strong>not protected</strong> by design: stop marker written, tables and chains removed</td>
+<td>not protected</td>
+<td>not protected</td>
+<td>n/a</td>
+<td>normal</td>
+<td>init script <code>stop_service</code>/<code>service_stopped</code>; fw3 include <code>main</code> honours the marker before restoring anything</td>
+<td><code>start</code> removes the marker; the boot block re-arms only after a reboot</td>
+<td>capture (fw3 and fw4: LAN client reached the internet on the real address within seconds — the intended behaviour)</td>
+</tr>
+<tr>
+<td>System shutdown / reboot</td>
+<td>kept: K-script runs with <code>action=shutdown</code>, treated like <code>restart</code></td>
+<td>same</td>
+<td>same</td>
+<td>same</td>
+<td>n/a</td>
+<td>init script <code>keep_killswitch</code></td>
+<td>boot block on the way up</td>
+<td>capture (fw3 VM 902 before the fix: LAN DNS and HTTPS SYN left 2 s after <code>reboot</code>; after: only FINs of the daemon's own connections; fw4 CT 425: zero upstream DNS, zero LAN egress)</td>
+</tr>
+<tr>
+<td>Daemon crash, steady state</td>
+<td>policy stays (nothing removes it)</td>
+<td>same</td>
+<td>same</td>
+<td>same</td>
+<td>same</td>
+<td>no code path removes a live policy on process death</td>
+<td>procd respawns (<code>respawn 3600 5 0</code>: retry 0 = forever), new daemon re-applies</td>
+<td><strong>unverified</strong> by capture; reasoning only</td>
+</tr>
+<tr>
+<td>Daemon crash mid-apply, fw4</td>
+<td>old or new table, never neither: <code>nft -f</code> replaces atomically</td>
+<td>same</td>
+<td>same</td>
+<td>same</td>
+<td>same</td>
+<td><code>fw4.rs:run_nft_script</code></td>
+<td>respawn</td>
+<td>unit-level reasoning; <strong>unverified</strong> by fault injection</td>
+</tr>
+<tr>
+<td>Daemon crash mid-apply, fw3</td>
+<td>transition marker stays; the next include run installs the strict emergency block (reply-only OUTPUT, DROP FORWARD) instead of reading half-written state; if the crash happened on a family's <em>first</em> activation the daemon had already installed the same block before touching chains</td>
+<td>LAN forwarding dropped entirely (transition set has no LAN accepts)</td>
+<td>rejected</td>
+<td>v6 block when kernel v6 is up</td>
+<td>LAN SSH/LuCI via INPUT; WAN sessions via reply accept</td>
+<td><code>fw3.rs:apply</code> (marker first; first-activation block), <code>fw3-include.sh:main</code> transition branch</td>
+<td>respawned daemon's next successful apply/reset removes marker and block; <code>stop</code> opens</td>
+<td>unit:<code>transition_marker_is_explicitly_cleared_only_on_success</code>, <code>emergency_script_keeps_reply_traffic_and_never_touches_input</code>; <strong>unverified</strong> by fault injection on a device</td>
+</tr>
+<tr>
+<td>procd respawn exhaustion</td>
+<td>does not occur: retry count 0 means respawn forever</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>init script <code>procd_set_param respawn 3600 5 0</code></td>
+<td>n/a</td>
+<td>config only; <strong>unverified</strong> that procd honours 0 as "forever" on every OpenWrt release in scope</td>
+</tr>
+<tr>
+<td>IPv6 newly enabled while a v4-only policy is persisted (fw3)</td>
+<td>the next include run installs a v6 emergency block until the daemon re-applies; the daemon installs a v6 first-activation block on its next apply</td>
+<td>same</td>
+<td>same</td>
+<td>this row <em>is</em> the v6 story</td>
+<td>as boot block</td>
+<td><code>fw3-include.sh:restore_policy</code> (<code>kernel_ipv6_enabled</code> without <code>v6.rules</code>), <code>fw3.rs:apply</code> per-family <code>jumps_present</code></td>
+<td>daemon re-apply</td>
+<td><strong>unverified</strong> on a device</td>
+</tr>
+<tr>
+<td>Kernel IPv6 up, <code>ip6tables</code> unusable (fw3)</td>
+<td>daemon refuses to apply any policy (Error state); whatever was live stays</td>
+<td>same</td>
+<td>same</td>
+<td><strong>not protected</strong> on a fresh boot: the boot block's v6 half fails (CRITICAL) and nothing else filters v6</td>
+<td>as before</td>
+<td><code>fw3.rs:apply</code> <code>Ipv6Status::Unusable</code> → <code>Err</code>; <code>fw3-include.sh:handle_no_policy</code> logs CRITICAL</td>
+<td>install <code>ip6tables</code>/<code>kmod-ip6tables</code> or disable IPv6</td>
+<td><strong>unverified</strong></td>
+</tr>
+<tr>
+<td>Corrupt or missing daemon config</td>
+<td>boot guard takes the daemon's defaults (kill-switch on) — block installed</td>
+<td>same</td>
+<td>same</td>
+<td>same</td>
+<td>same</td>
+<td><code>fw-boot-guard.sh:nym_config_bool</code> → <code>nym_boot_block_wanted</code>; daemon <code>config_manager.rs:new</code> renames an unparseable file to <code>.json.bak</code> and starts with defaults</td>
+<td>daemon starts with defaults and lifts the block</td>
+<td>device (mock run of the guard with valid/corrupt/absent files, 2026-09-07); <strong>unverified</strong> end to end</td>
+</tr>
+<tr>
+<td>Runtime directory untrusted (wrong owner/mode, symlink)</td>
+<td>fw4: marker and hints ignored, boot-block decision proceeds; fw3: include takes the lockless path — live policy left alone, or boot block if nothing is hooked; daemon refuses to apply on top of it</td>
+<td>same</td>
+<td>same</td>
+<td>same</td>
+<td>same</td>
+<td><code>common.rs:ensure_runtime_dir_at</code>, <code>fw-boot-guard.sh:nym_runtime_dir_trusted</code>, <code>fw3-include.sh:run_without_lock</code></td>
+<td>repair ownership/mode, then stop again to open WAN or start to restore service; while untrusted, fw4 Stop removes tables only until reload, fw3 skips locked teardown</td>
+<td>unit:<code>runtime_dir_rejects_*</code>, <code>every_runtime_path_lives_in_the_runtime_dir</code>, <code>scripts_derive_every_state_path_from_the_runtime_dir</code>; device (fw4: marker ignored with the directory at 0755, block kept, logged)</td>
+</tr>
+<tr>
+<td><code>flock</code> missing (fw3 only)</td>
+<td>include never reconciles unlocked: hooked policy left as is; nothing hooked → boot block, re-checked; init <code>stop</code> skips the teardown and leaves it to the next locked include run</td>
+<td>same</td>
+<td>same</td>
+<td>same</td>
+<td>same</td>
+<td><code>fw3-include.sh:run_without_lock</code>; init script stop-time lock check</td>
+<td>restore <code>flock</code>, <code>firewall reload</code> (the stop marker is honoured first); daemon applies still work (they use <code>flock(2)</code>, not the binary)</td>
+<td>device (fw3 VM 902 with <code>/usr/bin/flock</code> moved away, 2026-09-07: all three branches observed). Note OpenWrt's own <code>procd.sh</code> also requires <code>flock</code>, so this is not a realistic image</td>
+</tr>
+</tbody>
+</table>
+<h2 id="traps">Traps<a class="headerlink" href="#traps" title="Permanent link">&para;</a></h2>
+<p>Things that cost a debugging session at least once. Read before changing anything in this area.</p>
+<ul>
+<li><strong>A marker file is not a lock.</strong> The fw3 transition marker covers crashes; only the <code>flock</code>
+  on <code>/var/run/nym-firewall/lock</code> covers concurrency between the daemon, the include and the init
+  script. An include that tests the marker without the lock can install a block after the
+  daemon lifted its own.</li>
+<li><strong>An upgrade runs the old package's hooks</strong> (opkg: old <code>prerm</code>; apk: the <em>new</em> pre-upgrade
+  script, but the <em>old</em> init script is still what <code>stop</code> executes). Whatever the new package
+  wants during the swap must not depend on old code cooperating. That is why prerm no longer
+  stops the daemon on upgrade and postinst runs <code>restart</code> through the new init script.</li>
+<li><strong><code>fw3 reload</code> preserves foreign chains; <code>fw3 restart</code> flushes everything.</strong> Upstream
+  <code>fw3_flush_rules(reload=true)</code> skips user chains. An earlier version of this project
+  misdiagnosed its own cleanup branch as fw3 wiping chains on reload.</li>
+<li><strong>Shutdown runs <code>stop</code>.</strong> The K-script is invoked with <code>action=shutdown</code>, which rc.common
+  maps onto the stop functions. Without the keep path a reboot opened the firewall for its last
+  seconds, and a LAN client's packets left on the WAN.</li>
+<li><strong>The include scripts ship in the package, not in the daemon.</strong> <code>scripts/ipk/build-ipk.sh</code>
+  and <code>scripts/apk/build-apk.sh</code> copy the four helpers (<code>fw3-include.sh</code>, <code>fw4-include.sh</code>,
+  <code>fw-boot-guard.sh</code>, <code>fw-rules.sh</code>) to <code>/usr/share/nym-vpn/</code> and fail the build if one is
+  missing; every consumer refuses to run without the ones it sources. The Rust tests
+  <code>include_str!</code> them only to pin the contract, and <code>fw-rules.sh</code> is rendered from
+  <code>boot_rules.rs</code> (<code>NYM_FW_RULES_REGEN=1 cargo build -p nym-firewall</code>). Changing a script needs
+  a package rebuild and reinstall.</li>
+<li><strong>Stock busybox lacks <code>stat</code>, <code>nohup</code>, <code>setsid</code>, <code>timeout</code>.</strong> Use <code>find -user -perm</code> for
+  ownership checks and <code>( trap "" HUP; cmd &amp; )</code> to detach. <code>pkill -f</code>/<code>pgrep -f &lt;name&gt;</code> from an
+  ssh one-liner matches the shell running the one-liner.</li>
+<li><strong>The ad blocker redirects all LAN DNS to the router's dnsmasq</strong> (<code>nym-vpnd/src/adblocker.rs</code>,
+  a NAT <code>REDIRECT</code> in PREROUTING). A LAN client's query "to" a WAN resolver therefore traverses
+  INPUT, not FORWARD, and can be answered from cache. Counting FORWARD rejects proves nothing
+  about it; capture the WAN.</li>
+<li><strong><code>policy accept</code> on our nft chains means "let the next table decide".</strong> The boot table
+  and <code>inet nym</code> sit at lower priority than fw4; an accept there is not a final verdict, the
+  terminal <code>drop</code>/<code>reject</code> is.</li>
+<li><strong>The WAN is the firewall zone, not an interface name.</strong> <code>common.rs:wan_zone_devices</code> takes
+  every <code>network</code> of the zones named <code>wan</code> or with <code>masq</code> and resolves it through ubus
+  <code>l3_device</code> (PPPoE: <code>pppoe-wan</code>); mwan3 setups have several. <code>ip route get</code> never finds the
+  WAN — connected, it answers with the tunnel. It only names the private resolver's own device
+  (<code>policy.rs:private_dns_device</code>), which is then matched positively, since iptables cannot
+  express "not any of these".</li>
+<li><strong>The daemon's default kill-switch is on.</strong> An unreadable config does not make it off: the
+  daemon starts with defaults after stashing the bad file. The boot guard mirrors that.</li>
+<li><strong>The <code>nym</code> zone masquerades but is not an uplink.</strong> <code>common.rs:wan_zone_devices</code> takes every
+  zone named <code>wan</code> or with <code>masq</code>; the tunnel zone has <code>masq</code> too and is skipped by name
+  (<code>NYM_ZONE</code>). Rename the zone and the exemption mangle rules would mark tunnel-inbound flows
+  for the real WAN.</li>
+<li><strong>Tests that scan script text prove the text is there.</strong> They pin contracts (names, paths,
+  ordering); they do not prove packet behaviour. Only the captures do.</li>
+</ul>
+<h2 id="evidence">Evidence<a class="headerlink" href="#evidence" title="Permanent link">&para;</a></h2>
+<p>The capture and device observations in the tables are historical, not a validation of every
+subsequent revision. Unit and source-text checks do not establish packet-level protection.</p>
+<p><code>tests/harness/</code> exercises package lifecycle and connected/disconnected behavior in LXC.
+<code>tests/leak/</code> injects failures under a WAN capture on fw3 VM and fw4 container beds. Re-run
+relevant scenarios against the exact release artifacts after policy or harness changes. Global
+IPv6 transitions require a working IPv6 upstream, and an fw3 restart capture with no observed
+leak does not close the documented restart exposure.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
