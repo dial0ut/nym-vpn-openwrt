@@ -201,6 +201,22 @@ MKPKG_INFO_ARGS=(
     -I "depends:libc kmod-tun libmnl libnftnl kmod-ipt-conntrack-extra luci-base rpcd"
 )
 
+# NYM_PKG_STAGE_DIR: hand the staged tree and package info over and build
+# nothing (scripts/ci/check-pkg-payload.sh compares it with the ipk's).
+if [ -n "${NYM_PKG_STAGE_DIR:-}" ]; then
+    mkdir -p "$NYM_PKG_STAGE_DIR"
+    if [ -n "$(ls -A "$NYM_PKG_STAGE_DIR")" ]; then
+        echo "Error: NYM_PKG_STAGE_DIR=$NYM_PKG_STAGE_DIR is not empty" >&2
+        exit 1
+    fi
+    cp -a "$DATA_DIR" "$SCRIPTS_DIR" "$NYM_PKG_STAGE_DIR/"
+    for arg in "${MKPKG_INFO_ARGS[@]}"; do
+        [ "$arg" = "-I" ] || printf '%s\n' "$arg"
+    done > "$NYM_PKG_STAGE_DIR/info"
+    echo "=== Staged into $NYM_PKG_STAGE_DIR (no package built) ==="
+    exit 0
+fi
+
 if [ "$STAGED_AS_ROOT" = 1 ] && command -v apk >/dev/null 2>&1 && apk mkpkg --help >/dev/null 2>&1; then
     echo "Using native apk mkpkg"
     apk mkpkg \

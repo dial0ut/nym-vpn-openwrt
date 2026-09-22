@@ -201,6 +201,19 @@ else
     TAR_AS_ROOT=(--uid 0 --gid 0 --uname root --gname root --numeric-owner)
 fi
 
+# NYM_PKG_STAGE_DIR: hand the staged tree over and build nothing
+# (scripts/ci/check-pkg-payload.sh compares it with the apk's).
+if [ -n "${NYM_PKG_STAGE_DIR:-}" ]; then
+    mkdir -p "$NYM_PKG_STAGE_DIR"
+    if [ -n "$(ls -A "$NYM_PKG_STAGE_DIR")" ]; then
+        echo "Error: NYM_PKG_STAGE_DIR=$NYM_PKG_STAGE_DIR is not empty" >&2
+        exit 1
+    fi
+    cp -a "$BUILD_DIR/data" "$BUILD_DIR/control" "$NYM_PKG_STAGE_DIR/"
+    echo "=== Staged into $NYM_PKG_STAGE_DIR (no package built) ==="
+    exit 0
+fi
+
 echo "=== Building IPK ==="
 (cd "$BUILD_DIR/control" && tar "${TAR_AS_ROOT[@]}" -czf ../control.tar.gz .)
 (cd "$BUILD_DIR/data" && tar "${TAR_AS_ROOT[@]}" -czf ../data.tar.gz .)
