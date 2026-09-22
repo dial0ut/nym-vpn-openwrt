@@ -5,12 +5,12 @@ use std::net::SocketAddr;
 
 use nym_dns::ResolvedDnsConfig;
 use nym_vpn_lib_types::{ErrorStateReason, TunnelType};
-use tokio::{sync::mpsc, time::Instant};
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::tunnel_state_machine::{
-    ConnectionData, NextTunnelState, PrivateActionAfterDisconnect, PrivateTunnelState, SharedState,
-    TunnelCommand, TunnelInterface, TunnelStateHandler,
+    ConnectionData, NextTunnelState, PrivateActionAfterDisconnect, PrivateTunnelState,
+    SessionStart, SharedState, TunnelCommand, TunnelInterface, TunnelStateHandler,
     states::{ConnectingState, DisconnectingState},
     tunnel::SelectedGateways,
     tunnel_monitor::{TunnelMonitorEvent, TunnelMonitorEventReceiver, TunnelMonitorHandle},
@@ -31,7 +31,7 @@ pub struct ConnectedState {
     /// Set when the bandwidth controller ended the session, to the gateway
     /// to blame as in `TunnelMonitorEvent::BandwidthFailed`.
     bandwidth_failure: Option<Option<bool>>,
-    connected_at: Instant,
+    connected_at: SessionStart,
 }
 
 impl ConnectedState {
@@ -82,7 +82,7 @@ impl ConnectedState {
             tunnel_interface,
             firewall_policy_params,
             bandwidth_failure: None,
-            connected_at: Instant::now(),
+            connected_at: SessionStart::now(),
         };
 
         if let Err(e) =
@@ -218,7 +218,7 @@ impl ConnectedState {
                 // Unless the grace keeps forgiving a gateway whose sessions
                 // never last: Connecting then probes the API to decide. A
                 // session this side's bandwidth failure ended does not count.
-                let lifetime = self.connected_at.elapsed();
+                let lifetime = self.connected_at.lifetime();
                 let tunnel_type = shared_state.tunnel_settings.tunnel_type;
                 let retry_attempt = if bandwidth_failure.is_none()
                     && shared_state

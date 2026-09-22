@@ -662,6 +662,20 @@ fn short_session(tunnel_type: TunnelType) -> Duration {
     }
 }
 
+/// When a session came up, on the tokio clock so that tests can advance it.
+#[derive(Debug, Clone, Copy)]
+struct SessionStart(tokio::time::Instant);
+
+impl SessionStart {
+    fn now() -> Self {
+        Self(tokio::time::Instant::now())
+    }
+
+    fn lifetime(self) -> Duration {
+        self.0.elapsed()
+    }
+}
+
 /// Short sessions in a row via one entry gateway before it is suspected.
 const SHORT_SESSION_STRIKES: u32 = 3;
 
@@ -1735,23 +1749,24 @@ mod tests {
         }
     }
 
+    /// Sessions are timed with [`SessionStart`], as `ConnectedState` does.
     #[tokio::test(start_paused = true)]
     async fn sessions_are_timed_on_the_tokio_clock() {
         let entry = gateway("7CWjY3QFoA9dgE535u9bQiXCfzgMZvSpJu842GA1Wn42");
         let wg = TunnelType::Wireguard;
         let mut strikes = ShortSessionStrikes::default();
         for session in 1..=SHORT_SESSION_STRIKES {
-            let connected_at = tokio::time::Instant::now();
+            let connected_at = SessionStart::now();
             tokio::time::advance(short_session(wg) - Duration::from_secs(1)).await;
             assert_eq!(
-                strikes.record(entry, connected_at.elapsed(), wg),
+                strikes.record(entry, connected_at.lifetime(), wg),
                 session == SHORT_SESSION_STRIKES
             );
         }
 
-        let connected_at = tokio::time::Instant::now();
+        let connected_at = SessionStart::now();
         tokio::time::advance(short_session(wg)).await;
-        assert!(!strikes.record(entry, connected_at.elapsed(), wg));
+        assert!(!strikes.record(entry, connected_at.lifetime(), wg));
         assert_eq!(strikes.count, 0);
     }
 
