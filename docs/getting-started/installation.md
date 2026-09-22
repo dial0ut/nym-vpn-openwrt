@@ -110,9 +110,8 @@ Pulled in automatically:
 | Package | Why |
 |---------|-----|
 | `libc` | musl libc, 1.2 or newer on the 32-bit architectures (OpenWrt 22.03+) |
+| `libgcc` | GCC runtime (`libgcc_s.so.1`) the binaries link against |
 | `kmod-tun` | TUN device — userspace WireGuard needs it |
-| `libmnl` | netlink |
-| `libnftnl` | nftables netlink |
 | `kmod-ipt-conntrack-extra` | conntrack marking for inbound exemptions on fw3 |
 | `luci-base` | LuCI web framework |
 | `rpcd` | RPC backend the LuCI app talks to |

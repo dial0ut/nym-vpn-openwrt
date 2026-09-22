@@ -67,9 +67,8 @@ for opkg, `depends:` for apk):
 | Package | Why |
 |---------|-----|
 | `libc` | musl libc; `libc (>= 1.2)` on the 32-bit architectures (arm, i386, mips, mipsel), whose binaries import musl 1.2's time64 symbols. OpenWrt's `libc` package carries the musl version (21.02: `1.1.24`), so opkg refuses the install there instead of leaving a daemon that cannot load |
+| `libgcc` | `libgcc_s.so.1`, which the binaries link against for unwinding (OpenWrt's `libgcc1` provides it) |
 | `kmod-tun` | TUN device for userspace WireGuard |
-| `libmnl` | netlink — the binaries link against it |
-| `libnftnl` | nftables netlink — likewise |
 | `kmod-ipt-conntrack-extra` | conntrack marking for inbound exemptions on fw3 |
 | `luci-base` | LuCI web framework |
 | `rpcd` | RPC backend for LuCI |

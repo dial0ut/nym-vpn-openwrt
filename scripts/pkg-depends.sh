@@ -5,11 +5,13 @@
 #   nym_pkg_depends <openwrt_arch> opkg   -> "libc (>= 1.2), kmod-tun, ..."
 #   nym_pkg_depends <openwrt_arch> apk    -> "libc>=1.2 kmod-tun ..."
 
+# libc and libgcc are the two shared libraries the binaries need (libc.so,
+# libgcc_s.so.1); scripts/ci/check-elf.sh fails a release binary that needs
+# anything else. libgcc is OpenWrt's libgcc1, which provides "libgcc".
 NYM_PKG_DEPENDS=(
     libc
+    libgcc
     kmod-tun                  # TUN device for userspace WireGuard
-    libmnl
-    libnftnl
     kmod-ipt-conntrack-extra  # conntrack marking for inbound exemptions on fw3
     luci-base
     rpcd

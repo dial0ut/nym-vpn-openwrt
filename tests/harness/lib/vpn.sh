@@ -23,7 +23,7 @@ vpn_pkg_install() {
             pct_sh "$ctid" "apk update >/tmp/pkg-update.log 2>&1 || true; apk add --allow-untrusted $flags /tmp/$name >/tmp/pkg-install.log 2>&1" || rc=$? ;;
         *.ipk)
             # A fresh rootfs has no package lists; without `opkg update` the
-            # dependencies (libmnl, libnftnl, kmod-*) cannot be resolved and
+            # dependencies (libgcc, kmod-*) cannot be resolved and
             # opkg exits 255.
             pct_sh "$ctid" "opkg update >/tmp/pkg-update.log 2>&1 || true; opkg install $flags /tmp/$name >/tmp/pkg-install.log 2>&1" || rc=$? ;;
         *) echo "[vpn] package must end in .apk or .ipk: $name" >&2; return 1 ;;
