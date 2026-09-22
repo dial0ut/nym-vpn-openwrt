@@ -6,7 +6,7 @@
 
 [![GitHub Release](https://img.shields.io/github/v/release/dial0ut/nym-vpn-openwrt?style=flat-square&color=blue)](https://github.com/dial0ut/nym-vpn-openwrt/releases)
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-green.svg?style=flat-square)](LICENSE)
-[![OpenWrt](https://img.shields.io/badge/OpenWrt-18.06%2B-00B5E2?style=flat-square&logo=openwrt&logoColor=white)](https://openwrt.org/)
+[![OpenWrt](https://img.shields.io/badge/OpenWrt-22.03%2B-00B5E2?style=flat-square&logo=openwrt&logoColor=white)](https://openwrt.org/)
 [![Rust](https://img.shields.io/badge/Rust-1.95%2B-orange?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 
 

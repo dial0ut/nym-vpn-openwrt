@@ -19,7 +19,7 @@ Or download the `.ipk` (`.apk` on OpenWrt 25.x+) for your architecture from the
 
 | | Minimum |
 |--|---------|
-| OpenWrt | 18.06+ |
+| OpenWrt | 22.03+ (21.02 on x86_64/aarch64 only; 23.05+ recommended) |
 | RAM | 128 MB (256 MB comfortable) |
 | Storage | 40 MB free |
 | Kernel module | `kmod-tun` |

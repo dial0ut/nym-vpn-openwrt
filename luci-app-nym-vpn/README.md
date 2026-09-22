@@ -13,7 +13,7 @@ LuCI web interface for NymVPN on OpenWrt. Wraps the `nym-vpnc` CLI to control th
 
 ## Requirements
 
-- OpenWrt 21.02 or later
+- OpenWrt 22.03 or later (21.02 on x86_64/aarch64 only; 23.05+ recommended)
 - `luci-base`
 - `rpcd`
 - `nym-vpnd` and `nym-vpnc` binaries installed

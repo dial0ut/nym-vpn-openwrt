@@ -4,10 +4,15 @@
 
 | | Minimum | Comfortable |
 |-------------|---------|-------------|
-| OpenWrt | 18.06+ | 23.05+ |
+| OpenWrt | 22.03+ (21.02 on x86_64/aarch64 only) | 23.05+ |
 | RAM | 128 MB | 256 MB+ |
 | Storage | 40 MB free | 128 MB+ |
 | Kernel module | `kmod-tun` | `kmod-tun` |
+
+!!! note "Why 22.03 on 32-bit"
+    The 32-bit builds (arm, i386, mips, mipsel) need musl 1.2, which OpenWrt ships from 22.03 on;
+    21.02 and 19.07 have musl 1.1.24, and the package refuses to install there. The 64-bit builds
+    also run on 21.02. 18.06 is not supported on any architecture.
 
 !!! note
     At 128 MB RAM, enable [zram swap](troubleshooting.md#not-enough-ram-oom-crash) before you
