@@ -2206,7 +2206,7 @@ fn regen_split() -> Result<(), String> {
     }
 
     let wanted = (!domains.is_empty() && nftset_supported()).then_some(domains.as_slice());
-    let dhcp_changed = sync_split_ipset(&mut SystemUci, wanted)?;
+    let dhcp = sync_split_ipset(&mut SystemUci, wanted)?;
 
     let nft_file = if clients.is_empty() && domains.is_empty() {
         match std::fs::remove_file(SPLIT_NFT) {
@@ -2220,15 +2220,24 @@ fn regen_split() -> Result<(), String> {
             .map_err(|err| format!("write {SPLIT_NFT}: {err}"))
     };
 
-    apply_split(&mut SystemApply, dhcp_changed, wanted.is_some(), nft_file)
+    apply_split(&mut SystemApply, dhcp, nft_file)
+}
+
+/// What `sync_split_ipset` did to dhcp.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct DhcpChange {
+    /// A new domain list was committed.
+    changed: bool,
+    /// A domain left the list; its resolved addresses are still in the sets.
+    removed: bool,
 }
 
 /// The system steps that apply a split edit, behind a trait so their order
 /// can be tested.
 trait SplitApply {
     fn reload_firewall(&mut self) -> Result<(), String>;
+    fn flush_bypass_sets(&mut self) -> Result<(), String>;
     fn reload_dnsmasq(&mut self) -> Result<(), String>;
-    fn hup_dnsmasq(&mut self);
 }
 
 struct SystemApply;
@@ -2237,11 +2246,31 @@ impl SplitApply for SystemApply {
     fn reload_firewall(&mut self) -> Result<(), String> {
         reload_firewall()
     }
+    fn flush_bypass_sets(&mut self) -> Result<(), String> {
+        let mut errors: Vec<String> = Vec::new();
+        for set in ["nym_bypass4", "nym_bypass6"] {
+            let what = format!("nft flush set inet fw4 {set}");
+            match std::process::Command::new("nft")
+                .args(["flush", "set", "inet", "fw4", set])
+                .output()
+            {
+                Ok(output) if output.status.success() => {}
+                // Never created (no domain exclusion since boot): nothing to flush.
+                Ok(output)
+                    if String::from_utf8_lossy(&output.stderr)
+                        .contains("No such file or directory") => {}
+                Ok(output) => errors.push(command_error(&what, &output)),
+                Err(err) => errors.push(format!("{what}: {err}")),
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("; "))
+        }
+    }
     fn reload_dnsmasq(&mut self) -> Result<(), String> {
         initd_run_checked("dnsmasq", "reload")
-    }
-    fn hup_dnsmasq(&mut self) {
-        hup_dnsmasq()
     }
 }
 
@@ -2250,20 +2279,22 @@ impl SplitApply for SystemApply {
 /// reload skipped here would never be retried. The errors are combined.
 fn apply_split(
     sys: &mut impl SplitApply,
-    dhcp_changed: bool,
-    has_domains: bool,
+    dhcp: DhcpChange,
     nft_file: Result<(), String>,
 ) -> Result<(), String> {
     let mut errors: Vec<String> = nft_file.err().into_iter().collect();
-    // Firewall first so the sets exist before dnsmasq references them. The
-    // reload recreates them empty; dnsmasq adds addresses only on upstream
-    // answers, so without a new domain list a cache flush (SIGHUP) is what
-    // makes the next lookups refill them.
+    // Firewall first so the sets exist before dnsmasq references them.
     errors.extend(sys.reload_firewall().err());
-    if dhcp_changed {
+    // `fw4 reload` flushes the table's rules, not its set elements, so the
+    // addresses of a removed domain would keep bypassing the tunnel. Emptied
+    // before the dnsmasq reload, which drops its cache: the remaining
+    // domains' addresses come back as clients resolve them again, and are
+    // tunnelled until then.
+    if dhcp.removed {
+        errors.extend(sys.flush_bypass_sets().err());
+    }
+    if dhcp.changed {
         errors.extend(sys.reload_dnsmasq().err());
-    } else if has_domains {
-        sys.hup_dnsmasq();
     }
     if errors.is_empty() {
         Ok(())
@@ -2286,13 +2317,13 @@ fn split_ipset_domains(uci: &mut impl Uci) -> Option<Vec<String>> {
     Some(domains.split_whitespace().map(str::to_owned).collect())
 }
 
-/// Brings `dhcp.nym_split_ipset` to `wanted` (None: no section) and returns
-/// whether dhcp changed; an unchanged domain list leaves dhcp untouched.
+/// Brings `dhcp.nym_split_ipset` to `wanted` (None: no section) and says
+/// what changed; an unchanged domain list leaves dhcp untouched.
 /// OpenWrt's dnsmasq turns `config ipset` into --nftset directives on fw4.
-fn sync_split_ipset(uci: &mut impl Uci, wanted: Option<&[String]>) -> Result<bool, String> {
+fn sync_split_ipset(uci: &mut impl Uci, wanted: Option<&[String]>) -> Result<DhcpChange, String> {
     let current = split_ipset_domains(uci);
     if current.as_deref() == wanted {
-        return Ok(false);
+        return Ok(DhcpChange::default());
     }
     let staged = stage_split_ipset(uci, current.is_some(), wanted).and_then(|()| commit_dhcp(uci));
     if let Err(err) = staged {
@@ -2300,7 +2331,14 @@ fn sync_split_ipset(uci: &mut impl Uci, wanted: Option<&[String]>) -> Result<boo
         let _ = uci.run(&["revert", "dhcp.nym_split_ipset"]);
         return Err(err);
     }
-    Ok(true)
+    let kept = wanted.unwrap_or_default();
+    Ok(DhcpChange {
+        changed: true,
+        removed: current
+            .iter()
+            .flatten()
+            .any(|domain| !kept.contains(domain)),
+    })
 }
 
 fn stage_split_ipset(
@@ -2355,46 +2393,6 @@ fn reload_firewall() -> Result<(), String> {
         return Ok(());
     }
     initd_run_checked("firewall", "reload")
-}
-
-/// Instance pids from `ubus call service list '{"name":"dnsmasq"}'`.
-fn dnsmasq_pids(service_list: &str) -> Vec<u32> {
-    let Ok(list) = serde_json::from_str::<Value>(service_list) else {
-        return Vec::new();
-    };
-    list["dnsmasq"]["instances"]
-        .as_object()
-        .map(|instances| {
-            instances
-                .values()
-                .filter_map(|instance| instance["pid"].as_u64())
-                .filter_map(|pid| u32::try_from(pid).ok())
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-/// Cache flush for every dnsmasq instance, found the way nym-vpnd finds it:
-/// procd's pid is the ujail wrapper's, which forwards the signal. Best
-/// effort; a miss only delays the refill until the cached answers expire.
-fn hup_dnsmasq() {
-    let list = cmd_stdout(
-        "ubus",
-        &["call", "service", "list", r#"{"name":"dnsmasq"}"#],
-    )
-    .unwrap_or_default();
-    for pid in dnsmasq_pids(&list) {
-        let pid = pid.to_string();
-        let sent = std::process::Command::new("kill")
-            .args(["-HUP", &pid])
-            .output()
-            .is_ok_and(|output| output.status.success());
-        if !sent {
-            log_warn(&format!(
-                "split exclusions: kill -HUP {pid} (dnsmasq) failed"
-            ));
-        }
-    }
 }
 
 /// Runs one exclusion's `uci` edits and commits nym-vpn. A failure drops
@@ -3135,7 +3133,10 @@ dhcp.nym_split_ipset=ipset
     fn unchanged_split_domains_leave_dhcp_alone() {
         let wanted = strings(&["a.example.com", "b.example.com"]);
         let mut uci = ipset_uci(Some("a.example.com b.example.com\n"));
-        assert_eq!(sync_split_ipset(&mut uci, Some(&wanted)), Ok(false));
+        assert_eq!(
+            sync_split_ipset(&mut uci, Some(&wanted)),
+            Ok(DhcpChange::default())
+        );
         assert!(
             uci.calls.iter().all(|c| c.starts_with("-q get ")),
             "{:?}",
@@ -3143,7 +3144,7 @@ dhcp.nym_split_ipset=ipset
         );
 
         let mut uci = ipset_uci(None);
-        assert_eq!(sync_split_ipset(&mut uci, None), Ok(false));
+        assert_eq!(sync_split_ipset(&mut uci, None), Ok(DhcpChange::default()));
         assert!(
             uci.calls.iter().all(|c| c.starts_with("-q get ")),
             "{:?}",
@@ -3155,7 +3156,7 @@ dhcp.nym_split_ipset=ipset
     fn changed_split_domains_rewrite_the_section_and_commit() {
         let wanted = strings(&["a.example.com", "b.example.com"]);
         let mut uci = ipset_uci(Some("a.example.com\n"));
-        assert_eq!(sync_split_ipset(&mut uci, Some(&wanted)), Ok(true));
+        assert_eq!(sync_split_ipset(&mut uci, Some(&wanted)), Ok(ADDED));
         let calls = &uci.calls;
         let delete = position(calls, "delete dhcp.nym_split_ipset");
         let create = position(calls, "set dhcp.nym_split_ipset=ipset");
@@ -3170,7 +3171,7 @@ dhcp.nym_split_ipset=ipset
         assert!(position(calls, "changes dhcp") < commit);
 
         let mut uci = ipset_uci(Some("a.example.com\n"));
-        assert_eq!(sync_split_ipset(&mut uci, None), Ok(true));
+        assert_eq!(sync_split_ipset(&mut uci, None), Ok(REMOVED));
         assert!(
             position(&uci.calls, "delete dhcp.nym_split_ipset")
                 < position(&uci.calls, "commit dhcp")
@@ -3179,8 +3180,13 @@ dhcp.nym_split_ipset=ipset
 
         // A foreign section under our name never counts as unchanged.
         let mut uci = FakeUci::default().reply("-q get dhcp.nym_split_ipset", Ok("ipset_other\n"));
-        assert_eq!(sync_split_ipset(&mut uci, None), Ok(true));
+        assert_eq!(sync_split_ipset(&mut uci, None), Ok(ADDED));
         assert!(uci.calls.iter().any(|c| c == "delete dhcp.nym_split_ipset"));
+
+        // Swapping one domain for another removes one.
+        let wanted = strings(&["b.example.com"]);
+        let mut uci = ipset_uci(Some("a.example.com\n"));
+        assert_eq!(sync_split_ipset(&mut uci, Some(&wanted)), Ok(REMOVED));
     }
 
     #[test]
@@ -3220,26 +3226,38 @@ dhcp.nym_split_ipset=ipset
         fn reload_firewall(&mut self) -> Result<(), String> {
             self.step("firewall")
         }
+        fn flush_bypass_sets(&mut self) -> Result<(), String> {
+            self.step("flush")
+        }
         fn reload_dnsmasq(&mut self) -> Result<(), String> {
             self.step("dnsmasq")
         }
-        fn hup_dnsmasq(&mut self) {
-            let _ = self.step("hup");
-        }
     }
+
+    const ADDED: DhcpChange = DhcpChange {
+        changed: true,
+        removed: false,
+    };
+    const REMOVED: DhcpChange = DhcpChange {
+        changed: true,
+        removed: true,
+    };
 
     #[test]
     fn split_apply_order() {
         let mut sys = FakeApply::default();
-        assert_eq!(apply_split(&mut sys, true, true, Ok(())), Ok(()));
+        assert_eq!(apply_split(&mut sys, ADDED, Ok(())), Ok(()));
         assert_eq!(sys.steps, vec!["firewall", "dnsmasq"]);
 
+        // Emptied after the firewall reload (which keeps set elements) and
+        // before dnsmasq reloads and starts refilling them.
         let mut sys = FakeApply::default();
-        assert_eq!(apply_split(&mut sys, false, true, Ok(())), Ok(()));
-        assert_eq!(sys.steps, vec!["firewall", "hup"]);
+        assert_eq!(apply_split(&mut sys, REMOVED, Ok(())), Ok(()));
+        assert_eq!(sys.steps, vec!["firewall", "flush", "dnsmasq"]);
 
+        // Client-only edit: the sets and dnsmasq are left alone.
         let mut sys = FakeApply::default();
-        assert_eq!(apply_split(&mut sys, false, false, Ok(())), Ok(()));
+        assert_eq!(apply_split(&mut sys, DhcpChange::default(), Ok(())), Ok(()));
         assert_eq!(sys.steps, vec!["firewall"]);
     }
 
@@ -3249,8 +3267,8 @@ dhcp.nym_split_ipset=ipset
             fail: vec!["firewall"],
             ..FakeApply::default()
         };
-        let result = apply_split(&mut sys, true, true, Err("write nft failed".to_owned()));
-        assert_eq!(sys.steps, vec!["firewall", "dnsmasq"]);
+        let result = apply_split(&mut sys, REMOVED, Err("write nft failed".to_owned()));
+        assert_eq!(sys.steps, vec!["firewall", "flush", "dnsmasq"]);
         assert_eq!(result, Err("write nft failed; firewall failed".to_owned()));
 
         let mut sys = FakeApply {
@@ -3258,7 +3276,7 @@ dhcp.nym_split_ipset=ipset
             ..FakeApply::default()
         };
         assert_eq!(
-            apply_split(&mut sys, true, true, Ok(())),
+            apply_split(&mut sys, ADDED, Ok(())),
             Err("dnsmasq failed".to_owned())
         );
     }
@@ -3279,19 +3297,6 @@ dhcp.nym_split_ipset=ipset
             uci.calls.last().map(String::as_str),
             Some("revert nym-vpn.cli_x")
         );
-    }
-
-    #[test]
-    fn dnsmasq_pids_from_service_list() {
-        let list = r#"{
-            "dnsmasq": { "instances": {
-                "cfg01411c": { "running": true, "pid": 1234, "command": ["/usr/sbin/dnsmasq"] },
-                "guest": { "running": false }
-            } }
-        }"#;
-        assert_eq!(dnsmasq_pids(list), vec![1234]);
-        assert!(dnsmasq_pids("{}").is_empty());
-        assert!(dnsmasq_pids("").is_empty());
     }
 
     #[test]
