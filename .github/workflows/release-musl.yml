@@ -112,6 +112,16 @@ jobs:
             ${{ matrix.docker_image }} \
             bash /home/rust/src/scripts/cross-compile-dynamic.sh
 
+      - name: Check ELF imports and libraries
+        # Needed libraries within the package's depends, imports within
+        # musl 1.1.24 (plus time64 on 32-bit, which requires libc >= 1.2).
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          scripts/ci/check-elf.sh \
+            "nym-vpn-core/target/${TARGET}/release/nym-vpnd" \
+            "nym-vpn-core/target/${TARGET}/release/nym-vpnc"
+
       - name: Prepare artifacts
         run: |
           mkdir -p artifacts
@@ -185,6 +195,16 @@ jobs:
             -v "${{ github.workspace }}:/home/rust/src" \
             nym-musl-cross:${{ matrix.arch }}-musl \
             /opt/build-tier3-dynamic.sh
+
+      - name: Check ELF imports and libraries
+        # Needed libraries within the package's depends, imports within
+        # musl 1.1.24 (plus time64 on 32-bit, which requires libc >= 1.2).
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          scripts/ci/check-elf.sh \
+            "nym-vpn-core/target/${TARGET}/release/nym-vpnd" \
+            "nym-vpn-core/target/${TARGET}/release/nym-vpnc"
 
       - name: Prepare artifacts
         run: |
