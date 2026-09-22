@@ -398,6 +398,26 @@ async function scenarioPickers() {
   check(rowFor('weird').querySelector('.nym-gateway-option-perf').textContent === 'score=7' && rowFor('weird').querySelector('.nym-gateway-option-family').textContent === 'Fam', 'unknown format: raw string kept as telemetry, family still shown');
   check(qa(t7, '.nym-gateway-option-city').length === 1, 'city only when the row has one');
 
+  // The tier is the leading score word; the load uses the same words.
+  const MIXED = [
+    { id: 'M1', name: 'low-busy', country: 'DE', performance: 'Low (load: High, uptime: 95%)', bridges: true },
+    { id: 'M2', name: 'na', country: 'DE', performance: 'N/A', bridges: true },
+    { id: 'M3', name: 'med-busy', country: 'DE', performance: 'Medium (load: High, uptime: 90%)', bridges: true },
+    { id: 'M4', name: 'off', country: 'DE', performance: 'Offline (load: High, uptime: 0%)', bridges: true },
+    { id: 'M5', name: 'high-idle', country: 'DE', performance: 'High (load: Low, uptime: 99%)', bridges: true },
+    { id: 'M6', name: 'x', country: 'FR', performance: 'High (load: Low, uptime: 99%)', bridges: true },
+  ];
+  const t8 = setup({ rpc: { gateway_list_full: { gateways: MIXED } } });
+  await pickGateways(t8);
+  const entryList = q(t8, 'select[name="entry_country"]').closest('.nym-panel-picker');
+  const tierOf = (name) => Array.from(entryList.querySelectorAll('.nym-gateway-option')).find((r) => r.querySelector('.nym-gateway-option-name').textContent === name).querySelector('.nym-gateway-tier');
+  check(tierOf('low-busy').textContent === 'Low' && tierOf('low-busy').classList.contains('low'), '"Low (load: High, ...)" is tier Low, not High');
+  check(tierOf('med-busy').textContent === 'Medium' && tierOf('med-busy').classList.contains('medium'), '"Medium (load: High, ...)" is tier Medium');
+  check(tierOf('na').textContent === 'N/A' && tierOf('na').classList.contains('unknown'), 'N/A stays unknown');
+  check(tierOf('off').textContent === 'Offline' && tierOf('off').classList.contains('offline'), '"Offline (load: High, ...)" is tier Offline');
+  const order = Array.from(entryList.querySelectorAll('.nym-gateway-option-name')).map((e) => e.textContent).slice(1);
+  check(order[0] === 'high-idle' && order[1] === 'med-busy' && order[order.length - 1] === 'off' && order.indexOf('low-busy') > 1, 'sorted by score: High, Medium, Low/unknown, Offline: ' + JSON.stringify(order));
+
   // Restore from the saved daemon selection on first render.
   const t3 = setup({ rpc: { gateway_list_full: { gateways: GATEWAYS }, gateway_get: { entry_type: 'gateway', entry_country: 'DE', entry_id: 'A2', exit_type: 'random' } } });
   await sleep(60);

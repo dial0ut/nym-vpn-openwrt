@@ -282,8 +282,8 @@ async fn fetch_gateways(client: &mut RpcClient, gw_type: GatewayType) -> Result<
         .await?)
 }
 
-/// Same string the old table emitted, so the frontend's substring ranking
-/// ("High"/"Medium"/"Offline") and quality icons keep working.
+/// Same string the old table emitted. The frontend ranks by the leading score
+/// word only ("High"/"Medium"/"Low"/"Offline"); the load uses the same words.
 fn performance_string(gw: &Gateway, gw_type: GatewayType) -> String {
     gw.performance
         .as_ref()

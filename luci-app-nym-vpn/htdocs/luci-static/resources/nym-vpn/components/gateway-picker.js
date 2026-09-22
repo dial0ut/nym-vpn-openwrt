@@ -11,32 +11,35 @@
 
 var E = dom.create.bind(dom);
 
-var perfRank = function(p) {
-    p = p || '';
-    return p.indexOf('High') >= 0 ? 3 :
-           p.indexOf('Medium') >= 0 ? 2 :
-           p.indexOf('Offline') >= 0 ? 0 : 1;
-};
-
 // The bridge reports performance as one string, "High (load: Low, uptime:
-// 95%)" (or "N/A"). Split it into the tier and its two components so the
-// row can show the tier as a label and the rest as telemetry; anything that
-// does not match keeps the raw string as its telemetry line.
+// 95%)" (or "N/A"). The tier is the leading score word only: the load in
+// the parentheses uses the same words, so a match anywhere in the string
+// would read "Low (load: High, ...)" as High.
 var TIERS = { high: 'High', medium: 'Medium', low: 'Low', offline: 'Offline' };
+var RANKS = { high: 3, medium: 2, low: 1, unknown: 1, offline: 0 };
+var tierOf = function(p) {
+    var m = /^\s*(\w+)/.exec(String(p || ''));
+    var word = m ? m[1].toLowerCase() : '';
+    return TIERS.hasOwnProperty(word) ? word : 'unknown';
+};
+var perfRank = function(p) { return RANKS[tierOf(p)]; };
+
+// Split the string into the tier and its two components so the row can
+// show the tier as a label and the rest as telemetry; anything that does
+// not match keeps the raw string as its telemetry line.
 var parsePerformance = function(raw) {
     var s = String(raw || '').trim();
     var m = /^(\w+)\s*\(load:\s*(\w+),\s*uptime:\s*(\d+)%\)$/i.exec(s);
-    var rank = perfRank(s);
-    var tier = rank === 3 ? 'high' : rank === 2 ? 'medium' : rank === 0 ? 'offline' : 'low';
+    var tier = tierOf(s);
     if (!m) {
         // Only a known tier word is a real tier; "N/A"/"Unknown" is neither.
-        var known = /high|medium|low|offline/i.test(s);
+        var known = tier !== 'unknown';
         var shown = s && !known && !/^n\/?a$/i.test(s) ? s : '';
-        return { tier: known ? tier : 'unknown', label: known ? TIERS[tier] : 'N/A', telemetry: shown, raw: s };
+        return { tier: tier, label: known ? TIERS[tier] : 'N/A', telemetry: shown, raw: s };
     }
     return {
         tier: tier,
-        label: TIERS[tier],
+        label: TIERS[tier] || m[1],
         telemetry: 'load ' + m[2].toLowerCase() + ' · uptime ' + m[3] + '%',
         raw: s
     };
