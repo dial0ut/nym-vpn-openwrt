@@ -303,6 +303,9 @@ build_nym_vpnd() {
     cargo fetch --target="${TARGET}"
     bash "$SCRIPT_DIR/../docker/tier3-musl/patch-crates.sh" --ecash-only \
         "${CARGO_HOME:-$HOME/.cargo}" "$TARGET" "$PWD/Cargo.toml"
+    # The ecash fix edits a git checkout in place, and cargo never re-checks a
+    # git dependency's sources: drop any artifact built before the patch.
+    cargo clean --release --target="${TARGET}" -p nym-compact-ecash
 
     # Build with release profile
     log_info "Running: cargo build --target=${TARGET} --bins --release"
