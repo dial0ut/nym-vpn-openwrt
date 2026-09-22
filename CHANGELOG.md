@@ -11,6 +11,8 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+## [1.35.0] - 2026-09-21
+
 ### Added
 
 - Daemon-managed Always On connects at startup, recovers from network outages
