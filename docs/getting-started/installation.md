@@ -7,7 +7,9 @@ curl -fsSL https://packages.dial0ut.org/install.sh | sh
 ```
 
 It detects your package manager (`opkg` or `apk`), asks it for the CPU architecture, pulls the
-matching package from the latest GitHub release, and installs it.
+matching package from the latest GitHub release, and installs it. On a 32-bit router (arm, i386,
+mips, mipsel) it first checks for musl 1.2, i.e. OpenWrt 22.03 or later, and stops with a message
+if the firmware is older.
 
 ## Manual install
 
@@ -107,7 +109,7 @@ Pulled in automatically:
 
 | Package | Why |
 |---------|-----|
-| `libc` | musl libc |
+| `libc` | musl libc, 1.2 or newer on the 32-bit architectures (OpenWrt 22.03+) |
 | `kmod-tun` | TUN device — userspace WireGuard needs it |
 | `libmnl` | netlink |
 | `libnftnl` | nftables netlink |

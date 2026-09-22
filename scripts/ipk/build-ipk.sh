@@ -28,8 +28,12 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 LUCI_DIR="${LUCI_DIR:-$REPO_ROOT/luci-app-nym-vpn}"
 mkdir -p "$OUTPUT_DIR"
 OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"
+# shellcheck source=../pkg-depends.sh
+source "$REPO_ROOT/scripts/pkg-depends.sh"
 
 echo "=== Validating inputs ==="
+
+PKG_DEPENDS=$(nym_pkg_depends "$OPENWRT_ARCH" opkg)
 
 if [ ! -f "$BINARY_DIR/nym-vpnd" ]; then
     echo "Error: nym-vpnd not found in $BINARY_DIR"
@@ -40,6 +44,9 @@ if [ ! -f "$BINARY_DIR/nym-vpnc" ]; then
     echo "Error: nym-vpnc not found in $BINARY_DIR"
     exit 1
 fi
+
+nym_pkg_check_elf_class "$OPENWRT_ARCH" "$BINARY_DIR/nym-vpnd"
+nym_pkg_check_elf_class "$OPENWRT_ARCH" "$BINARY_DIR/nym-vpnc"
 
 if [ ! -d "$LUCI_DIR/htdocs" ]; then
     echo "Error: LuCI directory invalid (missing htdocs/): $LUCI_DIR"
@@ -157,6 +164,7 @@ INSTALLED_SIZE=$(du -sk "$BUILD_DIR/data" | cut -f1)
 sed -e "s/{{VERSION}}/$VERSION/" \
     -e "s/{{ARCH}}/$OPENWRT_ARCH/" \
     -e "s/{{SIZE}}/$INSTALLED_SIZE/" \
+    -e "s/{{DEPENDS}}/$PKG_DEPENDS/" \
     "$SCRIPT_DIR/control.template" > "$BUILD_DIR/control/control"
 
 if ! grep -q "^Package:" "$BUILD_DIR/control/control"; then
@@ -164,8 +172,9 @@ if ! grep -q "^Package:" "$BUILD_DIR/control/control"; then
     cat "$BUILD_DIR/control/control"
     exit 1
 fi
-if ! grep -q "^Depends:" "$BUILD_DIR/control/control"; then
-    echo "Error: Generated control file is invalid (missing Depends field)"
+if ! grep -q "^Depends: ." "$BUILD_DIR/control/control" \
+    || grep -q "{{" "$BUILD_DIR/control/control"; then
+    echo "Error: Generated control file is invalid (empty Depends or an unfilled {{placeholder}})"
     cat "$BUILD_DIR/control/control"
     exit 1
 fi

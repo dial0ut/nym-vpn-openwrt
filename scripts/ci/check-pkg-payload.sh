@@ -103,6 +103,18 @@ for arch in "${arches[@]}"; do
         fail=1
     fi
     echo "depends: $(ipk_depends "$ipk" | paste -sd' ')"
+
+    # 32-bit builds need musl 1.2 (time64); 64-bit ones run on 21.02's 1.1.24.
+    # shellcheck source=../pkg-depends.sh
+    if (source "$REPO_ROOT/scripts/pkg-depends.sh"; nym_pkg_arch_is_32bit "$arch"); then
+        want_libc='libc>=1.2'
+    else
+        want_libc='libc'
+    fi
+    if ! ipk_depends "$ipk" | grep -qx "$want_libc"; then
+        echo "::error::$arch must depend on $want_libc"
+        fail=1
+    fi
 done
 
 if [ "$fail" -ne 0 ]; then

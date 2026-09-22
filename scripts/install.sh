@@ -81,6 +81,48 @@ detect_arch() {
     echo "$arch"
 }
 
+# The 32-bit builds need musl 1.2 (their C dependencies import its time64
+# symbols); OpenWrt ships it from 22.03 on, 21.02 and older have 1.1.x. The
+# package's libc dependency refuses too, but with an opaque message.
+arch_is_32bit() {
+    case "$1" in
+        arm_*|i386_*|mips_*|mipsel_*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# musl's dynamic loader prints "Version x.y.z" when run without arguments.
+musl_version() {
+    local ld
+    for ld in /lib/ld-musl-*.so.1; do
+        [ -x "$ld" ] || continue
+        "$ld" 2>&1 | sed -n 's/^Version \([0-9][0-9.]*\).*/\1/p' | head -n 1
+        return 0
+    done
+}
+
+# True when dotted version $1 is at least major $2, minor $3.
+version_at_least() {
+    local major="${1%%.*}" rest="${1#*.}" minor
+    minor="${rest%%.*}"
+    case "$major$minor" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$major" -gt "$2" ] || { [ "$major" -eq "$2" ] && [ "$minor" -ge "$3" ]; }
+}
+
+check_musl() {
+    local arch="$1" musl
+    arch_is_32bit "$arch" || return 0
+    musl=$(musl_version)
+    if [ -z "$musl" ]; then
+        warn "Could not read the musl version; the package's libc dependency decides"
+        return 0
+    fi
+    if ! version_at_least "$musl" 1 2; then
+        die "This router runs musl $musl (OpenWrt 21.02 or older). The $arch build needs musl 1.2 or newer, which OpenWrt ships from 22.03 on. Upgrade the firmware to 22.03 or later (23.05+ recommended)."
+    fi
+    info "musl: $musl"
+}
+
 get_version() {
     if [ -n "$NYM_VERSION" ]; then
         echo "$NYM_VERSION"
@@ -113,6 +155,7 @@ main() {
     local arch
     arch=$(detect_arch "$pkg_mgr")
     info "Architecture: $arch"
+    check_musl "$arch"
 
     step "Getting latest version..."
     local version

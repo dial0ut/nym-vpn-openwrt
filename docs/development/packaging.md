@@ -61,11 +61,12 @@ the firewall include, so the kill-switch survives `fw4 reload`, and what declare
 firewall zone (`device 'nym+'`, masquerade, MSS clamp) and the `lan -> nym` forwarding that
 fw3/fw4 render as the tunnel plane.
 
-Dependencies come from `scripts/ipk/control.template`, and `build-apk.sh` repeats the same list:
+Dependencies come from one list in `scripts/pkg-depends.sh`, which both builders format (`Depends:`
+for opkg, `depends:` for apk):
 
 | Package | Why |
 |---------|-----|
-| `libc` | musl libc |
+| `libc` | musl libc; `libc (>= 1.2)` on the 32-bit architectures (arm, i386, mips, mipsel), whose binaries import musl 1.2's time64 symbols. OpenWrt's `libc` package carries the musl version (21.02: `1.1.24`), so opkg refuses the install there instead of leaving a daemon that cannot load |
 | `kmod-tun` | TUN device for userspace WireGuard |
 | `libmnl` | netlink — the binaries link against it |
 | `libnftnl` | nftables netlink — likewise |

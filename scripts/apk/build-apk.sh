@@ -23,8 +23,12 @@ LUCI_DIR="${LUCI_DIR:-$REPO_ROOT/luci-app-nym-vpn}"
 IPK_SCRIPT_DIR="$REPO_ROOT/scripts/ipk"
 mkdir -p "$OUTPUT_DIR"
 OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"
+# shellcheck source=../pkg-depends.sh
+source "$REPO_ROOT/scripts/pkg-depends.sh"
 
 echo "=== Validating inputs ==="
+
+PKG_DEPENDS=$(nym_pkg_depends "$OPENWRT_ARCH" apk)
 
 if [ ! -f "$BINARY_DIR/nym-vpnd" ]; then
     echo "Error: nym-vpnd not found in $BINARY_DIR"
@@ -35,6 +39,9 @@ if [ ! -f "$BINARY_DIR/nym-vpnc" ]; then
     echo "Error: nym-vpnc not found in $BINARY_DIR"
     exit 1
 fi
+
+nym_pkg_check_elf_class "$OPENWRT_ARCH" "$BINARY_DIR/nym-vpnd"
+nym_pkg_check_elf_class "$OPENWRT_ARCH" "$BINARY_DIR/nym-vpnc"
 
 if [ ! -d "$LUCI_DIR/htdocs" ]; then
     echo "Error: LuCI directory invalid (missing htdocs/): $LUCI_DIR"
@@ -198,7 +205,7 @@ MKPKG_INFO_ARGS=(
     -I "origin:nym-vpn"
     -I "maintainer:dial0ut"
     # Repeated -I "depends:" flags overwrite each other; one value only.
-    -I "depends:libc kmod-tun libmnl libnftnl kmod-ipt-conntrack-extra luci-base rpcd"
+    -I "depends:${PKG_DEPENDS}"
 )
 
 # NYM_PKG_STAGE_DIR: hand the staged tree and package info over and build
@@ -239,15 +246,7 @@ elif command -v docker >/dev/null 2>&1; then
         alpine:latest \
         sh -c 'chown -R 0:0 /work/data && "$@"; rc=$?; chown -R "$HOST_OWNER" /work/data; exit $rc' _ \
         apk mkpkg \
-            -I "name:nym-vpn" \
-            -I "version:${VERSION}-r0" \
-            -I "description:NymVPN for OpenWrt - Privacy VPN using the Nym mixnet" \
-            -I "url:https://github.com/dial0ut/nym-vpn-openwrt" \
-            -I "arch:${OPENWRT_ARCH}" \
-            -I "license:GPL-3.0" \
-            -I "origin:nym-vpn" \
-            -I "maintainer:dial0ut" \
-            -I "depends:libc kmod-tun libmnl libnftnl kmod-ipt-conntrack-extra luci-base rpcd" \
+            "${MKPKG_INFO_ARGS[@]}" \
             -s "post-install:/work/scripts/postinst" \
             -s "post-upgrade:/work/scripts/postinst" \
             -s "pre-upgrade:/work/scripts/preupgrade" \
