@@ -94,6 +94,13 @@ LuCI Software page (*System → Software*, update lists, then upgrade `nym-vpn`)
 Either way the tunnel drops while the daemon is replaced. If the upgrade changed the web UI's
 permissions, LuCI asks you to log in again a few seconds after it finishes; that is expected.
 
+### Firmware upgrades
+
+`sysupgrade` (and LuCI's *Flash new firmware image* with *Keep settings* checked) keeps
+`/etc/config/nym-vpn` and `/etc/nym`, the account and the daemon settings. The package itself is
+not part of a stock image, so install it again after flashing; it picks up the same account and
+settings, the kill-switch included.
+
 ## Dependencies
 
 Pulled in automatically:
@@ -122,6 +129,13 @@ Pulled in automatically:
     apk del nym-vpn
     ```
 
+Removing the package keeps `/etc/nym`: the account (the device keys and any tickets not used
+yet) and the daemon settings. Installing it again picks up the same account. To erase them too:
+
+```bash
+rm -rf /etc/nym
+```
+
 If the package database is broken and you have to do it by hand:
 
 ```bash
@@ -134,6 +148,7 @@ rm -f /usr/libexec/rpcd/nym-vpn
 rm -f /etc/init.d/nym-vpnd
 rm -f /usr/share/luci/menu.d/luci-app-nym-vpn.json
 rm -f /usr/share/rpcd/acl.d/luci-app-nym-vpn.json
+rm -f /lib/upgrade/keep.d/nym-vpn
 /etc/init.d/rpcd restart
 ```
 

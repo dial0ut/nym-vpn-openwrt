@@ -5,8 +5,9 @@
 # policy never leaves, and re-running the same `apk add` completes the
 # upgrade (apk fix only re-checks the recorded version). Needs a package
 # with a version higher than the installed one at $LEAK_UPGRADE_APK on the
-# router, or apk runs no post-upgrade step at all. Never downgrade to set
-# this up: a downgrade runs prerm's removal branch, which deletes /etc/nym.
+# router, or apk runs no post-upgrade step at all. A downgrade would not
+# cost the account: apk runs the incoming package's pre-upgrade hook, which
+# exports PKG_UPGRADE=1, and prerm no longer deletes /etc/nym.
 # The opkg counterpart is 08-interrupted-upgrade.
 scenario_mgmt=1
 scenario_wait=8

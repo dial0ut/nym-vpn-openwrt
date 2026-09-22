@@ -14,9 +14,10 @@
 # re-run the install, which the running daemon survives with the kill-switch
 # armed. The check tries configure first and falls back to the re-install.
 # Needs an ipk with a version higher than the installed one at
-# $LEAK_UPGRADE_IPK on the router. Never downgrade to set this up: a
-# downgrade runs prerm's removal branch, which deletes /etc/nym and with it
-# the account. The apk counterpart is 18-upgrade-interrupted-apk.
+# $LEAK_UPGRADE_IPK on the router; the plain `opkg install` below does not
+# downgrade. A downgrade would not cost the account either: opkg runs it as
+# an upgrade (PKG_UPGRADE=1), and prerm no longer deletes /etc/nym.
+# The apk counterpart is 18-upgrade-interrupted-apk.
 scenario_wait=15
 LEAK_UPGRADE_IPK=${LEAK_UPGRADE_IPK:-/tmp/nym-vpn_1.34.0_p15_x86_64.ipk}
 scenario_pre() {
