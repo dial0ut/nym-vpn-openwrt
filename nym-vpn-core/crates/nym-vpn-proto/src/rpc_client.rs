@@ -11,7 +11,7 @@ use nym_vpn_lib_types::{
     Socks5Status, StoreAccountRequest, SystemMessage, TentativeGateways, TunnelEvent, TunnelState,
     VpnAccountSummary, VpnServiceConfig, VpnServiceInfo,
 };
-use std::{net::IpAddr, path::PathBuf};
+use std::{net::IpAddr, path::PathBuf, time::Duration};
 use tokio_stream::{Stream, StreamExt};
 use tonic::transport::{Endpoint, Uri};
 use tower::service_fn;
@@ -20,6 +20,11 @@ use crate::proto::{self, nym_vpn_service_client::NymVpnServiceClient};
 
 type ServiceClient = NymVpnServiceClient<tonic::transport::Channel>;
 
+/// Bounds reaching the daemon's socket. Deliberately no request timeout on
+/// the endpoint: it would also cut the long-lived streaming calls, so a
+/// caller that needs a deadline puts one around its own call.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
 #[derive(Debug, Clone)]
 pub struct RpcClient(ServiceClient);
 
@@ -27,6 +32,7 @@ impl RpcClient {
     pub async fn new() -> Result<RpcClient> {
         let socket_path = get_rpc_socket_path();
         let channel = Endpoint::from_static("unix://placeholder")
+            .connect_timeout(CONNECT_TIMEOUT)
             .connect_with_connector(service_fn(move |_: Uri| {
                 nym_ipc::client::connect(socket_path.clone())
             }))

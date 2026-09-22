@@ -42,14 +42,25 @@ var sameFamily = function(a, b) {
     return !!a && !!b && a.toLowerCase() === b.toLowerCase();
 };
 
-// LuCI's rpc.js bounds every request at L.env.rpctimeout (20 s) with no
-// per-call option, but reads it per request: raise it around one call and
-// put it back once the reply is in. The daemon stop/restart/reset methods
-// block for the init script's real stop (disconnect, SIGTERM, wait for the
-// pid: up to ~35 s with a hung daemon); 60 s is uhttpd's own ubus bound.
+var luciEnv = function() {
+    return (typeof L !== 'undefined' && L && L.env) ? L.env : null;
+};
+
+// LuCI's rpc.js bounds every request at L.env.rpctimeout (20 s by default).
+// The bridge gives a call to a hung daemon 25 s and then answers itself
+// (error_code daemon_timeout: a plain failure, or the "service not
+// responding" shape for status/init/account/tunnel reads), so the page waits
+// a little longer than that to get the reply instead of a bare XHR timeout.
+var PAGE_RPC_TIMEOUT_S = 30;
+
+// rpc.js has no per-call option, but reads the timeout per request: raise it
+// around one call and put it back once the reply is in. The daemon
+// stop/restart/reset methods block for the init script's real stop
+// (disconnect, SIGTERM, wait for the pid: up to ~35 s with a hung daemon),
+// and a diagnostic may run to rpcd's own limit; 60 s is uhttpd's ubus bound.
 var SLOW_CALL_TIMEOUT_S = 60;
 var withSlowCallTimeout = function(call) {
-    var env = (typeof L !== 'undefined' && L && L.env) ? L.env : null;
+    var env = luciEnv();
     if (!env) return call();
     var had = Object.prototype.hasOwnProperty.call(env, 'rpctimeout');
     var prev = env.rpctimeout;
@@ -113,6 +124,8 @@ return baseclass.extend({
         // dropdown and every per-country list for the rest of the session.
         this.gatewayListCache = {};
         this.countryCache = {};
+        var env = luciEnv();
+        if (env && !(env.rpctimeout >= PAGE_RPC_TIMEOUT_S)) env.rpctimeout = PAGE_RPC_TIMEOUT_S;
     },
 
     onish: onish,
@@ -281,5 +294,7 @@ return baseclass.extend({
 
     // --- troubleshooting ---------------------------------------------------
     logsGet: function(lines) { return rpc.logsGet(lines); },
-    diagnosticRun: function(skipDns, skipHttp, gateway) { return rpc.diagnosticRun(skipDns, skipHttp, gateway); }
+    diagnosticRun: function(skipDns, skipHttp, gateway) {
+        return withSlowCallTimeout(function() { return rpc.diagnosticRun(skipDns, skipHttp, gateway); });
+    }
 });

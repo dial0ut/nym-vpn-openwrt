@@ -866,13 +866,12 @@ async function scenarioService() {
   clickModalButton(t3, 'Cancel');
   check(callsTo(t3, 'daemon_restart').length === 0, 'cancelled restart does nothing');
   // daemon_restart blocks for the init script's real restart; the call must
-  // run with a longer LuCI rpc timeout than the 20 s default and leave the
-  // environment as it found it.
+  // run with a longer LuCI rpc timeout than the page-wide one and put it back.
   let seenTimeout;
   const t4 = setup({ rpc: { status: { state: 'disconnected' }, daemon_restart: () => { seenTimeout = t4.L.env.rpctimeout; return { success: true, status: 'running', enabled: true }; } } });
   Array.from(card(t4, 'Service Management').querySelectorAll('.nym-card-action'))[1].click();
   await sleep(20);
-  check(callsTo(t4, 'daemon_restart').length === 1 && seenTimeout === 60 && !('rpctimeout' in t4.L.env), 'restart raises the rpc timeout to 60 s for that call and restores it: ' + seenTimeout + '/' + t4.L.env.rpctimeout);
+  check(callsTo(t4, 'daemon_restart').length === 1 && seenTimeout === 60 && t4.L.env.rpctimeout === 30, 'restart raises the rpc timeout to 60 s for that call and restores it: ' + seenTimeout + '/' + t4.L.env.rpctimeout);
   check(!!modal(t4) && modal(t4).classList.contains('success'), 'restart success modal');
 }
 
@@ -966,6 +965,35 @@ async function scenarioLogsAndDiagnostics() {
   check(Array.from(diag.querySelectorAll('.nym-diag-group-title')).map((e) => e.textContent).join('|') === 'DNS Resolution|VPN API (HTTP)|Gateway', 'groups in order');
 }
 
+// The bridge answers a call to a hung daemon itself after 25 s (error_code
+// daemon_timeout). The page must wait long enough to see that reply and
+// show it like any other daemon failure.
+async function scenarioDaemonTimeout() {
+  section('daemon_timeout replies from the bridge');
+  const TIMEOUT = 'The VPN service did not answer within 25 s';
+  const t = connectEnv({ tentative_gateways: { status: 'selected' }, connect: { success: false, error: TIMEOUT, error_code: 'daemon_timeout' } });
+  check(t.L.env.rpctimeout === 30, 'page-wide rpc timeout outlasts the bridge deadline: ' + t.L.env.rpctimeout);
+  await pickGateways(t);
+  actionBtn(t).click();
+  await sleep(100);
+  check(toasts(t).indexOf('Connection failed: ' + TIMEOUT) !== -1 && actionBtn(t).textContent === 'Connect', 'timed-out connect toasts the reason, button back to Connect');
+
+  // status/account_get time out into their "not responding" shapes.
+  let st = { state: 'disconnected' };
+  const t2 = setup({ rpc: { status: () => st, account_get: { identity: '', state: '', raw_info: TIMEOUT, available: false, daemon_running: true, daemon_enabled: true, error_code: 'daemon_timeout' } } });
+  st = { state: 'unknown', connected: false, raw_state: TIMEOUT, available: false, daemon_running: true, daemon_enabled: true, error_code: 'daemon_timeout' };
+  await t2.poll.fire(5);
+  await sleep(20);
+  check(/Service not responding/.test(card(t2, 'Account').textContent) && !card(t2, 'Account').querySelector('textarea'), 'timed-out status poll: account card says the service is not responding, no login form');
+
+  let diagTimeout;
+  const t3 = setup({ rpc: { diagnostic_run: () => { diagTimeout = t3.L.env.rpctimeout; return { success: false, error: 'The VPN service did not answer within 28 s', error_code: 'daemon_timeout' }; } } });
+  card(t3, 'Diagnostics').querySelector('button').click();
+  await sleep(20);
+  check(diagTimeout === 60 && t3.L.env.rpctimeout === 30, 'diagnostic runs with the slow-call rpc timeout: ' + diagTimeout);
+  check(card(t3, 'Diagnostics').querySelector('.nym-diag-results').textContent === 'The VPN service did not answer within 28 s', 'timed-out diagnostic shows the reason');
+}
+
 // LuCI's dom.append assigns a bare string child through innerHTML, so any
 // daemon, directory, UCI or lease string that reaches E() unwrapped is
 // markup. Feed one hostile value into every data field the page shows and
@@ -1056,6 +1084,7 @@ async function scenarioHostileStrings() {
   await scenarioService();
   await scenarioAlwaysOn();
   await scenarioLogsAndDiagnostics();
+  await scenarioDaemonTimeout();
   await scenarioHostileStrings();
   console.log('\n' + total + ' checks, ' + failures + ' failure(s), ' + (Date.now() - started) + ' ms');
   process.exit(failures ? 1 : 0);

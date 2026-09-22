@@ -61,12 +61,87 @@ impl Args {
                 } else {
                     json!({})
                 };
-                let reply = dispatch(&method, &args).await;
+                let reply = dispatch_bounded(&method, &args).await;
                 println!("{}", serde_json::to_string(&reply)?);
             }
         }
         Ok(())
     }
+}
+
+/// rpcd kills an exec plugin after its `timeout` (30 s by default) and the
+/// page then gets an opaque ubus error, so a call to a wedged daemon answers
+/// before that with a reply of its own.
+const CALL_TIMEOUT: Duration = Duration::from_secs(25);
+/// Leaves rpcd time to read the reply before its own timeout.
+const RPCD_MARGIN: Duration = Duration::from_secs(2);
+/// `error_code` of a reply cut short by the deadline.
+const DAEMON_TIMEOUT: &str = "daemon_timeout";
+
+/// A diagnostic runs real DNS, HTTP and gateway probes, so it gets all the
+/// time rpcd allows (`rpcd.@rpcd[0].timeout`).
+fn call_timeout(method: &str, rpcd_timeout: Option<Duration>) -> Duration {
+    match method {
+        "diagnostic_run" => rpcd_timeout
+            .unwrap_or(Duration::from_secs(30))
+            .saturating_sub(RPCD_MARGIN)
+            .max(CALL_TIMEOUT),
+        _ => CALL_TIMEOUT,
+    }
+}
+
+fn rpcd_timeout() -> Option<Duration> {
+    uci_get("rpcd.@rpcd[0].timeout")?
+        .parse()
+        .ok()
+        .map(Duration::from_secs)
+}
+
+/// Only the awaits can be cut: the methods that block (init.d actions, uci,
+/// logread) never talk to the daemon over gRPC and finish on their own.
+async fn dispatch_bounded(method: &str, args: &Value) -> Value {
+    let rpcd = if method == "diagnostic_run" {
+        rpcd_timeout()
+    } else {
+        None
+    };
+    with_deadline(method, call_timeout(method, rpcd), dispatch(method, args)).await
+}
+
+async fn with_deadline(
+    method: &str,
+    limit: Duration,
+    call: impl std::future::Future<Output = Value>,
+) -> Value {
+    match tokio::time::timeout(limit, call).await {
+        Ok(reply) => reply,
+        Err(_) => timeout_reply(method, limit),
+    }
+}
+
+/// The method's own "daemon unreachable" shape where the page reads one (so
+/// it shows the service as not responding, the text in its raw_* member),
+/// else a plain failure; tagged with `error_code` either way.
+fn timeout_reply(method: &str, limit: Duration) -> Value {
+    let error = format!(
+        "The VPN service did not answer within {} s",
+        limit.as_secs()
+    );
+    let mut reply = match method {
+        "status" => unknown_status(error),
+        "tunnel_get" => degraded_tunnel_config(error),
+        "account_get" => degraded_account(error),
+        "init" => {
+            let mut out = serde_json::Map::new();
+            out.insert("status".into(), unknown_status(error.clone()));
+            insert_daemon_unreachable(&mut out, error);
+            insert_system_members(&mut out);
+            Value::Object(out)
+        }
+        _ => fail(error),
+    };
+    reply["error_code"] = json!(DAEMON_TIMEOUT);
+    reply
 }
 
 /// The `list` answer rpcd sees; the shell plugin just execs this bridge.
@@ -1257,26 +1332,27 @@ async fn tunnel_set(args: &Value) -> Value {
 // account
 //-------------------------------------------------------------------------------
 
+fn degraded_account(err: String) -> Value {
+    let mut out = serde_json::Map::new();
+    out.insert("identity".into(), json!(""));
+    out.insert("state".into(), json!(""));
+    out.insert("raw_info".into(), json!(err));
+    insert_unavailable(&mut out);
+    Value::Object(out)
+}
+
 async fn account_get() -> Value {
-    let degraded = |err: String| {
-        let mut out = serde_json::Map::new();
-        out.insert("identity".into(), json!(""));
-        out.insert("state".into(), json!(""));
-        out.insert("raw_info".into(), json!(err));
-        insert_unavailable(&mut out);
-        Value::Object(out)
-    };
     let mut client = match RpcClient::new().await {
         Ok(client) => client,
-        Err(err) => return degraded(format!("{err:#}")),
+        Err(err) => return degraded_account(format!("{err:#}")),
     };
     let identity = match client.get_account_identity().await {
         Ok(identity) => identity.unwrap_or_else(|| "unset".to_owned()),
-        Err(err) => return degraded(format!("{err:#}")),
+        Err(err) => return degraded_account(format!("{err:#}")),
     };
     let state = match client.get_account_state().await {
         Ok(state) => format!("{state:?}"),
-        Err(err) => return degraded(format!("{err:#}")),
+        Err(err) => return degraded_account(format!("{err:#}")),
     };
     json!({
         "identity": identity,
@@ -2584,19 +2660,27 @@ async fn init_batch() -> Value {
             }
             out.insert("account".into(), Value::Object(account));
         }
-        Err(err) => {
-            out.insert("info".into(), json!({}));
-            out.insert("network".into(), json!({ "network": "" }));
-            let mut account = serde_json::Map::new();
-            account.insert("identity".into(), json!(""));
-            account.insert("state".into(), json!(""));
-            insert_unavailable(&mut account);
-            out.insert("account".into(), Value::Object(account));
-            insert_degraded_config_members(&mut out, format!("{err:#}"));
-        }
+        Err(err) => insert_daemon_unreachable(&mut out, format!("{err:#}")),
     }
 
-    // System-side members work regardless of daemon state.
+    insert_system_members(&mut out);
+    Value::Object(out)
+}
+
+/// The daemon-side members of an init reply the daemon never answered.
+fn insert_daemon_unreachable(out: &mut serde_json::Map<String, Value>, err: String) {
+    out.insert("info".into(), json!({}));
+    out.insert("network".into(), json!({ "network": "" }));
+    let mut account = serde_json::Map::new();
+    account.insert("identity".into(), json!(""));
+    account.insert("state".into(), json!(""));
+    insert_unavailable(&mut account);
+    out.insert("account".into(), Value::Object(account));
+    insert_degraded_config_members(out, err);
+}
+
+/// System-side members work regardless of daemon state.
+fn insert_system_members(out: &mut serde_json::Map<String, Value>) {
     out.insert("split_exclusions".into(), json!(split_exclusions()));
     out.insert(
         "split_status".into(),
@@ -2604,8 +2688,6 @@ async fn init_batch() -> Value {
     );
     out.insert("clients".into(), clients_list()["clients"].clone());
     out.insert("daemon".into(), daemon_status());
-
-    Value::Object(out)
 }
 
 fn insert_degraded_config_members(out: &mut serde_json::Map<String, Value>, err: String) {
@@ -3106,6 +3188,51 @@ dhcp.nym_split_ipset=ipset
         assert_eq!(dnsmasq_pids(list), vec![1234]);
         assert!(dnsmasq_pids("{}").is_empty());
         assert!(dnsmasq_pids("").is_empty());
+    }
+
+    #[test]
+    fn call_timeouts_stay_under_rpcd() {
+        assert_eq!(call_timeout("status", None), CALL_TIMEOUT);
+        assert_eq!(
+            call_timeout("status", Some(Duration::from_secs(120))),
+            CALL_TIMEOUT
+        );
+        assert_eq!(
+            call_timeout("diagnostic_run", None),
+            Duration::from_secs(28)
+        );
+        assert_eq!(
+            call_timeout("diagnostic_run", Some(Duration::from_secs(120))),
+            Duration::from_secs(118)
+        );
+        // Never below the default, even with a short rpcd timeout.
+        assert_eq!(
+            call_timeout("diagnostic_run", Some(Duration::from_secs(10))),
+            CALL_TIMEOUT
+        );
+    }
+
+    #[tokio::test]
+    async fn a_hung_call_answers_daemon_timeout() {
+        let limit = Duration::from_millis(10);
+        let reply = with_deadline("connect", limit, std::future::pending()).await;
+        assert_eq!(reply["success"], false);
+        assert_eq!(reply["error_code"], DAEMON_TIMEOUT);
+        assert!(reply["error"].as_str().unwrap().contains("did not answer"));
+
+        // Methods the page reads as "unreachable" keep that shape.
+        let reply = with_deadline("tunnel_get", limit, std::future::pending()).await;
+        assert_eq!(reply["error_code"], DAEMON_TIMEOUT);
+        assert_eq!(reply["two_hop"], "");
+        assert!(
+            reply["raw_config"]
+                .as_str()
+                .unwrap()
+                .contains("did not answer")
+        );
+
+        let reply = with_deadline("status", limit, async { json!({ "state": "connected" }) }).await;
+        assert_eq!(reply, json!({ "state": "connected" }));
     }
 
     #[test]
