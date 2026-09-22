@@ -19,7 +19,7 @@ use std::fs::File;
 use std::io::Write as IoWrite;
 use std::os::unix::fs::OpenOptionsExt;
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use nix::errno::Errno;
@@ -368,7 +368,9 @@ fn persist_state(v4_script: &str, v6_script: Option<&str>) -> Result<()> {
 /// `O_EXCL | O_NOFOLLOW` on the temp name: a planted file or symlink fails
 /// the open instead of being followed as root.
 fn write_state_file(path: &str, contents: &str) -> Result<()> {
-    static SEQ: AtomicU64 = AtomicU64::new(0);
+    // Usize, not u64: the 32-bit tier-3 targets (mips, mipsel, armv5te) have no
+    // `AtomicU64` in std, and this only has to be unique within the process.
+    static SEQ: AtomicUsize = AtomicUsize::new(0);
     let tmp = format!(
         "{path}.{}.{}.tmp",
         std::process::id(),
