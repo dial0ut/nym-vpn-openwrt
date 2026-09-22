@@ -143,7 +143,9 @@ pub fn iptables_emergency_rules(family: Family, mode: Mode) -> String {
         line(format!("-A {out} -d {mcast} -j ACCEPT"));
         for net in nets {
             line(format!("-A {out} -d {net} -j ACCEPT"));
-            line(format!("-A {fwd} -d {net} -j ACCEPT"));
+            // RETURN, not ACCEPT: forwards to private destinations stay the
+            // zones' decision, so the block never opens wan->lan or guest->lan.
+            line(format!("-A {fwd} -d {net} -j RETURN"));
         }
     }
     line(format!("-A {out} -j DROP"));
@@ -409,11 +411,12 @@ mod tests {
                     reply < udp && lo < udp,
                     "reply/loopback accepts precede the DNS reject"
                 );
+                let pass = if chain == fwd { "RETURN" } else { "ACCEPT" };
                 for net in nets {
-                    let accept = pos(&l, &format!("-A {chain} -d {net} -j ACCEPT"));
+                    let accept = pos(&l, &format!("-A {chain} -d {net} -j {pass}"));
                     assert!(
                         udp < accept && tcp < accept,
-                        "{chain}: DNS reject precedes the {net} accept"
+                        "{chain}: DNS reject precedes the {net} {pass}"
                     );
                 }
                 let drop = pos(&l, &format!("-A {chain} -j DROP"));
@@ -425,6 +428,23 @@ mod tests {
                 !script.contains(&format!("-A {fwd} -d {mcast}")),
                 "multicast is router-originated only"
             );
+        }
+    }
+
+    /// fw3 ends the builtin chain on an ACCEPT from our chain, skipping the
+    /// zone rejects; the forward block may only drop, reject or return.
+    #[test]
+    fn emergency_forward_chain_never_accepts() {
+        for family in [Family::V4, Family::V6] {
+            for mode in [Mode::Transition, Mode::Boot] {
+                let script = iptables_emergency_rules(family, mode);
+                for line in script
+                    .lines()
+                    .filter(|l| l.starts_with(&format!("-A {EMERGENCY_FORWARD_CHAIN} ")))
+                {
+                    assert!(!line.ends_with("-j ACCEPT"), "{family:?}/{mode:?}: {line}");
+                }
+            }
         }
     }
 
