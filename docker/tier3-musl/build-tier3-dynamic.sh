@@ -188,6 +188,10 @@ cargo build \
     --release \
     -Z build-std=std,panic_abort
 
+# patch-crates.sh's [patch.crates-io] made cargo rewrite the lock; a patch
+# that missed the resolved version would have built the unpatched crate.
+bash "$BUILD_DIR/scripts/ci/check-cargo-patches.sh" "$BUILD_DIR/nym-vpn-core/Cargo.lock"
+
 # Step 4: Strip binaries
 log_info "Stripping binaries..."
 BINARY_DIR="$BUILD_DIR/nym-vpn-core/target/${TARGET}/release"

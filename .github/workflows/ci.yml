@@ -5,8 +5,8 @@
 #             differ (no build, dummy binaries).
 #   security  fast checks that need no Rust build: secret scan of the pushed
 #             commits, dependency policy (licenses, bans, sources), dependency
-#             advisories, shellcheck over the root-run scripts, and a lint of
-#             these workflows themselves.
+#             advisories, no unused cargo patches, shellcheck over the
+#             root-run scripts, and a lint of these workflows themselves.
 #
 # The weekly schedule repeats the secret scan over the full history and
 # re-checks advisories against a fresh RUSTSEC database, so a newly published
@@ -165,6 +165,9 @@ jobs:
           arguments: --locked
           command: check
           command-arguments: advisories
+
+      - name: Cargo patches (none unused)
+        run: scripts/ci/check-cargo-patches.sh nym-vpn-core/Cargo.lock
 
       - name: Shell scripts (shellcheck)
         run: |
