@@ -346,14 +346,16 @@ find_gotatun() {
 #          8 bytes (u64). This causes ZK proof challenge hash mismatch and
 #          "the provided ticket failed to get verified" on all 32-bit platforms.
 # Fix: Cast usize to u64 before calling to_le_bytes()
+# A miss here still compiles and only fails at the gateway, so the patch
+# checks its own result and stops the build unless both casts are in place.
 patch_nym_ecash() {
     local dir="$1"
     log_info "Patching nym-compact-ecash (usize -> u64 in to_bytes)..."
 
     local f="$dir/common/nym_offline_compact_ecash/src/scheme/keygen.rs"
     if [ ! -f "$f" ]; then
-        log_warn "  keygen.rs not found at $f — skipping"
-        return
+        log_error "  keygen.rs not found at $f"
+        exit 1
     fi
 
     if grep -q '&ys_len\.to_le_bytes()' "$f"; then
@@ -364,6 +366,20 @@ patch_nym_ecash() {
     if grep -q '&beta_g1_len\.to_le_bytes()' "$f"; then
         _sed_i 's|&beta_g1_len\.to_le_bytes()|\&(beta_g1_len as u64).to_le_bytes()|' "$f"
         log_info "  patched VerificationKeyAuth::to_bytes()"
+    fi
+
+    local len
+    for len in ys_len beta_g1_len; do
+        if ! grep -qF "&(${len} as u64).to_le_bytes()" "$f"; then
+            log_error "  ecash patch did not apply: no '(${len} as u64).to_le_bytes()' in $f"
+            log_error "  the upstream code changed; update patch_nym_ecash"
+            exit 1
+        fi
+    done
+    # Any other usize length serialised the same way would break the same way.
+    if grep -nE '&[a-z_]+_len\.to_le_bytes\(\)' "$f"; then
+        log_error "  keygen.rs still serialises a usize length (above); update patch_nym_ecash"
+        exit 1
     fi
 }
 
@@ -481,8 +497,8 @@ apply_nym_ecash_patch() {
     local nym_dir
     nym_dir=$(find_nym)
     if [ -z "$nym_dir" ]; then
-        log_warn "nym git checkout not found — skipping ecash patch"
-        return
+        log_error "nym git checkout not found under $CARGO_HOME/git/checkouts (run cargo fetch first)"
+        exit 1
     fi
     patch_nym_ecash "$nym_dir"
 }
