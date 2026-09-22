@@ -42,87 +42,97 @@ fn cached_system() -> Option<FirewallSystem> {
 }
 
 fn detect_uncached() -> FirewallSystem {
-    if !is_openwrt() {
-        tracing::debug!("Not running on OpenWrt");
+    let detected = detect_with(&SystemProbe);
+    match detected {
+        FirewallSystem::Fw4 => tracing::debug!("Detected fw4 (nftables-based firewall)"),
+        FirewallSystem::Fw3 => tracing::debug!("Detected fw3 (iptables-based firewall)"),
+        FirewallSystem::Unknown => {
+            tracing::warn!("No OpenWrt firewall system found")
+        }
+    }
+    detected
+}
+
+/// What detection asks of the system; tests inject it.
+trait Probe {
+    fn is_openwrt(&self) -> bool;
+    /// `inet fw4` is loaded.
+    fn fw4_live(&self) -> bool;
+    /// fw3's `input_rule` chain exists.
+    fn fw3_live(&self) -> bool;
+    /// `/etc/init.d/firewall`, if readable.
+    fn firewall_init_script(&self) -> Option<String>;
+    fn file_exists(&self, path: &str) -> bool;
+}
+
+/// The order of `nym_fw_backend` in `fw-boot-guard.sh`, which picks the
+/// include: live state first (a vendor image may ship both stacks), then the
+/// firewall init script, which still names fw4 when its ruleset failed to
+/// load (a bad user rule), then binary presence. `inet nym` does not need
+/// `inet fw4`, so a router whose fw4 failed still gets its kill-switch.
+fn detect_with(probe: &dyn Probe) -> FirewallSystem {
+    if !probe.is_openwrt() {
         return FirewallSystem::Unknown;
     }
-
-    // Check for fw4 first (newer)
-    if is_fw4_available() {
-        tracing::debug!("Detected fw4 (nftables-based firewall)");
+    if probe.fw4_live() {
         return FirewallSystem::Fw4;
     }
-
-    // Check for fw3
-    if is_fw3_available() {
-        tracing::debug!("Detected fw3 (iptables-based firewall)");
+    if probe.fw3_live() {
         return FirewallSystem::Fw3;
     }
-
-    tracing::warn!("OpenWrt detected but no known firewall system found");
+    if let Some(script) = probe.firewall_init_script() {
+        let names = |word: &str| {
+            script
+                .split(|c: char| !c.is_ascii_alphanumeric())
+                .any(|token| token == word)
+        };
+        if names("fw4") {
+            return FirewallSystem::Fw4;
+        }
+        if names("fw3") {
+            return FirewallSystem::Fw3;
+        }
+    }
+    let exists = |paths: &[&str]| paths.iter().any(|p| probe.file_exists(p));
+    if exists(&["/sbin/fw4", "/usr/sbin/fw4"]) {
+        return FirewallSystem::Fw4;
+    }
+    if exists(&["/sbin/fw3", "/usr/sbin/fw3"]) {
+        return FirewallSystem::Fw3;
+    }
     FirewallSystem::Unknown
 }
 
-/// Check if we're running on OpenWrt.
-fn is_openwrt() -> bool {
-    Path::new("/etc/openwrt_release").exists()
+struct SystemProbe;
+
+impl Probe for SystemProbe {
+    fn is_openwrt(&self) -> bool {
+        Path::new("/etc/openwrt_release").exists()
+    }
+
+    fn fw4_live(&self) -> bool {
+        succeeds("nft", &["list", "table", "inet", "fw4"])
+    }
+
+    fn fw3_live(&self) -> bool {
+        succeeds("iptables", &["-L", "input_rule", "-n"])
+    }
+
+    fn firewall_init_script(&self) -> Option<String> {
+        std::fs::read_to_string("/etc/init.d/firewall").ok()
+    }
+
+    fn file_exists(&self, path: &str) -> bool {
+        Path::new(path).exists()
+    }
 }
 
-/// Check if fw4 is available and active.
-fn is_fw4_available() -> bool {
-    // Check if fw4 binary exists
-    if !Path::new("/sbin/fw4").exists() && !Path::new("/usr/sbin/fw4").exists() {
-        return false;
-    }
-
-    // Check if nft is available
-    let nft_ok = Command::new("nft")
-        .arg("--version")
+fn succeeds(program: &str, args: &[&str]) -> bool {
+    Command::new(program)
+        .args(args)
         .output()
         .map(|o| o.status.success())
-        .unwrap_or(false);
-
-    if !nft_ok {
-        return false;
-    }
-
-    // Check if fw4 table exists (indicates fw4 is active)
-    let fw4_active = Command::new("nft")
-        .args(["list", "table", "inet", "fw4"])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
-
-    fw4_active
-}
-
-/// Check if fw3 is available and active.
-fn is_fw3_available() -> bool {
-    // Check if fw3 binary exists
-    if !Path::new("/sbin/fw3").exists() && !Path::new("/usr/sbin/fw3").exists() {
-        return false;
-    }
-
-    // Check if iptables is available
-    let ipt_ok = Command::new("iptables")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
-
-    if !ipt_ok {
-        return false;
-    }
-
-    // Check if fw3's chains exist (indicates fw3 is active)
-    // fw3 creates zone chains like zone_lan_input
-    let fw3_active = Command::new("iptables")
-        .args(["-L", "input_rule", "-n"])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
-
-    fw3_active
+        .unwrap_or(false)
 }
 
 /// Get the OpenWrt version string if available.
@@ -151,6 +161,130 @@ mod tests {
         // This test will behave differently on OpenWrt vs other systems
         let system = detect_system();
         println!("Detected system: {:?}", system);
+    }
+
+    #[derive(Default)]
+    struct FakeProbe {
+        openwrt: bool,
+        fw4_live: bool,
+        fw3_live: bool,
+        init: Option<&'static str>,
+        files: Vec<&'static str>,
+    }
+
+    impl Probe for FakeProbe {
+        fn is_openwrt(&self) -> bool {
+            self.openwrt
+        }
+        fn fw4_live(&self) -> bool {
+            self.fw4_live
+        }
+        fn fw3_live(&self) -> bool {
+            self.fw3_live
+        }
+        fn firewall_init_script(&self) -> Option<String> {
+            self.init.map(str::to_string)
+        }
+        fn file_exists(&self, path: &str) -> bool {
+            self.files.contains(&path)
+        }
+    }
+
+    fn openwrt() -> FakeProbe {
+        FakeProbe {
+            openwrt: true,
+            ..Default::default()
+        }
+    }
+
+    const FW4_INIT: &str = "#!/bin/sh /etc/rc.common\nSTART=19\nboot() { fw4 -q start; }";
+    const FW3_INIT: &str = "#!/bin/sh /etc/rc.common\nSTART=19\nstart_service() { fw3 start; }";
+
+    #[test]
+    fn live_state_wins() {
+        let both_binaries = vec!["/sbin/fw3", "/sbin/fw4"];
+        let probe = FakeProbe {
+            fw3_live: true,
+            init: Some(FW4_INIT),
+            files: both_binaries.clone(),
+            ..openwrt()
+        };
+        assert_eq!(detect_with(&probe), FirewallSystem::Fw3);
+        let probe = FakeProbe {
+            fw4_live: true,
+            fw3_live: true,
+            files: both_binaries,
+            ..openwrt()
+        };
+        assert_eq!(detect_with(&probe), FirewallSystem::Fw4);
+    }
+
+    /// The regression: fw4 whose ruleset failed to load is still fw4, not
+    /// an unknown system handed to the iptables backend.
+    #[test]
+    fn fw4_that_failed_to_load_is_still_fw4() {
+        let probe = FakeProbe {
+            init: Some(FW4_INIT),
+            files: vec!["/sbin/fw4"],
+            ..openwrt()
+        };
+        assert_eq!(detect_with(&probe), FirewallSystem::Fw4);
+        let no_init = FakeProbe {
+            files: vec!["/sbin/fw4"],
+            ..openwrt()
+        };
+        assert_eq!(detect_with(&no_init), FirewallSystem::Fw4);
+    }
+
+    #[test]
+    fn init_script_names_the_framework() {
+        let probe = FakeProbe {
+            init: Some(FW3_INIT),
+            files: vec!["/sbin/fw4"],
+            ..openwrt()
+        };
+        assert_eq!(detect_with(&probe), FirewallSystem::Fw3);
+        // A word match: "fw4" inside another token names nothing.
+        let probe = FakeProbe {
+            init: Some("start_service() { myfw4tool; }"),
+            files: vec!["/sbin/fw3"],
+            ..openwrt()
+        };
+        assert_eq!(detect_with(&probe), FirewallSystem::Fw3);
+    }
+
+    #[test]
+    fn nothing_known_is_unknown() {
+        assert_eq!(detect_with(&openwrt()), FirewallSystem::Unknown);
+        let not_openwrt = FakeProbe {
+            fw4_live: true,
+            ..Default::default()
+        };
+        assert_eq!(detect_with(&not_openwrt), FirewallSystem::Unknown);
+    }
+
+    /// Same order as the shell that picks the include, so the daemon and the
+    /// include never disagree about the backend.
+    #[test]
+    fn order_matches_nym_fw_backend() {
+        let script = include_str!("../../scripts/fw-boot-guard.sh");
+        let body = script
+            .split("nym_fw_backend() {")
+            .nth(1)
+            .and_then(|s| s.split("\n}").next())
+            .expect("nym_fw_backend in fw-boot-guard.sh");
+        let probes = [
+            "nft list table inet fw4",
+            "iptables -L input_rule -n",
+            "grep -q -w fw4 /etc/init.d/firewall",
+            "grep -q -w fw3 /etc/init.d/firewall",
+            "[ -x /sbin/fw4 ]",
+        ];
+        let positions: Vec<usize> = probes
+            .iter()
+            .map(|p| body.find(p).unwrap_or_else(|| panic!("{p} missing from:\n{body}")))
+            .collect();
+        assert!(positions.windows(2).all(|w| w[0] < w[1]), "{body}");
     }
 
     #[test]
