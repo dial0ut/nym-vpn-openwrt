@@ -7,7 +7,15 @@ use futures::{
     pin_mut,
 };
 use nym_diagnostic::DiagnosticHandler;
-use std::{net::IpAddr, path::PathBuf, pin::Pin, sync::Arc};
+use std::{
+    net::IpAddr,
+    path::PathBuf,
+    pin::Pin,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tokio::{
     sync::{RwLock, broadcast, mpsc, oneshot, watch},
@@ -323,6 +331,11 @@ pub struct NymVpnService {
     // Held by every SOCKS5 enable (lookups included), disable and
     // auto-disable, so they apply in turn.
     socks5_ops: Arc<tokio::sync::Mutex<()>>,
+
+    // Bumped on the loop per SOCKS5 enable, so an auto-disable spares an
+    // enable handled after its tunnel event. Usize: 32-bit targets lack
+    // AtomicU64 and only equality is compared.
+    socks5_enables: Arc<AtomicUsize>,
 }
 
 impl NymVpnService {
@@ -576,6 +589,7 @@ impl NymVpnService {
             idle: false,
             socks5_service,
             socks5_ops: Arc::new(tokio::sync::Mutex::new(())),
+            socks5_enables: Arc::new(AtomicUsize::new(0)),
         })
     }
 
@@ -839,8 +853,15 @@ impl NymVpnService {
             if matches!(new_state, TunnelState::Disconnected | TunnelState::Error(_)) {
                 let socks5_service = self.socks5_service.clone();
                 let socks5_ops = self.socks5_ops.clone();
+                let socks5_enables = self.socks5_enables.clone();
+                let enables_seen = socks5_enables.load(Ordering::SeqCst);
                 tokio::spawn(async move {
                     let _op = socks5_ops.lock().await;
+                    // An enable asked for after the disconnect may have taken
+                    // the lock first; it stands.
+                    if socks5_enables.load(Ordering::SeqCst) != enables_seen {
+                        return;
+                    }
                     // Exact under the lock: only enable and disable write the
                     // state, and both hold it.
                     if !socks5_service.is_enabled() {
@@ -1612,6 +1633,7 @@ impl NymVpnService {
         };
         let socks5_service = self.socks5_service.clone();
         let socks5_ops = self.socks5_ops.clone();
+        self.socks5_enables.fetch_add(1, Ordering::SeqCst);
 
         tokio::spawn(async move {
             let _op = socks5_ops.lock().await;
