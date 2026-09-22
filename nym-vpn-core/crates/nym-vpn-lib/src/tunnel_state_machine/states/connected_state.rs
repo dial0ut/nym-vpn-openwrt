@@ -219,8 +219,11 @@ impl ConnectedState {
                 // never last: Connecting then probes the API to decide. A
                 // session this side's bandwidth failure ended does not count.
                 let lifetime = self.connected_at.elapsed();
+                let tunnel_type = shared_state.tunnel_settings.tunnel_type;
                 let retry_attempt = if bandwidth_failure.is_none()
-                    && shared_state.short_session_strikes.record(entry, lifetime)
+                    && shared_state
+                        .short_session_strikes
+                        .record(entry, lifetime, tunnel_type)
                 {
                     tracing::warn!(
                         "Session via entry gateway {entry} lasted only {}s, again; checking whether the gateway is to blame",

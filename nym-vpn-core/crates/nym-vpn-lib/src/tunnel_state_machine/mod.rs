@@ -653,7 +653,14 @@ impl From<TunnelInterface> for nym_firewall::TunnelInterface {
 const GATEWAY_BLAME_GRACE: std::time::Duration = std::time::Duration::from_secs(120);
 
 /// A session that ends sooner than this counts against its entry gateway.
-const SHORT_SESSION: Duration = Duration::from_secs(60);
+/// It must outlast the connection monitor's detection time: a mixnet tunnel
+/// that dies right after Up is declared failed up to two minutes later.
+fn short_session(tunnel_type: TunnelType) -> Duration {
+    match tunnel_type {
+        TunnelType::Wireguard => Duration::from_secs(60),
+        TunnelType::Mixnet => Duration::from_secs(180),
+    }
+}
 
 /// Short sessions in a row via one entry gateway before it is suspected.
 const SHORT_SESSION_STRIKES: u32 = 3;
@@ -670,8 +677,8 @@ struct ShortSessionStrikes {
 impl ShortSessionStrikes {
     /// Records how long a session via `entry` lasted. Returns whether the
     /// gateway has struck out; it stays so until a session lasts.
-    fn record(&mut self, entry: NodeIdentity, lifetime: Duration) -> bool {
-        if lifetime >= SHORT_SESSION {
+    fn record(&mut self, entry: NodeIdentity, lifetime: Duration, tunnel_type: TunnelType) -> bool {
+        if lifetime >= short_session(tunnel_type) {
             self.reset();
             return false;
         }
@@ -1695,26 +1702,33 @@ mod tests {
     fn short_session_strikes_table() {
         let a = gateway("7CWjY3QFoA9dgE535u9bQiXCfzgMZvSpJu842GA1Wn42");
         let b = gateway("2djmrzZ62M8jpzpYb7MMq6QjP15CkbnKHf3ZV3kSCXUE");
-        // (entry, session lifetime in seconds, struck out)
+        let wg = TunnelType::Wireguard;
+        let mixnet = TunnelType::Mixnet;
+        // (entry, tunnel type, session lifetime in seconds, struck out)
         let cases = [
-            (a, 10, false),
-            (a, 59, false),
-            (a, 30, true),
+            (a, wg, 10, false),
+            (a, wg, 59, false),
+            (a, wg, 30, true),
             // Stays struck out until a session lasts.
-            (a, 5, true),
-            (a, 60, false),
-            (a, 1, false),
+            (a, wg, 5, true),
+            (a, wg, 60, false),
+            (a, wg, 1, false),
             // Another entry gateway starts over.
-            (b, 1, false),
-            (b, 1, false),
-            (a, 1, false),
-            (a, 1, false),
-            (a, 1, true),
+            (b, wg, 1, false),
+            (b, wg, 1, false),
+            (a, wg, 1, false),
+            (a, wg, 1, false),
+            (a, wg, 1, true),
+            // Mixnet detects a dead tunnel up to two minutes after Up.
+            (a, mixnet, 180, false),
+            (a, mixnet, 120, false),
+            (a, mixnet, 150, false),
+            (a, mixnet, 179, true),
         ];
         let mut strikes = ShortSessionStrikes::default();
-        for (i, (entry, lifetime, struck_out)) in cases.into_iter().enumerate() {
+        for (i, (entry, tunnel_type, lifetime, struck_out)) in cases.into_iter().enumerate() {
             assert_eq!(
-                strikes.record(entry, Duration::from_secs(lifetime)),
+                strikes.record(entry, Duration::from_secs(lifetime), tunnel_type),
                 struck_out,
                 "case {i}"
             );
@@ -1724,19 +1738,20 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn sessions_are_timed_on_the_tokio_clock() {
         let entry = gateway("7CWjY3QFoA9dgE535u9bQiXCfzgMZvSpJu842GA1Wn42");
+        let wg = TunnelType::Wireguard;
         let mut strikes = ShortSessionStrikes::default();
         for session in 1..=SHORT_SESSION_STRIKES {
             let connected_at = tokio::time::Instant::now();
-            tokio::time::advance(SHORT_SESSION - Duration::from_secs(1)).await;
+            tokio::time::advance(short_session(wg) - Duration::from_secs(1)).await;
             assert_eq!(
-                strikes.record(entry, connected_at.elapsed()),
+                strikes.record(entry, connected_at.elapsed(), wg),
                 session == SHORT_SESSION_STRIKES
             );
         }
 
         let connected_at = tokio::time::Instant::now();
-        tokio::time::advance(SHORT_SESSION).await;
-        assert!(!strikes.record(entry, connected_at.elapsed()));
+        tokio::time::advance(short_session(wg)).await;
+        assert!(!strikes.record(entry, connected_at.elapsed(), wg));
         assert_eq!(strikes.count, 0);
     }
 
