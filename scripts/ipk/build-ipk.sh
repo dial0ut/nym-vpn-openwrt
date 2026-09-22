@@ -178,13 +178,32 @@ cp "$SCRIPT_DIR/postinst" "$BUILD_DIR/control/"
 cp "$SCRIPT_DIR/prerm" "$BUILD_DIR/control/"
 chmod 755 "$BUILD_DIR/control/postinst" "$BUILD_DIR/control/prerm"
 
+echo "=== Normalising ownership and modes ==="
+# Everything the package installs belongs to root and must not be
+# group-writable. Files copied with cp -R keep the build user's umask, and tar
+# records the build user's uid/gid unless told otherwise, so a package built by
+# an ordinary user installs files that user can rewrite - including the daemon
+# binary, the init script and the rpcd ACL.
+normalise_tree() {
+    find "$@" -type d -exec chmod 755 {} +
+    find "$@" -type f -perm -u+x -exec chmod 755 {} +
+    find "$@" -type f ! -perm -u+x -exec chmod 644 {} +
+}
+normalise_tree "$BUILD_DIR/data" "$BUILD_DIR/control"
+chmod 755 "$BUILD_DIR/control/postinst" "$BUILD_DIR/control/prerm"
+if tar --version 2>/dev/null | grep -q 'GNU tar'; then
+    TAR_AS_ROOT=(--owner=0 --group=0 --numeric-owner)
+else
+    TAR_AS_ROOT=(--uid 0 --gid 0 --uname root --gname root --numeric-owner)
+fi
+
 echo "=== Building IPK ==="
-(cd "$BUILD_DIR/control" && tar -czf ../control.tar.gz .)
-(cd "$BUILD_DIR/data" && tar -czf ../data.tar.gz .)
+(cd "$BUILD_DIR/control" && tar "${TAR_AS_ROOT[@]}" -czf ../control.tar.gz .)
+(cd "$BUILD_DIR/data" && tar "${TAR_AS_ROOT[@]}" -czf ../data.tar.gz .)
 echo "2.0" > "$BUILD_DIR/debian-binary"
 
 OUTPUT_FILE="$OUTPUT_DIR/nym-vpn_${VERSION}_${OPENWRT_ARCH}.ipk"
-(cd "$BUILD_DIR" && tar -czf "$OUTPUT_FILE" ./debian-binary ./control.tar.gz ./data.tar.gz)
+(cd "$BUILD_DIR" && tar "${TAR_AS_ROOT[@]}" -czf "$OUTPUT_FILE" ./debian-binary ./control.tar.gz ./data.tar.gz)
 
 echo ""
 echo "=== Build complete ==="

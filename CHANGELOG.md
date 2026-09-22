@@ -43,6 +43,11 @@ the GitHub release notes.
 
 ### Security
 
+- Packages install their files as root. Both packagers recorded the building
+  user's uid and umask, so the daemon binary, its init script, the firewall
+  helpers, the LuCI assets and the rpcd ACL arrived owned by that uid
+  (`runner` in released packages) and, depending on the builder's umask,
+  group-writable.
 - Firewall runtime state now lives in the root-owned, mode-0700
   `/var/run/nym-firewall` directory, with ownership checks and safe temporary
   file creation. Package-hook state also moved out of world-writable `/tmp`.

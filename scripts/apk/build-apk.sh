@@ -152,6 +152,17 @@ chmod 755 "$SCRIPTS_DIR/prerm"
 } > "$SCRIPTS_DIR/preupgrade"
 chmod 755 "$SCRIPTS_DIR/preupgrade"
 
+echo "=== Normalising ownership and modes ==="
+# apk mkpkg records each file's on-disk owner and mode, so the staging tree has
+# to be root-owned and free of group-write before packaging: otherwise the
+# package installs the daemon binary, the init script and the rpcd ACL owned by
+# whoever built it. Files copied with cp -R also carry the build user's umask.
+find "$DATA_DIR" "$SCRIPTS_DIR" -type d -exec chmod 755 {} +
+find "$DATA_DIR" "$SCRIPTS_DIR" -type f -perm -u+x -exec chmod 755 {} +
+find "$DATA_DIR" "$SCRIPTS_DIR" -type f ! -perm -u+x -exec chmod 644 {} +
+STAGED_AS_ROOT=0
+chown -R 0:0 "$DATA_DIR" 2>/dev/null && STAGED_AS_ROOT=1
+
 echo "=== Building APK ==="
 
 OUTPUT_FILE="$OUTPUT_DIR/nym-vpn_${VERSION}_${OPENWRT_ARCH}.apk"
@@ -169,7 +180,7 @@ MKPKG_INFO_ARGS=(
     -I "depends:libc kmod-tun libmnl libnftnl kmod-ipt-conntrack-extra luci-base rpcd"
 )
 
-if command -v apk >/dev/null 2>&1 && apk mkpkg --help >/dev/null 2>&1; then
+if [ "$STAGED_AS_ROOT" = 1 ] && command -v apk >/dev/null 2>&1 && apk mkpkg --help >/dev/null 2>&1; then
     echo "Using native apk mkpkg"
     apk mkpkg \
         "${MKPKG_INFO_ARGS[@]}" \
@@ -181,11 +192,15 @@ if command -v apk >/dev/null 2>&1 && apk mkpkg --help >/dev/null 2>&1; then
         -o "$OUTPUT_FILE"
 elif command -v docker >/dev/null 2>&1; then
     echo "Using Docker Alpine for apk mkpkg"
+    # The tree is chowned to root inside the container (the host build user
+    # cannot), then handed back so the trap can clean the staging directory up.
     docker run --rm \
-        -v "$DATA_DIR:/work/data:ro" \
+        -v "$DATA_DIR:/work/data" \
         -v "$SCRIPTS_DIR:/work/scripts:ro" \
         -v "$OUTPUT_DIR:/work/out" \
+        -e "HOST_OWNER=$(id -u):$(id -g)" \
         alpine:latest \
+        sh -c 'chown -R 0:0 /work/data && "$@"; rc=$?; chown -R "$HOST_OWNER" /work/data; exit $rc' _ \
         apk mkpkg \
             -I "name:nym-vpn" \
             -I "version:${VERSION}-r0" \
@@ -205,8 +220,8 @@ elif command -v docker >/dev/null 2>&1; then
 
     mv "$OUTPUT_DIR/output.apk" "$OUTPUT_FILE"
 else
-    echo "Error: Neither apk mkpkg nor docker found."
-    echo "Install Docker or run on Alpine to build APK packages."
+    echo "Error: no way to package as root."
+    echo "Run on Alpine as root (apk mkpkg), or install Docker."
     exit 1
 fi
 
