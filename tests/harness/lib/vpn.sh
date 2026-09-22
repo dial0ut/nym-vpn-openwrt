@@ -12,20 +12,20 @@ set -euo pipefail
 # enables and (re)starts the daemon through /etc/init.d/nym-vpnd under procd,
 # which is the path a real router takes; nothing in the harness starts the
 # daemon by hand. Copies over stdin (the CTs have no shared filesystem).
-# Args: ctid path
+# Args: ctid path [extra package-manager flags, e.g. --force-reinstall]
 vpn_pkg_install() {
-    local ctid="$1" file="$2" name rc=0
+    local ctid="$1" file="$2" flags="${3:-}" name rc=0
     name=$(basename "$file")
     _ssh_host "pct exec $ctid -- sh -c 'cat > /tmp/$name'" < "$file" || return 1
     case "$name" in
         *.apk)
             # apk resolves the local file's dependencies from its index.
-            pct_sh "$ctid" "apk update >/tmp/pkg-update.log 2>&1 || true; apk add --allow-untrusted /tmp/$name >/tmp/pkg-install.log 2>&1" || rc=$? ;;
+            pct_sh "$ctid" "apk update >/tmp/pkg-update.log 2>&1 || true; apk add --allow-untrusted $flags /tmp/$name >/tmp/pkg-install.log 2>&1" || rc=$? ;;
         *.ipk)
             # A fresh rootfs has no package lists; without `opkg update` the
             # dependencies (libmnl, libnftnl, kmod-*) cannot be resolved and
             # opkg exits 255.
-            pct_sh "$ctid" "opkg update >/tmp/pkg-update.log 2>&1 || true; opkg install /tmp/$name >/tmp/pkg-install.log 2>&1" || rc=$? ;;
+            pct_sh "$ctid" "opkg update >/tmp/pkg-update.log 2>&1 || true; opkg install $flags /tmp/$name >/tmp/pkg-install.log 2>&1" || rc=$? ;;
         *) echo "[vpn] package must end in .apk or .ipk: $name" >&2; return 1 ;;
     esac
     # Do not trust the exit code alone: the package manager's own view of
@@ -36,6 +36,17 @@ vpn_pkg_install() {
         return 1
     fi
     return 0
+}
+
+# Remove the package with the router's package manager (a real removal,
+# prerm's non-upgrade path). Output in /tmp/pkg-remove.log. Args: ctid
+vpn_pkg_remove() {
+    pct_sh "$1" 'if command -v opkg >/dev/null 2>&1; then opkg remove nym-vpn; else apk del nym-vpn; fi >/tmp/pkg-remove.log 2>&1'
+}
+
+# The package manager inside the CT: opkg or apk. Args: ctid
+vpn_pkg_manager() {
+    pct_sh "$1" 'if command -v opkg >/dev/null 2>&1; then echo opkg; else echo apk; fi'
 }
 
 # The firewall helpers the package must ship: the includes fw3/fw4 run and
@@ -122,6 +133,47 @@ vpn_account_state() {
 # Account identity line, for asserting an upgrade kept the account.
 vpn_account_identity() {
     pct_sh "$1" 'nym-vpnc account get 2>&1' | sed -n 's/^Account identity: //p' | head -1
+}
+
+# "on"/"off" as `nym-vpnc tunnel get` reports the kill-switch, or "unknown".
+vpn_killswitch_state() {
+    pct_sh "$1" 'nym-vpnc tunnel get 2>/dev/null' | sed -n 's/^Kill-switch: //p' | head -1 | grep . || echo unknown
+}
+
+# Account-survival check around a package operation. vpn_keep_begin records
+# the account identity and turns the kill-switch off, the non-default value,
+# so a settings file that did not survive reads back as "on". vpn_keep_end
+# waits for the daemon under procd, asserts both came back, and turns the
+# kill-switch on again. Both print why they failed. Args: ctid
+vpn_keep_begin() {
+    KEEP_ID=$(vpn_account_identity "$1")
+    if [ -z "$KEEP_ID" ]; then
+        echo "  no account identity to compare"
+        return 1
+    fi
+    vpn_killswitch "$1" off
+    sleep 2
+    if [ "$(vpn_killswitch_state "$1")" != off ]; then
+        echo "  could not turn the kill-switch off"
+        return 1
+    fi
+}
+vpn_keep_end() {
+    local ctid="$1" rc=0 id ks
+    vpn_daemon_wait "$ctid" 40 || { echo "  daemon did not answer"; rc=1; }
+    vpn_daemon_under_procd "$ctid" || { echo "  procd does not list the daemon as running"; rc=1; }
+    id=$(vpn_account_identity "$ctid")
+    ks=$(vpn_killswitch_state "$ctid")
+    if [ "$id" != "$KEEP_ID" ]; then
+        echo "  account identity changed: '$KEEP_ID' -> '${id:-none}'"
+        rc=1
+    fi
+    if [ "$ks" != off ]; then
+        echo "  daemon settings not kept: kill-switch off -> $ks"
+        rc=1
+    fi
+    vpn_killswitch "$ctid" on
+    return "$rc"
 }
 
 # For cases that need a tunnel: SKIP with the reason when the slot's account
