@@ -6,6 +6,8 @@
 //! in `/tmp/resolv.conf.d/`, which the jailed dnsmasq sees through the init
 //! script's bind-mount and reloads via inotify on rename-in. Connect and
 //! disconnect are then file writes, not a 3s LAN-wide dnsmasq restart.
+//! The rest of the daemon commits dhcp through [`commit_dhcp`], which keeps
+//! the repoint out of the commit.
 //!
 //! One daemon-lifetime actor owns the file: tunnel resolvers while
 //! connected, a 5s mirror of netifd's `resolv.conf.auto` while idle. Every
@@ -102,7 +104,11 @@ trait Sys: Send + Sync + 'static {
     fn uci_revert_option(&self, key: &str);
     /// Staged only, never committed.
     fn uci_set(&self, key: &str, value: &str) -> Result<()>;
-    /// The one allowed commit: delete an accidentally-committed resolvfile.
+    /// `uci changes <package>`: one staged delta per line.
+    fn uci_changes(&self, package: &str) -> Result<String>;
+    /// Only with our repoint reverted first; see `commit_dhcp_keeping_repoint`.
+    fn uci_commit(&self, package: &str) -> Result<()>;
+    /// Delete an accidentally-committed resolvfile.
     fn repair_committed_resolvfile(&self) -> Result<()>;
     fn committed_dhcp(&self) -> String;
     /// Must be read after the targeted reverts, or a stale staged delta of
@@ -124,6 +130,12 @@ impl<T: Sys> Sys for std::sync::Arc<T> {
     }
     fn uci_set(&self, key: &str, value: &str) -> Result<()> {
         (**self).uci_set(key, value)
+    }
+    fn uci_changes(&self, package: &str) -> Result<String> {
+        (**self).uci_changes(package)
+    }
+    fn uci_commit(&self, package: &str) -> Result<()> {
+        (**self).uci_commit(package)
     }
     fn repair_committed_resolvfile(&self) -> Result<()> {
         (**self).repair_committed_resolvfile()
@@ -163,6 +175,36 @@ impl Sys for RealSys {
 
     fn uci_set(&self, key: &str, value: &str) -> Result<()> {
         uci_set(key, value)
+    }
+
+    fn uci_changes(&self, package: &str) -> Result<String> {
+        let output = Command::new("uci")
+            .args(["changes", package])
+            .output()
+            .map_err(|e| Error::UciCommand(e.to_string()))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(Error::UciCommand(format!(
+                "uci changes {} failed: {}",
+                package, stderr
+            )));
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    }
+
+    fn uci_commit(&self, package: &str) -> Result<()> {
+        let output = Command::new("uci")
+            .args(["commit", package])
+            .output()
+            .map_err(|e| Error::UciCommand(e.to_string()))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(Error::UciCommand(format!(
+                "uci commit {} failed: {}",
+                package, stderr
+            )));
+        }
+        Ok(())
     }
 
     fn repair_committed_resolvfile(&self) -> Result<()> {
@@ -349,6 +391,48 @@ fn converge<S: Sys>(sys: &S, managed_file: &str) -> Result<ConvergeOutcome> {
     ))
 }
 
+/// Sections whose staged `resolvfile` is our repoint, from `uci changes dhcp`
+/// lines of the form `dhcp.<section>.resolvfile='<path>'`.
+fn staged_repoints(changes: &str, managed_file: &str) -> Vec<String> {
+    let repoint = format!("'{}'", managed_file);
+    let mut sections: Vec<String> = Vec::new();
+    for line in changes.lines() {
+        let Some((key, value)) = line.trim().split_once('=') else {
+            continue;
+        };
+        let Some(section) = key
+            .strip_prefix("dhcp.")
+            .and_then(|key| key.strip_suffix(".resolvfile"))
+        else {
+            continue;
+        };
+        if value == repoint && !section.contains('.') && !sections.iter().any(|s| s == section) {
+            sections.push(section.to_owned());
+        }
+    }
+    sections
+}
+
+/// `uci commit dhcp` that leaves our repoint staged. Committed, it would
+/// outlive the daemon: after a reboot dnsmasq would read a file nothing
+/// writes. uci cannot commit around one delta, so ours is reverted, the rest
+/// committed and ours staged again.
+fn commit_dhcp_keeping_repoint<S: Sys>(sys: &S, managed_file: &str) -> Result<()> {
+    let sections = staged_repoints(&sys.uci_changes("dhcp")?, managed_file);
+    for section in &sections {
+        sys.uci_revert_option(&format!("dhcp.{}.resolvfile", section));
+    }
+    let committed = sys.uci_commit("dhcp");
+    // Even when the commit failed: without it the next dnsmasq restart
+    // drops the managed file.
+    let mut restaged = Ok(());
+    for section in &sections {
+        let result = sys.uci_set(&format!("dhcp.{}.resolvfile", section), managed_file);
+        restaged = restaged.and(result);
+    }
+    committed.and(restaged)
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("not running on OpenWrt")]
@@ -393,6 +477,7 @@ impl Paths {
 enum Cmd {
     SetTunnel(Vec<IpAddr>, oneshot::Sender<Result<()>>),
     SetWanMirror(IdleDns, oneshot::Sender<Result<()>>),
+    CommitDhcp(oneshot::Sender<Result<()>>),
 }
 
 enum Mode {
@@ -583,6 +668,10 @@ async fn run_actor<S: Sys>(sys: S, paths: Paths, mut rx: mpsc::Receiver<Cmd>) {
                         }
                         let _ = ack.send(result);
                     }
+                    Cmd::CommitDhcp(ack) => {
+                        let managed = paths.managed.display().to_string();
+                        let _ = ack.send(commit_dhcp_keeping_repoint(&sys, &managed));
+                    }
                 }
             }
             _ = tick.tick() => {
@@ -676,6 +765,17 @@ impl Dnsmasq {
     }
 }
 
+/// `uci commit dhcp` for the rest of the daemon: leaves the repoint staged,
+/// and runs on the actor so it cannot interleave with a converge.
+pub async fn commit_dhcp() -> Result<()> {
+    let tx = Dnsmasq::new()?.tx;
+    let (ack, rx) = oneshot::channel();
+    tx.send(Cmd::CommitDhcp(ack))
+        .await
+        .map_err(|_| Error::ActorGone)?;
+    rx.await.map_err(|_| Error::ActorGone)?
+}
+
 fn uci_set(key: &str, value: &str) -> Result<()> {
     let arg = format!("{}={}", key, value);
     let output = Command::new("uci")
@@ -711,6 +811,9 @@ mod converge_tests {
     #[derive(Default)]
     pub(super) struct FakeSys {
         pub calls: Mutex<Vec<String>>,
+        /// `uci changes dhcp` output.
+        pub changes: String,
+        pub commit_fails: bool,
         pub committed: String,
         pub section: Option<String>,
         // queue of generated-conf reads, popped front on each generated_conf()
@@ -725,6 +828,16 @@ mod converge_tests {
         }
         fn uci_set(&self, key: &str, value: &str) -> Result<()> {
             self.calls.lock().unwrap().push(format!("set {key}={value}"));
+            Ok(())
+        }
+        fn uci_changes(&self, _package: &str) -> Result<String> {
+            Ok(self.changes.clone())
+        }
+        fn uci_commit(&self, package: &str) -> Result<()> {
+            self.calls.lock().unwrap().push(format!("commit {package}"));
+            if self.commit_fails {
+                return Err(Error::UciCommand("commit failed".into()));
+            }
             Ok(())
         }
         fn repair_committed_resolvfile(&self) -> Result<()> {
@@ -847,6 +960,57 @@ mod converge_tests {
         assert!(
             !calls.iter().any(|c| c.starts_with("set dhcp.@dnsmasq[0].resolvfile")),
             "no repoint may be staged under noresolv: {calls:?}"
+        );
+    }
+
+    #[test]
+    fn commit_dhcp_reverts_commits_then_restages_the_repoint() {
+        let sys = FakeSys {
+            changes: format!(
+                "dhcp.cfg01411c.resolvfile='{MANAGED_FILE}'\n\
+                 dhcp.cfg01411c.confdir='/tmp/dnsmasq.d'\n"
+            ),
+            ..Default::default()
+        };
+        commit_dhcp_keeping_repoint(&sys, MANAGED_FILE).unwrap();
+        assert_eq!(
+            *sys.calls.lock().unwrap(),
+            [
+                "revert dhcp.cfg01411c.resolvfile".to_string(),
+                "commit dhcp".to_string(),
+                format!("set dhcp.cfg01411c.resolvfile={MANAGED_FILE}"),
+            ]
+        );
+    }
+
+    #[test]
+    fn commit_dhcp_without_our_repoint_staged_only_commits() {
+        for changes in [
+            "",
+            // The user's own resolvfile edit is theirs to commit.
+            "dhcp.cfg01411c.resolvfile='/tmp/resolv.conf.d/resolv.conf.auto'\n",
+            "-dhcp.cfg01411c.resolvfile\n",
+        ] {
+            let sys = FakeSys {
+                changes: changes.into(),
+                ..Default::default()
+            };
+            commit_dhcp_keeping_repoint(&sys, MANAGED_FILE).unwrap();
+            assert_eq!(*sys.calls.lock().unwrap(), ["commit dhcp".to_string()]);
+        }
+    }
+
+    #[test]
+    fn commit_dhcp_restages_the_repoint_when_the_commit_fails() {
+        let sys = FakeSys {
+            changes: format!("dhcp.cfg01411c.resolvfile='{MANAGED_FILE}'\n"),
+            commit_fails: true,
+            ..Default::default()
+        };
+        assert!(commit_dhcp_keeping_repoint(&sys, MANAGED_FILE).is_err());
+        assert_eq!(
+            sys.calls.lock().unwrap().last().unwrap(),
+            &format!("set dhcp.cfg01411c.resolvfile={MANAGED_FILE}")
         );
     }
 

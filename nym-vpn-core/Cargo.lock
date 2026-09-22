@@ -6257,6 +6257,7 @@ dependencies = [
  "nym-bin-common",
  "nym-common 1.35.0",
  "nym-diagnostic",
+ "nym-dns",
  "nym-firewall",
  "nym-gateway-directory",
  "nym-http-api-client",

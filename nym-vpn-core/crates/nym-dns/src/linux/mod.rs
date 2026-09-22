@@ -48,6 +48,12 @@ pub enum Error {
     NoDnsMonitor,
 }
 
+/// `uci commit dhcp` that keeps the OpenWrt dnsmasq backend's resolvfile
+/// repoint staged, not committed. Every dhcp commit in the daemon goes here.
+pub async fn commit_dhcp() -> Result<()> {
+    Ok(dnsmasq::commit_dhcp().await?)
+}
+
 pub struct DnsMonitor {
     route_manager: RouteManagerHandle,
     inner: Option<DnsMonitorHolder>,

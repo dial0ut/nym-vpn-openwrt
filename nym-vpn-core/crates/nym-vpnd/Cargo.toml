@@ -57,6 +57,7 @@ nym-sdk.workspace = true
 # Local crates
 nym-common.workspace = true
 nym-diagnostic.workspace = true
+nym-dns.workspace = true
 nym-ipc.workspace = true
 nym-offline-monitor.workspace = true
 nym-firewall = { workspace = true }

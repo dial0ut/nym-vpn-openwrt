@@ -19,6 +19,8 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
     time::Duration,
 };
+
+use nym_common::ErrorExt;
 use tokio::{
     fs,
     process::Command,
@@ -356,17 +358,10 @@ async fn ensure_dnsmasq_confdir() -> Result<(), AdblockError> {
         );
     }
 
-    let commit = Command::new("uci")
-        .args(["commit", "dhcp"])
-        .output()
-        .await
-        .map_err(|e| AdblockError::Io("uci commit dhcp", e))?;
-
-    if !commit.status.success() {
-        tracing::warn!(
-            "uci commit dhcp failed: {}",
-            String::from_utf8_lossy(&commit.stderr)
-        );
+    // Not a plain `uci commit dhcp`: that would also commit the DNS backend's
+    // staged resolvfile repoint.
+    if let Err(e) = nym_dns::commit_dhcp().await {
+        tracing::warn!("{}", e.display_chain_with_msg("uci commit dhcp failed"));
     }
 
     Ok(())
