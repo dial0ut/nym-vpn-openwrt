@@ -266,9 +266,9 @@ async fn dispatch(method: &str, args: &Value) -> Value {
         "init" => init_batch().await,
         "split_list" => split_list(),
         "split_status" => split_status().await,
-        "split_add" => split_add(args),
-        "split_del" => split_del(args),
-        "split_set_enabled" => split_set_enabled(args),
+        "split_add" => with_split_lock(|| split_add(args)),
+        "split_del" => with_split_lock(|| split_del(args)),
+        "split_set_enabled" => with_split_lock(|| split_set_enabled(args)),
         "clients_list" => clients_list(),
         "daemon_status" => daemon_status(),
         "daemon_start" => daemon_start(),
@@ -2189,15 +2189,60 @@ fn split_targets(exclusions: &[Value]) -> SplitTargets {
 }
 
 /// Temp file + rename, so a firewall reload never includes a half-written
-/// file. The temp name is outside fw4's `*.nft` include glob.
+/// file. The temp name is per process and outside fw4's `*.nft` include glob.
 fn write_split_nft(content: &str) -> std::io::Result<()> {
     use std::io::Write;
-    let tmp = format!("{SPLIT_NFT}.tmp");
-    let mut file = std::fs::File::create(&tmp)?;
-    file.write_all(content.as_bytes())?;
-    file.sync_all()?;
-    drop(file);
-    std::fs::rename(&tmp, SPLIT_NFT)
+    let tmp = format!("{SPLIT_NFT}.{}.tmp", std::process::id());
+    let written = std::fs::File::create(&tmp).and_then(|mut file| {
+        file.write_all(content.as_bytes())?;
+        file.sync_all()
+    });
+    let result = written.and_then(|()| std::fs::rename(&tmp, SPLIT_NFT));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
+}
+
+const SPLIT_LOCK: &str = "/var/lock/nym-vpn-split.lock";
+
+/// rpcd runs one bridge process per call, so two split edits can overlap:
+/// interleaved, they leave a stale nft file, or one's dhcp commit lands in
+/// the other's revert/re-stage window and persists the repoint. The flock
+/// goes with the process, also when rpcd kills it at its timeout.
+fn with_split_lock<T>(edit: impl FnOnce() -> T) -> T {
+    let _lock = match lock_file(std::path::Path::new(SPLIT_LOCK)) {
+        Ok(file) => Some(file),
+        Err(err) => {
+            // Unserialised, as before, rather than refusing every edit.
+            log_warn(&format!("split exclusions: lock {SPLIT_LOCK}: {err}"));
+            None
+        }
+    };
+    edit()
+}
+
+/// Opens `path` and holds an exclusive flock on it until the file is dropped.
+fn lock_file(path: &std::path::Path) -> std::io::Result<std::fs::File> {
+    use std::os::fd::AsRawFd;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(path)?;
+    loop {
+        // SAFETY: the fd belongs to `file`, which is open for the whole call.
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } == 0 {
+            return Ok(file);
+        }
+        let err = std::io::Error::last_os_error();
+        if err.kind() != std::io::ErrorKind::Interrupted {
+            return Err(err);
+        }
+    }
 }
 
 /// Idempotent; an empty list tears everything down.
@@ -3376,6 +3421,27 @@ dhcp.nym_split_ipset=ipset
             uci.calls.last().map(String::as_str),
             Some("revert nym-vpn.cli_x")
         );
+    }
+
+    #[test]
+    fn split_lock_admits_one_holder_at_a_time() {
+        let path = std::env::temp_dir().join(format!("nym-vpnc-split-lock-{}", std::process::id()));
+        let held = lock_file(&path).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let waiter_path = path.clone();
+        let waiter = std::thread::spawn(move || {
+            let _lock = lock_file(&waiter_path).unwrap();
+            tx.send(()).unwrap();
+        });
+        assert!(
+            rx.recv_timeout(Duration::from_millis(200)).is_err(),
+            "second holder got the lock while the first held it"
+        );
+        drop(held);
+        rx.recv_timeout(Duration::from_secs(5))
+            .expect("lock not handed over after release");
+        waiter.join().unwrap();
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
