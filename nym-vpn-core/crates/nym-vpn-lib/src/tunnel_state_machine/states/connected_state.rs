@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::tunnel_state_machine::{
     ConnectionData, NextTunnelState, PrivateActionAfterDisconnect, PrivateTunnelState,
-    SessionStart, SharedState, TunnelCommand, TunnelInterface, TunnelStateHandler,
+    SessionStart, SharedState, TunnelCommand, TunnelInterface, TunnelStateHandler, short_session,
     states::{ConnectingState, DisconnectingState},
     tunnel::SelectedGateways,
     tunnel_monitor::{TunnelMonitorEvent, TunnelMonitorEventReceiver, TunnelMonitorHandle},
@@ -182,28 +182,51 @@ impl ConnectedState {
         Self::reset_dns(shared_state).await;
         Self::reset_routes(shared_state).await;
 
+        let lifetime = self.connected_at.lifetime();
+        let tunnel_type = shared_state.tunnel_settings.tunnel_type;
+        let lasted = lifetime >= short_session(tunnel_type);
+
         match (error_state_reason, self.bandwidth_failure) {
             (Some(block_reason), _) => {
                 NextTunnelState::NewState(ErrorState::enter(block_reason, shared_state).await)
             }
-            (None, Some(Some(entry_culpable))) => {
-                // The tunnel carried traffic until a gateway failed its
-                // bandwidth checks, so the local network is not the cause:
-                // no grace, and a fresh pair after a short backoff.
+            (None, Some(entry_culpable)) => {
+                // The tunnel carried traffic until the bandwidth checks
+                // failed, so the local network is not the cause: no grace,
+                // and a backoff that grows with the streak.
                 shared_state.entry_gateway_grace = None;
-                if entry_culpable {
-                    shared_state.blacklist_entry_gateway(
-                        self.selected_gateways.entry_gateway().identity,
-                        "bandwidth failure",
-                    );
-                } else {
+                let retry_attempt = shared_state.bandwidth_failure_streak.record_failure(lasted);
+                if !shared_state.bandwidth_failure_streak.ends_sessions() {
                     tracing::warn!(
-                        "Bandwidth failure at the exit gateway; re-selecting without blacklisting the entry gateway"
+                        "Bandwidth failures ended {retry_attempt} sessions in a row; \
+                         later sessions run on without top-ups until the gateway ends them"
                     );
                 }
-                NextTunnelState::NewState(ConnectingState::enter(1, None, shared_state).await)
+                let gateways = match entry_culpable {
+                    Some(true) => {
+                        shared_state.blacklist_entry_gateway(
+                            self.selected_gateways.entry_gateway().identity,
+                            "bandwidth failure",
+                        );
+                        None
+                    }
+                    Some(false) => {
+                        tracing::warn!(
+                            "Bandwidth failure at the exit gateway; re-selecting without blacklisting the entry gateway"
+                        );
+                        None
+                    }
+                    None => Some(self.selected_gateways),
+                };
+                NextTunnelState::NewState(
+                    ConnectingState::enter(retry_attempt, gateways, shared_state).await,
+                )
             }
-            (None, bandwidth_failure) => {
+            (None, None) => {
+                shared_state
+                    .bandwidth_failure_streak
+                    .record_other_end(lasted);
+
                 // This session was viable moments ago, so reconnect failures in
                 // the near future are far more likely a local outage than the
                 // gateway's fault. Grant the entry gateway a grace window during
@@ -216,15 +239,12 @@ impl ConnectedState {
                 ));
 
                 // Unless the grace keeps forgiving a gateway whose sessions
-                // never last: Connecting then probes the API to decide. A
-                // session this side's bandwidth failure ended does not count.
-                let lifetime = self.connected_at.lifetime();
-                let tunnel_type = shared_state.tunnel_settings.tunnel_type;
-                let retry_attempt = if bandwidth_failure.is_none()
-                    && shared_state
-                        .short_session_strikes
-                        .record(entry, lifetime, tunnel_type)
-                {
+                // never last: Connecting then probes the API to decide.
+                let retry_attempt = if shared_state.short_session_strikes.record(
+                    entry,
+                    lifetime,
+                    tunnel_type,
+                ) {
                     tracing::warn!(
                         "Session via entry gateway {entry} lasted only {}s, again; checking whether the gateway is to blame",
                         lifetime.as_secs()

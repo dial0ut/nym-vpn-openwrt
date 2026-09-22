@@ -25,6 +25,7 @@ impl DisconnectedState {
         // of the independence criteria are scoped to a connect session.
         shared_state.entry_gateway_grace = None;
         shared_state.clear_short_session_strikes();
+        shared_state.bandwidth_failure_streak.reset();
         shared_state.relax_independence = false;
 
         drop(tombstone);

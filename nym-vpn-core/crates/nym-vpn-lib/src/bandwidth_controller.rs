@@ -589,7 +589,12 @@ pub(crate) struct BandwidthController {
     exit_depletion_rate: DepletionRate,
     entry_query_health: QueryHealth,
     exit_query_health: QueryHealth,
+    /// The session's token.
     shutdown_token: CancellationToken,
+    /// Stops the checks alone; a child of `shutdown_token`.
+    stop_token: CancellationToken,
+    /// Whether a failure ends the session or only stops the checks.
+    end_session_on_failure: bool,
     /// Why the controller ended the session, if it did.
     failure: Option<Error>,
     upgrade_mode_enabled_on_last_check: bool,
@@ -602,6 +607,7 @@ impl BandwidthController {
         wg_exit_gateway_client: TemporaryBandwidthClient,
         account_command_tx: AccountCommandSender,
         shutdown_token: CancellationToken,
+        end_session_on_failure: bool,
     ) -> Self {
         let timeout_check_interval =
             IntervalStream::new(tokio::time::interval(DEFAULT_BANDWIDTH_CHECK));
@@ -616,16 +622,28 @@ impl BandwidthController {
             exit_depletion_rate: Default::default(),
             entry_query_health: Default::default(),
             exit_query_health: Default::default(),
+            stop_token: shutdown_token.child_token(),
             shutdown_token,
+            end_session_on_failure,
             failure: None,
             upgrade_mode_enabled_on_last_check: false,
         }
     }
 
-    /// Ends the session, keeping the first reason.
+    /// Ends the session, keeping the first reason. When failures are
+    /// tolerated, only the checks stop and the session runs until the
+    /// gateway ends it.
     fn fail(&mut self, err: Error) {
-        self.failure.get_or_insert(err);
-        self.shutdown_token.cancel();
+        if self.end_session_on_failure {
+            self.failure.get_or_insert(err);
+            self.shutdown_token.cancel();
+        } else {
+            nym_common::trace_err_chain!(
+                err,
+                "Bandwidth checks stopped; the session runs on until the gateway ends it"
+            );
+            self.stop_token.cancel();
+        }
     }
 
     fn construct_bandwidth_client(
@@ -722,6 +740,7 @@ impl BandwidthController {
         exit_signal_channel: TunUpReceiver,
         gateway_metadata_update_version: Option<semver::Version>,
         cancel_token: CancellationToken,
+        end_session_on_failure: bool,
     ) -> BandwidthController {
         let wg_entry_client = Self::construct_bandwidth_client(
             entry_gateway_data.private_ipv4.into(),
@@ -744,6 +763,7 @@ impl BandwidthController {
             wg_exit_client,
             account_command_tx,
             cancel_token.clone(),
+            end_session_on_failure,
         )
     }
 
@@ -1034,9 +1054,9 @@ impl BandwidthController {
     pub(crate) async fn run(mut self) -> Option<Error> {
         // Skip the first, immediate tick
         self.timeout_check_interval.next().await;
-        while !self.shutdown_token.is_cancelled() {
+        while !self.stop_token.is_cancelled() {
             tokio::select! {
-                _ = self.shutdown_token.cancelled() => {
+                _ = self.stop_token.cancelled() => {
                     tracing::trace!("BandwidthController: Received shutdown");
                     break;
                 }
@@ -1044,8 +1064,8 @@ impl BandwidthController {
                     let current_period = self.timeout_check_interval.as_ref().period();
                     // Top-ups included: the monitor waits for this task
                     // before it reports the tunnel down.
-                    let shutdown_token = self.shutdown_token.clone();
-                    let Some(next_period) = shutdown_token
+                    let stop_token = self.stop_token.clone();
+                    let Some(next_period) = stop_token
                         .run_until_cancelled(self.check_both(current_period))
                         .await
                     else {

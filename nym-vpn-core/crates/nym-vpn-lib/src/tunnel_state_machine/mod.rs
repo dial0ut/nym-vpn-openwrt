@@ -711,6 +711,50 @@ impl ShortSessionStrikes {
     }
 }
 
+/// Sessions in a row that bandwidth failures may end.
+const BANDWIDTH_FAILURE_SESSIONS: u32 = 3;
+
+/// Sessions in a row that a bandwidth failure ended. Re-selection cannot move
+/// away from a pinned gateway or a failing exit, and every new session spends
+/// tickets, so the reconnects back off, and after
+/// [`BANDWIDTH_FAILURE_SESSIONS`] later sessions are no longer ended by a
+/// failed check: they run until the gateway ends them, as before upstream
+/// #5685.
+#[derive(Debug, Default)]
+struct BandwidthFailureStreak {
+    count: u32,
+}
+
+impl BandwidthFailureStreak {
+    /// Whether a bandwidth failure may end the next session.
+    fn ends_sessions(&self) -> bool {
+        self.count < BANDWIDTH_FAILURE_SESSIONS
+    }
+
+    /// A bandwidth failure ended a session; `lasted` if it was not short.
+    /// Returns the retry attempt for the reconnect.
+    fn record_failure(&mut self, lasted: bool) -> u32 {
+        if lasted {
+            self.count = 0;
+        }
+        self.count = self.count.saturating_add(1);
+        self.count
+    }
+
+    /// A session ended for another reason. One that lasted ends the streak,
+    /// unless failures are already tolerated: such a session cannot report
+    /// one.
+    fn record_other_end(&mut self, lasted: bool) {
+        if lasted && self.ends_sessions() {
+            self.count = 0;
+        }
+    }
+
+    fn reset(&mut self) {
+        self.count = 0;
+    }
+}
+
 pub struct SharedState {
     route_handler: RouteHandler,
     firewall: Firewall,
@@ -737,6 +781,8 @@ pub struct SharedState {
     /// is to blame. Connecting runs the probe: Connected's firewall admits
     /// no API endpoints.
     entry_gateway_suspect: Option<NodeIdentity>,
+    /// See [`BandwidthFailureStreak`].
+    bandwidth_failure_streak: BandwidthFailureStreak,
     /// Whether the current connect session relaxed the gateway independence
     /// criteria ("connect anyway"). Set by Connect, kept across automatic
     /// reconnects, cleared on disconnect.
@@ -1151,6 +1197,7 @@ impl TunnelStateMachine {
             entry_gateway_grace: None,
             short_session_strikes: ShortSessionStrikes::default(),
             entry_gateway_suspect: None,
+            bandwidth_failure_streak: BandwidthFailureStreak::default(),
             relax_independence: false,
             api_endpoints,
             api_resolution: None,
@@ -1768,6 +1815,44 @@ mod tests {
         tokio::time::advance(short_session(wg)).await;
         assert!(!strikes.record(entry, connected_at.lifetime(), wg));
         assert_eq!(strikes.count, 0);
+    }
+
+    #[test]
+    fn bandwidth_failure_streak_table() {
+        enum End {
+            Failure { lasted: bool },
+            Other { lasted: bool },
+        }
+        use End::*;
+        // (how a session ended, retry attempt if a failure, next session may be ended)
+        let cases = [
+            (Failure { lasted: false }, Some(1), true),
+            (Other { lasted: false }, None, true),
+            (Failure { lasted: false }, Some(2), true),
+            (Other { lasted: true }, None, true),
+            (Failure { lasted: false }, Some(1), true),
+            // A failure after a long session starts a new streak.
+            (Failure { lasted: true }, Some(1), true),
+            (Failure { lasted: false }, Some(2), true),
+            (Failure { lasted: false }, Some(3), false),
+            // Tolerated from here on, however long sessions last.
+            (Other { lasted: true }, None, false),
+            (Other { lasted: false }, None, false),
+        ];
+        let mut streak = BandwidthFailureStreak::default();
+        for (i, (end, retry_attempt, ends_sessions)) in cases.into_iter().enumerate() {
+            match end {
+                Failure { lasted } => assert_eq!(
+                    Some(streak.record_failure(lasted)),
+                    retry_attempt,
+                    "case {i}"
+                ),
+                Other { lasted } => streak.record_other_end(lasted),
+            }
+            assert_eq!(streak.ends_sessions(), ends_sessions, "case {i}");
+        }
+        streak.reset();
+        assert!(streak.ends_sessions());
     }
 
     #[test]

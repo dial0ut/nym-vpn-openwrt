@@ -367,6 +367,7 @@ impl ConnectingState {
             user_agent: shared_state.user_agent.clone(),
             blacklisted_entry_gateways: shared_state.blacklisted_entry_gateways.clone(),
             relax_independence: shared_state.relax_independence,
+            bandwidth_failures_end_session: shared_state.bandwidth_failure_streak.ends_sessions(),
         };
         let tunnel_monitor_handle = TunnelMonitor::start(
             tunnel_parameters,
@@ -710,6 +711,7 @@ impl TunnelStateHandler for ConnectingState {
                         NextTunnelState::SameState(self)
                     }
                     TunnelMonitorEvent::BandwidthFailed { entry_culpable } => {
+                        shared_state.bandwidth_failure_streak.record_failure(false);
                         if let Some(entry_culpable) = entry_culpable {
                             self.handle_gateway_failure(entry_culpable, "bandwidth failure", shared_state).await;
                         }

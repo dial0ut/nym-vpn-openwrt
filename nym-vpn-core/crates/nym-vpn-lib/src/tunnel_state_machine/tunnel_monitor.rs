@@ -230,6 +230,9 @@ pub struct TunnelParameters {
     /// Run gateway selection with the independence criteria switched off for
     /// this connect session (the user chose to connect anyway).
     pub relax_independence: bool,
+    /// Whether a failed bandwidth check ends the session, or only stops the
+    /// checks.
+    pub bandwidth_failures_end_session: bool,
 }
 
 pub struct TunnelMonitor {
@@ -1124,6 +1127,7 @@ impl TunnelMonitor {
             exit_signal_rx,
             gw_update_version,
             self.shutdown_token.clone(),
+            self.tunnel_parameters.bandwidth_failures_end_session,
         );
 
         let authenticator_listener_handle = match authenticator_listener_handle {
