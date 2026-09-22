@@ -1884,6 +1884,14 @@ fn initd_run(service: &str, action: &str) {
         .output();
 }
 
+/// To syslog, where the LuCI log card (`logread -e nym-vpn`) shows it: rpcd
+/// sends a plugin's stderr nowhere.
+fn log_warn(message: &str) {
+    let _ = std::process::Command::new("logger")
+        .args(["-t", "nym-vpn-rpcd", "-p", "daemon.warn", message])
+        .output();
+}
+
 /// Colon-separated EUI-48, normalised to lowercase.
 fn valid_mac(mac: &str) -> Option<String> {
     let parts: Vec<&str> = mac.split(':').collect();
@@ -1972,27 +1980,71 @@ fn render_split_nft(clients: &[String], domains: &[String]) -> String {
     out
 }
 
-/// Idempotent; an empty list tears everything down.
-fn regen_split() {
-    let mut clients: Vec<String> = Vec::new();
-    let mut domains: Vec<String> = Vec::new();
-    for excl in split_exclusions() {
+#[derive(Debug, Default)]
+struct SplitTargets {
+    clients: Vec<String>,
+    domains: Vec<String>,
+    /// One line per skipped entry, for the log.
+    skipped: Vec<String>,
+}
+
+/// The enabled exclusions' MACs and domains, validated again here and not
+/// only in split_add: UCI is writable outside this bridge (`uci set`, a
+/// restored backup), the MACs land in an nft file fw4 includes on every
+/// load, and the domains in a dnsmasq `--nftset` line.
+fn split_targets(exclusions: &[Value]) -> SplitTargets {
+    let mut targets = SplitTargets::default();
+    for excl in exclusions {
         if excl["enabled"] != json!(true) {
             continue;
         }
+        let id = excl["id"].as_str().unwrap_or_default();
         match excl["type"].as_str() {
             Some("client") => {
-                if let Some(mac) = excl["mac"].as_str() {
-                    clients.push(mac.to_owned());
+                let raw = excl["mac"].as_str().unwrap_or_default();
+                match valid_mac(raw) {
+                    Some(mac) => targets.clients.push(mac),
+                    None => targets.skipped.push(format!(
+                        "split exclusion {id}: skipping invalid MAC {raw:?}"
+                    )),
                 }
             }
             Some("domain") => {
-                if let Some(domain) = excl["domain"].as_str() {
-                    domains.push(domain.to_owned());
+                let raw = excl["domain"].as_str().unwrap_or_default();
+                match valid_domain(raw) {
+                    Some(domain) => targets.domains.push(domain),
+                    None => targets.skipped.push(format!(
+                        "split exclusion {id}: skipping invalid domain {raw:?}"
+                    )),
                 }
             }
             _ => {}
         }
+    }
+    targets
+}
+
+/// Temp file + rename, so a firewall reload never includes a half-written
+/// file. The temp name is outside fw4's `*.nft` include glob.
+fn write_split_nft(content: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let tmp = format!("{SPLIT_NFT}.tmp");
+    let mut file = std::fs::File::create(&tmp)?;
+    file.write_all(content.as_bytes())?;
+    file.sync_all()?;
+    drop(file);
+    std::fs::rename(&tmp, SPLIT_NFT)
+}
+
+/// Idempotent; an empty list tears everything down.
+fn regen_split() {
+    let SplitTargets {
+        clients,
+        domains,
+        skipped,
+    } = split_targets(&split_exclusions());
+    for line in &skipped {
+        log_warn(line);
     }
 
     // OpenWrt's dnsmasq turns `config ipset` into --nftset directives on fw4.
@@ -2012,7 +2064,7 @@ fn regen_split() {
     if clients.is_empty() && domains.is_empty() {
         let _ = std::fs::remove_file(SPLIT_NFT);
     } else {
-        let _ = std::fs::write(SPLIT_NFT, render_split_nft(&clients, &domains));
+        let _ = write_split_nft(&render_split_nft(&clients, &domains));
     }
 
     // Firewall first so the sets exist before dnsmasq references them.
@@ -2538,6 +2590,62 @@ mod tests {
         assert!(rendered.contains("\tip daddr @nym_bypass4 meta mark set 0x14e\n"));
         assert!(rendered.contains("\tip6 daddr @nym_bypass6 meta mark set 0x14e\n"));
         assert!(rendered.ends_with("}\n"));
+    }
+
+    #[test]
+    fn split_targets_never_render_unvalidated_values() {
+        // As `uci show` prints values set with `uci set`, bypassing split_add.
+        let uci = "\
+nym-vpn.cli_evil=exclusion
+nym-vpn.cli_evil.type='client'
+nym-vpn.cli_evil.mac='aa:bb:cc:dd:ee:ff meta mark set 0x1; } chain evil { type filter hook input priority 0; policy accept; }'
+nym-vpn.cli_ok=exclusion
+nym-vpn.cli_ok.type='client'
+nym-vpn.cli_ok.mac='AA:BB:CC:DD:EE:01'
+nym-vpn.cli_off=exclusion
+nym-vpn.cli_off.type='client'
+nym-vpn.cli_off.mac='aa:bb:cc:dd:ee:02'
+nym-vpn.cli_off.enabled='0'
+nym-vpn.dom_evil=exclusion
+nym-vpn.dom_evil.type='domain'
+nym-vpn.dom_evil.domain='evil.example.com/#/1.2.3.4'
+nym-vpn.dom_comma=exclusion
+nym-vpn.dom_comma.type='domain'
+nym-vpn.dom_comma.domain='a.example.com,b.example.com'
+nym-vpn.dom_ok=exclusion
+nym-vpn.dom_ok.type='domain'
+nym-vpn.dom_ok.domain='Ok.Example.ORG'
+";
+        let targets = split_targets(&parse_split_exclusions(uci));
+        assert_eq!(targets.clients, vec!["aa:bb:cc:dd:ee:01"]);
+        assert_eq!(targets.domains, vec!["ok.example.org"]);
+        assert_eq!(targets.skipped.len(), 3, "{:?}", targets.skipped);
+        assert!(targets.skipped.iter().any(|l| l.contains("cli_evil")));
+        assert!(targets.skipped.iter().any(|l| l.contains("dom_evil")));
+        assert!(targets.skipped.iter().any(|l| l.contains("dom_comma")));
+
+        let rendered = render_split_nft(&targets.clients, &targets.domains);
+        for needle in ["evil", "0x1;", "hook input", "#/", ","] {
+            assert!(
+                !rendered.contains(needle),
+                "{needle:?} reached the nft file"
+            );
+        }
+        let chains: Vec<&str> = rendered.lines().filter(|l| l.contains("chain")).collect();
+        assert_eq!(chains, vec!["chain nym_split {"]);
+        let marks: Vec<&str> = rendered
+            .lines()
+            .filter(|l| l.contains("meta mark set"))
+            .map(str::trim)
+            .collect();
+        assert_eq!(
+            marks,
+            vec![
+                "ether saddr aa:bb:cc:dd:ee:01 meta mark set 0x14e",
+                "ip daddr @nym_bypass4 meta mark set 0x14e",
+                "ip6 daddr @nym_bypass6 meta mark set 0x14e",
+            ]
+        );
     }
 
     #[test]
