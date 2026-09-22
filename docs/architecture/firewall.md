@@ -46,29 +46,29 @@ Every state starts from the same base:
 
 ```text
  1. Loopback in/out
- 2. ct established — INPUT only (see below)
- 3. DHCPv4 and DHCPv6, router as both client and server
- 4. IPv6 NDP
- 5. mwan3 tracking pings
+ 2. Accept the bypass mark 0x14e in FORWARD (always)
+ 3. Return FORWARD traffic arriving on a WAN zone device or the tunnel (see below)
+ 4. DHCPv4 and DHCPv6 out, router as both client and server
+ 5. IPv6 NDP out
+ 6. mwan3 tracking pings out
 ```
 
 then the state's own rules are appended in this order:
 
 ```text
- 6. Allow peer endpoints (the gateways)
- 7. Allow other allowed endpoints (API, etc.)
- 8. Allow DNS to the VPN's DNS servers
- 9. Allow traffic to and from the tunnel interface
-10. Accept the inbound-exemption mark (INPUT/OUTPUT, only if exemptions exist)
-11. Accept the bypass mark 0x14e in FORWARD (always)
+ 7. Allow peer endpoints (the gateways)
+ 8. Allow other allowed endpoints (API, etc.)
+ 9. Allow DNS to the VPN's DNS servers
+10. Allow traffic into the tunnel interface; CVE-2019-14899 drop in INPUT (Connected, LAN on)
+11. Accept the inbound-exemption mark (INPUT/OUTPUT, only if exemptions exist)
 12. DNS escape hatch (rate-limited)
 13. Block DNS port 53 (reject)
 14. NTP escape hatch (rate-limited)
-15. Allow LAN traffic (RFC1918), if enabled
+15. LAN destinations, if enabled: accept in OUTPUT, return in FORWARD
 16. Final reject (catch-all)
 ```
 
-**Rule 9 must come before rule 13.** A LAN client's DNS query, once routed into the tunnel,
+**Rule 10 must come before rule 13.** A LAN client's DNS query, once routed into the tunnel,
 arrives at the firewall as a packet on the tunnel interface destined for port 53. Put the blanket
 port-53 reject first and it catches that query before the tunnel-allow rules get a look at it. DNS
 then fails for every client on the LAN, silently, while everything else works — which is a
@@ -82,7 +82,7 @@ resolving `*.pool.ntp.org`, and rule 13 would reject that lookup. Both hatches a
 sized for a cold-boot resolution round — so neither degrades into a general leak or an exfil
 channel.
 
-**Rules 8 and 12 are uid-scoped to root in every state where the tunnel is not up** — Blocked
+**Rules 9 and 12 are uid-scoped to root in every state where the tunnel is not up** — Blocked
 *and* Connecting (`meta skuid 0` on fw4, `-m owner --uid-owner 0` on fw3). "Router-originated"
 is not the same as "daemon-originated": dnsmasq answers LAN clients and re-originates their
 queries upstream as its own OUTPUT packets, so an unscoped accept forwards every LAN lookup to
@@ -114,10 +114,17 @@ to an unscoped DNS exception. Since Connecting is scoped too, an fw3 router with
 extension cannot resolve anything with the kill switch on — connecting fails closed until the
 extension is installed or the kill switch is disabled, and the daemon logs exactly that.
 
-**`ct established` is INPUT-only, deliberately.** That is return traffic *to* the router, so it is
-not an egress bypass. Output and forward established accepts are scoped to the tunnel interface
-inside the tunnel-allow rules instead. A blanket established accept in those chains let WAN-bound
-established flows — IPv6 during reconnects especially — walk straight past the kill-switch.
+**INPUT and inbound forwards are the zones' call, not ours.** On fw4 an accept in `inet nym` only
+lets fw4 decide; on fw3 our chains are jumped from `input_rule`/`forwarding_rule` and an ACCEPT
+there ends the builtin chain, skipping the zone rejects. So the policy never accepts what the
+zones must judge: INPUT carries only loopback, the CVE-2019-14899 drops and the exemption accept
+(the one final allow, for a service the user declared); FORWARD first hands back
+(`return`/`-j RETURN`) everything arriving on a WAN zone device or the tunnel, and returns
+LAN-destination forwards instead of accepting them. The zones' own established accept takes the
+replies. Before this, an fw3 router with the kill-switch on answered LuCI on its WAN address to a
+private upstream network, forwarded WAN hosts into the LAN, and let a guest zone reach the LAN.
+There is no established accept in OUTPUT or FORWARD: a blanket one let WAN-bound established
+flows — IPv6 during reconnects especially — walk straight past the kill-switch.
 
 ### Bootstrap stays fail-closed
 
@@ -172,7 +179,8 @@ new router-originated and forwarded traffic and lets through exactly what the ro
 up and stay manageable: loopback, DHCP and DHCPv6 as client and server, IPv6 router/neighbour
 solicitation and advertisement, LAN, link-local and multicast destinations (RFC1918,
 `169.254.0.0/16`, `fe80::/10`, `fc00::/7`), and reply-direction packets of established
-connections. INPUT is never touched. SSH and LuCI from the LAN therefore keep working however long
+connections. Forwards to LAN destinations are handed back to the zones rather than accepted, so
+the block never opens wan→lan or guest→lan on fw3. INPUT is never touched. SSH and LuCI from the LAN therefore keep working however long
 the block stays — including when the daemon crash-loops before ever applying a policy, which is
 the case the block exists for.
 
