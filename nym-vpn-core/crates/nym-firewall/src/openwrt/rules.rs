@@ -41,25 +41,20 @@ pub enum Proto {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CtState {
-    EstablishedRelated,
     New,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IcmpV4Type {
     EchoRequest,
-    EchoReply,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IcmpV6Type {
     RouterSolicit,
-    RouterAdvert,
     NeighborSolicit,
     NeighborAdvert,
-    Redirect,
     EchoRequest,
-    EchoReply,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -149,10 +144,6 @@ impl Rule {
         self.matches.iif_not = Some(iface.into());
         self
     }
-    pub fn saddr(mut self, addr: impl Into<AddrMatch>) -> Self {
-        self.matches.saddr = Some(addr.into());
-        self
-    }
     pub fn daddr(mut self, addr: impl Into<AddrMatch>) -> Self {
         self.matches.daddr = Some(addr.into());
         self
@@ -167,10 +158,6 @@ impl Rule {
     }
     pub fn dport(mut self, port: u16) -> Self {
         self.matches.dport = Some(port);
-        self
-    }
-    pub fn ct_established(mut self) -> Self {
-        self.matches.ct_state = Some(CtState::EstablishedRelated);
         self
     }
     pub fn ct_new(mut self) -> Self {

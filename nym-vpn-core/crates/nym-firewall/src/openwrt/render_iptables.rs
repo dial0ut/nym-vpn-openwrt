@@ -115,9 +115,6 @@ fn render_rule(rule: &Rule, family: AddrFamily) -> String {
     }
     if let Some(ct) = m.ct_state {
         match ct {
-            CtState::EstablishedRelated => {
-                parts.push("-m conntrack --ctstate ESTABLISHED,RELATED".into())
-            }
             CtState::New => parts.push("-m conntrack --ctstate NEW".into()),
         }
     }
@@ -167,19 +164,15 @@ fn render_addr(addr: &AddrMatch) -> String {
 fn icmpv4_name(t: IcmpV4Type) -> &'static str {
     match t {
         IcmpV4Type::EchoRequest => "echo-request",
-        IcmpV4Type::EchoReply => "echo-reply",
     }
 }
 
 fn icmpv6_name(t: IcmpV6Type) -> &'static str {
     match t {
         IcmpV6Type::RouterSolicit => "router-solicitation",
-        IcmpV6Type::RouterAdvert => "router-advertisement",
         IcmpV6Type::NeighborSolicit => "neighbour-solicitation",
         IcmpV6Type::NeighborAdvert => "neighbour-advertisement",
-        IcmpV6Type::Redirect => "redirect",
         IcmpV6Type::EchoRequest => "echo-request",
-        IcmpV6Type::EchoReply => "echo-reply",
     }
 }
 
@@ -204,15 +197,6 @@ mod tests {
     fn renders_loopback_accept() {
         let rule = Rule::accept(Family::Inet).iif("lo");
         assert_eq!(render_rule(&rule, AddrFamily::V4), "-i lo -j ACCEPT");
-    }
-
-    #[test]
-    fn renders_ct_established() {
-        let rule = Rule::accept(Family::Inet).ct_established();
-        assert_eq!(
-            render_rule(&rule, AddrFamily::V4),
-            "-m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT"
-        );
     }
 
     #[test]
@@ -369,7 +353,7 @@ mod tests {
     #[test]
     fn skips_v6_only_rules_in_v4_render() {
         let mut rs = RuleSet::default();
-        rs.filter.input.push(Rule::accept(Family::V6).icmpv6_type(IcmpV6Type::RouterAdvert));
+        rs.filter.input.push(Rule::accept(Family::V6).icmpv6_type(IcmpV6Type::NeighborAdvert));
         rs.filter.input.push(Rule::accept(Family::V4).proto(Proto::Udp).dport(67));
         rs.filter.output.push(Rule::reject(Family::Inet));
         rs.filter.forward.push(Rule::reject(Family::Inet));
@@ -381,7 +365,7 @@ mod tests {
     #[test]
     fn skips_v4_only_rules_in_v6_render() {
         let mut rs = RuleSet::default();
-        rs.filter.input.push(Rule::accept(Family::V6).icmpv6_type(IcmpV6Type::RouterAdvert));
+        rs.filter.input.push(Rule::accept(Family::V6).icmpv6_type(IcmpV6Type::NeighborAdvert));
         rs.filter.input.push(Rule::accept(Family::V4).proto(Proto::Udp).dport(67));
         rs.filter.output.push(Rule::reject(Family::Inet));
         rs.filter.forward.push(Rule::reject(Family::Inet));

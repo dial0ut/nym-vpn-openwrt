@@ -87,7 +87,6 @@ fn render_rule(rule: &Rule) -> String {
     }
     if let Some(ct) = m.ct_state {
         match ct {
-            CtState::EstablishedRelated => parts.push("ct state established,related".into()),
             CtState::New => parts.push("ct state new".into()),
         }
     }
@@ -176,19 +175,15 @@ fn render_addr(addr: &AddrMatch) -> String {
 fn icmpv4_name(t: IcmpV4Type) -> &'static str {
     match t {
         IcmpV4Type::EchoRequest => "echo-request",
-        IcmpV4Type::EchoReply => "echo-reply",
     }
 }
 
 fn icmpv6_name(t: IcmpV6Type) -> &'static str {
     match t {
         IcmpV6Type::RouterSolicit => "nd-router-solicit",
-        IcmpV6Type::RouterAdvert => "nd-router-advert",
         IcmpV6Type::NeighborSolicit => "nd-neighbor-solicit",
         IcmpV6Type::NeighborAdvert => "nd-neighbor-advert",
-        IcmpV6Type::Redirect => "nd-redirect",
         IcmpV6Type::EchoRequest => "echo-request",
-        IcmpV6Type::EchoReply => "echo-reply",
     }
 }
 
@@ -202,12 +197,6 @@ mod tests {
     fn renders_loopback_accept() {
         let rule = Rule::accept(Family::Inet).iif("lo");
         assert_eq!(render_rule(&rule), "iifname \"lo\" accept");
-    }
-
-    #[test]
-    fn renders_ct_established() {
-        let rule = Rule::accept(Family::Inet).ct_established();
-        assert_eq!(render_rule(&rule), "ct state established,related accept");
     }
 
     #[test]
@@ -334,8 +323,8 @@ mod tests {
 
     #[test]
     fn renders_icmpv6_nd() {
-        let rule = Rule::accept(Family::V6).icmpv6_type(IcmpV6Type::RouterAdvert);
-        assert_eq!(render_rule(&rule), "icmpv6 type nd-router-advert accept");
+        let rule = Rule::accept(Family::V6).icmpv6_type(IcmpV6Type::NeighborAdvert);
+        assert_eq!(render_rule(&rule), "icmpv6 type nd-neighbor-advert accept");
     }
 
     #[test]
