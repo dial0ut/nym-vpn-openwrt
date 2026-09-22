@@ -1370,16 +1370,11 @@ impl NymVpnService {
 
     async fn handle_set_enable_ad_blocking(&mut self, enable: bool) -> Result<(), String> {
         let result = self.config_manager.set_enable_ad_blocking(enable).await;
-        crate::adblocker::note_explicit_toggle();
-        if enable {
-            if let Err(e) = crate::adblocker::apply_adblock().await {
-                tracing::error!("Failed to apply ad-blocking: {e}");
-            }
-        } else {
-            if let Err(e) = crate::adblocker::remove_adblock().await {
-                tracing::error!("Failed to remove ad-blocking: {e}");
-            }
-        }
+        // The reply does not wait for the download (up to two minutes) or the
+        // dnsmasq restart. The generation is taken here, in click order, so
+        // the last click wins however the spawned runs are scheduled.
+        let generation = crate::adblocker::note_explicit_toggle();
+        tokio::spawn(crate::adblocker::apply_toggle(enable, generation));
         result
     }
 

@@ -7,11 +7,23 @@
 //! resolve blocked domains to NXDOMAIN immediately without upstream forwarding.
 //! The blocklist is written to `/tmp/dnsmasq.d/nym-adblock.conf` and dnsmasq is
 //! restarted to pick up the changes.
+//!
+//! None of this runs on the service loop: the download alone can take two
+//! minutes. Every apply and remove, from a toggle or the startup restore,
+//! takes one lock, so two never interleave their dnsmasq and firewall edits,
+//! and a newer toggle supersedes runs still queued or downloading.
 
-use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use tokio::fs;
-use tokio::process::Command;
+use std::{
+    future::Future,
+    path::Path,
+    sync::atomic::{AtomicUsize, Ordering},
+    time::Duration,
+};
+use tokio::{
+    fs,
+    process::Command,
+    sync::{Mutex, Notify},
+};
 
 const DNSMASQ_CONF_DIR: &str = "/tmp/dnsmasq.d";
 const DNSMASQ_CONF_FILE: &str = "/tmp/dnsmasq.d/nym-adblock.conf";
@@ -20,15 +32,18 @@ const DNSMASQ_CONF_FILE: &str = "/tmp/dnsmasq.d/nym-adblock.conf";
 const BLOCKLIST_URL: &str =
     "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/hosts/multi.txt";
 
-/// Download the blocklist and install it into dnsmasq.
-pub async fn apply_adblock() -> Result<(), AdblockError> {
+const RESTORE_FIRST_RETRY: Duration = Duration::from_secs(15);
+const RESTORE_MAX_RETRY: Duration = Duration::from_secs(300);
+
+/// Install a downloaded blocklist into dnsmasq.
+async fn install_blocklist(body: String) -> Result<(), AdblockError> {
     tracing::info!("Applying ad-blocking via dnsmasq");
 
-    // Download blocklist
-    let body = download_blocklist().await?;
-
-    // Parse hosts file into domain list, convert to dnsmasq format
-    let conf = hosts_to_dnsmasq(&body);
+    // Parse hosts file into domain list, convert to dnsmasq format. Hundreds
+    // of thousands of lines: keep it off the async workers.
+    let conf = tokio::task::spawn_blocking(move || hosts_to_dnsmasq(&body))
+        .await
+        .map_err(AdblockError::Convert)?;
 
     // Ensure dnsmasq.d directory exists
     fs::create_dir_all(DNSMASQ_CONF_DIR)
@@ -54,7 +69,7 @@ pub async fn apply_adblock() -> Result<(), AdblockError> {
 }
 
 /// Remove the dnsmasq ad-block config and restart dnsmasq.
-pub async fn remove_adblock() -> Result<(), AdblockError> {
+async fn remove_adblock() -> Result<(), AdblockError> {
     tracing::info!("Removing ad-blocking config");
 
     // Remove DNS redirect rules
@@ -71,16 +86,151 @@ pub async fn remove_adblock() -> Result<(), AdblockError> {
     Ok(())
 }
 
-/// Bumped on every explicit enable/disable so a pending background restore
-/// can tell it has been superseded by a user action. Usize, not u64: the
-/// 32-bit tier-3 targets (mips, armv5te) have no `AtomicU64` in std, and
-/// only equality is ever compared so width doesn't matter.
-static TOGGLE_GENERATION: AtomicUsize = AtomicUsize::new(0);
+/// The system side of an apply or remove; a fake in tests.
+trait Backend: Sync {
+    /// Abandoned midway when a newer toggle supersedes the run.
+    fn download(&self) -> impl Future<Output = Result<String, AdblockError>> + Send;
+    /// Always runs to completion once started.
+    fn install(&self, blocklist: String) -> impl Future<Output = Result<(), AdblockError>> + Send;
+    fn remove(&self) -> impl Future<Output = Result<(), AdblockError>> + Send;
+}
 
-/// Must be called from the explicit enable/disable path (not from restore):
-/// supersedes any background restore still retrying its download.
-pub fn note_explicit_toggle() {
-    TOGGLE_GENERATION.fetch_add(1, Ordering::Relaxed);
+struct System;
+
+impl Backend for System {
+    fn download(&self) -> impl Future<Output = Result<String, AdblockError>> + Send {
+        download_blocklist()
+    }
+
+    fn install(&self, blocklist: String) -> impl Future<Output = Result<(), AdblockError>> + Send {
+        install_blocklist(blocklist)
+    }
+
+    fn remove(&self) -> impl Future<Output = Result<(), AdblockError>> + Send {
+        remove_adblock()
+    }
+}
+
+enum Run {
+    Done,
+    Superseded,
+}
+
+/// Orders explicit toggles and serializes every apply and remove.
+struct Toggles {
+    /// Bumped on every explicit enable/disable, on the service loop, so a run
+    /// can tell a newer click has superseded it. Usize, not u64: the 32-bit
+    /// tier-3 targets (mips, armv5te) have no `AtomicU64` in std, and only
+    /// equality is ever compared so width doesn't matter.
+    generation: AtomicUsize,
+    /// Held for a whole run, restore included.
+    lock: Mutex<()>,
+    /// Wakes a download that a newer toggle has superseded.
+    toggled: Notify,
+}
+
+static TOGGLES: Toggles = Toggles::new();
+
+impl Toggles {
+    const fn new() -> Self {
+        Self {
+            generation: AtomicUsize::new(0),
+            lock: Mutex::const_new(()),
+            toggled: Notify::const_new(),
+        }
+    }
+
+    fn current(&self) -> usize {
+        self.generation.load(Ordering::SeqCst)
+    }
+
+    fn toggle(&self) -> usize {
+        let generation = self
+            .generation
+            .fetch_add(1, Ordering::SeqCst)
+            .wrapping_add(1);
+        self.toggled.notify_waiters();
+        generation
+    }
+
+    /// Resolves once a toggle newer than `generation` has been made.
+    async fn superseded(&self, generation: usize) {
+        loop {
+            let toggled = self.toggled.notified();
+            let mut toggled = std::pin::pin!(toggled);
+            // Registered before the check, so a toggle in between still wakes us.
+            toggled.as_mut().enable();
+            if self.current() != generation {
+                return;
+            }
+            toggled.await;
+        }
+    }
+
+    /// One apply or remove on behalf of `generation`: waits its turn, skips if
+    /// a newer toggle came meanwhile and abandons a download one supersedes.
+    /// A started install or remove always completes.
+    async fn run<B: Backend>(
+        &self,
+        backend: &B,
+        enable: bool,
+        generation: usize,
+    ) -> Result<Run, AdblockError> {
+        let _turn = self.lock.lock().await;
+        if self.current() != generation {
+            return Ok(Run::Superseded);
+        }
+        if !enable {
+            backend.remove().await?;
+            return Ok(Run::Done);
+        }
+        let blocklist = tokio::select! {
+            _ = self.superseded(generation) => return Ok(Run::Superseded),
+            blocklist = backend.download() => blocklist?,
+        };
+        backend.install(blocklist).await?;
+        Ok(Run::Done)
+    }
+
+    /// Apply with backoff until it lands or an explicit toggle supersedes it.
+    async fn restore<B: Backend>(&self, backend: &B, generation: usize) {
+        let mut delay = RESTORE_FIRST_RETRY;
+        let mut first = true;
+        loop {
+            match self.run(backend, true, generation).await {
+                Ok(Run::Done) => return,
+                Ok(Run::Superseded) => {
+                    tracing::debug!("Ad-block restore superseded by explicit toggle");
+                    return;
+                }
+                Err(e) if first => {
+                    first = false;
+                    tracing::warn!("Ad-block restore failed (will keep retrying): {e}");
+                }
+                Err(e) => tracing::debug!("Ad-block restore retry failed: {e}"),
+            }
+            tokio::time::sleep(delay).await;
+            delay = (delay * 2).min(RESTORE_MAX_RETRY);
+        }
+    }
+}
+
+/// Call on the service loop for every explicit enable/disable, in click
+/// order; pass the result to the [`apply_toggle`] it spawns. Supersedes
+/// older runs, the startup restore included.
+pub fn note_explicit_toggle() -> usize {
+    TOGGLES.toggle()
+}
+
+/// The slow half of an explicit toggle, to be spawned. Does nothing if a
+/// newer toggle has been made by the time its turn comes.
+pub async fn apply_toggle(enable: bool, generation: usize) {
+    let action = if enable { "apply" } else { "remove" };
+    match TOGGLES.run(&System, enable, generation).await {
+        Ok(Run::Done) => {}
+        Ok(Run::Superseded) => tracing::debug!("Ad-block {action} superseded by a newer toggle"),
+        Err(e) => tracing::error!("Failed to {action} ad-blocking: {e}"),
+    }
 }
 
 /// Re-apply ad-blocking on startup if it was previously enabled.
@@ -99,33 +249,15 @@ pub async fn restore_if_enabled(config: &nym_vpn_lib_types::VpnServiceConfig) {
 
     if Path::new(DNSMASQ_CONF_FILE).exists() {
         tracing::info!("Ad-block list already installed; re-asserting DNS redirect only");
+        let _turn = TOGGLES.lock.lock().await;
         if let Err(e) = install_dns_redirect().await {
             tracing::warn!("Failed to re-assert ad-block DNS redirect: {e}");
         }
         return;
     }
 
-    tokio::spawn(async {
-        let generation = TOGGLE_GENERATION.load(Ordering::Relaxed);
-        let mut delay = std::time::Duration::from_secs(15);
-        let mut first = true;
-        loop {
-            match apply_adblock().await {
-                Ok(()) => return,
-                Err(e) if first => {
-                    first = false;
-                    tracing::warn!("Ad-block restore failed (will keep retrying): {e}");
-                }
-                Err(e) => tracing::debug!("Ad-block restore retry failed: {e}"),
-            }
-            tokio::time::sleep(delay).await;
-            delay = (delay * 2).min(std::time::Duration::from_secs(300));
-            if TOGGLE_GENERATION.load(Ordering::Relaxed) != generation {
-                tracing::debug!("Ad-block restore superseded by explicit toggle");
-                return;
-            }
-        }
-    });
+    let generation = TOGGLES.current();
+    tokio::spawn(TOGGLES.restore(&System, generation));
 }
 
 fn hosts_to_dnsmasq(hosts_content: &str) -> String {
@@ -177,6 +309,8 @@ async fn download_blocklist() -> Result<String, AdblockError> {
     // a heavy HTTP client dependency just for this one request.
     let output = Command::new("curl")
         .args(["-sL", "--connect-timeout", "30", "--max-time", "120", BLOCKLIST_URL])
+        // A superseded download is dropped mid-transfer; curl goes with it.
+        .kill_on_drop(true)
         .output()
         .await
         .map_err(|e| AdblockError::Io("run curl", e))?;
@@ -417,4 +551,142 @@ pub enum AdblockError {
 
     #[error("Failed to download blocklist: {0}")]
     Download(String),
+
+    #[error("Failed to convert blocklist: {0}")]
+    Convert(#[source] tokio::task::JoinError),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex as StdMutex, atomic::AtomicBool};
+
+    /// Records every step, 30 s each, and whether two ever ran at once.
+    struct Fake {
+        steps: StdMutex<Vec<&'static str>>,
+        busy: AtomicBool,
+        overlapped: AtomicBool,
+        failing_downloads: AtomicUsize,
+    }
+
+    struct Busy<'a>(&'a Fake);
+
+    impl Drop for Busy<'_> {
+        fn drop(&mut self) {
+            self.0.busy.store(false, Ordering::SeqCst);
+        }
+    }
+
+    impl Fake {
+        fn new(failing_downloads: usize) -> Arc<Self> {
+            Arc::new(Self {
+                steps: StdMutex::new(Vec::new()),
+                busy: AtomicBool::new(false),
+                overlapped: AtomicBool::new(false),
+                failing_downloads: AtomicUsize::new(failing_downloads),
+            })
+        }
+
+        async fn step(&self, name: &'static str) {
+            if self.busy.swap(true, Ordering::SeqCst) {
+                self.overlapped.store(true, Ordering::SeqCst);
+            }
+            let _busy = Busy(self);
+            self.steps.lock().unwrap().push(name);
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        }
+
+        fn steps(&self) -> Vec<&'static str> {
+            self.steps.lock().unwrap().clone()
+        }
+    }
+
+    impl Backend for Arc<Fake> {
+        async fn download(&self) -> Result<String, AdblockError> {
+            self.step("download").await;
+            if self.failing_downloads.load(Ordering::SeqCst) > 0 {
+                self.failing_downloads.fetch_sub(1, Ordering::SeqCst);
+                return Err(AdblockError::Download("unreachable".into()));
+            }
+            Ok("0.0.0.0 ads.example\n".into())
+        }
+
+        async fn install(&self, _blocklist: String) -> Result<(), AdblockError> {
+            self.step("install").await;
+            Ok(())
+        }
+
+        async fn remove(&self) -> Result<(), AdblockError> {
+            self.step("remove").await;
+            Ok(())
+        }
+    }
+
+    /// An explicit toggle as the service loop makes it.
+    fn toggle(
+        toggles: &Arc<Toggles>,
+        fake: &Arc<Fake>,
+        enable: bool,
+    ) -> tokio::task::JoinHandle<Result<Run, AdblockError>> {
+        let generation = toggles.toggle();
+        let (toggles, fake) = (toggles.clone(), fake.clone());
+        tokio::spawn(async move { toggles.run(&fake, enable, generation).await })
+    }
+
+    fn restore(toggles: &Arc<Toggles>, fake: &Arc<Fake>) -> tokio::task::JoinHandle<()> {
+        let generation = toggles.current();
+        let (toggles, fake) = (toggles.clone(), fake.clone());
+        tokio::spawn(async move { toggles.restore(&fake, generation).await })
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn only_the_last_of_several_toggles_applies() {
+        let toggles = Arc::new(Toggles::new());
+        let fake = Fake::new(0);
+
+        let first = toggle(&toggles, &fake, true);
+        tokio::time::sleep(Duration::from_secs(10)).await; // mid-download
+        let second = toggle(&toggles, &fake, false);
+        let third = toggle(&toggles, &fake, true);
+
+        assert!(matches!(first.await.unwrap(), Ok(Run::Superseded)));
+        assert!(matches!(second.await.unwrap(), Ok(Run::Superseded)));
+        assert!(matches!(third.await.unwrap(), Ok(Run::Done)));
+        // The first download was abandoned and the disable never ran.
+        assert_eq!(fake.steps(), ["download", "download", "install"]);
+        assert!(!fake.overlapped.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn restore_and_toggle_never_overlap() {
+        let toggles = Arc::new(Toggles::new());
+        let fake = Fake::new(1);
+
+        let restore = restore(&toggles, &fake);
+        // The first download fails at 30 s, the retry at 45 s succeeds and
+        // its install runs from 75 s.
+        tokio::time::sleep(Duration::from_secs(80)).await;
+        let disable = toggle(&toggles, &fake, false);
+
+        restore.await.unwrap();
+        assert!(matches!(disable.await.unwrap(), Ok(Run::Done)));
+        // The started install finished before the disable began.
+        assert_eq!(fake.steps(), ["download", "download", "install", "remove"]);
+        assert!(!fake.overlapped.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_toggle_ends_a_restore_mid_download() {
+        let toggles = Arc::new(Toggles::new());
+        let fake = Fake::new(0);
+
+        let restore = restore(&toggles, &fake);
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        let disable = toggle(&toggles, &fake, false);
+
+        restore.await.unwrap();
+        assert!(matches!(disable.await.unwrap(), Ok(Run::Done)));
+        assert_eq!(fake.steps(), ["download", "remove"]);
+        assert!(!fake.overlapped.load(Ordering::SeqCst));
+    }
 }

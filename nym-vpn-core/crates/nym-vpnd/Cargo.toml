@@ -72,6 +72,7 @@ nym-vpn-proto = { workspace = true, features = ["conversions"] }
 
 [dev-dependencies]
 pretty_assertions.workspace = true
+tokio = { workspace = true, features = ["macros", "test-util"] }
 
 [build-dependencies]
 vergen-gitcl = { workspace = true, default-features = false, features = [
