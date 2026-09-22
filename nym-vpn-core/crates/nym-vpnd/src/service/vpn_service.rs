@@ -25,6 +25,7 @@ use super::{
         AccountLinksError, Error, GatewayTestError, ListGatewaysError, Result, SetNetworkError,
     },
     gateway_test::{self, GatewayTestContext, GatewayTestSlot},
+    off_loop::OffLoop,
     socks5::Socks5EnableConfig,
     socks5_idle_timeout, socks5_request_timeout,
 };
@@ -67,6 +68,10 @@ type Seed = [u8; 32];
 /// Upper bound on a tentative gateway lookup, so a stalled directory refresh
 /// turns into "no gateways available" instead of a hung RPC.
 const TENTATIVE_GATEWAYS_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The registration diagnostic runs on the service loop; capped so it costs
+/// the liveness probe one strike at most.
+const REGISTER_DIAGNOSTIC_TIMEOUT: Duration = Duration::from_secs(45);
 
 type Locale = String;
 
@@ -278,6 +283,9 @@ pub struct NymVpnService {
 
     gateway_test_slot: GatewayTestSlot,
 
+    // Slow read-only commands, run in tasks of their own.
+    off_loop: OffLoop,
+
     discovery_refresher_event_rx: mpsc::UnboundedReceiver<DiscoveryRefresherEvent>,
 
     discovery_refresher_join_handle: JoinHandle<()>,
@@ -443,6 +451,7 @@ impl NymVpnService {
                 .map_err(Error::CreateGatewayClient)?;
 
         let (network_tx, network_rx) = watch::channel(parameters.network_env.clone());
+        let off_loop = OffLoop::new(network_tx.subscribe());
         let nym_config = NymConfig {
             config_path: Some(config_dir.clone()),
             data_path: Some(network_data_dir.clone()),
@@ -541,6 +550,7 @@ impl NymVpnService {
             gateway_cache_handle,
             gateway_cache_join_handle,
             gateway_test_slot: GatewayTestSlot::new(),
+            off_loop,
             blacklisted_entry_gateways,
             relax_independence: false,
             discovery_refresher_event_rx,
@@ -1115,10 +1125,22 @@ impl NymVpnService {
                 let _ = tx.send(result);
             }
             VpnServiceCommand::RunDiagnostic(tx, params) => {
-                let _ = tx.send(self.handle_run_diagnostic(params).await);
+                self.off_loop.run_diagnostic(tx, params);
             }
             VpnServiceCommand::RegisterDiagnostic(tx, params) => {
-                let _ = tx.send(Box::pin(self.handle_register_diagnostic(params)).await);
+                // Inline on purpose: while it runs the loop takes no Connect,
+                // which would share its data dir.
+                let registration = Box::pin(self.handle_register_diagnostic(params));
+                let report = tokio::time::timeout(REGISTER_DIAGNOSTIC_TIMEOUT, registration)
+                    .await
+                    .unwrap_or_else(|_elapsed| {
+                        tracing::warn!(
+                            "Registration diagnostic did not finish within {}s",
+                            REGISTER_DIAGNOSTIC_TIMEOUT.as_secs()
+                        );
+                        RegistrationReport::from_err("the registration diagnostic timed out")
+                    });
+                let _ = tx.send(report);
             }
             VpnServiceCommand::TestGateways(tx, params) => {
                 self.handle_test_gateways(params, tx).await;
@@ -2044,16 +2066,6 @@ impl NymVpnService {
         if let Some(remove_log_file_handle) = self.log_file_remover_handle.as_ref() {
             remove_log_file_handle.remove_log_file();
         }
-    }
-
-    async fn handle_run_diagnostic(&self, params: DiagnosticRunParams) -> DiagnosticReport {
-        let network = *self.network_tx.borrow().clone();
-        let report = DiagnosticHandler::run(network, params).await;
-        match serde_json::to_string_pretty(&report) {
-            Ok(report_log) => tracing::info!("{report_log}"),
-            Err(e) => tracing::error!("Error serializing report :{e}"),
-        }
-        report
     }
 
     async fn handle_register_diagnostic(

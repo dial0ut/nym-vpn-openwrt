@@ -5,6 +5,7 @@ mod always_on;
 mod config;
 mod error;
 mod gateway_test;
+mod off_loop;
 mod socks5;
 mod vpn_service;
 
