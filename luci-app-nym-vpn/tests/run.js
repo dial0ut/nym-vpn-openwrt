@@ -707,6 +707,29 @@ async function scenarioSplit() {
   qa(t, '.nym-split-row .nym-exemption-delete')[1].click();
   await sleep(20);
   check(eq(callsTo(t, 'split_del'), [{ id: 'x2' }]) && qa(t, '.nym-split-row').length === 1, 'delete by id');
+  // Stored in UCI but not applied: the list follows the stored state, the
+  // toast carries the error.
+  const notApplied = { success: false, saved: true, error: 'Saved, but not applied: fw4 reload failed' };
+  const tSaved = setup({ init: baseInit({ split_exclusions: [{ id: 'x1', type: 'client', mac: 'aa:bb:cc:dd:ee:ff', enabled: 1 }] }),
+    rpc: { split_add: Object.assign({ id: 'x2' }, notApplied), split_del: notApplied, split_set_enabled: notApplied } });
+  byId(tSaved, 'nym-split-domain').value = 'example.org';
+  byId(tSaved, 'nym-split-domain-save').click();
+  await sleep(20);
+  check(qa(tSaved, '.nym-split-row').length === 2 && toasts(tSaved).indexOf(notApplied.error) !== -1 && byId(tSaved, 'nym-split-domain').value === '', 'saved-not-applied add: row shown, error toasted');
+  const swSaved = qa(tSaved, '.nym-split-row input[type="checkbox"]')[0];
+  swSaved.checked = false;
+  fire(tSaved, swSaved, 'change');
+  await sleep(20);
+  check(qa(tSaved, '.nym-split-row')[0].classList.contains('inert') && toasts(tSaved).filter((m) => m === notApplied.error).length === 2, 'saved-not-applied toggle: row follows the stored state, error toasted');
+  qa(tSaved, '.nym-split-row .nym-exemption-delete')[1].click();
+  await sleep(20);
+  check(qa(tSaved, '.nym-split-row').length === 1 && toasts(tSaved).filter((m) => m === notApplied.error).length === 3, 'saved-not-applied delete: row gone, error toasted');
+  const tFail = setup({ init: baseInit({ split_exclusions: [{ id: 'x1', type: 'client', mac: 'aa:bb:cc:dd:ee:ff', enabled: 1 }] }),
+    rpc: { split_del: { success: false, error: 'Failed to remove exclusion: read-only' } } });
+  qa(tFail, '.nym-split-row .nym-exemption-delete')[0].click();
+  await sleep(20);
+  check(qa(tFail, '.nym-split-row').length === 1 && !q(tFail, '.nym-split-row').classList.contains('removing') && toasts(tFail).indexOf('Failed to remove exclusion: read-only') !== -1, 'unsaved delete: row stays, error toasted');
+
   const t2 = setup({ init: baseInit({ split_status: { nftset_supported: false }, clients: [] }) });
   check(!byId(t2, 'nym-split-domain') && /dnsmasq-full/.test(q(t2, '.nym-split-section').textContent), 'no nftset: domain row replaced by the dnsmasq-full hint');
   check(byId(t2, 'nym-split-client').options[0].textContent === 'No DHCP leases found', 'no leases placeholder');

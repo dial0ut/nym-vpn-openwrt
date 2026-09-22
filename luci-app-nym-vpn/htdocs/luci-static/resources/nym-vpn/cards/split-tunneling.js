@@ -23,6 +23,13 @@
 
 var E = dom.create.bind(dom);
 
+// The bridge replies {success: false, saved: true, error} when the change
+// reached UCI but the firewall or dnsmasq did not take it: the list follows
+// what is stored and the toast carries the error.
+var stored = function(result) {
+    return !!(result && (result.success || result.saved));
+};
+
 return baseclass.extend({
     // The exclusion list plus the add-device / add-domain forms. Returns the
     // section element (.nym-split-section); the card controls its
@@ -89,14 +96,14 @@ return baseclass.extend({
             var row = listEl.querySelector('.nym-split-row[data-id="' + ex.id + '"]');
             if (row) row.classList.add('removing');
             api.splitDel(ex.id).then(function(result) {
-                if (result && result.success) {
+                if (stored(result)) {
                     state = state.filter(function(e) { return e.id !== ex.id; });
                     redraw();
-                    toast.show('Removed exclusion', 'success');
-                } else {
-                    if (row) row.classList.remove('removing');
-                    toast.show((result && result.error) || 'Failed to delete', 'error');
+                } else if (row) {
+                    row.classList.remove('removing');
                 }
+                if (result && result.success) toast.show('Removed exclusion', 'success');
+                else toast.show((result && result.error) || 'Failed to delete', 'error');
             }).catch(function(err) {
                 if (row) row.classList.remove('removing');
                 toast.show('Failed: ' + (err && err.message ? err.message : err), 'error');
@@ -105,13 +112,9 @@ return baseclass.extend({
 
         var setEnabled = function(ex, enabled) {
             api.splitSetEnabled(ex.id, enabled ? 1 : 0).then(function(result) {
-                if (result && result.success) {
-                    ex.enabled = enabled ? 1 : 0;
-                    redraw();
-                } else {
-                    toast.show((result && result.error) || 'Failed to update', 'error');
-                    redraw();
-                }
+                if (stored(result)) ex.enabled = enabled ? 1 : 0;
+                if (!(result && result.success)) toast.show((result && result.error) || 'Failed to update', 'error');
+                redraw();
             }).catch(function(err) {
                 toast.show('Failed: ' + (err && err.message ? err.message : err), 'error');
                 redraw();
@@ -145,7 +148,7 @@ return baseclass.extend({
             }
             api.splitAdd(kind, mac, domain, label || '').then(function(result) {
                 if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Add'; }
-                if (result && result.success) {
+                if (stored(result)) {
                     var ex = { id: result.id, type: kind, enabled: 1 };
                     if (kind === 'domain') ex.domain = domain; else ex.mac = mac;
                     if (label) ex.label = label;
@@ -153,10 +156,9 @@ return baseclass.extend({
                     redraw();
                     if (kind === 'domain' && domainInp) domainInp.value = '';
                     if (labelInp) labelInp.value = '';
-                    toast.show('Added exclusion', 'success');
-                } else {
-                    toast.show((result && result.error) || 'Failed to add exclusion', 'error');
                 }
+                if (result && result.success) toast.show('Added exclusion', 'success');
+                else toast.show((result && result.error) || 'Failed to add exclusion', 'error');
             }).catch(function(err) {
                 if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Add'; }
                 toast.show('Failed: ' + (err && err.message ? err.message : err), 'error');

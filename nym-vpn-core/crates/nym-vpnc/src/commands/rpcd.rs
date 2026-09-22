@@ -1875,14 +1875,6 @@ const SPLIT_MARK: &str = "0x14e";
 /// dnsmasq falls back to the stock resolv file on a boot without the daemon.
 const NYM_RESOLV_FILE: &str = "/tmp/resolv.conf.d/nym-resolv.conf";
 
-fn uci_run(args: &[&str]) -> bool {
-    std::process::Command::new("uci")
-        .args(args)
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
-
 /// The `uci` CLI, behind a trait so the commit sequence can be tested.
 trait Uci {
     /// Runs `uci <args>`: stdout on success, the error text otherwise.
@@ -2127,7 +2119,7 @@ fn write_split_nft(content: &str) -> std::io::Result<()> {
 }
 
 /// Idempotent; an empty list tears everything down.
-fn regen_split() {
+fn regen_split() -> Result<(), String> {
     let SplitTargets {
         clients,
         domains,
@@ -2137,38 +2129,184 @@ fn regen_split() {
         log_warn(line);
     }
 
-    // OpenWrt's dnsmasq turns `config ipset` into --nftset directives on fw4.
-    uci_run(&["-q", "delete", "dhcp.nym_split_ipset"]);
-    if !domains.is_empty() && nftset_supported() {
-        uci_run(&["set", "dhcp.nym_split_ipset=ipset"]);
-        uci_run(&["add_list", "dhcp.nym_split_ipset.name=nym_bypass4"]);
-        uci_run(&["add_list", "dhcp.nym_split_ipset.name=nym_bypass6"]);
-        for domain in &domains {
-            uci_run(&["add_list", &format!("dhcp.nym_split_ipset.domain={domain}")]);
-        }
-        uci_run(&["set", "dhcp.nym_split_ipset.table=fw4"]);
-        uci_run(&["set", "dhcp.nym_split_ipset.table_family=inet"]);
-    }
-    if let Err(err) = commit_dhcp(&mut SystemUci) {
-        log_warn(&format!("split exclusions: {err}"));
-    }
+    let wanted = (!domains.is_empty() && nftset_supported()).then_some(domains.as_slice());
+    let dhcp_changed = sync_split_ipset(&mut SystemUci, wanted)?;
 
     if clients.is_empty() && domains.is_empty() {
-        let _ = std::fs::remove_file(SPLIT_NFT);
+        match std::fs::remove_file(SPLIT_NFT) {
+            Err(err) if err.kind() != std::io::ErrorKind::NotFound => {
+                return Err(format!("remove {SPLIT_NFT}: {err}"));
+            }
+            _ => {}
+        }
     } else {
-        let _ = write_split_nft(&render_split_nft(&clients, &domains));
+        write_split_nft(&render_split_nft(&clients, &domains))
+            .map_err(|err| format!("write {SPLIT_NFT}: {err}"))?;
     }
 
-    // Firewall first so the sets exist before dnsmasq references them.
-    let fw4_ok = std::process::Command::new("fw4")
-        .arg("reload")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
-    if !fw4_ok {
-        initd_run("firewall", "reload");
+    // Firewall first so the sets exist before dnsmasq references them. The
+    // reload recreates them empty; dnsmasq adds addresses only on upstream
+    // answers, so without a new domain list a cache flush (SIGHUP) is what
+    // makes the next lookups refill them.
+    reload_firewall()?;
+    if dhcp_changed {
+        initd_run_checked("dnsmasq", "reload")?;
+    } else if wanted.is_some() {
+        hup_dnsmasq();
     }
-    initd_run("dnsmasq", "restart");
+    Ok(())
+}
+
+/// The domains `dhcp.nym_split_ipset` holds, None without the section. A
+/// section of another type under that name reads as an empty list, which
+/// never matches, so it gets rewritten.
+fn split_ipset_domains(uci: &mut impl Uci) -> Option<Vec<String>> {
+    let kind = uci.run(&["-q", "get", "dhcp.nym_split_ipset"]).ok()?;
+    if kind.trim() != "ipset" {
+        return Some(Vec::new());
+    }
+    let domains = uci
+        .run(&["-q", "get", "dhcp.nym_split_ipset.domain"])
+        .unwrap_or_default();
+    Some(domains.split_whitespace().map(str::to_owned).collect())
+}
+
+/// Brings `dhcp.nym_split_ipset` to `wanted` (None: no section) and returns
+/// whether dhcp changed; an unchanged domain list leaves dhcp untouched.
+/// OpenWrt's dnsmasq turns `config ipset` into --nftset directives on fw4.
+fn sync_split_ipset(uci: &mut impl Uci, wanted: Option<&[String]>) -> Result<bool, String> {
+    let current = split_ipset_domains(uci);
+    if current.as_deref() == wanted {
+        return Ok(false);
+    }
+    let staged = stage_split_ipset(uci, current.is_some(), wanted).and_then(|()| commit_dhcp(uci));
+    if let Err(err) = staged {
+        // Drop the half-staged section so a later dhcp commit cannot pick it up.
+        let _ = uci.run(&["revert", "dhcp.nym_split_ipset"]);
+        return Err(err);
+    }
+    Ok(true)
+}
+
+fn stage_split_ipset(
+    uci: &mut impl Uci,
+    exists: bool,
+    wanted: Option<&[String]>,
+) -> Result<(), String> {
+    if exists {
+        uci.run(&["delete", "dhcp.nym_split_ipset"])?;
+    }
+    let Some(domains) = wanted else {
+        return Ok(());
+    };
+    uci.run(&["set", "dhcp.nym_split_ipset=ipset"])?;
+    uci.run(&["add_list", "dhcp.nym_split_ipset.name=nym_bypass4"])?;
+    uci.run(&["add_list", "dhcp.nym_split_ipset.name=nym_bypass6"])?;
+    for domain in domains {
+        uci.run(&["add_list", &format!("dhcp.nym_split_ipset.domain={domain}")])?;
+    }
+    uci.run(&["set", "dhcp.nym_split_ipset.table=fw4"])?;
+    uci.run(&["set", "dhcp.nym_split_ipset.table_family=inet"])?;
+    Ok(())
+}
+
+/// `what: stderr`, or the exit status when the command printed nothing.
+fn command_error(what: &str, output: &std::process::Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if stderr.trim().is_empty() {
+        format!("{what}: {}", output.status)
+    } else {
+        format!("{what}: {}", stderr.trim())
+    }
+}
+
+fn initd_run_checked(service: &str, action: &str) -> Result<(), String> {
+    let what = format!("/etc/init.d/{service} {action}");
+    let output = std::process::Command::new(format!("/etc/init.d/{service}"))
+        .arg(action)
+        .output()
+        .map_err(|err| format!("{what}: {err}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(command_error(&what, &output))
+    }
+}
+
+/// `fw4 reload`, or the firewall init script where fw4 is missing or failed.
+fn reload_firewall() -> Result<(), String> {
+    let fw4 = std::process::Command::new("fw4").arg("reload").output();
+    if fw4.as_ref().is_ok_and(|output| output.status.success()) {
+        return Ok(());
+    }
+    initd_run_checked("firewall", "reload")
+}
+
+/// Instance pids from `ubus call service list '{"name":"dnsmasq"}'`.
+fn dnsmasq_pids(service_list: &str) -> Vec<u32> {
+    let Ok(list) = serde_json::from_str::<Value>(service_list) else {
+        return Vec::new();
+    };
+    list["dnsmasq"]["instances"]
+        .as_object()
+        .map(|instances| {
+            instances
+                .values()
+                .filter_map(|instance| instance["pid"].as_u64())
+                .filter_map(|pid| u32::try_from(pid).ok())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Cache flush for every dnsmasq instance, found the way nym-vpnd finds it:
+/// procd's pid is the ujail wrapper's, which forwards the signal. Best
+/// effort; a miss only delays the refill until the cached answers expire.
+fn hup_dnsmasq() {
+    let list = cmd_stdout(
+        "ubus",
+        &["call", "service", "list", r#"{"name":"dnsmasq"}"#],
+    )
+    .unwrap_or_default();
+    for pid in dnsmasq_pids(&list) {
+        let pid = pid.to_string();
+        let sent = std::process::Command::new("kill")
+            .args(["-HUP", &pid])
+            .output()
+            .is_ok_and(|output| output.status.success());
+        if !sent {
+            log_warn(&format!(
+                "split exclusions: kill -HUP {pid} (dnsmasq) failed"
+            ));
+        }
+    }
+}
+
+/// Runs one exclusion's `uci` edits and commits nym-vpn. A failure drops
+/// what was staged for the section, so a later commit cannot pick it up.
+fn commit_split_section(
+    uci: &mut impl Uci,
+    sid: &str,
+    edits: &[Vec<String>],
+) -> Result<(), String> {
+    let result = edits
+        .iter()
+        .try_for_each(|edit| {
+            let args: Vec<&str> = edit.iter().map(String::as_str).collect();
+            uci.run(&args).map(drop)
+        })
+        .and_then(|()| uci.run(&["commit", "nym-vpn"]).map(drop));
+    if result.is_err() {
+        let _ = uci.run(&["revert", &format!("nym-vpn.{sid}")]);
+    }
+    result
+}
+
+/// The edit is committed but the firewall or dnsmasq did not take it. Not a
+/// success, but `saved` tells the page the stored list did change.
+fn split_not_applied(err: &str) -> Value {
+    log_warn(&format!("split exclusions: {err}"));
+    json!({ "success": false, "saved": true, "error": format!("Saved, but not applied: {err}") })
 }
 
 fn split_dup_exists(field: &str, value: &str) -> bool {
@@ -2208,28 +2346,40 @@ fn split_add(args: &Value) -> Value {
     };
 
     // Ensure the package file exists so `uci set` has somewhere to append.
-    if !std::path::Path::new("/etc/config/nym-vpn").exists() {
-        let _ = std::fs::write("/etc/config/nym-vpn", "");
+    if !std::path::Path::new("/etc/config/nym-vpn").exists()
+        && let Err(err) = std::fs::write("/etc/config/nym-vpn", "")
+    {
+        return fail(format!(
+            "Failed to save exclusion: /etc/config/nym-vpn: {err}"
+        ));
     }
     let Some(sid) = split_section_name(kind, &mac, &domain) else {
         return fail("Failed to create exclusion");
     };
-    uci_run(&["set", &format!("nym-vpn.{sid}=exclusion")]);
-    uci_run(&["set", &format!("nym-vpn.{sid}.type={kind}")]);
+    let set = |option: String| vec!["set".to_owned(), option];
+    let mut edits = vec![
+        set(format!("nym-vpn.{sid}=exclusion")),
+        set(format!("nym-vpn.{sid}.type={kind}")),
+    ];
     if kind == "client" {
-        uci_run(&["set", &format!("nym-vpn.{sid}.mac={mac}")]);
+        edits.push(set(format!("nym-vpn.{sid}.mac={mac}")));
     } else {
-        uci_run(&["set", &format!("nym-vpn.{sid}.domain={domain}")]);
+        edits.push(set(format!("nym-vpn.{sid}.domain={domain}")));
     }
     if let Some(label) = &label {
-        uci_run(&["set", &format!("nym-vpn.{sid}.label={label}")]);
+        edits.push(set(format!("nym-vpn.{sid}.label={label}")));
     }
-    uci_run(&["set", &format!("nym-vpn.{sid}.enabled=1")]);
-    uci_run(&["commit", "nym-vpn"]);
+    edits.push(set(format!("nym-vpn.{sid}.enabled=1")));
+    if let Err(err) = commit_split_section(&mut SystemUci, &sid, &edits) {
+        return fail(format!("Failed to save exclusion: {err}"));
+    }
 
-    regen_split();
-
-    json!({ "success": true, "id": sid, "message": "Added exclusion" })
+    let mut reply = match regen_split() {
+        Ok(()) => json!({ "success": true, "message": "Added exclusion" }),
+        Err(err) => split_not_applied(&err),
+    };
+    reply["id"] = json!(sid);
+    reply
 }
 
 fn valid_section_id(id: &str) -> bool {
@@ -2247,10 +2397,14 @@ fn split_del(args: &Value) -> Value {
     if !split_section_exists(id) {
         return fail("No such exclusion");
     }
-    uci_run(&["-q", "delete", &format!("nym-vpn.{id}")]);
-    uci_run(&["commit", "nym-vpn"]);
-    regen_split();
-    json!({ "success": true, "message": "Removed exclusion" })
+    let edits = [vec!["delete".to_owned(), format!("nym-vpn.{id}")]];
+    if let Err(err) = commit_split_section(&mut SystemUci, id, &edits) {
+        return fail(format!("Failed to remove exclusion: {err}"));
+    }
+    match regen_split() {
+        Ok(()) => json!({ "success": true, "message": "Removed exclusion" }),
+        Err(err) => split_not_applied(&err),
+    }
 }
 
 fn split_set_enabled(args: &Value) -> Value {
@@ -2267,10 +2421,17 @@ fn split_set_enabled(args: &Value) -> Value {
     if !split_section_exists(id) {
         return fail("No such exclusion");
     }
-    uci_run(&["set", &format!("nym-vpn.{id}.enabled={enabled}")]);
-    uci_run(&["commit", "nym-vpn"]);
-    regen_split();
-    json!({ "success": true })
+    let edits = [vec![
+        "set".to_owned(),
+        format!("nym-vpn.{id}.enabled={enabled}"),
+    ]];
+    if let Err(err) = commit_split_section(&mut SystemUci, id, &edits) {
+        return fail(format!("Failed to update exclusion: {err}"));
+    }
+    match regen_split() {
+        Ok(()) => json!({ "success": true }),
+        Err(err) => split_not_applied(&err),
+    }
 }
 
 //-------------------------------------------------------------------------------
@@ -2827,6 +2988,124 @@ dhcp.nym_split_ipset=ipset
         let mut uci = FakeUci::default().reply("changes dhcp", Err("no uci"));
         assert!(commit_dhcp(&mut uci).is_err());
         assert_eq!(uci.calls, vec!["changes dhcp"]);
+    }
+
+    fn strings(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    fn ipset_uci(domains: Option<&str>) -> FakeUci {
+        match domains {
+            Some(domains) => FakeUci::default()
+                .reply("-q get dhcp.nym_split_ipset", Ok("ipset\n"))
+                .reply("-q get dhcp.nym_split_ipset.domain", Ok(domains)),
+            None => FakeUci::default().reply("-q get dhcp.nym_split_ipset", Err("")),
+        }
+    }
+
+    fn position(calls: &[String], call: &str) -> usize {
+        calls
+            .iter()
+            .position(|c| c == call)
+            .unwrap_or_else(|| panic!("{call:?} not in {calls:?}"))
+    }
+
+    #[test]
+    fn unchanged_split_domains_leave_dhcp_alone() {
+        let wanted = strings(&["a.example.com", "b.example.com"]);
+        let mut uci = ipset_uci(Some("a.example.com b.example.com\n"));
+        assert_eq!(sync_split_ipset(&mut uci, Some(&wanted)), Ok(false));
+        assert!(
+            uci.calls.iter().all(|c| c.starts_with("-q get ")),
+            "{:?}",
+            uci.calls
+        );
+
+        let mut uci = ipset_uci(None);
+        assert_eq!(sync_split_ipset(&mut uci, None), Ok(false));
+        assert!(
+            uci.calls.iter().all(|c| c.starts_with("-q get ")),
+            "{:?}",
+            uci.calls
+        );
+    }
+
+    #[test]
+    fn changed_split_domains_rewrite_the_section_and_commit() {
+        let wanted = strings(&["a.example.com", "b.example.com"]);
+        let mut uci = ipset_uci(Some("a.example.com\n"));
+        assert_eq!(sync_split_ipset(&mut uci, Some(&wanted)), Ok(true));
+        let calls = &uci.calls;
+        let delete = position(calls, "delete dhcp.nym_split_ipset");
+        let create = position(calls, "set dhcp.nym_split_ipset=ipset");
+        let a = position(calls, "add_list dhcp.nym_split_ipset.domain=a.example.com");
+        let b = position(calls, "add_list dhcp.nym_split_ipset.domain=b.example.com");
+        let commit = position(calls, "commit dhcp");
+        assert!(
+            delete < create && create < a && a < b && b < commit,
+            "{calls:?}"
+        );
+        // Through the resolvfile-safe commit.
+        assert!(position(calls, "changes dhcp") < commit);
+
+        let mut uci = ipset_uci(Some("a.example.com\n"));
+        assert_eq!(sync_split_ipset(&mut uci, None), Ok(true));
+        assert!(
+            position(&uci.calls, "delete dhcp.nym_split_ipset")
+                < position(&uci.calls, "commit dhcp")
+        );
+        assert!(!uci.calls.iter().any(|c| c.starts_with("set ")));
+
+        // A foreign section under our name never counts as unchanged.
+        let mut uci = FakeUci::default().reply("-q get dhcp.nym_split_ipset", Ok("ipset_other\n"));
+        assert_eq!(sync_split_ipset(&mut uci, None), Ok(true));
+        assert!(uci.calls.iter().any(|c| c == "delete dhcp.nym_split_ipset"));
+    }
+
+    #[test]
+    fn failed_split_ipset_edit_is_reverted_not_committed() {
+        let wanted = strings(&["a.example.com"]);
+        let mut uci = ipset_uci(None).reply(
+            "add_list dhcp.nym_split_ipset.domain=a.example.com",
+            Err("uci: I/O error"),
+        );
+        assert_eq!(
+            sync_split_ipset(&mut uci, Some(&wanted)),
+            Err("uci: I/O error".to_owned())
+        );
+        assert!(uci.calls.iter().any(|c| c == "revert dhcp.nym_split_ipset"));
+        assert!(!uci.calls.iter().any(|c| c == "commit dhcp"));
+    }
+
+    #[test]
+    fn split_section_commit_reverts_on_failure() {
+        let edits = [vec!["set".to_owned(), "nym-vpn.cli_x.enabled=0".to_owned()]];
+        let mut uci = FakeUci::default();
+        assert_eq!(commit_split_section(&mut uci, "cli_x", &edits), Ok(()));
+        assert_eq!(
+            uci.calls,
+            vec!["set nym-vpn.cli_x.enabled=0", "commit nym-vpn"]
+        );
+
+        let mut uci = FakeUci::default().reply("commit nym-vpn", Err("read-only"));
+        assert!(commit_split_section(&mut uci, "cli_x", &edits).is_err());
+        assert_eq!(
+            uci.calls.last().map(String::as_str),
+            Some("revert nym-vpn.cli_x")
+        );
+    }
+
+    #[test]
+    fn dnsmasq_pids_from_service_list() {
+        let list = r#"{
+            "dnsmasq": { "instances": {
+                "cfg01411c": { "running": true, "pid": 1234, "command": ["/usr/sbin/dnsmasq"] },
+                "guest": { "running": false }
+            } }
+        }"#;
+        assert_eq!(dnsmasq_pids(list), vec![1234]);
+        assert!(dnsmasq_pids("{}").is_empty());
+        assert!(dnsmasq_pids("").is_empty());
     }
 
     #[test]
