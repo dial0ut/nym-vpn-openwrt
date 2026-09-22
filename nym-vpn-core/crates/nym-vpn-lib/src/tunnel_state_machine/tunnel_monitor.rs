@@ -1089,7 +1089,7 @@ impl TunnelMonitor {
             entry_signal_rx,
             exit_signal_rx,
             gw_update_version,
-            self.shutdown_token.child_token(),
+            self.shutdown_token.clone(),
         );
 
         let authenticator_listener_handle = match authenticator_listener_handle {
