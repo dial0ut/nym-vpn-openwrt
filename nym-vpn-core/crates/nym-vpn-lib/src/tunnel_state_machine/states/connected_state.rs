@@ -209,7 +209,7 @@ impl ConnectedState {
                 // it and switching the user to a different server.
                 shared_state.entry_gateway_grace = Some((
                     self.selected_gateways.entry_gateway().identity,
-                    std::time::Instant::now() + crate::tunnel_state_machine::GATEWAY_BLAME_GRACE,
+                    tokio::time::Instant::now() + crate::tunnel_state_machine::GATEWAY_BLAME_GRACE,
                 ));
 
                 NextTunnelState::NewState(

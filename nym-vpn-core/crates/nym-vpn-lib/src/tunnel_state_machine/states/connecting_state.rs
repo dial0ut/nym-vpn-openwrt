@@ -9,7 +9,7 @@ use futures::{
     FutureExt,
     future::{BoxFuture, Fuse},
 };
-use tokio::sync::mpsc;
+use tokio::{sync::mpsc, time::Instant};
 use tokio_util::sync::CancellationToken;
 
 use crate::tunnel_state_machine::Error;
@@ -31,7 +31,7 @@ use nym_firewall::{
     AllowedClients, AllowedEndpoint, AllowedTunnelTraffic, Endpoint, FirewallPolicy,
     TransportProtocol,
 };
-use nym_gateway_directory::ResolvedConfig;
+use nym_gateway_directory::{NodeIdentity, ResolvedConfig};
 use nym_vpn_lib_types::TunnelConnectionData;
 use nym_vpn_lib_types::{
     AccountControllerErrorStateReason, AccountControllerState, EstablishConnectionData,
@@ -69,6 +69,9 @@ pub struct ConnectingState {
     firewall_policy_params: ConnectingPolicyParameters,
     resolve_api_addrs_fut: Fuse<ResolveApiAddrsFuture>,
     reconnect_delay_fut: Fuse<ReconnectDelayFuture>,
+    /// A failure of this attempt was forgiven, so the next attempt keeps the
+    /// gateways whatever its number.
+    final_retry_owed: bool,
 }
 
 impl ConnectingState {
@@ -154,6 +157,7 @@ impl ConnectingState {
             resolve_api_addrs_fut: Fuse::terminated(),
             reconnect_delay_fut,
             firewall_policy_params,
+            final_retry_owed: false,
         };
 
         let tunnel_state = connecting_state.make_connecting_tunnel_state(
@@ -190,25 +194,26 @@ impl ConnectingState {
     /// Whether the currently selected entry gateway is inside its post-drop
     /// grace window and must be retried rather than blamed and re-selected.
     fn grace_retry_pending(&self, shared_state: &SharedState) -> bool {
-        match (&self.selected_gateways, shared_state.entry_gateway_grace) {
-            (Some(gateways), Some((identity, deadline))) => {
-                gateways.entry_gateway().identity == identity
-                    && std::time::Instant::now() < deadline
-            }
-            _ => false,
-        }
+        self.selected_gateways.as_ref().is_some_and(|gateways| {
+            grace_covers(
+                gateways.entry_gateway().identity,
+                shared_state.entry_gateway_grace,
+                Instant::now(),
+            )
+        })
     }
 
     async fn reconnect(self, shared_state: &mut SharedState) -> NextTunnelState {
         let next_attempt = self.retry_attempt.saturating_add(1);
-        // Re-select every other attempt, unless a grace retry is owed to the
-        // current gateway.
-        let next_gateways =
-            if next_attempt.is_multiple_of(2) && !self.grace_retry_pending(shared_state) {
-                None
-            } else {
-                self.selected_gateways
-            };
+        let next_gateways = if keep_gateways(
+            next_attempt,
+            self.grace_retry_pending(shared_state),
+            self.final_retry_owed,
+        ) {
+            self.selected_gateways
+        } else {
+            None
+        };
 
         tracing::info!("Reconnecting, attempt {next_attempt}");
 
@@ -470,9 +475,12 @@ impl ConnectingState {
                      unreachable too — this is a local network outage; retrying the \
                      same gateway instead of re-selecting"
                 );
+                // The grace may run out before the tunnel is down.
+                self.final_retry_owed = true;
                 return;
             }
             shared_state.entry_gateway_grace = None;
+            self.final_retry_owed = true;
             tracing::warn!(
                 "Tunnel {failure_kind} via entry gateway {entry_gateway_identifier} \
                  while the VPN API is reachable — the network is up, but this \
@@ -891,9 +899,80 @@ fn wait_delay(retry_attempt: u32) -> Duration {
     }
 }
 
+/// Whether the post-drop grace still shields `entry` at `now`.
+fn grace_covers(entry: NodeIdentity, grace: Option<(NodeIdentity, Instant)>, now: Instant) -> bool {
+    matches!(grace, Some((identity, deadline)) if identity == entry && now < deadline)
+}
+
+/// Re-select every other attempt, unless the current gateway is still owed
+/// a retry: its grace is running, or a failure was just forgiven.
+fn keep_gateways(next_attempt: u32, grace_pending: bool, final_retry_owed: bool) -> bool {
+    !next_attempt.is_multiple_of(2) || grace_pending || final_retry_owed
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::tunnel_state_machine::GATEWAY_BLAME_GRACE;
+
+    fn identity(base58: &str) -> NodeIdentity {
+        NodeIdentity::from_base58_string(base58).expect("valid test identity")
+    }
+
+    fn entry() -> NodeIdentity {
+        identity("7CWjY3QFoA9dgE535u9bQiXCfzgMZvSpJu842GA1Wn42")
+    }
+
+    fn other_entry() -> NodeIdentity {
+        identity("2djmrzZ62M8jpzpYb7MMq6QjP15CkbnKHf3ZV3kSCXUE")
+    }
+
+    #[test]
+    fn keep_gateways_table() {
+        // (next_attempt, grace_pending, final_retry_owed, keep)
+        let cases = [
+            (1, false, false, true),
+            (2, false, false, false),
+            (3, false, false, true),
+            (4, false, false, false),
+            (2, true, false, true),
+            (2, false, true, true),
+            (4, true, true, true),
+            (1, false, true, true),
+        ];
+        for (next_attempt, grace_pending, final_retry_owed, keep) in cases {
+            assert_eq!(
+                keep_gateways(next_attempt, grace_pending, final_retry_owed),
+                keep,
+                "attempt {next_attempt}, grace {grace_pending}, final retry {final_retry_owed}"
+            );
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn grace_shields_only_its_gateway_until_the_deadline() {
+        let grace = Some((entry(), Instant::now() + GATEWAY_BLAME_GRACE));
+        assert!(grace_covers(entry(), grace, Instant::now()));
+        assert!(!grace_covers(other_entry(), grace, Instant::now()));
+        assert!(!grace_covers(entry(), None, Instant::now()));
+
+        tokio::time::advance(GATEWAY_BLAME_GRACE - Duration::from_secs(1)).await;
+        assert!(grace_covers(entry(), grace, Instant::now()));
+        tokio::time::advance(Duration::from_secs(1)).await;
+        assert!(!grace_covers(entry(), grace, Instant::now()));
+    }
+
+    /// A failure forgiven inside the grace whose deadline passes before the
+    /// tunnel is down still gets its retry on an even attempt.
+    #[tokio::test(start_paused = true)]
+    async fn forgiven_failure_keeps_the_gateway_after_the_grace_runs_out() {
+        let grace = Some((entry(), Instant::now() + GATEWAY_BLAME_GRACE));
+        tokio::time::advance(GATEWAY_BLAME_GRACE + Duration::from_secs(1)).await;
+        let grace_pending = grace_covers(entry(), grace, Instant::now());
+        assert!(!grace_pending);
+        assert!(!keep_gateways(2, grace_pending, false));
+        assert!(keep_gateways(2, grace_pending, true));
+    }
 
     #[test]
     fn wait_delay_sequence() {

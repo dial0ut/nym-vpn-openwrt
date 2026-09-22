@@ -170,7 +170,7 @@ impl TunnelStateHandler for OfflineState {
                         if let Some(ref gateways) = self.selected_gateways {
                             shared_state.entry_gateway_grace = Some((
                                 gateways.entry_gateway().identity,
-                                std::time::Instant::now()
+                                tokio::time::Instant::now()
                                     + crate::tunnel_state_machine::GATEWAY_BLAME_GRACE,
                             ));
                         }

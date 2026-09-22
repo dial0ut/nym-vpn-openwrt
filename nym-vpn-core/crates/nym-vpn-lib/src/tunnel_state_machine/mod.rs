@@ -670,7 +670,8 @@ pub struct SharedState {
     user_agent: UserAgent,
     blacklisted_entry_gateways: BlacklistedGateways,
     /// Entry gateway shielded from blame after a drop; see [`GATEWAY_BLAME_GRACE`].
-    entry_gateway_grace: Option<(NodeIdentity, std::time::Instant)>,
+    /// On the tokio clock so that tests can advance it.
+    entry_gateway_grace: Option<(NodeIdentity, tokio::time::Instant)>,
     /// Whether the current connect session relaxed the gateway independence
     /// criteria ("connect anyway"). Set by Connect, kept across automatic
     /// reconnects, cleared on disconnect.
