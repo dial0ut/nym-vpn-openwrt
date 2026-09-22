@@ -25,19 +25,11 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# When running inside Docker, the source tree is at /home/rust/src or /tmp/nym-build
-# Try both locations for log.sh
-if [ -f "/home/rust/src/scripts/log.sh" ]; then
-    source "/home/rust/src/scripts/log.sh"
-elif [ -f "$SCRIPT_DIR/../../scripts/log.sh" ]; then
-    source "$SCRIPT_DIR/../../scripts/log.sh"
-else
-    # Inline fallback if neither path exists
-    log_info() { echo -e "\033[0;32m[PATCH]\033[0m $1" >&2; }
-    log_warn() { echo -e "\033[1;33m[PATCH]\033[0m $1" >&2; }
-    log_error() { echo -e "\033[0;31m[PATCH]\033[0m $1" >&2; }
-fi
+# Every log line goes to stderr: several helpers hand a path back on stdout
+# through $(...), where a log line would corrupt the path or swallow an
+# error message (scripts/log.sh writes to stdout).
+log_info() { echo -e "\033[0;32m[PATCH]\033[0m $1" >&2; }
+log_error() { echo -e "\033[0;31m[PATCH ERROR]\033[0m $1" >&2; }
 
 PATCH_MODE=all
 if [ "${1:-}" = "--ecash-only" ]; then
@@ -47,7 +39,7 @@ fi
 CARGO_HOME="${CARGO_HOME:-${1:-}}"
 TARGET="${TARGET:-${2:-}}"
 CARGO_TOML="${CARGO_TOML:-${3:-}}"
-PATCH_DIR="/tmp/patches"
+PATCH_DIR="${PATCH_DIR:-/tmp/patches}"
 
 # Which patches a target needs follows from what rustc says the target
 # lacks, not from a list of triple names that can miss one (armv7 and i686
@@ -102,37 +94,25 @@ download_crate() {
     fi
 }
 
-# Find a crate directory in the cargo registry cache by name.
-# Uses Cargo.lock to determine the exact version. Falls back to downloading
-# from crates.io if not found in the registry (e.g., fresh Docker container
-# where cargo fetch hasn't fully populated the cache).
+# Find a crate directory in the cargo registry cache: exactly the version
+# Cargo.lock resolved, or that version downloaded from crates.io (a fresh
+# container where cargo fetch did not unpack it). Never another version: a
+# patch for a version the lock does not use would be silently unused.
 find_crate() {
     local name="$1"
     local version
     version=$(get_lock_version "$name")
+    if [ -z "$version" ]; then
+        log_error "'${name}' is not in Cargo.lock; nothing to patch"
+        return 1
+    fi
 
     local found=""
-    if [ -n "$version" ]; then
-        # Look for exact version match in registry cache
-        found=$(find "$CARGO_HOME/registry/src" -maxdepth 2 -name "${name}-${version}" -type d 2>/dev/null | head -1)
+    if [ -d "$CARGO_HOME/registry/src" ]; then
+        found=$(find "$CARGO_HOME/registry/src" -maxdepth 2 -name "${name}-${version}" -type d | head -1)
     fi
-
-    # Fallback: find any version in registry cache
     if [ -z "$found" ]; then
-        found=$(find "$CARGO_HOME/registry/src" -maxdepth 2 -name "${name}-*" -type d 2>/dev/null \
-            | grep -E "/${name}-[0-9]" \
-            | sort -V \
-            | tail -1)
-    fi
-
-    # Final fallback: download from crates.io
-    if [ -z "$found" ]; then
-        if [ -n "$version" ]; then
-            found=$(download_crate "$name" "$version")
-        else
-            log_error "Could not find '${name}' in cargo registry and no version in Cargo.lock"
-            return 1
-        fi
+        found=$(download_crate "$name" "$version") || return 1
     fi
 
     echo "$found"
@@ -309,32 +289,45 @@ patch_gotatun() {
     fi
 }
 
-# Find the gotatun git checkout directory in CARGO_HOME.
-# Uses Cargo.lock to determine the exact revision.
-find_gotatun() {
-    local cargo_lock_dir
-    cargo_lock_dir=$(dirname "$CARGO_TOML")
+# The checkout of the revision Cargo.lock pins for <package>, from the
+# repository whose checkout directories are named <repo>-<hash>. Fails
+# rather than guess: patching another checkout patches nothing cargo builds.
+find_git_checkout() {
+    local package="$1" repo="$2"
+    local cargo_lock
+    cargo_lock="$(dirname "$CARGO_TOML")/Cargo.lock"
     local rev=""
-    if [ -f "$cargo_lock_dir/Cargo.lock" ]; then
-        # Extract git rev from: source = "git+https://...#<full-rev>"
-        rev=$(awk '/^name = "gotatun"/{found=1} found && /^source =.*gotatun/{print; exit}' \
-            "$cargo_lock_dir/Cargo.lock" | grep -o '#[a-f0-9]*' | tr -d '#')
+    if [ -f "$cargo_lock" ]; then
+        # source = "git+https://...#<full-rev>", within the package's entry
+        rev=$(awk -v want="name = \"$package\"" '
+                $0 == want { found = 1; next }
+                found && /^\[\[package\]\]/ { exit }
+                found && /^source = "git\+/ { print; exit }' "$cargo_lock" \
+            | grep -o '#[a-f0-9]*' | tr -d '#') || true
+    fi
+    if [ -z "$rev" ]; then
+        log_error "no git revision for '${package}' in $cargo_lock"
+        return 1
     fi
 
-    local short_rev="${rev:0:7}"
-    if [ -n "$short_rev" ]; then
-        local found
-        found=$(find "$CARGO_HOME/git/checkouts" -maxdepth 2 -type d -name "${short_rev}*" \
-            -path "*/gotatun-*/*" 2>/dev/null | head -1)
-        if [ -n "$found" ]; then
-            echo "$found"
-            return
-        fi
+    local found=""
+    if [ -d "$CARGO_HOME/git/checkouts" ]; then
+        # <repo>-<16 hex>/<short rev>: "nym-" alone would also match
+        # another repository whose name starts with "nym-".
+        found=$(find "$CARGO_HOME/git/checkouts" -mindepth 2 -maxdepth 2 -type d \
+            -regextype posix-extended \
+            -regex ".*/${repo}-[0-9a-f]{16}/${rev:0:7}[0-9a-f]*" | head -1)
     fi
+    if [ -z "$found" ]; then
+        log_error "no ${repo} checkout of ${rev:0:7} under $CARGO_HOME/git/checkouts (run cargo fetch first)"
+        return 1
+    fi
+    echo "$found"
+}
 
-    # Fallback: use most recent checkout
-    find "$CARGO_HOME/git/checkouts/gotatun-"*/  -maxdepth 1 -type d 2>/dev/null \
-        | grep -v '\.git' | tail -1
+# Find the gotatun git checkout directory in CARGO_HOME.
+find_gotatun() {
+    find_git_checkout gotatun gotatun
 }
 
 # ============================================================================
@@ -394,8 +387,8 @@ patch_nym_gateway_client() {
 
     local f="$dir/common/client-libs/gateway-client/src/bandwidth.rs"
     if [ ! -f "$f" ]; then
-        log_warn "  bandwidth.rs not found at $f — skipping"
-        return
+        log_error "  bandwidth.rs not found at $f"
+        exit 1
     fi
 
     if grep -q 'std::sync::atomic.*AtomicI64' "$f"; then
@@ -421,8 +414,8 @@ patch_nym_lp() {
 
     local f="$dir/common/nym-lp/src/session.rs"
     if [ ! -f "$f" ]; then
-        log_warn "  session.rs not found at $f — skipping"
-        return
+        log_error "  session.rs not found at $f"
+        exit 1
     fi
 
     if grep -q 'std::sync::atomic.*AtomicU64' "$f"; then
@@ -437,30 +430,10 @@ patch_nym_lp() {
     fi
 }
 
-# Find the nym git checkout directory in CARGO_HOME.
+# Find the nym git checkout directory in CARGO_HOME (the nym crates share
+# one checkout; nym-compact-ecash pins its revision).
 find_nym() {
-    local cargo_lock_dir
-    cargo_lock_dir=$(dirname "$CARGO_TOML")
-    local rev=""
-    if [ -f "$cargo_lock_dir/Cargo.lock" ]; then
-        rev=$(awk '/^name = "nym-compact-ecash"/{found=1} found && /^source =.*nymtech\/nym/{print; exit}' \
-            "$cargo_lock_dir/Cargo.lock" | grep -o '#[a-f0-9]*' | tr -d '#')
-    fi
-
-    local short_rev="${rev:0:7}"
-    if [ -n "$short_rev" ]; then
-        local found
-        found=$(find "$CARGO_HOME/git/checkouts" -maxdepth 2 -type d -name "${short_rev}*" \
-            -path "*/nym-*/*" 2>/dev/null | head -1)
-        if [ -n "$found" ]; then
-            echo "$found"
-            return
-        fi
-    fi
-
-    # Fallback: use most recent checkout
-    find "$CARGO_HOME/git/checkouts/nym-"*/  -maxdepth 1 -type d 2>/dev/null \
-        | grep -v '\.git' | tail -1
+    find_git_checkout nym-compact-ecash nym
 }
 
 # ============================================================================
@@ -496,10 +469,6 @@ apply_nym_ecash_patch() {
     log_info "32-bit target detected — applying the ecash usize fix"
     local nym_dir
     nym_dir=$(find_nym)
-    if [ -z "$nym_dir" ]; then
-        log_error "nym git checkout not found under $CARGO_HOME/git/checkouts (run cargo fetch first)"
-        exit 1
-    fi
     patch_nym_ecash "$nym_dir"
 }
 
@@ -521,9 +490,11 @@ main() {
     log_info "=== Build-time crate patching for target: ${TARGET} ==="
     mkdir -p "$PATCH_DIR"
 
-    if grep -q '\[patch.crates-io\]' "$CARGO_TOML"; then
-        log_warn "Cargo.toml already has [patch.crates-io] — skipping"
-        exit 0
+    # The entries below go into a new [patch.crates-io] table, and TOML
+    # allows only one. Skipping here once disabled every tier-3 patch.
+    if grep -q '^\[patch\.crates-io\]' "$CARGO_TOML"; then
+        log_error "$CARGO_TOML already has a [patch.crates-io] table; merge its entries into this script's or patch from a fresh copy"
+        exit 1
     fi
 
     # Determine which patches to apply
@@ -569,21 +540,13 @@ opentelemetry_sdk = { path = \"$otel_sdk_dir\" }"
         # gotatun: git dependency — patch in-place in git checkout
         local gotatun_dir
         gotatun_dir=$(find_gotatun)
-        if [ -n "$gotatun_dir" ]; then
-            patch_gotatun "$gotatun_dir"
-        else
-            log_warn "gotatun git checkout not found — skipping (may fail to compile)"
-        fi
+        patch_gotatun "$gotatun_dir"
 
         # nym crates: git dependency — patch in-place in git checkout
         local nym_dir
         nym_dir=$(find_nym)
-        if [ -n "$nym_dir" ]; then
-            patch_nym_gateway_client "$nym_dir"
-            patch_nym_lp "$nym_dir"
-        else
-            log_warn "nym git checkout not found — skipping nym patches"
-        fi
+        patch_nym_gateway_client "$nym_dir"
+        patch_nym_lp "$nym_dir"
     fi
 
     apply_nym_ecash_patch

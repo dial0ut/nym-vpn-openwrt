@@ -130,7 +130,7 @@ cd "$BUILD_DIR/nym-vpn-core"
 
 PATCH_SCRIPT="$BUILD_DIR/docker/tier3-musl/patch-crates.sh"
 log_info "Fetching dependencies..."
-cargo fetch --target="${TARGET}" 2>/dev/null || true
+cargo fetch --target="${TARGET}"
 
 log_info "Applying build-time crate patches..."
 bash "$PATCH_SCRIPT" "$HOME/.cargo" "$TARGET" "$BUILD_DIR/nym-vpn-core/Cargo.toml"
