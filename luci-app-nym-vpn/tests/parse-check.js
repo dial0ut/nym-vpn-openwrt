@@ -41,12 +41,37 @@ for (const file of files) {
 }
 
 const acl = path.resolve(__dirname, '..', 'root', 'usr', 'share', 'rpcd', 'acl.d', 'luci-app-nym-vpn.json');
+let grants = null;
 try {
-  JSON.parse(fs.readFileSync(acl, 'utf8'));
+  grants = JSON.parse(fs.readFileSync(acl, 'utf8'))['luci-app-nym-vpn'];
   console.log('ok   ' + path.relative(path.resolve(__dirname, '..'), acl));
 } catch (e) {
   failures++;
   console.log('FAIL json ' + acl + ': ' + e.message);
+}
+
+// The ACL grants exactly what rpc.js declares: only the nym-vpn ubus object,
+// no uci access, and no method the page never calls.
+if (grants) {
+  const rpcSrc = fs.readFileSync(moduleFile('nym-vpn.rpc'), 'utf8');
+  const objects = Array.from(new Set(Array.from(rpcSrc.matchAll(/object:\s*'([^']+)'/g), (m) => m[1])));
+  // One method may be declared more than once with different params.
+  const declared = Array.from(new Set(Array.from(rpcSrc.matchAll(/method:\s*'([^']+)'/g), (m) => m[1]))).sort();
+  const scopes = ['read', 'write'].map((k) => grants[k] || {});
+  const granted = [].concat(...scopes.map((s) => (s.ubus && s.ubus['nym-vpn']) || [])).sort();
+  const otherObjects = [].concat(...scopes.map((s) => Object.keys(s.ubus || {}).filter((o) => o !== 'nym-vpn')));
+  const otherTypes = [].concat(...scopes.map((s) => Object.keys(s).filter((t) => t !== 'ubus')));
+  const problems = [];
+  if (objects.length !== 1 || objects[0] !== 'nym-vpn') problems.push('rpc.js objects ' + JSON.stringify(objects));
+  if (otherObjects.length) problems.push('extra ubus objects ' + JSON.stringify(otherObjects));
+  if (otherTypes.length) problems.push('extra grant types ' + JSON.stringify(otherTypes));
+  if (JSON.stringify(granted) !== JSON.stringify(declared)) problems.push('granted ' + JSON.stringify(granted) + ' vs declared ' + JSON.stringify(declared));
+  if (problems.length) {
+    failures++;
+    console.log('FAIL acl  grants differ from rpc.js: ' + problems.join('; '));
+  } else {
+    console.log('ok   acl grants match the ' + declared.length + ' methods rpc.js declares');
+  }
 }
 
 console.log(files.length + ' modules parsed, ' + failures + ' failure(s)');

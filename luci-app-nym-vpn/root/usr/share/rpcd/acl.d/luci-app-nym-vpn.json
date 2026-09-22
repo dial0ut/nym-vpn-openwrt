@@ -25,14 +25,8 @@
           "daemon_status",
           "logs_get",
           "diagnostic_run"
-        ],
-        "service": [
-          "list"
         ]
-      },
-      "uci": [
-        "nym-vpn"
-      ]
+      }
     },
     "write": {
       "ubus": {
@@ -45,7 +39,6 @@
           "account_forget",
           "account_reset",
           "account_rotate_keys",
-          "network_set",
           "lan_set",
           "inbound_add",
           "inbound_del",
@@ -57,18 +50,8 @@
           "daemon_restart",
           "daemon_start",
           "daemon_stop"
-        ],
-        "service": [
-          "start",
-          "stop",
-          "restart",
-          "reload"
         ]
-      },
-      "uci": [
-        "nym-vpn",
-        "dhcp"
-      ]
+      }
     }
   }
 }
