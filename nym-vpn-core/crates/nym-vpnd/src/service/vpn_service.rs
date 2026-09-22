@@ -78,8 +78,11 @@ type Seed = [u8; 32];
 const TENTATIVE_GATEWAYS_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The registration diagnostic runs on the service loop; capped so it costs
-/// the liveness probe one strike at most.
-const REGISTER_DIAGNOSTIC_TIMEOUT: Duration = Duration::from_secs(45);
+/// the liveness probe one strike at most. Only a backstop: a run cut short
+/// leaks its mixnet client, since nym-diagnostic takes no cancel token, so
+/// the cap sits above a slow router's normal run (two node-list fetches, a
+/// 10 s connect, registration, 10 s of pings).
+const REGISTER_DIAGNOSTIC_TIMEOUT: Duration = Duration::from_secs(55);
 
 /// Upper bound on the gateway lookups of a SOCKS5 enable.
 const SOCKS5_LOOKUP_TIMEOUT: Duration = Duration::from_secs(30);

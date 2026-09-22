@@ -14,7 +14,7 @@
 //!
 //! Commands that can take long (ad-blocking, diagnostic runs, account reads,
 //! SOCKS5 enable) run off the loop. What stays inline is bounded well under a
-//! minute: the registration diagnostic is capped at 45 s and account
+//! minute: the registration diagnostic is capped at 55 s and account
 //! mutations carry API timeouts. So a single slow command can cost at most
 //! one strike before the next probe answers.
 
