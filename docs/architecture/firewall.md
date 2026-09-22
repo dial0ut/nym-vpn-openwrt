@@ -46,8 +46,9 @@ Every state starts from the same base:
 
 ```text
  1. Loopback in/out
- 2. Accept the bypass mark 0x14e in FORWARD (always)
- 3. Return FORWARD traffic arriving on a WAN zone device or the tunnel (see below)
+ 2. FORWARD entering on a WAN zone device or the tunnel: reject if it leaves on a WAN device,
+    otherwise return it to the zones (see below)
+ 3. Accept the bypass mark 0x14e in FORWARD (always)
  4. DHCPv4 and DHCPv6 out, router as both client and server
  5. IPv6 NDP out
  6. mwan3 tracking pings out
@@ -120,7 +121,11 @@ there ends the builtin chain, skipping the zone rejects. So the policy never acc
 zones must judge: INPUT carries only loopback, the CVE-2019-14899 drops and the exemption accept
 (the one final allow, for a service the user declared); FORWARD first hands back
 (`return`/`-j RETURN`) everything arriving on a WAN zone device or the tunnel, and returns
-LAN-destination forwards instead of accepting them. The zones' own established accept takes the
+LAN-destination forwards instead of accepting them. The hand-back comes before the exemption-mark
+accept, which is set on every new inbound flow to an exempt port whatever its destination, and
+after a reject of anything that would leave through a WAN device: that is never inbound, so a
+LAN-side device mistaken for a WAN one (masquerade on a guest zone, a one-arm router) still meets
+the kill-switch. The zones' own established accept takes the
 replies. Before this, an fw3 router with the kill-switch on answered LuCI on its WAN address to a
 private upstream network, forwarded WAN hosts into the LAN, and let a guest zone reach the LAN.
 There is no established accept in OUTPUT or FORWARD: a blanket one let WAN-bound established

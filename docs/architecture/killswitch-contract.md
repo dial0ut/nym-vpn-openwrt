@@ -42,7 +42,8 @@ root-scoped DNS and NTP hatches, the mark-scoped probe hatch, LAN if allowed, th
 **Connecting** (Blocked plus the peer endpoints and the tunnel interface once it exists) and
 **Connected** (Connecting minus the DNS/NTP hatches, plus tunnel DNS and the CVE-2019-14899 drop).
 INPUT carries only loopback, the CVE-2019-14899 drops and the inbound-exemption accept, and FORWARD
-returns everything arriving on a WAN zone device or the tunnel to the zones before any accept
+returns everything arriving on a WAN zone device or the tunnel to the zones before any accept,
+except what would leave through a WAN device, which it rejects
 (`policy.rs:untrusted_ingress_returns`): on fw3 an accept of ours is final. In every policy, OUTPUT
 and FORWARD end in a terminal reject (`policy.rs:final_reject`) and INPUT
 is left to fw3/fw4 (management is never ours to break).

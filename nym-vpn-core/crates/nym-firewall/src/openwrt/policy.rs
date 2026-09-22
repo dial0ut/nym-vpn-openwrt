@@ -87,10 +87,12 @@ pub(crate) fn compile_with(policy: &FirewallPolicy, uplink: &Uplink<'_>) -> Rule
     let mut rs = RuleSet::default();
 
     base_rules(&mut rs);
-    // Heads the forward chain: marked flows pass before anything can reject
-    // them, and arrivals from outside go back to the zones before any accept.
-    bypass_mark_forward_accept(&mut rs);
+    // Heads the forward chain: arrivals from outside go back to the zones
+    // before any accept can match them, the exemption mark's included (it is
+    // set on every new inbound flow to an exempt port, whatever the
+    // destination); then marked flows pass before anything can reject them.
     untrusted_ingress_returns(&mut rs, uplink.wan_devices, &tunnel_interfaces(policy));
+    bypass_mark_forward_accept(&mut rs);
 
     match policy {
         FirewallPolicy::Connecting {
@@ -322,9 +324,22 @@ fn tunnel_interfaces(policy: &FirewallPolicy) -> Vec<String> {
 /// without these a WAN host reached the LAN through `daddr <private>` or
 /// relayed into the tunnel through `oif <tunnel>`, past the WAN zone's
 /// reject. On fw4 a return is what an accept already meant.
+///
+/// Whatever leaves through a WAN device is rejected first: that is never
+/// inbound, so a LAN-side device taken for a WAN one (masquerade on a guest
+/// zone, a one-arm router sharing the WAN device) still meets the
+/// kill-switch rather than the zones.
 fn untrusted_ingress_returns(rs: &mut RuleSet, wan_devices: &[String], tunnels: &[String]) {
-    for dev in wan_devices.iter().chain(tunnels) {
-        rs.filter.forward.push(Rule::return_(Family::Inet).iif(dev.as_str()));
+    let ingress: Vec<&str> = wan_devices.iter().chain(tunnels).map(String::as_str).collect();
+    for dev in &ingress {
+        for wan in wan_devices {
+            rs.filter
+                .forward
+                .push(Rule::reject(Family::Inet).iif(*dev).oif(wan.as_str()));
+        }
+    }
+    for dev in ingress {
+        rs.filter.forward.push(Rule::return_(Family::Inet).iif(dev));
     }
 }
 
@@ -1676,7 +1691,8 @@ mod tests {
     }
 
     /// Arrivals from a WAN device or the tunnel are handed back to the zones
-    /// before any accept can match them; only the mark accept comes first.
+    /// before any accept can match them, the exemption mark's included;
+    /// egress through a WAN device is rejected before any return.
     #[test]
     fn forward_returns_untrusted_ingress_before_any_accept() {
         let wan = multi_wan();
@@ -1687,26 +1703,43 @@ mod tests {
             if name.starts_with("connected") || name.starts_with("connecting+tun") {
                 untrusted.push("nym0");
             }
-            let last_return = untrusted
-                .iter()
-                .map(|dev| {
-                    fwd.iter()
-                        .position(|r| {
-                            r.verdict == Verdict::Return
-                                && r.matches.iif.as_deref() == Some(*dev)
-                                && r.matches.daddr.is_none()
-                        })
-                        .unwrap_or_else(|| panic!("{name}: no return for {dev}"))
-                })
-                .max()
-                .unwrap();
+            let return_at = |dev: &str| {
+                fwd.iter()
+                    .position(|r| {
+                        r.verdict == Verdict::Return
+                            && r.matches.iif.as_deref() == Some(dev)
+                            && r.matches.daddr.is_none()
+                    })
+                    .unwrap_or_else(|| panic!("{name}: no return for {dev}"))
+            };
+            let last_return = untrusted.iter().map(|d| return_at(d)).max().unwrap();
             for (i, r) in fwd.iter().enumerate().take(last_return) {
-                let is_mark = r.matches.mark == Some(common::EXEMPT_FWMARK);
+                let egress_reject = r.verdict == Verdict::Reject
+                    && r.matches.iif.is_some()
+                    && r.matches.oif.as_ref().is_some_and(|o| wan.contains(o));
                 assert!(
-                    r.verdict == Verdict::Return || is_mark,
+                    r.verdict == Verdict::Return || egress_reject,
                     "{name}: {r:?} at {i} precedes the ingress returns"
                 );
             }
+            for dev in &untrusted {
+                for out in &wan {
+                    let reject = fwd.iter().position(|r| {
+                        r.verdict == Verdict::Reject
+                            && r.matches.iif.as_deref() == Some(*dev)
+                            && r.matches.oif.as_ref() == Some(out)
+                    });
+                    assert!(
+                        reject.is_some_and(|at| at < return_at(dev)),
+                        "{name}: {dev} -> {out} must be rejected before {dev} returns"
+                    );
+                }
+            }
+            let mark = fwd
+                .iter()
+                .position(|r| r.matches.mark == Some(common::EXEMPT_FWMARK))
+                .expect("mark accept");
+            assert!(mark > last_return, "{name}: mark accept precedes the returns");
             assert!(rs.forward_terminates_in_block(), "{name}");
         }
     }
