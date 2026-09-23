@@ -13,10 +13,13 @@ use anyhow::{Context, Result, bail};
 use clap::{ArgAction, Parser};
 use tokio_stream::StreamExt;
 
-use nym_vpn_lib_types::{TunnelEvent, TunnelState, VpnServiceInfo};
+use nym_vpn_lib_types::{TunnelConnectionData, TunnelEvent, TunnelState, VpnServiceInfo};
 use nym_vpn_proto::rpc_client::RpcClient;
 
-use crate::{display_helpers::error_state_hint, table_style::TableStyle};
+use crate::{
+    display_helpers::{error_state_hint, key_exchange_label},
+    table_style::TableStyle,
+};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -253,6 +256,9 @@ impl Command {
                     if let Some(family) = &gateway.family_name {
                         println!("{side} gateway family: {family}");
                     }
+                }
+                if let TunnelConnectionData::Wireguard(data) = &connection_data.tunnel {
+                    println!("Key exchange: {}", key_exchange_label(data.lewes_protocol));
                 }
             }
             TunnelState::Error(reason) => {

@@ -17,6 +17,15 @@ pub const LEWES_PROTOCOL_STATE: &str = "auto";
 /// Shared with the rpcd bridge's `raw_config` reconstruction.
 pub const LEWES_PROTOCOL_LINE: &str = "Lewes protocol: auto (used when the gateway supports it)";
 
+/// How a WireGuard session's keys were agreed: `status` and the rpcd bridge.
+pub fn key_exchange_label(lewes_protocol: bool) -> &'static str {
+    if lewes_protocol {
+        "Lewes protocol (post-quantum)"
+    } else {
+        "standard"
+    }
+}
+
 /// `tunnel get` value for the gateway independence criteria: "on" followed by
 /// the active criteria, or "off". Shared with the rpcd bridge's `raw_config`.
 pub fn gateway_independence_summary(gateway_independence: &GatewayIndependence) -> String {
@@ -52,6 +61,12 @@ pub fn error_state_hint(reason: &ErrorStateReason) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn key_exchange_names_the_protocol_only_when_used() {
+        assert_eq!(key_exchange_label(true), "Lewes protocol (post-quantum)");
+        assert_eq!(key_exchange_label(false), "standard");
+    }
 
     #[test]
     fn relax_hint_is_a_single_line_without_runs_of_spaces() {
