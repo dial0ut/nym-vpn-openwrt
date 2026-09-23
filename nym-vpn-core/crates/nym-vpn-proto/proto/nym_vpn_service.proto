@@ -534,6 +534,8 @@ message WireguardConnectionData {
   WireguardNode entry = 1;
   WireguardNode exit = 2;
   optional BridgeAddress entry_bridge_addr = 3;
+  // Registered over the Lewes Protocol (post-quantum pre-shared key).
+  bool lewes_protocol = 4;
 }
 
 message WireguardNode {

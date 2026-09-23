@@ -287,6 +287,10 @@ pub struct WireguardConnectionData {
     pub entry_bridge_addr: Option<BridgeAddress>,
     pub entry: WireguardNode,
     pub exit: WireguardNode,
+    /// Registered over the Lewes Protocol, whose post-quantum key exchange
+    /// supplies the WireGuard pre-shared key; false for legacy registration.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub lewes_protocol: bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]

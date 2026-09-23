@@ -664,6 +664,10 @@ impl TunnelMonitor {
                     entry_bridge_addr: None, // not known yet
                     entry: WireguardNode::from(result.entry_gateway_data()),
                     exit: WireguardNode::from(result.exit_gateway_data()),
+                    lewes_protocol: matches!(
+                        result.as_ref(),
+                        WireguardRegistrationResult::LewesProtocol(_)
+                    ),
                 })
             }
         };
@@ -1091,6 +1095,10 @@ impl TunnelMonitor {
             }
         });
 
+        let lewes_protocol = matches!(
+            registration_result,
+            WireguardRegistrationResult::LewesProtocol(_)
+        );
         let (
             entry_gateway_client,
             exit_gateway_client,
@@ -1163,6 +1171,7 @@ impl TunnelMonitor {
             entry_bridge_addr: None,
             entry: entry_gateway_data,
             exit: exit_gateway_data,
+            lewes_protocol,
         };
 
         Ok((connection_data, rt))
@@ -1305,6 +1314,7 @@ impl TunnelMonitor {
             entry_bridge_addr: conn_data.entry_bridge_addr.clone(),
             entry: WireguardNode::from(&conn_data.entry),
             exit: WireguardNode::from(&conn_data.exit),
+            lewes_protocol: conn_data.lewes_protocol,
         });
 
         let dns_config = self.tunnel_parameters.tunnel_settings.resolved_dns_config();

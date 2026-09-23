@@ -695,6 +695,7 @@ mod tests {
                     entry_bridge_addr: None,
                     entry: node(1),
                     exit: node(2),
+                    lewes_protocol: false,
                 }),
             },
         }

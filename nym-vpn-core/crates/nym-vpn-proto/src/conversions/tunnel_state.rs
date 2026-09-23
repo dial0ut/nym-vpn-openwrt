@@ -473,6 +473,7 @@ impl TryFrom<proto::WireguardConnectionData> for WireguardConnectionData {
                 .entry_bridge_addr
                 .map(BridgeAddress::try_from)
                 .transpose()?,
+            lewes_protocol: value.lewes_protocol,
         })
     }
 }
@@ -509,6 +510,7 @@ impl From<WireguardConnectionData> for proto::WireguardConnectionData {
             entry: Some(proto::WireguardNode::from(value.entry)),
             exit: Some(proto::WireguardNode::from(value.exit)),
             entry_bridge_addr: value.entry_bridge_addr.map(proto::BridgeAddress::from),
+            lewes_protocol: value.lewes_protocol,
         }
     }
 }
@@ -634,5 +636,33 @@ impl From<TunnelState> for proto::TunnelState {
 impl From<GatewayId> for proto::GatewayId {
     fn from(value: GatewayId) -> Self {
         Self { id: value.id }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn node(last: u8) -> WireguardNode {
+        WireguardNode {
+            endpoint: SocketAddr::from(([198, 51, 100, last], 51822)),
+            public_key: format!("key{last}"),
+            private_ipv4: Ipv4Addr::new(10, 1, 0, last),
+            private_ipv6: None,
+        }
+    }
+
+    #[test]
+    fn wireguard_connection_data_keeps_the_key_exchange() {
+        for lewes_protocol in [true, false] {
+            let data = WireguardConnectionData {
+                entry_bridge_addr: None,
+                entry: node(1),
+                exit: node(2),
+                lewes_protocol,
+            };
+            let wire = proto::WireguardConnectionData::from(data.clone());
+            assert_eq!(WireguardConnectionData::try_from(wire).unwrap(), data);
+        }
     }
 }

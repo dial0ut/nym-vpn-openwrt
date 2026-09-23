@@ -17,6 +17,8 @@ pub struct ConnectionData {
     pub entry_bridge_addr: Option<BridgeAddress>,
     pub entry: WireguardConfiguration,
     pub exit: WireguardConfiguration,
+    /// Registered over the Lewes Protocol rather than the legacy path.
+    pub lewes_protocol: bool,
 }
 
 impl ConnectionData {
