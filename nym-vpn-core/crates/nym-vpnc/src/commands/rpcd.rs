@@ -400,6 +400,7 @@ fn gateway_json(gw: &Gateway, gw_type: GatewayType) -> Value {
         "performance": performance_string(gw, gw_type),
         "bridges": gw.bridge_params.is_some(),
         "family": gw.node_family_name,
+        "lewes": gw.advertises_lewes_protocol(),
     })
 }
 
@@ -687,6 +688,10 @@ async fn status() -> Value {
                 ),
             };
             out.insert("mode".into(), json!(mode));
+            // WireGuard only: mixnet registration never uses the protocol.
+            if let TunnelConnectionData::Wireguard(data) = &connection_data.tunnel {
+                out.insert("lewes_protocol".into(), json!(data.lewes_protocol));
+            }
             out.insert("entry_ip".into(), json!(entry_ip));
             out.insert("exit_ip".into(), json!(exit_ip));
 
@@ -3667,6 +3672,7 @@ nym-vpn.broken.mac='11:22:33:44:55:66'
         assert_eq!(v["name"], "gw-x");
         assert_eq!(v["country"], "NL");
         assert_eq!(v["bridges"], false);
+        assert_eq!(v["lewes"], false);
         assert!(v["performance"].as_str().unwrap().starts_with("High"));
     }
 }
