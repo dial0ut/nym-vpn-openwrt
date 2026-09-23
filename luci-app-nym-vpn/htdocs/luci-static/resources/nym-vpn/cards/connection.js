@@ -18,7 +18,7 @@ return baseclass.extend({
         var pickers = gatewayPicker.create(store, api);
 
         var statusHero, statusLabel, uptimeDisplay, actionBtn;
-        var entryGatewayDisplay, exitGatewayDisplay, connectionChain, modeLabel;
+        var entryGatewayDisplay, exitGatewayDisplay, connectionChain, modeLabel, keyExchangeLabel;
         // Signature of the last connected-state render (gateway identity +
         // hop count). The status poll fires every 5s, but none of this
         // changes for the life of a connection, so we only rebuild the
@@ -90,9 +90,22 @@ return baseclass.extend({
             nymUI.renderGatewayInfo(exitGatewayDisplay, st.exit_name, st.exit_id, st.exit_ip, st.exit_country, countries.data);
             appendFamilyInfo(exitGatewayDisplay, xf, same);
         };
+        // How this session agreed its keys, from the daemon's record of the
+        // registration; absent (mixnet, older bridge) shows nothing.
+        var renderKeyExchange = function(st) {
+            if (!keyExchangeLabel) return;
+            var pq = st.lewes_protocol === true;
+            var known = pq || st.lewes_protocol === false;
+            keyExchangeLabel.className = 'nym-kex-label' + (pq ? ' pq' : '');
+            keyExchangeLabel.textContent = !known ? '' : pq ? 'Post-quantum key exchange' : 'Standard key exchange';
+            keyExchangeLabel.title = !known ? '' : pq
+                ? 'Registered over the Lewes protocol'
+                : 'Registered without the Lewes protocol: a gateway on this route does not offer it';
+        };
         var clearGatewayPanels = function() {
             if (entryGatewayDisplay) entryGatewayDisplay.innerHTML = '<div class="nym-gateway-empty">—</div>';
             if (exitGatewayDisplay) exitGatewayDisplay.innerHTML = '<div class="nym-gateway-empty">—</div>';
+            renderKeyExchange({});
         };
 
         var buildConnectionChain = function(hopCount) {
@@ -239,7 +252,8 @@ return baseclass.extend({
                     E('div', { 'class': 'nym-uptime-label' }, 'Session Duration'),
                     E('div', { 'class': 'nym-connection-wrapper' }, [
                         modeLabel = E('div', { 'class': 'nym-mode-label' }),
-                        connectionChain = E('div', { 'class': 'nym-connection-chain' })
+                        connectionChain = E('div', { 'class': 'nym-connection-chain' }),
+                        keyExchangeLabel = E('div', { 'class': 'nym-kex-label' })
                     ])
                 ]),
 
@@ -312,11 +326,12 @@ return baseclass.extend({
                 var sig = [result.entry_name, result.entry_id, result.entry_ip, result.entry_country,
                            result.exit_name, result.exit_id, result.exit_ip, result.exit_country,
                            api.familyOf(result, 'entry'), api.familyOf(result, 'exit'),
-                           hops].join('|');
+                           hops, result.lewes_protocol].join('|');
                 if (sig !== lastConnectedSig) {
                     lastConnectedSig = sig;
                     renderConnectedGateways(result);
                     buildConnectionChain(hops);
+                    renderKeyExchange(result);
                 }
 
                 // The pickers are hidden while connected and their saved
@@ -357,6 +372,7 @@ return baseclass.extend({
             if (status.state === 'connected') {
                 renderConnectedGateways(status);
                 buildConnectionChain(store.hops());
+                renderKeyExchange(status);
                 actionBtn.textContent = 'Disconnect';
                 actionBtn.className = 'nym-btn nym-btn-danger';
                 actionBtn.onclick = flow.handleDisconnect;

@@ -191,6 +191,12 @@ return baseclass.extend({
                             'title': row.perf.raw
                         }, [row.perf.label]));
                     }
+                    if (row.lewes) {
+                        status.push(E('span', {
+                            'class': 'nym-gateway-pq-tag',
+                            'title': 'Offers post-quantum key exchange (Lewes protocol); used when both gateways do'
+                        }, 'PQ'));
+                    }
                     if (row.noCt) {
                         status.push(E('span', {
                             'class': 'nym-gateway-ct-tag',
@@ -247,6 +253,7 @@ return baseclass.extend({
                         value: gw.id || '',
                         disabled: ctIncompatible,
                         noCt: ctIncompatible,
+                        lewes: gw.lewes === true,
                         perf: parsePerformance(gw.performance),
                         city: city,
                         family: family,

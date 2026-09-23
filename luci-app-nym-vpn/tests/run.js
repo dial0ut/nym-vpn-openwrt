@@ -644,6 +644,36 @@ async function scenarioConnectedFamilies() {
   check(q(t3, '.nym-connection-chain').innerHTML === chain && qa(t3, '.nym-gateway-name').length === 2, 'unchanged status poll does not rebuild the chain');
 }
 
+async function scenarioLewes() {
+  section('Lewes protocol: session key exchange and gateway tag');
+  const pq = Object.assign({}, CONNECTED, { lewes_protocol: true });
+  const t = setup({ init: baseInit({ status: pq }), rpc: { status: pq } });
+  const kex = q(t, '.nym-kex-label');
+  check(kex.textContent === 'Post-quantum key exchange' && kex.classList.contains('pq') && kex.title.length > 0, 'LP session: post-quantum label, highlighted, with a title');
+  const std = Object.assign({}, CONNECTED, { lewes_protocol: false });
+  const t2 = setup({ init: baseInit({ status: std }), rpc: { status: std } });
+  check(q(t2, '.nym-kex-label').textContent === 'Standard key exchange' && !q(t2, '.nym-kex-label').classList.contains('pq'), 'legacy session: standard label, not highlighted');
+  const t3 = connectEnv({}, { status: CONNECTED });
+  t3.setStatus(CONNECTED);
+  check(q(t3, '.nym-kex-label').textContent === '', 'no field (mixnet or older bridge): nothing shown');
+  // The label follows the session, not the page load.
+  t3.setStatus(pq);
+  await t3.poll.fire(5);
+  check(q(t3, '.nym-kex-label').textContent === 'Post-quantum key exchange', 'poll picks up the key exchange');
+  t3.setStatus({ state: 'disconnected' });
+  await t3.poll.fire(5);
+  check(q(t3, '.nym-kex-label').textContent === '', 'cleared on disconnect');
+
+  const gws = GATEWAYS.map((g) => Object.assign({}, g, { lewes: g.id === 'A1' }));
+  const t4 = setup({ rpc: { gateway_list_full: { gateways: gws } } });
+  await pickGateways(t4);
+  const tags = qa(t4, '.nym-gateway-pq-tag');
+  const tagged = tags.map((el) => el.closest('.nym-gateway-option').querySelector('.nym-gateway-option-name').textContent);
+  check(tagged.length > 0 && tagged.every((n) => n === 'alpha-entry') && tags.every((el) => el.parentNode.classList.contains('nym-gateway-option-status') && el.title.length > 0), 'PQ tag only on gateways offering Lewes, in the status column, with a title');
+  const css = t4.modules['nym-vpn.theme'].css;
+  check(/\.nym-gateway-pq-tag \{[^}]*flex-shrink: 0/.test(css) && /\.nym-kex-label\.pq \{/.test(css), 'theme styles the tag and the label');
+}
+
 async function scenarioInbound() {
   section('inbound services');
   const t = setup({ init: baseInit({ inbound_exemptions: [{ proto: 'tcp', dport: 443, label: 'https' }] }), rpc: { inbound_add: { success: true }, inbound_del: { success: true } } });
@@ -1089,6 +1119,7 @@ async function scenarioHostileStrings() {
   await scenarioDisconnectAndCancel();
   await scenarioErrorState();
   await scenarioConnectedFamilies();
+  await scenarioLewes();
   await scenarioInbound();
   await scenarioSplit();
   await scenarioDns();

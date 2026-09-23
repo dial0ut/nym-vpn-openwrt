@@ -76,6 +76,8 @@ return baseclass.extend({
     .nym-connection-wrapper { display: flex; flex-direction: column; align-items: center; justify-content: center; padding-top: 20px; min-height: 44px; opacity: 0; visibility: hidden; transition: opacity 0.5s ease, visibility 0s linear 0.5s; pointer-events: none; }\
     .nym-status-hero.connected .nym-connection-wrapper, .nym-status-hero.disconnecting .nym-connection-wrapper { opacity: 1; visibility: visible; pointer-events: auto; transition: opacity 0.5s ease, visibility 0s linear; }\
     .nym-mode-label { font-size: 10px; text-transform: uppercase; letter-spacing: var(--label-spacing); color: var(--nym-green); opacity: 0.8; margin-bottom: 8px; }\
+    .nym-kex-label { font-size: 10px; letter-spacing: var(--label-spacing); color: var(--text-muted); margin-top: 8px; min-height: 12px; }\
+    .nym-kex-label.pq { color: var(--nym-green); }\
     .nym-connection-chain { display: flex; align-items: center; justify-content: center; padding-top: 0; gap: 0; margin: 0; }\
     .nym-chain-node { width: 14px; height: 14px; border-radius: 50%; background: var(--nym-green); opacity: 0.8; flex-shrink: 0; box-shadow: 0 0 6px var(--nym-green-glow); }\
     .nym-chain-line { width: 24px; height: 2px; opacity: 0.5; position: relative; overflow: hidden; }\
@@ -279,6 +281,7 @@ return baseclass.extend({
     /* No CT: an outlined tag like the reconnect tag, in the warning colour —\
        "not applicable while Circumvention Transports is on", not an error. */\
     .nym-gateway-ct-tag { flex-shrink: 0; font-size: 9px; line-height: 1; text-transform: uppercase; letter-spacing: var(--label-spacing); color: var(--warning); border: 1px solid var(--warning); border-radius: 4px; padding: 3px 5px 2px; white-space: nowrap; opacity: 0.9; }\
+    .nym-gateway-pq-tag { flex-shrink: 0; font-size: 9px; line-height: 1; text-transform: uppercase; letter-spacing: var(--label-spacing); color: var(--nym-green); border: 1px solid var(--nym-green); border-radius: 4px; padding: 3px 5px 2px; white-space: nowrap; opacity: 0.9; }\
     /* CT-incompatible: the text column dims, the status column keeps full\
        contrast so the reason is the most legible thing on the row. */\
     .nym-gateway-option.disabled { cursor: not-allowed; border-style: dashed; }\
