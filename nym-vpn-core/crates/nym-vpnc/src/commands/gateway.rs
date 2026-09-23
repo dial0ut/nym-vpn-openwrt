@@ -511,10 +511,17 @@ pub struct GatewayModel {
     pub build_version: String,
     #[tabled(rename = "Bridges")]
     pub bridges: String,
+    #[tabled(rename = "Lewes")]
+    pub lewes: String,
 }
 
 impl GatewayModel {
     fn new(gateway: nym_vpn_lib_types::Gateway, gw_type: GatewayType) -> Self {
+        let lewes = if gateway.advertises_lewes_protocol() {
+            "yes"
+        } else {
+            "no"
+        };
         Self {
             id: gateway.identity_key,
             name: gateway.name,
@@ -574,6 +581,7 @@ impl GatewayModel {
             } else {
                 "no".to_owned()
             },
+            lewes: lewes.to_owned(),
         }
     }
 }

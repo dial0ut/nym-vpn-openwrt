@@ -492,6 +492,16 @@ pub struct Gateway {
     pub node_family_name: Option<String>,
 }
 
+impl Gateway {
+    /// The gateway advertises the Lewes Protocol as enabled. A session uses it
+    /// only when both of its gateways do (the legacy registration otherwise).
+    pub fn advertises_lewes_protocol(&self) -> bool {
+        self.lewes_protocol_details
+            .as_ref()
+            .is_some_and(|details| details.content.enabled)
+    }
+}
+
 #[derive(Debug, Clone)]
 #[cfg_attr(
     feature = "typescript-bindings",
@@ -1082,5 +1092,44 @@ impl From<nym_vpn_api_client::response::QuicClientOptions> for QuicClientOptions
             host: value.host,
             id_pubkey: value.id_pubkey,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn gateway(lewes: Option<bool>) -> Gateway {
+        Gateway {
+            identity_key: "gw".to_owned(),
+            name: "gw".to_owned(),
+            description: None,
+            location: None,
+            last_probe: None,
+            mixnet_performance: None,
+            bridge_params: None,
+            performance: None,
+            exit_ipv4s: vec![],
+            exit_ipv6s: vec![],
+            build_version: None,
+            lewes_protocol_details: lewes.map(|enabled| LewesProtocolDetails {
+                content: LewesProtocolDetailsData {
+                    enabled,
+                    control_port: 41264,
+                    data_port: 51264,
+                    x25519: String::new(),
+                    kem_keys: HashMap::new(),
+                },
+                signature: String::new(),
+            }),
+            node_family_name: None,
+        }
+    }
+
+    #[test]
+    fn lewes_is_advertised_only_when_enabled() {
+        assert!(gateway(Some(true)).advertises_lewes_protocol());
+        assert!(!gateway(Some(false)).advertises_lewes_protocol());
+        assert!(!gateway(None).advertises_lewes_protocol());
     }
 }
