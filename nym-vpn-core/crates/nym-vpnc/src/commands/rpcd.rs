@@ -400,7 +400,8 @@ fn gateway_json(gw: &Gateway, gw_type: GatewayType) -> Value {
         "performance": performance_string(gw, gw_type),
         "bridges": gw.bridge_params.is_some(),
         "family": gw.node_family_name,
-        "lewes": gw.advertises_lewes_protocol(),
+        // Mixnet registration never uses it, whatever the gateway offers.
+        "lewes": gw_type == GatewayType::Wg && gw.advertises_lewes_protocol(),
     })
 }
 
@@ -3674,5 +3675,23 @@ nym-vpn.broken.mac='11:22:33:44:55:66'
         assert_eq!(v["bridges"], false);
         assert_eq!(v["lewes"], false);
         assert!(v["performance"].as_str().unwrap().starts_with("High"));
+    }
+
+    #[test]
+    fn lewes_is_reported_for_two_hop_lists_only() {
+        let mut gw = gateway("idL", "gw-l", Some("NL"), Score::High);
+        gw.lewes_protocol_details = Some(nym_vpn_lib_types::LewesProtocolDetails {
+            content: nym_vpn_lib_types::LewesProtocolDetailsData {
+                enabled: true,
+                control_port: 41264,
+                data_port: 51264,
+                x25519: String::new(),
+                kem_keys: Default::default(),
+            },
+            signature: String::new(),
+        });
+        assert_eq!(gateway_json(&gw, GatewayType::Wg)["lewes"], true);
+        assert_eq!(gateway_json(&gw, GatewayType::MixnetEntry)["lewes"], false);
+        assert_eq!(gateway_json(&gw, GatewayType::MixnetExit)["lewes"], false);
     }
 }

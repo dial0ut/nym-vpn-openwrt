@@ -517,10 +517,11 @@ pub struct GatewayModel {
 
 impl GatewayModel {
     fn new(gateway: nym_vpn_lib_types::Gateway, gw_type: GatewayType) -> Self {
-        let lewes = if gateway.advertises_lewes_protocol() {
-            "yes"
-        } else {
-            "no"
+        // Mixnet registration never uses it, whatever the gateway offers.
+        let lewes = match gw_type {
+            GatewayType::Wg if gateway.advertises_lewes_protocol() => "yes",
+            GatewayType::Wg => "no",
+            GatewayType::MixnetEntry | GatewayType::MixnetExit => "-",
         };
         Self {
             id: gateway.identity_key,
