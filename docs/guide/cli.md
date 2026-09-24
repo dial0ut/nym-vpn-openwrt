@@ -26,6 +26,10 @@ nym-vpnc gateway tentative                 # the pair a connect would pick right
 `gateway list` shows each gateway's operator **family** (node family) when it has declared one,
 and `status` names the family of the entry and exit while connected.
 
+The `Lewes` column says whether a gateway offers the Lewes protocol (post-quantum key exchange);
+it is `-` in mixnet lists, which never use it. While connected in two-hop mode, `status` prints
+`Key exchange: Lewes protocol (post-quantum)` or `Key exchange: standard` for the session.
+
 ### Gateway independence
 
 A two-hop tunnel only hides who talks to whom if the entry and the exit are run by unrelated

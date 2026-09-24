@@ -5,7 +5,9 @@ Your router's IP (usually `http://192.168.1.1`), then **NymVPN** in the navigati
 The main view shows a connection status ring (green connected, pulsing connecting, grey
 disconnected), uptime since the tunnel came up, and the hop chain through entry and exit gateways.
 While connected, each gateway also shows its operator family when the directory knows one; if
-entry and exit turn out to share a family, both are marked **Same operator family** in amber.
+entry and exit turn out to share a family, both are marked **Same operator family** in amber. In
+two-hop mode the line under the hop chain says which key exchange the session used (see
+[Gateway Tags](#gateway-tags)).
 
 While disconnected, the two side panels are the gateway pickers — entry on one side, exit on the
 other. Choose a country (the dropdown shows how many gateways each has, or **Random**), then a row
@@ -14,11 +16,31 @@ to NymVPN; each row below is one gateway, showing its name, a performance tier �
 `MEDIUM`, `LOW`, `OFFLINE` or `N/A`, with a green / amber / red / grey dot — its current load, its
 24-hour uptime, its city, and, when known, its operator family, so you can avoid picking two
 servers from the same operator by hand. Rows are sorted best tier first; the selected row is
-outlined in green.
+outlined in green. Some rows carry a small tag; the ⓘ button beside the gateway count under the
+list explains them, and so does [Gateway Tags](#gateway-tags).
 
 Below the connection panel the settings come as expandable cards, in this order: **Tunnel
 Settings**, **Split Tunneling**, **Mixnet Tuning**, **DNS & Ad Blocking**, **Account**, **Service
 Management**, **Diagnostics**, **Daemon Logs**.
+
+## Gateway Tags
+
+The column on the right of a gateway row can show:
+
+- **Tier** — `HIGH`, `MEDIUM`, `LOW`, `OFFLINE`, or `N/A` when unknown, with a green / amber /
+  red / grey dot: the directory's performance score for the gateway. The line under the name gives
+  its load, 24-hour uptime and city.
+- **`No CT`**, amber — the gateway cannot carry
+  [Circumvention Transports](#circumvention-transports). While that switch is on it sinks to the
+  bottom of the list, greyed out, and cannot be picked.
+- **`No PQ`**, grey — the gateway does not offer the Lewes protocol. A two-hop connection
+  registers over Lewes, and so gets a post-quantum key exchange, only when both of its gateways
+  offer it; through this one it uses the standard key exchange instead. Mixnet lists never show
+  the tag, because the mixnet does not use Lewes.
+
+While connected in two-hop mode, the connection panel says under the hop chain which key exchange
+the session actually used: **Post-quantum key exchange** or **Standard key exchange**.
+`nym-vpnc status` prints the same as `Key exchange:`.
 
 ## Tunnel Settings
 
