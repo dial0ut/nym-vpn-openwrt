@@ -400,8 +400,9 @@ fn gateway_json(gw: &Gateway, gw_type: GatewayType) -> Value {
         "performance": performance_string(gw, gw_type),
         "bridges": gw.bridge_params.is_some(),
         "family": gw.node_family_name,
-        // Mixnet registration never uses it, whatever the gateway offers.
-        "lewes": gw_type == GatewayType::Wg && gw.advertises_lewes_protocol(),
+        // Null for mixnet lists: that registration never uses it, whatever
+        // the gateway offers. The UI tags the two-hop exceptions (false).
+        "lewes": (gw_type == GatewayType::Wg).then(|| gw.advertises_lewes_protocol()),
     })
 }
 
@@ -3673,7 +3674,7 @@ nym-vpn.broken.mac='11:22:33:44:55:66'
         assert_eq!(v["name"], "gw-x");
         assert_eq!(v["country"], "NL");
         assert_eq!(v["bridges"], false);
-        assert_eq!(v["lewes"], false);
+        assert!(v["lewes"].is_null(), "mixnet list: not applicable");
         assert!(v["performance"].as_str().unwrap().starts_with("High"));
     }
 
@@ -3691,7 +3692,9 @@ nym-vpn.broken.mac='11:22:33:44:55:66'
             signature: String::new(),
         });
         assert_eq!(gateway_json(&gw, GatewayType::Wg)["lewes"], true);
-        assert_eq!(gateway_json(&gw, GatewayType::MixnetEntry)["lewes"], false);
-        assert_eq!(gateway_json(&gw, GatewayType::MixnetExit)["lewes"], false);
+        assert!(gateway_json(&gw, GatewayType::MixnetEntry)["lewes"].is_null());
+        assert!(gateway_json(&gw, GatewayType::MixnetExit)["lewes"].is_null());
+        gw.lewes_protocol_details = None;
+        assert_eq!(gateway_json(&gw, GatewayType::Wg)["lewes"], false);
     }
 }
