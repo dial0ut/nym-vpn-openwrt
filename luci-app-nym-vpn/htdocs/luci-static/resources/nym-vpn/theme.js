@@ -281,7 +281,8 @@ return baseclass.extend({
     /* No CT: an outlined tag like the reconnect tag, in the warning colour —\
        "not applicable while Circumvention Transports is on", not an error. */\
     .nym-gateway-ct-tag { flex-shrink: 0; font-size: 9px; line-height: 1; text-transform: uppercase; letter-spacing: var(--label-spacing); color: var(--warning); border: 1px solid var(--warning); border-radius: 4px; padding: 3px 5px 2px; white-space: nowrap; opacity: 0.9; }\
-    .nym-gateway-pq-tag { flex-shrink: 0; font-size: 9px; line-height: 1; text-transform: uppercase; letter-spacing: var(--label-spacing); color: var(--nym-green); border: 1px solid var(--nym-green); border-radius: 4px; padding: 3px 5px 2px; white-space: nowrap; opacity: 0.9; }\
+    .nym-gateway-nopq-tag { flex-shrink: 0; font-size: 9px; line-height: 1; text-transform: uppercase; letter-spacing: var(--label-spacing); color: var(--text-muted); border: 1px solid var(--text-muted); border-radius: 4px; padding: 3px 5px 2px; white-space: nowrap; opacity: 0.9; }\
+    .nym-gateway-list-footer { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); margin-top: 8px; }\
     /* CT-incompatible: the text column dims, the status column keeps full\
        contrast so the reason is the most legible thing on the row. */\
     .nym-gateway-option.disabled { cursor: not-allowed; border-style: dashed; }\

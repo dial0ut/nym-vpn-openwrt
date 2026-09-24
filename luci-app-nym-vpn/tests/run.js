@@ -664,14 +664,31 @@ async function scenarioLewes() {
   await t3.poll.fire(5);
   check(q(t3, '.nym-kex-label').textContent === '', 'cleared on disconnect');
 
-  const gws = GATEWAYS.map((g) => Object.assign({}, g, { lewes: g.id === 'A1' }));
+  // Two-hop lists send lewes true/false: only the exceptions are tagged.
+  const gws = GATEWAYS.map((g) => Object.assign({}, g, { lewes: g.id !== 'A2' }));
   const t4 = setup({ rpc: { gateway_list_full: { gateways: gws } } });
   await pickGateways(t4);
-  const tags = qa(t4, '.nym-gateway-pq-tag');
+  const tags = qa(t4, '.nym-gateway-nopq-tag');
   const tagged = tags.map((el) => el.closest('.nym-gateway-option').querySelector('.nym-gateway-option-name').textContent);
-  check(tagged.length > 0 && tagged.every((n) => n === 'alpha-entry') && tags.every((el) => el.parentNode.classList.contains('nym-gateway-option-status') && el.title.length > 0), 'PQ tag only on gateways offering Lewes, in the status column, with a title');
+  check(tagged.length > 0 && tagged.every((n) => n === 'alpha-two') && tags.every((el) => el.textContent === 'No PQ' && el.parentNode.classList.contains('nym-gateway-option-status') && el.title.length > 0), 'No PQ only on the gateway without Lewes, in the status column, with a title');
+  // Mixnet lists send null: never tagged.
+  const t5 = setup({ rpc: { gateway_list_full: { gateways: GATEWAYS.map((g) => Object.assign({}, g, { lewes: null })) } } });
+  await pickGateways(t5);
+  check(qa(t5, '.nym-gateway-nopq-tag').length === 0, 'null (mixnet list): no No PQ tag');
+
+  // The tags are explained under the list.
+  const footer = q(t4, '.nym-gateway-list-footer');
+  const btn = footer && footer.querySelector('.nym-info-btn');
+  const panel = btn && t4.container.ownerDocument.getElementById(btn.getAttribute('aria-controls'));
+  check(!!btn && !!panel && panel.hidden, 'legend: (i) button beside the gateway count, closed by default');
+  btn.click();
+  check(!panel.hidden && /No CT:/.test(panel.textContent) && /No PQ:/.test(panel.textContent) && /performance tier/.test(panel.textContent), 'legend explains the tier, No CT and No PQ');
+  const more = panel.querySelector('a.nym-learn-more');
+  check(more && /#gateway-tags$/.test(more.getAttribute('href')), 'legend links to the Gateway tags docs section');
+  const ids = qa(t4, '.nym-gateway-list-footer .nym-info-btn').map((b) => b.getAttribute('aria-controls'));
+  check(new Set(ids).size === ids.length, 'one legend per picker, unique panel ids: ' + JSON.stringify(ids));
   const css = t4.modules['nym-vpn.theme'].css;
-  check(/\.nym-gateway-pq-tag \{[^}]*flex-shrink: 0/.test(css) && /\.nym-kex-label\.pq \{/.test(css), 'theme styles the tag and the label');
+  check(/\.nym-gateway-nopq-tag \{[^}]*flex-shrink: 0/.test(css) && /\.nym-kex-label\.pq \{/.test(css), 'theme styles the tag and the label');
 }
 
 async function scenarioInbound() {

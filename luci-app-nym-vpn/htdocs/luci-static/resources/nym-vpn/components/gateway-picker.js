@@ -2,12 +2,13 @@
 'require baseclass';
 'require dom';
 'require nym-vpn.countries as countries';
+'require nym-vpn.components.details as details';
 
 // The two gateway pickers (entry and exit): a country dropdown filled on
 // first focus, a per-country server list (one ledger row per gateway: name
 // and a telemetry line on the left, a fixed status column with the tier and
-// the No CT marker on the right), and the restore of the daemon's saved
-// selection after a disconnect.
+// the No CT / No PQ markers on the right, explained by an (i) legend under the
+// list), and the restore of the daemon's saved selection after a disconnect.
 
 var E = dom.create.bind(dom);
 
@@ -191,11 +192,11 @@ return baseclass.extend({
                             'title': row.perf.raw
                         }, [row.perf.label]));
                     }
-                    if (row.lewes) {
+                    if (row.noPq) {
                         status.push(E('span', {
-                            'class': 'nym-gateway-pq-tag',
-                            'title': 'Offers post-quantum key exchange (Lewes protocol); used when both gateways do'
-                        }, 'PQ'));
+                            'class': 'nym-gateway-nopq-tag',
+                            'title': 'No post-quantum key exchange: this gateway does not offer the Lewes protocol'
+                        }, 'No PQ'));
                     }
                     if (row.noCt) {
                         status.push(E('span', {
@@ -253,7 +254,8 @@ return baseclass.extend({
                         value: gw.id || '',
                         disabled: ctIncompatible,
                         noCt: ctIncompatible,
-                        lewes: gw.lewes === true,
+                        // False only on two-hop lists; mixnet lists send null.
+                        noPq: gw.lewes === false,
                         perf: parsePerformance(gw.performance),
                         city: city,
                         family: family,
@@ -261,11 +263,24 @@ return baseclass.extend({
                     }));
                 });
 
+                var legend = details.create({
+                    id: 'gateway-tags-' + (container.getAttribute('data-side') || 'list'),
+                    label: 'the gateway tags',
+                    text: [
+                        E('div', {}, ['HIGH, MEDIUM, LOW and OFFLINE are the gateway\'s performance tier; the line under the name shows its load, 24-hour uptime and city.']),
+                        E('div', {}, ['No CT: cannot carry Circumvention Transports, so it cannot be picked while that switch is on.']),
+                        E('div', {}, ['No PQ: does not offer the Lewes protocol, so a connection through it uses the standard key exchange instead of the post-quantum one.'])
+                    ],
+                    docs: 'gateway-tags'
+                });
                 dom.content(container, [
                     E('label', { 'class': 'nym-form-label' }, 'Gateway'),
                     gatewayList,
-                    E('div', { 'style': 'font-size: 11px; color: var(--text-muted); margin-top: 8px' },
-                        result.gateways.length + ' gateways available')
+                    E('div', { 'class': 'nym-gateway-list-footer' }, [
+                        E('span', {}, [result.gateways.length + ' gateways available']),
+                        legend.button
+                    ]),
+                    legend.panel
                 ]);
             }).catch(function(err) {
                 dom.content(container, E('div', { 'class': 'nym-gateway-loading', 'style': 'color: var(--danger)' },
@@ -282,7 +297,8 @@ return baseclass.extend({
             // 'change' only fires on user interaction (radio clicks bubble;
             // programmatic prefill doesn't), so it is exactly the dirty
             // signal we want.
-            side.list = E('div', { 'class': 'nym-form-group', 'style': 'margin-bottom: 0', 'change': markDirty },
+            side.list = E('div', { 'class': 'nym-form-group', 'style': 'margin-bottom: 0', 'change': markDirty,
+                'data-side': selectName.split('_')[0] },
                 E('div', { 'class': 'nym-gateway-loading' }, 'Select a country'));
             return side;
         };
