@@ -10,7 +10,7 @@ use std::{
 use nym_offline_monitor::ConnectivityHandle;
 use nym_sdk::mixnet::NodeIdentity;
 use strum::IntoEnumIterator;
-use tokio::task::JoinHandle;
+use tokio::task::{Id as TaskId, JoinError, JoinHandle, JoinSet};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -21,12 +21,17 @@ use crate::{
 /// The maximum age of the cache before it is considered stale.
 const MAX_CACHE_AGE: Duration = Duration::from_secs(5 * 60);
 
+/// A stale list is still served, while a background fetch replaces it, until
+/// it reaches this age. A pick from a slightly old list costs at most one
+/// reconnect; a blocking fetch costs every connect.
+const MAX_STALE_SERVE_AGE: Duration = Duration::from_secs(30 * 60);
+
 /// How often to check for (and re-fetch) stale gateway lists in the
-/// background. Without this, a stale list is only refreshed inline on the
-/// next lookup, which makes the caller (e.g. the LuCI gateway picker) block
-/// on a full directory fetch — over the tunnel when connected. The check is
-/// a no-op while every list is fresh, so the effective refresh rate stays
-/// MAX_CACHE_AGE per list type.
+/// background. Without this, a stale list is only refreshed on the next
+/// lookup, and past MAX_STALE_SERVE_AGE that makes the caller (e.g. the LuCI
+/// gateway picker) block on a full directory fetch — over the tunnel when
+/// connected. The check is a no-op while every list is fresh, so the
+/// effective refresh rate stays MAX_CACHE_AGE per list type.
 const REFRESH_CHECK_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Only lists that were looked up within this window are kept warm by the
@@ -35,6 +40,28 @@ const REFRESH_CHECK_INTERVAL: Duration = Duration::from_secs(60);
 /// lists never go stale, and a router nobody is looking at does zero
 /// background directory fetches.
 const LOOKUP_INTEREST_WINDOW: Duration = Duration::from_secs(30 * 60);
+
+/// How a lookup treats a cached list of a given age.
+#[derive(Debug, PartialEq, Eq)]
+enum LookupAction {
+    UseCached,
+    /// Answer from the cache and refresh it in the background.
+    ServeStaleAndRefresh,
+    /// Too old to serve: fetch before answering.
+    FetchInline,
+}
+
+impl LookupAction {
+    fn for_age(age: Duration) -> Self {
+        if age < MAX_CACHE_AGE {
+            Self::UseCached
+        } else if age < MAX_STALE_SERVE_AGE {
+            Self::ServeStaleAndRefresh
+        } else {
+            Self::FetchInline
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct GatewayCacheHandle {
@@ -227,6 +254,14 @@ pub struct GatewayCache {
     // refresh (see LOOKUP_INTEREST_WINDOW)
     lookup_interest: HashMap<GatewayType, Instant>,
 
+    // Background fetches of stale lists. The run loop stores their results,
+    // so no command waits on them
+    background_refreshes: JoinSet<Result<GatewayList>>,
+
+    // The list type each background fetch is for, keyed by task so a failed
+    // task still clears its entry
+    refreshing: HashMap<TaskId, GatewayType>,
+
     // The cached full node list (with nr_address) for SOCKS5
     cached_nymnodes: Option<(NymNodeList, Instant)>,
 
@@ -254,6 +289,8 @@ impl GatewayCache {
             command_rx,
             cached_gateways: HashMap::default(),
             lookup_interest: HashMap::default(),
+            background_refreshes: JoinSet::new(),
+            refreshing: HashMap::default(),
             cached_nymnodes: None,
             is_performed_initial_refresh: false,
             shutdown_token,
@@ -278,6 +315,9 @@ impl GatewayCache {
                     // cache. Offline-gated, and a no-op while everything is
                     // fresh or nobody has asked lately.
                     self.refresh_recently_used().await;
+                }
+                Some(joined) = self.background_refreshes.join_next_with_id() => {
+                    self.store_background_refresh(joined);
                 }
                 Some(cmd) = self.command_rx.recv() => {
                     match cmd {
@@ -341,6 +381,7 @@ impl GatewayCache {
         if new_config.min_gateway_performance() != old_config.min_gateway_performance() {
             self.cached_gateways.clear();
             self.cached_nymnodes = None;
+            self.cancel_background_refreshes();
         }
     }
 
@@ -348,6 +389,7 @@ impl GatewayCache {
         tracing::debug!("Clearing gateway cache due to environment change");
         self.cached_gateways.clear();
         self.cached_nymnodes = None;
+        self.cancel_background_refreshes();
         // Reset the initial refresh flag so we fetch fresh data
         self.is_performed_initial_refresh = false;
     }
@@ -379,8 +421,70 @@ impl GatewayCache {
 
         if !gw_types.is_empty() {
             tracing::debug!("Background-refreshing recently used gateway lists: {gw_types:?}");
-            self.refresh(gw_types).await;
+            self.spawn_background_refreshes(&gw_types).await;
         }
+    }
+
+    /// Start a background fetch for each of `gw_types` not already being
+    /// fetched. Results land via the run loop, so the caller never waits.
+    async fn spawn_background_refreshes(&mut self, gw_types: &[GatewayType]) {
+        let gw_types: Vec<GatewayType> = gw_types
+            .iter()
+            .copied()
+            .filter(|gw_type| !self.refreshing.values().any(|t| t == gw_type))
+            .collect();
+        if gw_types.is_empty() {
+            return;
+        }
+
+        if self.connectivity_handle.connectivity().await.is_offline() {
+            tracing::debug!("Not refreshing gateways because we are not connected");
+            return;
+        }
+
+        for gw_type in gw_types {
+            let client = self.gateway_client.clone();
+            let task = self
+                .background_refreshes
+                .spawn(async move { client.lookup_gateways(gw_type).await });
+            self.refreshing.insert(task.id(), gw_type);
+        }
+    }
+
+    fn store_background_refresh(
+        &mut self,
+        joined: std::result::Result<(TaskId, Result<GatewayList>), JoinError>,
+    ) {
+        let (task_id, result) = match joined {
+            Ok(done) => done,
+            Err(err) => {
+                self.refreshing.remove(&err.id());
+                tracing::error!("Background gateway refresh task failed: {err}");
+                return;
+            }
+        };
+        let Some(gw_type) = self.refreshing.remove(&task_id) else {
+            return;
+        };
+
+        match result {
+            Ok(refreshed_gateways) => {
+                tracing::debug!("Refreshed gateways for {gw_type:?} in the background");
+                self.cached_gateways
+                    .insert(gw_type, (refreshed_gateways, Instant::now()));
+            }
+            Err(err) => {
+                tracing::debug!("Failed to refresh gateways for {gw_type:?}: {err}");
+            }
+        }
+    }
+
+    /// Abandon in-flight background fetches, so one made with a replaced
+    /// client or environment can't repopulate a cleared cache.
+    fn cancel_background_refreshes(&mut self) {
+        // Dropping the set aborts its tasks
+        self.background_refreshes = JoinSet::new();
+        self.refreshing.clear();
     }
 
     async fn refresh(&mut self, gw_list_types: Vec<GatewayType>) {
@@ -391,7 +495,7 @@ impl GatewayCache {
 
         tracing::debug!("Refreshing gateway lists: {gw_list_types:?}");
 
-        let mut tasks = tokio::task::JoinSet::new();
+        let mut tasks = JoinSet::new();
 
         for gw_type in gw_list_types {
             let client = self.gateway_client.clone();
@@ -429,23 +533,54 @@ impl GatewayCache {
     }
 
     async fn refresh_gateways(&mut self, gw_type: GatewayType) -> Result<GatewayList> {
-        if let Some((gw_list, last_updated)) = self.cached_gateways.get(&gw_type)
-            && last_updated.elapsed() < MAX_CACHE_AGE
-        {
-            Ok(gw_list.clone())
-        } else {
-            if self.connectivity_handle.connectivity().await.is_offline() {
-                tracing::warn!("Not refreshing countries because we are not connected");
-                return Err(Error::Offline);
+        let Some((gw_list, last_updated)) = self.cached_gateways.get(&gw_type) else {
+            return self.fetch_gateways_inline(gw_type).await;
+        };
+
+        let age = last_updated.elapsed();
+        match LookupAction::for_age(age) {
+            LookupAction::UseCached => Ok(gw_list.clone()),
+            LookupAction::ServeStaleAndRefresh => {
+                let gw_list = gw_list.clone();
+                tracing::debug!(
+                    "Serving {gw_type:?} gateways aged {age:?}, refreshing in background"
+                );
+                self.spawn_background_refreshes(&[gw_type]).await;
+                Ok(gw_list)
             }
-
-            let refreshed_gateways = self.gateway_client.lookup_gateways(gw_type).await?;
-
-            self.cached_gateways
-                .insert(gw_type, (refreshed_gateways.clone(), Instant::now()));
-
-            Ok(refreshed_gateways)
+            LookupAction::FetchInline => self.fetch_gateways_inline(gw_type).await,
         }
+    }
+
+    /// Fetch a list the caller has to wait for. Timed, since on the connect
+    /// path this is the directory's share of the connect time.
+    async fn fetch_gateways_inline(&mut self, gw_type: GatewayType) -> Result<GatewayList> {
+        if self.connectivity_handle.connectivity().await.is_offline() {
+            tracing::warn!("Not refreshing countries because we are not connected");
+            return Err(Error::Offline);
+        }
+
+        let started = Instant::now();
+        let refreshed_gateways = self
+            .gateway_client
+            .lookup_gateways(gw_type)
+            .await
+            .inspect_err(|err| {
+                tracing::debug!(
+                    "Inline fetch of {gw_type:?} gateways failed after {:?}: {err}",
+                    started.elapsed()
+                );
+            })?;
+        tracing::info!(
+            "Fetched {} {gw_type:?} gateways inline in {:?}",
+            refreshed_gateways.len(),
+            started.elapsed()
+        );
+
+        self.cached_gateways
+            .insert(gw_type, (refreshed_gateways.clone(), Instant::now()));
+
+        Ok(refreshed_gateways)
     }
 
     async fn lookup_gateways(&mut self, gw_type: GatewayType) -> Result<GatewayList> {
@@ -590,5 +725,39 @@ impl GatewayCache {
         Err(Error::RequestedGatewayIdNotFound(
             identity.to_base58_string(),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lookup_action_by_age() {
+        let ms = Duration::from_millis(1);
+        assert_eq!(
+            LookupAction::for_age(Duration::ZERO),
+            LookupAction::UseCached
+        );
+        assert_eq!(
+            LookupAction::for_age(MAX_CACHE_AGE - ms),
+            LookupAction::UseCached
+        );
+        assert_eq!(
+            LookupAction::for_age(MAX_CACHE_AGE),
+            LookupAction::ServeStaleAndRefresh
+        );
+        assert_eq!(
+            LookupAction::for_age(MAX_STALE_SERVE_AGE - ms),
+            LookupAction::ServeStaleAndRefresh
+        );
+        assert_eq!(
+            LookupAction::for_age(MAX_STALE_SERVE_AGE),
+            LookupAction::FetchInline
+        );
+        assert_eq!(
+            LookupAction::for_age(Duration::from_secs(24 * 60 * 60)),
+            LookupAction::FetchInline
+        );
     }
 }
