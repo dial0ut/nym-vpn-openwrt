@@ -245,6 +245,16 @@ impl RequestingZkNymsState {
         shared_state: &mut SharedAccountState<C>,
         zknym_result: Result<Result<ZkNymFetchResult, ZkNymError>, JoinError>,
     ) -> NextAccountControllerState<C> {
+        if !matches!(
+            zknym_result,
+            Ok(Ok(
+                ZkNymFetchResult::SufficientBandwidth | ZkNymFetchResult::FetchedTickets { .. }
+            ))
+        ) {
+            // Without tickets in hand the account is no longer vouched for; the
+            // ReadyState fallbacks below validate it afresh.
+            shared_state.last_validated.send_replace(None);
+        }
         let join_result = match zknym_result {
             Ok(join_result) => join_result,
             Err(err) => {
@@ -396,7 +406,17 @@ impl RequestingZkNymsState {
                 shared_state.refresh_mode = mode;
             }
             AccountCommand::Common(common_command) => {
-                common_handler::handle_common_command(common_command, shared_state).await
+                let restart = self.zk_nym_fetching_handle.is_some()
+                    && common_handler::changes_api_path(&common_command, shared_state);
+                common_handler::handle_common_command(common_command, shared_state).await;
+                if restart {
+                    self.abort_fetch();
+                    return NextAccountControllerState::NewState(RequestingZkNymsState::enter(
+                        shared_state,
+                        self.attempts,
+                        self.entered_through_upgrade_mode,
+                    ));
+                }
             }
             AccountCommand::UpgradeMode(upgrade_mode_command) => match upgrade_mode_command {
                 UpgradeModeCommand::GetUpgradeModeEnabled(return_sender) => {

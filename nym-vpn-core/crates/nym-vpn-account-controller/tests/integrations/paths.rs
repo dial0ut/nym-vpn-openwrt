@@ -7,6 +7,7 @@ use crate::common::{
     TestBench, account_summary::*, credential_proxy::MockCredentialProxy, endpoints, nyxd_endpoints,
 };
 
+use futures::FutureExt;
 use nym_vpn_api_client::response::NymVpnDeviceStatus;
 use nym_vpn_lib_types::{AccountControllerErrorStateReason, AccountControllerState};
 use wiremock::Mock;
@@ -373,7 +374,117 @@ fn slow_ready_to_connect_mocks(credential_proxy: MockCredentialProxy) -> Vec<Moc
     ]
 }
 
+#[tokio::test]
+async fn recent_validation_does_not_hold_up_a_connect() -> anyhow::Result<()> {
+    let mut test_bench = TestBench::new().await?;
+    let mocks = slow_ready_to_connect_mocks(test_bench.credential_proxy.clone());
+    test_bench.register_vpn_api_mocks(mocks).await;
 
+    test_bench.store_mock_account().await?;
+    test_bench
+        .assert_state(AccountControllerState::ReadyToConnect)
+        .await;
+
+    // What a connect does: refresh, then firewall the VPN API mid-sync.
+    assert_eq!(
+        test_bench
+            .command_sender
+            .background_refresh_account_state()
+            .await,
+        Ok(())
+    );
+    assert_eq!(
+        test_bench.command_sender.set_vpn_api_firewall_up().await,
+        Ok(())
+    );
+    assert_eq!(
+        test_bench.state_receiver.get_state(),
+        AccountControllerState::Syncing
+    );
+
+    let mut state_receiver = test_bench.state_receiver.clone();
+    assert_eq!(
+        state_receiver
+            .wait_for_account_ready_to_connect()
+            .now_or_never(),
+        Some(Ok(()))
+    );
+
+    // A new device identity hasn't been validated yet.
+    assert_eq!(
+        test_bench.command_sender.reset_device_identity(None).await,
+        Ok(())
+    );
+    assert!(
+        state_receiver
+            .wait_for_account_ready_to_connect()
+            .now_or_never()
+            .is_none()
+    );
+
+    assert_eq!(
+        test_bench.command_sender.set_vpn_api_firewall_down().await,
+        Ok(())
+    );
+    let ready = tokio::time::timeout(
+        Duration::from_secs(10),
+        state_receiver.wait_for_account_ready_to_connect(),
+    )
+    .await?;
+    assert_eq!(ready, Ok(()));
+    assert_eq!(
+        test_bench.state_receiver.get_state(),
+        AccountControllerState::ReadyToConnect
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn failed_recheck_holds_up_a_connect() -> anyhow::Result<()> {
+    let mut test_bench = TestBench::new().await?;
+    let mocks = slow_ready_to_connect_mocks(test_bench.credential_proxy.clone());
+    test_bench.register_vpn_api_mocks(mocks).await;
+
+    test_bench.store_mock_account().await?;
+    test_bench
+        .assert_state(AccountControllerState::ReadyToConnect)
+        .await;
+
+    test_bench.vpn_api_server.reset().await;
+    test_bench
+        .register_vpn_api_mocks(vec![
+            endpoints::desynced_health(),
+            endpoints::account_summary_with_device_200(account_ready_to_connect()),
+        ])
+        .await;
+
+    let mut state_watcher = test_bench.state_receiver.subscribe();
+    state_watcher.borrow_and_update();
+    assert_eq!(
+        test_bench
+            .command_sender
+            .background_refresh_account_state()
+            .await,
+        Ok(())
+    );
+    // Entering Syncing, then the retry after the failed sync.
+    for _ in 0..2 {
+        tokio::time::timeout(Duration::from_secs(10), state_watcher.changed()).await??;
+    }
+    assert_eq!(
+        test_bench.state_receiver.get_state(),
+        AccountControllerState::Syncing
+    );
+
+    let mut state_receiver = test_bench.state_receiver.clone();
+    assert!(
+        state_receiver
+            .wait_for_account_ready_to_connect()
+            .now_or_never()
+            .is_none()
+    );
+    Ok(())
+}
 
 #[tokio::test]
 async fn firewall_toggles_do_not_back_off_the_sync() -> anyhow::Result<()> {
@@ -416,5 +527,48 @@ async fn firewall_toggles_do_not_back_off_the_sync() -> anyhow::Result<()> {
             Duration::from_secs(3),
         )
         .await;
+    Ok(())
+}
+
+fn health_requests(requests: &[wiremock::Request]) -> usize {
+    requests
+        .iter()
+        .filter(|request| request.url.path() == "/public/v1/health")
+        .count()
+}
+
+#[tokio::test]
+async fn path_change_restarts_the_sync_in_flight() -> anyhow::Result<()> {
+    let mut test_bench = TestBench::new().await?;
+    let mocks = slow_ready_to_connect_mocks(test_bench.credential_proxy.clone());
+    test_bench.register_vpn_api_mocks(mocks).await;
+
+    test_bench.store_mock_account().await?;
+    test_bench
+        .assert_state(AccountControllerState::ReadyToConnect)
+        .await;
+    let before = health_requests(&test_bench.vpn_api_server.received_requests().await.unwrap());
+
+    assert_eq!(
+        test_bench
+            .command_sender
+            .background_refresh_account_state()
+            .await,
+        Ok(())
+    );
+    // The tunnel came up while the health check was in flight.
+    assert_eq!(
+        test_bench.command_sender.set_resolver_overrides(None).await,
+        Ok(())
+    );
+    test_bench
+        .assert_state_within(
+            AccountControllerState::ReadyToConnect,
+            Duration::from_secs(10),
+        )
+        .await;
+
+    let after = health_requests(&test_bench.vpn_api_server.received_requests().await.unwrap());
+    assert_eq!(after - before, 2, "the sync restarts on the new client");
     Ok(())
 }

@@ -276,6 +276,10 @@ impl<C: ConnectivityMonitor> AccountControllerStateHandler<C> for SyncingState {
                 NextAccountControllerState::Finished
             }
             syncing_result = join_task(&mut self.syncing_state_handle) => {
+                if !matches!(syncing_result, Ok(SyncOutcome { result: Ok(()), .. })) {
+                    // A failed re-check no longer vouches for the account.
+                    shared_state.last_validated.send_replace(None);
+                }
                 match syncing_result {
                     Ok(outcome) => {
                         if let Some(vpn_account_summary) = outcome.summary {
@@ -370,7 +374,13 @@ impl<C: ConnectivityMonitor> AccountControllerStateHandler<C> for SyncingState {
                     },
 
                     AccountCommand::Common(common_command) => {
-                        common_handler::handle_common_command(common_command, shared_state).await
+                        let restart = self.syncing_state_handle.is_some()
+                            && common_handler::changes_api_path(&common_command, shared_state);
+                        common_handler::handle_common_command(common_command, shared_state).await;
+                        if restart {
+                            self.abort_sync();
+                            return NextAccountControllerState::NewState(SyncingState::enter(shared_state, self.attempts));
+                        }
                     },
                     AccountCommand::UpgradeMode(upgrade_mode_command) => match upgrade_mode_command {
                         UpgradeModeCommand::GetUpgradeModeEnabled(return_sender) => {

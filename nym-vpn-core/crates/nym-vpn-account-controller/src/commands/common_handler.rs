@@ -198,6 +198,18 @@ fn keeps_client(current: Option<&ResolverOverrides>, new: Option<&ResolverOverri
     new.is_some() && new == current
 }
 
+/// Whether handling `command` swaps the VPN API client for one on a new
+/// network path. A request already in flight keeps the old path's source
+/// address, and once the routes have moved it hangs until its timeout; the
+/// caller restarts it on the new client instead.
+pub(crate) fn changes_api_path<C: ConnectivityMonitor>(
+    command: &CommonCommand,
+    shared_state: &SharedAccountState<C>,
+) -> bool {
+    matches!(command, CommonCommand::SetResolverOverrides(_, new)
+        if !keeps_client(shared_state.resolver_overrides.as_ref(), new.as_ref()))
+}
+
 pub(crate) async fn handle_get_account_summary<C: ConnectivityMonitor>(
     shared_state: &mut SharedAccountState<C>,
 ) -> Result<Option<VpnAccountSummary>, AccountCommandError> {

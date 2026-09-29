@@ -147,7 +147,10 @@ where
 
     /// Get the channel used to keep track of the controller state.
     pub fn get_state_receiver(&self) -> AccountStateReceiver {
-        AccountStateReceiver::new(self.state_channel.1.clone())
+        AccountStateReceiver::new(
+            self.state_channel.1.clone(),
+            self.shared_state.last_validated.subscribe(),
+        )
     }
 
     /// Get the wireguard keys database storage
@@ -200,6 +203,14 @@ where
             match next_state {
                 NextAccountControllerState::NewState((new_state_handler, new_state)) => {
                     self.current_state_handler = new_state_handler;
+
+                    // Ahead of the state, so no reader pairs it with a stale validation.
+                    let was_ready =
+                        *self.state_channel.0.borrow() == AccountControllerState::ReadyToConnect;
+                    let last_validated = *self.shared_state.last_validated.borrow();
+                    self.shared_state
+                        .last_validated
+                        .send_replace(new_state.next_validation(was_ready, last_validated));
 
                     let state = AccountControllerState::from(new_state);
                     tracing::info!("New AccountController state: {}", state);
