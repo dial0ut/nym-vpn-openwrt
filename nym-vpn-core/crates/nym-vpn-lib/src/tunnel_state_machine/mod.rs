@@ -997,7 +997,12 @@ impl SharedState {
 
     /// The one path that updates the allow-list, so cache and memory agree.
     fn adopt_resolved_api_endpoints(&mut self, resolved: &ResolvedConfig) {
-        self.api_endpoints = resolved.all_socket_addrs();
+        // Resolution order varies between runs; sorted, an unchanged set
+        // compiles to the same firewall rules and the re-apply is skipped.
+        let mut api_endpoints = resolved.all_socket_addrs();
+        api_endpoints.sort_unstable();
+        api_endpoints.dedup();
+        self.api_endpoints = api_endpoints;
         self.api_resolution = Some(resolved.clone());
         self.api_endpoints_resolved_at = Some(Instant::now());
         api_endpoints_cache::save(self.nym_config.data_path.as_deref(), &self.api_endpoints);

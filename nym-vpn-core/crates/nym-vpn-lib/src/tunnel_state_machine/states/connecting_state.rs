@@ -119,7 +119,9 @@ impl ConnectingState {
                     .as_ref()
                     .map(|v| v.entry_gateway().lp_endpoints())
                     .unwrap_or_default(),
-                api_endpoints: Vec::new(),
+                // Already admitted while disconnected; when the resolve below
+                // returns the same set, its re-apply is a no-op.
+                api_endpoints: shared_state.api_endpoints.clone(),
                 // Daemon resolvers plus any LAN custom resolver, admitted off-WAN.
                 dns_servers: shared_state.tunnel_settings.idle_dns_ips(),
                 tunnel_interface: None,
