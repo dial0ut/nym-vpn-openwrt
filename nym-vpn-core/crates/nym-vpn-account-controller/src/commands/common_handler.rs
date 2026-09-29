@@ -173,13 +173,29 @@ pub(crate) async fn handle_set_resolver_overrides<C: ConnectivityMonitor>(
     shared_state: &mut SharedAccountState<C>,
     resolver_overrides: Option<ResolverOverrides>,
 ) -> Result<(), AccountCommandError> {
+    if keeps_client(
+        shared_state.resolver_overrides.as_ref(),
+        resolver_overrides.as_ref(),
+    ) {
+        tracing::debug!("Resolver overrides unchanged, keeping the VPN API client");
+        return Ok(());
+    }
     shared_state
         .vpn_api_client
         .override_resolver(resolver_overrides.as_ref())
         .await
         .map_err(|e| {
             AccountCommandError::internal(format!("Failed to set resolver overrides: {e}"))
-        })
+        })?;
+    shared_state.resolver_overrides = resolver_overrides;
+    Ok(())
+}
+
+/// Unchanged pins keep the client and its warm connections. `None` always
+/// rebuilds: it comes with the tunnel going up or down, and connections
+/// pooled across that are dead.
+fn keeps_client(current: Option<&ResolverOverrides>, new: Option<&ResolverOverrides>) -> bool {
+    new.is_some() && new == current
 }
 
 pub(crate) async fn handle_get_account_summary<C: ConnectivityMonitor>(
@@ -232,4 +248,25 @@ pub(crate) async fn handle_get_master_verification_key<C: ConnectivityMonitor>(
         .get_master_verification_key(epoch_id)
         .await
         .map_err(|err| AccountCommandError::Storage(err.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pins(ip: [u8; 4]) -> ResolverOverrides {
+        ResolverOverrides::from_domain("nymvpn.com", [(ip, 443).into()])
+    }
+
+    #[test]
+    fn only_unchanged_pins_keep_the_client() {
+        let pins_a = pins([192, 0, 2, 1]);
+        let pins_b = pins([192, 0, 2, 2]);
+
+        assert!(keeps_client(Some(&pins_a), Some(&pins_a)));
+        assert!(!keeps_client(Some(&pins_a), Some(&pins_b)));
+        assert!(!keeps_client(None, Some(&pins_a)));
+        assert!(!keeps_client(Some(&pins_a), None));
+        assert!(!keeps_client(None, None));
+    }
 }

@@ -3,7 +3,7 @@
 
 use nym_offline_monitor::ConnectivityMonitor;
 use nym_vpn_api_client::{
-    VpnApiClient,
+    ResolverOverrides, VpnApiClient,
     types::{Device, VpnAccount},
 };
 use nym_vpn_lib_types::VpnAccountSummary;
@@ -38,6 +38,9 @@ pub(crate) struct SharedAccountState<C: ConnectivityMonitor> {
 
     /// VPN API client
     pub(crate) vpn_api_client: VpnApiClient,
+
+    /// Resolver overrides `vpn_api_client` was last rebuilt with
+    pub(crate) resolver_overrides: Option<ResolverOverrides>,
 
     /// Nyxd RPC client
     pub(crate) nyxd_client: NyxdClient,
@@ -89,6 +92,7 @@ impl<C: ConnectivityMonitor> SharedAccountState<C> {
             credential_storage,
             wireguard_keys_storage,
             vpn_api_client,
+            resolver_overrides: None,
             nyxd_client,
             vpn_api_account: vpn_api_account.map(Arc::new),
             vpn_account_summary: None,
