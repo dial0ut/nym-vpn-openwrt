@@ -48,7 +48,7 @@ enum DnsAccess {
 
 /// What the forward returns, the private-DNS accepts and the exemption
 /// mangle rules need to know about the uplink. Tests inject it; [`compile`]
-/// probes the system.
+/// probes the system, the WAN zone memoized for [`common::PROBE_TTL`].
 pub(crate) struct Uplink<'a> {
     /// L3 devices of every WAN zone ([`common::wan_zone_devices`]). Empty
     /// means unknown: the private-DNS and exemption rules fail closed, and
