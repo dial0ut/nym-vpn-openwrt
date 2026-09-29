@@ -39,6 +39,7 @@ use nym_vpn_lib_types::{
 };
 use nym_vpn_store::keys::wireguard::WireguardKeysDb;
 
+use super::lp_registration::ParallelLpRegistration;
 use super::route_handler::{RouteHandler, RoutingConfig};
 use super::tun_ipv6;
 use super::tunnel::wireguard::connected_tunnel::TunTunTunnelOptions;
@@ -579,11 +580,18 @@ impl TunnelMonitor {
         // Setup shutdown guard to cancel pending tasks that otherwise may continue running upon return
         let shutdown_guard = self.shutdown_token.clone().drop_guard();
 
-        let rc_builder = RegistrationClientBuilder::new(rc_builder_config);
+        let mut rc_builder = RegistrationClientBuilder::new(rc_builder_config);
 
-        let registration_client = Box::pin(rc_builder.build()).await?;
-        let registration_result = Box::pin(registration_client.register())
-            .await
+        let registration = if rc_builder.use_lp() {
+            let lp_registration = Box::pin(ParallelLpRegistration::new(rc_builder.config)).await?;
+            Box::pin(lp_registration.register()).await
+        } else {
+            // Already decided and warned about by `use_lp`.
+            rc_builder.config.enable_lp_registration = false;
+            let registration_client = Box::pin(rc_builder.build()).await?;
+            Box::pin(registration_client.register()).await
+        };
+        let registration_result = registration
             // A gateway that accepts the connection but fails registration must
             // be dropped from the entry pool, otherwise we keep retrying it
             // indefinitely (upstream nym-vpn-client #5379).

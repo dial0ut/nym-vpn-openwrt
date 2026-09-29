@@ -31,6 +31,7 @@ pub(crate) mod api_endpoints_cache;
 mod dns_handler;
 mod gateway_ext;
 mod ipv6_availability;
+mod lp_registration;
 mod route_handler;
 mod states;
 mod tun_ipv6;
