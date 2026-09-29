@@ -7,6 +7,7 @@ use nym_offline_monitor::ConnectivityMonitor;
 use nym_vpn_lib_types::{AccountControllerErrorStateReason, AccountControllerState};
 use tokio::{
     sync::mpsc,
+    task::{JoinError, JoinHandle},
     time::{Instant, Sleep},
 };
 use tokio_util::sync::CancellationToken;
@@ -176,6 +177,16 @@ impl RefreshTimer {
         tracing::debug!("Account refresh mode: {mode:?}");
         shared_state.refresh_mode = mode;
         self.set_mode(mode) && !shared_state.firewall_active
+    }
+}
+
+/// Joins a state's background task. Pending while there is none, i.e. while
+/// the VPN API is firewalled, so an aborted task is never mistaken for a
+/// failed one.
+pub(crate) async fn join_task<T>(handle: &mut Option<JoinHandle<T>>) -> Result<T, JoinError> {
+    match handle {
+        Some(handle) => handle.await,
+        None => std::future::pending().await,
     }
 }
 

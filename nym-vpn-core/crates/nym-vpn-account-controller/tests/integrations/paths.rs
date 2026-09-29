@@ -1,10 +1,15 @@
 // Copyright 2025 - Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::common::{TestBench, account_summary::*, endpoints, nyxd_endpoints};
+use std::time::Duration;
+
+use crate::common::{
+    TestBench, account_summary::*, credential_proxy::MockCredentialProxy, endpoints, nyxd_endpoints,
+};
 
 use nym_vpn_api_client::response::NymVpnDeviceStatus;
 use nym_vpn_lib_types::{AccountControllerErrorStateReason, AccountControllerState};
+use wiremock::Mock;
 
 /// How to use these tests :
 ///
@@ -346,6 +351,70 @@ async fn decentralised_account_test() -> anyhow::Result<()> {
     test_bench.forget_account().await?;
     test_bench
         .assert_state(AccountControllerState::LoggedOut)
+        .await;
+    Ok(())
+}
+
+const SLOW_HEALTH_DELAY: Duration = Duration::from_millis(300);
+
+/// Everything a sync needs to reach ReadyToConnect, behind a slow health
+/// check so the test can act while a sync is in flight.
+fn slow_ready_to_connect_mocks(credential_proxy: MockCredentialProxy) -> Vec<Mock> {
+    vec![
+        endpoints::slow_synced_health(SLOW_HEALTH_DELAY),
+        endpoints::account_summary_with_device_200(account_ready_to_connect()),
+        endpoints::register_account_200(mock_api_device(NymVpnDeviceStatus::Active)),
+        endpoints::zknym_available_200(credential_proxy.clone()),
+        endpoints::zknym_post(credential_proxy.clone()),
+        endpoints::zknym_id(credential_proxy.clone()),
+        endpoints::partial_verification_key_200(credential_proxy.clone()),
+        endpoints::confirm_zk_nym_download_by_id_200(credential_proxy),
+        endpoints::account_update_device_200(mock_api_device(NymVpnDeviceStatus::DeleteMe)),
+    ]
+}
+
+
+
+#[tokio::test]
+async fn firewall_toggles_do_not_back_off_the_sync() -> anyhow::Result<()> {
+    let mut test_bench = TestBench::new().await?;
+    let mocks = slow_ready_to_connect_mocks(test_bench.credential_proxy.clone());
+    test_bench.register_vpn_api_mocks(mocks).await;
+
+    test_bench.store_mock_account().await?;
+    test_bench
+        .assert_state(AccountControllerState::ReadyToConnect)
+        .await;
+
+    // One firewall cycle per connect attempt, each landing mid-sync.
+    assert_eq!(
+        test_bench
+            .command_sender
+            .background_refresh_account_state()
+            .await,
+        Ok(())
+    );
+    for _ in 0..8 {
+        assert_eq!(
+            test_bench.command_sender.set_vpn_api_firewall_up().await,
+            Ok(())
+        );
+        assert_eq!(
+            test_bench.command_sender.set_vpn_api_firewall_down().await,
+            Ok(())
+        );
+    }
+    assert_eq!(
+        test_bench.state_receiver.get_state(),
+        AccountControllerState::Syncing
+    );
+
+    // Counted as failures, eight aborts would back the sync off by 8s.
+    test_bench
+        .assert_state_within(
+            AccountControllerState::ReadyToConnect,
+            Duration::from_secs(3),
+        )
         .await;
     Ok(())
 }
