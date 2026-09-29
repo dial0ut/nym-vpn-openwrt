@@ -328,10 +328,12 @@ impl TunnelMonitor {
         .await
         .map_err(Error::GatewayDirectoryClient)?;
 
+        // No refresh_all: it would make the lookups below queue behind
+        // fetches of every list type, and lookups refresh the types they
+        // need themselves.
         self.gateway_cache_handle
             .replace_gateway_client(gateway_directory_client)
             .ok();
-        self.gateway_cache_handle.refresh_all().await.ok();
 
         let selected_gateways =
             if let Some(ref selected_gateways) = self.tunnel_parameters.selected_gateways {
