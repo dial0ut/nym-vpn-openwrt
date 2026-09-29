@@ -12,15 +12,24 @@ const FILTER_PRIORITY_OFFSET: i32 = -10;
 /// `mangle - 10` (-160): before every other mangle hook and fw4's dstnat.
 const MANGLE_PRIORITY_OFFSET: i32 = -10;
 
+/// The daemon's kill-switch table.
+pub const NYM_TABLE: &str = "nym";
+
+/// `inet {table}` deleted whether it exists or not: `delete table` alone
+/// fails on a missing table, and one failing statement aborts the whole
+/// `nft -f` transaction.
+pub fn delete_table(table: &str) -> String {
+    format!("table inet {table}\ndelete table inet {table}\n")
+}
+
+/// An atomic replace of `inet nym` (delete, then create).
 pub fn render(rs: &RuleSet) -> String {
     let mut out = String::new();
     writeln!(out, "#!/usr/sbin/nft -f").unwrap();
     writeln!(out).unwrap();
-    // `delete table` errors on a missing table, hence create-delete-create.
-    writeln!(out, "table inet nym").unwrap();
-    writeln!(out, "delete table inet nym").unwrap();
+    out.push_str(&delete_table(NYM_TABLE));
     writeln!(out).unwrap();
-    writeln!(out, "table inet nym {{").unwrap();
+    writeln!(out, "table inet {NYM_TABLE} {{").unwrap();
 
     if !rs.mangle.is_empty() {
         render_mangle_chain(&mut out, "mangle_prerouting", "prerouting", &rs.mangle.prerouting);
