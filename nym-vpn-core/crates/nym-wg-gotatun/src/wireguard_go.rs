@@ -25,15 +25,13 @@ const UDP_SOCKET_BUFFER_SIZE: usize = 7 * 1024 * 1024;
 /// Handshake-initiation retransmit range forced on every peer, replacing the
 /// stock `REKEY_TIMEOUT` (5s) + jitter.
 ///
-/// The devices start before the state machine installs their routes and
-/// firewall exceptions (see `ConnectedTunnel::run` ordering, inherited from
-/// upstream), so the very first initiation of a session races bring-up and
-/// reliably dies locally — and a gateway slow to install our peer after
-/// registration drops it remotely. With stock timing every such loss is a
-/// flat 5-second stall on the connect path. Retransmitting after ~1s caps
-/// it at ~1s. This also applies to rekey initiations, where retrying loss
-/// sooner only speeds recovery; `REKEY_ATTEMPT_TIME` still bounds the total
-/// retry window, and duplicate initiations are handled by the protocol.
+/// A lost initiation is only retried after this timeout, and a gateway slow
+/// to install our peer after registration drops the first one. With stock
+/// timing every such loss is a flat 5-second stall on the connect path.
+/// Retransmitting after ~1s caps it at ~1s. This also applies to rekey
+/// initiations, where retrying loss sooner only speeds recovery;
+/// `REKEY_ATTEMPT_TIME` still bounds the total retry window, and duplicate
+/// initiations are handled by the protocol.
 const REKEY_TIMEOUT_FAST: std::ops::RangeInclusive<Duration> =
     Duration::from_millis(1000)..=Duration::from_millis(1333);
 
