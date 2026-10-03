@@ -48,7 +48,61 @@ lto = true
 strip = true
 codegen-units = 1
 panic = "abort"
-opt-level = 2
+# Optimised for size: routers are short on flash, and an upgrade needs room
+# for the old and new binaries side by side. The crypto and packet path below
+# stays at 2.
+opt-level = "s"
+
+[profile.release.package]
+gotatun.opt-level = 2
+ring.opt-level = 2
+aws-lc-sys.opt-level = 2
+aws-lc-rs.opt-level = 2
+chacha20.opt-level = 2
+chacha20poly1305.opt-level = 2
+poly1305.opt-level = 2
+x25519-dalek.opt-level = 2
+curve25519-dalek.opt-level = 2
+ed25519-dalek.opt-level = 2
+blake2.opt-level = 2
+blake2b_simd.opt-level = 2
+blake3.opt-level = 2
+sha2.opt-level = 2
+sha3.opt-level = 2
+keccak.opt-level = 2
+aes.opt-level = 2
+aes-gcm.opt-level = 2
+ctr.opt-level = 2
+ghash.opt-level = 2
+polyval.opt-level = 2
+hmac.opt-level = 2
+hkdf.opt-level = 2
+libcrux-ml-kem.opt-level = 2
+libcrux-ml-dsa.opt-level = 2
+libcrux-sha2.opt-level = 2
+libcrux-sha3.opt-level = 2
+libcrux-curve25519.opt-level = 2
+libcrux-chacha20poly1305.opt-level = 2
+libcrux-poly1305.opt-level = 2
+libcrux-psq.opt-level = 2
+libcrux-hacl-rs.opt-level = 2
+libcrux-intrinsics.opt-level = 2
+libcrux-hmac.opt-level = 2
+libcrux-hkdf.opt-level = 2
+libcrux-aesgcm.opt-level = 2
+libcrux-ecdh.opt-level = 2
+libcrux-ed25519.opt-level = 2
+libcrux-p256.opt-level = 2
+nym-bls12_381-fork.opt-level = 2
+nym-compact-ecash.opt-level = 2
+ff.opt-level = 2
+group.opt-level = 2
+pairing.opt-level = 2
+sphinx-packet.opt-level = 2
+lioness.opt-level = 2
+tokio.opt-level = 2
+bytes.opt-level = 2
+mio.opt-level = 2
 
 [workspace.lints.clippy]
 large_futures = "warn"
