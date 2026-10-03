@@ -11,6 +11,32 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+### Changed
+
+- Connecting is more than twice as fast: 3.9 s down to 1.7 s on an x86 test
+  router, 5.0 s down to 1.8 s after a long idle. The entry and exit gateways
+  are registered in parallel, a connect no longer waits for the re-check of
+  an account validated in the last 30 minutes, and gateway lists up to
+  30 minutes old are used while a fresh copy downloads in the background.
+  Only the gateway list the tunnel type needs is fetched.
+- A connect applies the firewall with fewer process launches: system probes
+  are reused for 5 seconds, fw4 applies and resets in a single `nft`
+  transaction, and a repeat of the last policy within 30 seconds is skipped.
+  With the kill-switch off, a failing `nft` during reset is now reported
+  instead of ignored.
+
+### Fixed
+
+- The kill-switch rejected the first WireGuard handshake of every connect,
+  which was only retried after about 1.3 seconds. The tunnel interfaces are
+  now admitted before the tunnel starts.
+- Firewall toggles during a connect counted as failed account syncs, so
+  quick reconnects waited longer and longer at "awaiting account
+  readiness". A sync in flight when the tunnel comes up is restarted on the
+  new route instead of hanging until its timeout.
+- The first connect after boot discarded the gateway lists fetched at
+  startup.
+
 ## [1.35.0] - 2026-09-21
 
 ### Added
