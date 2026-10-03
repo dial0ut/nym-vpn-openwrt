@@ -7,6 +7,7 @@ use nym_offline_monitor::ConnectivityMonitor;
 use nym_vpn_lib_types::{AccountControllerErrorStateReason, AccountControllerState};
 use tokio::{
     sync::mpsc,
+    task::{JoinError, JoinHandle},
     time::{Instant, Sleep},
 };
 use tokio_util::sync::CancellationToken;
@@ -52,6 +53,10 @@ const ACCOUNT_UPDATE_INTERVAL: Duration = Duration::from_secs(2 * 60);
 // While idle. A connect request switches back and syncs at once if the last
 // sync is older than ACCOUNT_UPDATE_INTERVAL, so idling costs nothing at connect.
 const ACCOUNT_IDLE_UPDATE_INTERVAL: Duration = Duration::from_secs(30 * 60);
+
+// How long a validation lets a connect skip the re-check in progress. An idle
+// ReadyToConnect already vouches for one this old.
+pub(crate) const ACCOUNT_VALIDATION_FRESHNESS: Duration = ACCOUNT_IDLE_UPDATE_INTERVAL;
 
 // The interval at which we attempt to exit the upgrade mode by trying to get a new zk-nym instead
 // (note: this does not prevent bandwidth controller from notifying us directly about the UM being over)
@@ -179,6 +184,16 @@ impl RefreshTimer {
     }
 }
 
+/// Joins a state's background task. Pending while there is none, i.e. while
+/// the VPN API is firewalled, so an aborted task is never mistaken for a
+/// failed one.
+pub(crate) async fn join_task<T>(handle: &mut Option<JoinHandle<T>>) -> Result<T, JoinError> {
+    match handle {
+        Some(handle) => handle.await,
+        None => std::future::pending().await,
+    }
+}
+
 /// Private enum describing the account controller state
 #[derive(Debug, Clone)]
 pub(super) enum PrivateAccountControllerState {
@@ -190,6 +205,29 @@ pub(super) enum PrivateAccountControllerState {
     UpgradeMode,
     Error(AccountControllerErrorStateReason),
     RequestingZkNyms,
+}
+
+impl PrivateAccountControllerState {
+    /// The validation standing once this state is entered: reaching
+    /// ReadyToConnect from another state is one, a re-check keeps the last
+    /// one, anything else drops it.
+    pub(crate) fn next_validation(
+        &self,
+        was_ready: bool,
+        last_validated: Option<Instant>,
+    ) -> Option<Instant> {
+        match self {
+            // Re-entered on a firewalled refresh tick: nothing was checked.
+            Self::ReadyToConnect if was_ready => last_validated,
+            Self::ReadyToConnect => Some(Instant::now()),
+            Self::Syncing | Self::RequestingZkNyms => last_validated,
+            Self::Offline
+            | Self::LoggedOut
+            | Self::Decentralised
+            | Self::UpgradeMode
+            | Self::Error(_) => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -245,5 +283,41 @@ mod tests {
         assert!(!timer.set_mode(AccountRefreshMode::Idle));
         assert!(!fires_within(&mut timer, ACCOUNT_UPDATE_INTERVAL).await);
         assert!(fires_within(&mut timer, ACCOUNT_IDLE_UPDATE_INTERVAL).await);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn reaching_ready_validates_and_a_recheck_keeps_it() {
+        use PrivateAccountControllerState::*;
+
+        let validated = ReadyToConnect.next_validation(false, None);
+        assert_eq!(validated, Some(Instant::now()));
+
+        tokio::time::advance(ACCOUNT_UPDATE_INTERVAL).await;
+        assert_eq!(Syncing.next_validation(true, validated), validated);
+        assert_eq!(
+            RequestingZkNyms.next_validation(false, validated),
+            validated
+        );
+        assert_eq!(Syncing.next_validation(true, None), None);
+
+        // A firewalled refresh tick re-enters ReadyToConnect unchecked.
+        assert_eq!(ReadyToConnect.next_validation(true, validated), validated);
+        assert_eq!(ReadyToConnect.next_validation(true, None), None);
+    }
+
+    #[tokio::test]
+    async fn leaving_the_sync_states_drops_the_validation() {
+        use PrivateAccountControllerState::*;
+
+        let validated = Some(Instant::now());
+        for state in [
+            Offline,
+            LoggedOut,
+            Decentralised,
+            UpgradeMode,
+            Error(AccountControllerErrorStateReason::DeviceTimeDesynced),
+        ] {
+            assert_eq!(state.next_validation(false, validated), None, "{state:?}");
+        }
     }
 }

@@ -19,6 +19,7 @@ use crate::{
     state_machine::{
         AccountControllerStateHandler, ErrorState, LoggedOutState, NextAccountControllerState,
         OfflineState, PrivateAccountControllerState, ReadyState, SyncingState, UpgradeModeState,
+        join_task,
     },
     storage::VpnCredentialStorage,
 };
@@ -50,8 +51,11 @@ const ZK_NYM_STATE_CONTEXT: &str = "ZK_NYM_STATE";
 /// - SyncingState : We handled a refresh account command
 /// - LoggedOutState : A successful forget account command was handled
 /// - UpgradeModeState : Instead of retrieving zk-nyms, we have received information about upgrade mode being activated
+///
+/// Like the sync, the fetch pauses while the VPN API is firewalled.
 pub(crate) struct RequestingZkNymsState {
-    zk_nym_fetching_handle: JoinHandle<Result<ZkNymFetchResult, ZkNymError>>,
+    /// `None` while paused
+    zk_nym_fetching_handle: Option<JoinHandle<Result<ZkNymFetchResult, ZkNymError>>>,
     attempts: u32,
     entered_through_upgrade_mode: bool,
 }
@@ -86,16 +90,21 @@ impl RequestingZkNymsState {
 
         // can we make that unique to that state?
         let storage = shared_state.credential_storage.clone();
-        let zk_nym_fetching_handle = tokio::spawn(async move {
-            RequestingZkNymsState::fetch_zk_nyms(
-                vpn_api_client,
-                vpn_api_account,
-                device,
-                storage,
-                fair_usage_left,
-            )
-            .await
-        });
+        let zk_nym_fetching_handle = if shared_state.firewall_active {
+            debug!("VPN API is firewalled, zk-nym fetching paused");
+            None
+        } else {
+            Some(tokio::spawn(async move {
+                RequestingZkNymsState::fetch_zk_nyms(
+                    vpn_api_client,
+                    vpn_api_account,
+                    device,
+                    storage,
+                    fair_usage_left,
+                )
+                .await
+            }))
+        };
 
         (
             Box::new(Self {
@@ -225,11 +234,27 @@ impl RequestingZkNymsState {
         }
     }
 
+    fn abort_fetch(&mut self) {
+        if let Some(handle) = self.zk_nym_fetching_handle.take() {
+            handle.abort();
+        }
+    }
+
     async fn handle_retrieved_zk_nym<C: ConnectivityMonitor>(
         &mut self,
         shared_state: &mut SharedAccountState<C>,
         zknym_result: Result<Result<ZkNymFetchResult, ZkNymError>, JoinError>,
     ) -> NextAccountControllerState<C> {
+        if !matches!(
+            zknym_result,
+            Ok(Ok(
+                ZkNymFetchResult::SufficientBandwidth | ZkNymFetchResult::FetchedTickets { .. }
+            ))
+        ) {
+            // Without tickets in hand the account is no longer vouched for; the
+            // ReadyState fallbacks below validate it afresh.
+            shared_state.last_validated.send_replace(None);
+        }
         let join_result = match zknym_result {
             Ok(join_result) => join_result,
             Err(err) => {
@@ -306,7 +331,7 @@ impl RequestingZkNymsState {
     }
 
     async fn handle_account_command<C: ConnectivityMonitor>(
-        self: Box<Self>,
+        mut self: Box<Self>,
         command: AccountCommand,
         shared_state: &mut SharedAccountState<C>,
     ) -> NextAccountControllerState<C> {
@@ -322,7 +347,7 @@ impl RequestingZkNymsState {
                 return_sender.send(res);
             }
             AccountCommand::ForgetAccount(return_sender) => {
-                self.zk_nym_fetching_handle.abort();
+                self.abort_fetch();
                 let res = handler::handle_forget_account(shared_state).await;
                 let error = res.is_err();
                 return_sender.send(res);
@@ -343,7 +368,7 @@ impl RequestingZkNymsState {
                 return_sender.send(Err(AccountCommandError::AccountNotDecentralised))
             }
             AccountCommand::ResetDeviceIdentity(return_sender, seed) => {
-                self.zk_nym_fetching_handle.abort();
+                self.abort_fetch();
                 return_sender.send(handler::handle_reset_device_identity(shared_state, seed).await);
                 return NextAccountControllerState::NewState(SyncingState::enter(shared_state, 0));
             }
@@ -352,7 +377,7 @@ impl RequestingZkNymsState {
                 return if shared_state.firewall_active {
                     NextAccountControllerState::SameState(self)
                 } else {
-                    self.zk_nym_fetching_handle.abort();
+                    self.abort_fetch();
                     NextAccountControllerState::NewState(SyncingState::enter(shared_state, 0))
                 };
             }
@@ -363,25 +388,35 @@ impl RequestingZkNymsState {
                 return_sender.send(Ok(()));
                 // No-op if firewall was already down
                 if shared_state.firewall_active {
-                    // If firewall is indeed active, no handle should be running, so nothing to abort
+                    // Paused, so nothing runs: resume at the attempt it was on.
                     shared_state.firewall_active = false;
                     return NextAccountControllerState::NewState(RequestingZkNymsState::enter(
                         shared_state,
                         self.attempts,
-                        false,
+                        self.entered_through_upgrade_mode,
                     ));
                 }
             }
             AccountCommand::VpnApiFirewallUp(return_sender) => {
                 shared_state.firewall_active = true;
-                self.zk_nym_fetching_handle.abort();
+                self.abort_fetch();
                 return_sender.send(Ok(()));
             }
             AccountCommand::SetRefreshMode(mode) => {
                 shared_state.refresh_mode = mode;
             }
             AccountCommand::Common(common_command) => {
-                common_handler::handle_common_command(common_command, shared_state).await
+                let restart = self.zk_nym_fetching_handle.is_some()
+                    && common_handler::changes_api_path(&common_command, shared_state);
+                common_handler::handle_common_command(common_command, shared_state).await;
+                if restart {
+                    self.abort_fetch();
+                    return NextAccountControllerState::NewState(RequestingZkNymsState::enter(
+                        shared_state,
+                        self.attempts,
+                        self.entered_through_upgrade_mode,
+                    ));
+                }
             }
             AccountCommand::UpgradeMode(upgrade_mode_command) => match upgrade_mode_command {
                 UpgradeModeCommand::GetUpgradeModeEnabled(return_sender) => {
@@ -416,14 +451,14 @@ impl<C: ConnectivityMonitor> AccountControllerStateHandler<C> for RequestingZkNy
         tokio::select! {
             biased;
             _ = shutdown_token.cancelled() => {
-                self.zk_nym_fetching_handle.abort();
+                self.abort_fetch();
                 NextAccountControllerState::Finished
             }
-            fetching_result = &mut self.zk_nym_fetching_handle => self.handle_retrieved_zk_nym(shared_state, fetching_result).await,
+            fetching_result = join_task(&mut self.zk_nym_fetching_handle) => self.handle_retrieved_zk_nym(shared_state, fetching_result).await,
             Some(command) = command_rx.recv() => self.handle_account_command(command, shared_state).await,
             Some(connectivity) = shared_state.connectivity_handle.next() => {
                 if connectivity.is_offline() {
-                    self.zk_nym_fetching_handle.abort();
+                    self.abort_fetch();
                     NextAccountControllerState::NewState(OfflineState::enter())
                 } else {
                     NextAccountControllerState::SameState(self)

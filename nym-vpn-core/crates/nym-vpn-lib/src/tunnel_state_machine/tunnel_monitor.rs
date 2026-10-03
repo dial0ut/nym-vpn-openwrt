@@ -39,6 +39,7 @@ use nym_vpn_lib_types::{
 };
 use nym_vpn_store::keys::wireguard::WireguardKeysDb;
 
+use super::lp_registration::ParallelLpRegistration;
 use super::route_handler::{RouteHandler, RoutingConfig};
 use super::tun_ipv6;
 use super::tunnel::wireguard::connected_tunnel::TunTunTunnelOptions;
@@ -78,47 +79,6 @@ const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
 /// operations can take much longer than on desktop CPUs, so we use a
 /// generous timeout to avoid a connect/timeout/reconnect loop.
 const REGISTRATION_CLIENT_STARTUP_TIMEOUT: Duration = Duration::from_secs(120);
-
-/// Poll the exit WireGuard tunnel's peer stats until the handshake completes.
-///
-/// Advisory only: on timeout or shutdown this logs and returns, and the
-/// caller proceeds to connectivity probing exactly as before. Ported from
-/// upstream #5571, adapted to gotatun's native stats API.
-async fn wait_for_exit_handshake(
-    tunnel_handle: &tunnel::wireguard::connected_tunnel::TunnelHandle,
-    shutdown_token: &CancellationToken,
-) {
-    const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
-    // 50ms: actual exit handshakes complete in 190-350ms; the read is an
-    // in-process stats peek, so a tight advisory poll costs nothing and
-    // avoids quantizing the connect path to a coarse interval.
-    const POLL_INTERVAL: Duration = Duration::from_millis(50);
-
-    let started = std::time::Instant::now();
-    let wait = async {
-        loop {
-            if tunnel_handle.exit_handshake_complete().await {
-                return;
-            }
-            tokio::time::sleep(POLL_INTERVAL).await;
-        }
-    };
-
-    tokio::select! {
-        result = tokio::time::timeout(HANDSHAKE_TIMEOUT, wait) => match result {
-            Ok(()) => tracing::info!(
-                "Exit WireGuard handshake completed after {} ms",
-                started.elapsed().as_millis()
-            ),
-            Err(_) => tracing::warn!(
-                "Exit WireGuard handshake not observed within {HANDSHAKE_TIMEOUT:?}; proceeding to connectivity probing"
-            ),
-        },
-        _ = shutdown_token.cancelled() => {
-            tracing::debug!("Shutdown requested while waiting for exit handshake");
-        }
-    }
-}
 
 #[derive(Debug)]
 pub enum TunnelMonitorEvent {
@@ -368,10 +328,12 @@ impl TunnelMonitor {
         .await
         .map_err(Error::GatewayDirectoryClient)?;
 
+        // No refresh_all: it would make the lookups below queue behind
+        // fetches of every list type, and lookups refresh the types they
+        // need themselves.
         self.gateway_cache_handle
             .replace_gateway_client(gateway_directory_client)
             .ok();
-        self.gateway_cache_handle.refresh_all().await.ok();
 
         let selected_gateways =
             if let Some(ref selected_gateways) = self.tunnel_parameters.selected_gateways {
@@ -620,11 +582,18 @@ impl TunnelMonitor {
         // Setup shutdown guard to cancel pending tasks that otherwise may continue running upon return
         let shutdown_guard = self.shutdown_token.clone().drop_guard();
 
-        let rc_builder = RegistrationClientBuilder::new(rc_builder_config);
+        let mut rc_builder = RegistrationClientBuilder::new(rc_builder_config);
 
-        let registration_client = Box::pin(rc_builder.build()).await?;
-        let registration_result = Box::pin(registration_client.register())
-            .await
+        let registration = if rc_builder.use_lp() {
+            let lp_registration = Box::pin(ParallelLpRegistration::new(rc_builder.config)).await?;
+            Box::pin(lp_registration.register()).await
+        } else {
+            // Already decided and warned about by `use_lp`.
+            rc_builder.config.enable_lp_registration = false;
+            let registration_client = Box::pin(rc_builder.build()).await?;
+            Box::pin(registration_client.register()).await
+        };
+        let registration_result = registration
             // A gateway that accepts the connection but fails registration must
             // be dropped from the entry pool, otherwise we keep retrying it
             // indefinitely (upstream nym-vpn-client #5379).
@@ -707,7 +676,8 @@ impl TunnelMonitor {
                 let mixnet_client_token = inner_result.mixnet_client.cancellation_token();
 
                 (
-                    self.start_mixnet_tunnel(*inner_result).await?,
+                    self.start_mixnet_tunnel(*inner_result, &selected_gateways)
+                        .await?,
                     None,
                     Some(mixnet_client_token),
                     // Return sender back to avoid it being dropped
@@ -745,8 +715,9 @@ impl TunnelMonitor {
                 );
 
                 let _ = entry_metadata_addr_tx;
-                let start_tunnel_result =
-                    self.start_wireguard_tunnel(connected_tunnel).await?;
+                let start_tunnel_result = self
+                    .start_wireguard_tunnel(connected_tunnel, &selected_gateways)
+                    .await?;
 
                 let mixnet_client_token = wg_tunnel_runtime.mixnet_client_token();
 
@@ -759,29 +730,7 @@ impl TunnelMonitor {
             }
         };
 
-        let establishing_connection_data = EstablishConnectionData {
-            entry_gateway: GatewayLightInfo::from(selected_gateways.entry_gateway().clone()),
-            exit_gateway: GatewayLightInfo::from(selected_gateways.exit_gateway().clone()),
-            tunnel: Some(tunnel_conn_data.clone()),
-        };
-
-        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-        self.send_event(TunnelMonitorEvent::InterfaceUp {
-            tunnel_interface: tunnel_interface.clone(),
-            connection_data: Box::new(establishing_connection_data),
-            reply_tx,
-        });
-
-        if tokio::time::timeout(REPLY_TIMEOUT, reply_rx).await.is_err() {
-            tracing::warn!("Interface up reply timeout");
-        }
-
-        // Routes and firewall are up. Wait for the exit WG handshake so the
-        // first connectivity probe isn't lost to the handshake window (which
-        // otherwise quantizes time-to-Connected to the 3s probe cadence).
-        if let Some(wg_handle) = tunnel_handle.as_wireguard() {
-            wait_for_exit_handshake(wg_handle, &self.shutdown_token).await;
-        }
+        let tunnel_started_at = std::time::Instant::now();
 
         // Send metadata endpoint data to the bandwidth controller
         match &tunnel_interface {
@@ -844,7 +793,10 @@ impl TunnelMonitor {
 
                         match event.status {
                             ConnectionStatusEvent::Viable => {
-                                tracing::info!("Tunnel connection is viable");
+                                tracing::info!(
+                                    "Tunnel connection is viable ({} ms after tunnel start)",
+                                    tunnel_started_at.elapsed().as_millis()
+                                );
                                 if !has_sent_up_event {
                                     has_sent_up_event = true;
 
@@ -987,9 +939,39 @@ impl TunnelMonitor {
         }
     }
 
+    /// Lets the state machine admit the tunnel interfaces in the firewall.
+    /// Must run before the devices start: gotatun initiates a handshake on
+    /// the first packet it reads, and the kernel queues some (MLD reports)
+    /// as soon as the interface has an address. An initiation the firewall
+    /// rejects is only retried after the rekey timeout.
+    async fn announce_interface_up(
+        &mut self,
+        selected_gateways: &SelectedGateways,
+        tunnel_interface: &TunnelInterface,
+        tunnel_conn_data: &TunnelConnectionData,
+    ) {
+        let connection_data = EstablishConnectionData {
+            entry_gateway: GatewayLightInfo::from(selected_gateways.entry_gateway().clone()),
+            exit_gateway: GatewayLightInfo::from(selected_gateways.exit_gateway().clone()),
+            tunnel: Some(tunnel_conn_data.clone()),
+        };
+
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        self.send_event(TunnelMonitorEvent::InterfaceUp {
+            tunnel_interface: tunnel_interface.clone(),
+            connection_data: Box::new(connection_data),
+            reply_tx,
+        });
+
+        if tokio::time::timeout(REPLY_TIMEOUT, reply_rx).await.is_err() {
+            tracing::warn!("Interface up reply timeout");
+        }
+    }
+
     async fn start_mixnet_tunnel(
         &mut self,
         registration_result: MixnetRegistrationResult,
+        selected_gateways: &SelectedGateways,
     ) -> Result<StartTunnelResult> {
         let assigned_addresses = registration_result.assigned_addresses;
         let mtu = if let Some(mtu) = self
@@ -1058,6 +1040,10 @@ impl TunnelMonitor {
             ipv4_gateway: None,
             ipv6_gateway: None,
         };
+        let tunnel_interface = TunnelInterface::One(tunnel_metadata);
+
+        self.announce_interface_up(selected_gateways, &tunnel_interface, &tunnel_conn_data)
+            .await;
 
         let tunnel_handle = mixnet::connected_tunnel::start_mixnet_tunnel(
             registration_result.mixnet_client,
@@ -1070,7 +1056,7 @@ impl TunnelMonitor {
         .map_err(|e| Error::Tunnel(Box::new(e)))?;
 
         Ok(StartTunnelResult {
-            tunnel_interface: TunnelInterface::One(tunnel_metadata),
+            tunnel_interface,
             tunnel_conn_data,
             tunnel_handle: AnyTunnelHandle::from(tunnel_handle),
         })
@@ -1231,6 +1217,7 @@ impl TunnelMonitor {
     async fn start_wireguard_tunnel(
         &mut self,
         connected_tunnel: ConnectedTunnel,
+        selected_gateways: &SelectedGateways,
     ) -> Result<StartTunnelResult> {
         let conn_data = connected_tunnel.connection_data();
         let use_bridges = self.tunnel_parameters.tunnel_settings.bridges_enabled();
@@ -1317,6 +1304,14 @@ impl TunnelMonitor {
             lewes_protocol: conn_data.lewes_protocol,
         });
 
+        let tunnel_interface = TunnelInterface::Two {
+            entry: entry_tunnel_metadata,
+            exit: exit_tunnel_metadata,
+        };
+
+        self.announce_interface_up(selected_gateways, &tunnel_interface, &tunnel_conn_data)
+            .await;
+
         let dns_config = self.tunnel_parameters.tunnel_settings.resolved_dns_config();
         let tunnel_options = TunTunTunnelOptions {
             entry_tun,
@@ -1334,10 +1329,7 @@ impl TunnelMonitor {
         let tunnel_handle = AnyTunnelHandle::from(tunnel_handle);
 
         Ok(StartTunnelResult {
-            tunnel_interface: TunnelInterface::Two {
-                entry: entry_tunnel_metadata,
-                exit: exit_tunnel_metadata,
-            },
+            tunnel_interface,
             tunnel_conn_data,
             tunnel_handle,
         })

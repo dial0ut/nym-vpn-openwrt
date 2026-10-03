@@ -120,6 +120,12 @@ Things that cost a debugging session at least once. Read before changing anythin
   a NAT `REDIRECT` in PREROUTING). A LAN client's query "to" a WAN resolver therefore traverses
   INPUT, not FORWARD, and can be answered from cache. Counting FORWARD rejects proves nothing
   about it; capture the WAN.
+- **A repeated apply may not reach the firewall.** An apply whose compiled rules equal the last
+  successful one is skipped for 30 s after it (`REAPPLY_AFTER`, `openwrt/mod.rs`), so the burst
+  of applies during a connect costs one run. Rows above that recover by "re-apply" only do so
+  once the rules differ or 30 s have passed; a failed apply or a kill-switch toggle always makes
+  the next one run, and `reset_policy` never skips. A test that injects a failure and then
+  requests an unchanged policy must wait the window out.
 - **`policy accept` on our nft chains means "let the next table decide".** The boot table
   and `inet nym` sit at lower priority than fw4; an accept there is not a final verdict, the
   terminal `drop`/`reject` is.

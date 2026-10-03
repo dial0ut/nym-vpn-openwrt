@@ -27,6 +27,7 @@ hickory-resolver = { workspace = true, features = [
 ipnetwork.workspace = true
 itertools.workspace = true
 rand.workspace = true
+rand09.workspace = true
 serial_test.workspace = true
 semver = { workspace = true }
 surge-ping.workspace = true
@@ -48,6 +49,7 @@ nym-bandwidth-controller.workspace = true
 nym-bin-common.workspace = true
 nym-client-core.workspace = true
 nym-config.workspace = true
+nym-credential-storage.workspace = true
 nym-credentials-interface.workspace = true
 nym-crypto.workspace = true
 nym-http-api-client.workspace = true

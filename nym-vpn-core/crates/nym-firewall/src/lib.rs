@@ -408,8 +408,12 @@ impl Firewall {
     }
 
     /// Read on every `apply_policy`; callers must sync it from the live
-    /// tunnel settings.
+    /// tunnel settings. A change makes the next apply run in full, whatever
+    /// it compares equal to.
     pub fn set_killswitch(&mut self, on: bool) {
+        if on != self.killswitch {
+            self.inner.forget_applied();
+        }
         self.killswitch = on;
     }
 
@@ -423,20 +427,24 @@ impl Firewall {
 
     /// Applies and starts enforcing the given `FirewallPolicy` Makes sure it is being kept in place
     /// until this method is called again with another policy, or until `reset_policy` is called.
+    ///
+    /// A repeat of the last successful call shortly after it is skipped
+    /// (the compiled rules, or the reset, compared); a failed call or a
+    /// kill-switch change makes the next one run.
     pub fn apply_policy(&mut self, policy: FirewallPolicy) -> Result<(), Error> {
         if !self.killswitch {
             // Routing into the tunnel is unconditional and the `nym` zone in
             // /etc/config/firewall NATs and forwards into it, so with
             // blocking off the daemon has nothing to keep in the firewall.
             tracing::info!("Kill-switch disabled: removing any blocking rules (no policy applied)");
-            return self.inner.reset_policy();
+            return self.inner.reset_policy_if_changed();
         }
         tracing::info!("Applying firewall policy: {}", policy);
         self.inner.apply_policy(policy)
     }
 
     /// Resets/removes any currently enforced `FirewallPolicy`. Returns the system to the same state
-    /// it had before any policy was applied through this `Firewall` instance.
+    /// it had before any policy was applied through this `Firewall` instance. Never skipped.
     pub fn reset_policy(&mut self) -> Result<(), Error> {
         tracing::info!("Resetting firewall policy");
         self.inner.reset_policy()
@@ -466,5 +474,18 @@ mod killswitch_toggle_tests {
         assert!(fw.killswitch, "set_killswitch(true) must update the cached flag");
         fw.set_killswitch(false);
         assert!(!fw.killswitch);
+    }
+
+    #[test]
+    fn only_a_killswitch_change_forgets_the_last_apply() {
+        let mut fw = Firewall {
+            inner: openwrt::Firewall::new().expect("construct"),
+            killswitch: true,
+        };
+        fw.inner.remember_reset_for_test();
+        fw.set_killswitch(true);
+        assert!(fw.inner.remembers_an_apply(), "a re-sync to the same value keeps it");
+        fw.set_killswitch(false);
+        assert!(!fw.inner.remembers_an_apply(), "a toggle must forget it");
     }
 }

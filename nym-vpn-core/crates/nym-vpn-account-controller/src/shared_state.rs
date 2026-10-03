@@ -3,14 +3,17 @@
 
 use nym_offline_monitor::ConnectivityMonitor;
 use nym_vpn_api_client::{
-    VpnApiClient,
+    ResolverOverrides, VpnApiClient,
     types::{Device, VpnAccount},
 };
 use nym_vpn_lib_types::VpnAccountSummary;
 use std::sync::Arc;
 
 use nym_vpn_store::keys::wireguard::WireguardKeysDb;
-use tokio::sync::mpsc;
+use tokio::{
+    sync::{mpsc, watch},
+    time::Instant,
+};
 
 use crate::{
     AccountControllerConfig, AccountControllerEventSender,
@@ -39,6 +42,9 @@ pub(crate) struct SharedAccountState<C: ConnectivityMonitor> {
     /// VPN API client
     pub(crate) vpn_api_client: VpnApiClient,
 
+    /// Resolver overrides `vpn_api_client` was last rebuilt with
+    pub(crate) resolver_overrides: Option<ResolverOverrides>,
+
     /// Nyxd RPC client
     pub(crate) nyxd_client: NyxdClient,
 
@@ -50,6 +56,11 @@ pub(crate) struct SharedAccountState<C: ConnectivityMonitor> {
 
     /// Registered device
     pub(crate) device: Option<Device>,
+
+    /// When a sync last reached ReadyToConnect, published to state receivers.
+    /// The controller keeps it through a re-check and drops it on leaving
+    /// one; handlers drop it when something invalidates the account mid-sync.
+    pub(crate) last_validated: watch::Sender<Option<Instant>>,
 
     /// Deeplinks for signing-in via services like Privy
     pub(crate) deeplinks: Deeplinks,
@@ -89,10 +100,12 @@ impl<C: ConnectivityMonitor> SharedAccountState<C> {
             credential_storage,
             wireguard_keys_storage,
             vpn_api_client,
+            resolver_overrides: None,
             nyxd_client,
             vpn_api_account: vpn_api_account.map(Arc::new),
             vpn_account_summary: None,
             device,
+            last_validated: watch::Sender::new(None),
             deeplinks,
             firewall_active: false,
             refresh_mode: AccountRefreshMode::default(),

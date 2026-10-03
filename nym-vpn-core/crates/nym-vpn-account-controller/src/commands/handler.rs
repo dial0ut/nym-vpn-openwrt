@@ -122,6 +122,9 @@ pub(crate) async fn handle_forget_account<C: ConnectivityMonitor>(
 ) -> Result<(), AccountCommandError> {
     tracing::info!("REMOVING ACCOUNT AND ALL ASSOCIATED DATA");
 
+    // Even a partial forget leaves an account no sync has validated.
+    shared_state.last_validated.send_replace(None);
+
     // Tunnel state is checked before sending the command here. We're in Disconnected state
 
     if let Err(err) = handle_unregister_device(shared_state).await {
@@ -251,6 +254,8 @@ pub(crate) async fn handle_reset_device_identity<C: ConnectivityMonitor>(
         .map_err(AccountCommandError::storage)?; // Storage error
 
     shared_state.device = Some(device);
+    // The new device hasn't been validated.
+    shared_state.last_validated.send_replace(None);
 
     Ok(())
 }

@@ -16,6 +16,9 @@ scenario_pre() {
 }
 scenario_inject() {
     local out
+    # An apply identical to one under 30 s old is skipped (REAPPLY_AFTER in
+    # nym-firewall); wait it out so the injected failure is reached either way.
+    sleep 31
     out=$(rt 'nym-vpnc tunnel set --ipv6 on 2>&1 && echo "SET_OK at $(date +%T)" || echo "SET_FAILED"')
     printf '%s\n' "$out"
     printf '%s\n' "$out" | grep -q SET_OK || inconclusive "injection failed: tunnel set did not succeed"

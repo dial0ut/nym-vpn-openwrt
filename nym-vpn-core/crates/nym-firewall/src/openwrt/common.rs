@@ -4,6 +4,8 @@
 
 use std::net::IpAddr;
 use std::path::Path;
+use std::sync::{Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
 use super::{Error, Result};
 
@@ -98,14 +100,54 @@ pub const NYM_ZONE: &str = "nym";
 /// carried in `ct mark` and restored so replies route via the real WAN.
 pub const EXEMPT_FWMARK: u32 = 0x14e;
 
+/// How long a system probe's answer is reused. A connect applies its policy
+/// about six times within seconds and each compile asks for the uplink; one
+/// probe serves the burst. The cost: a WAN device or mwan3 change made
+/// inside the window lands with the first apply after it.
+pub const PROBE_TTL: Duration = Duration::from_secs(5);
+
+/// One probe answer on the monotonic clock. Empty is never kept: it is what
+/// a failed tool returns (for the WAN zone, "unknown", which callers fail
+/// closed on), and a transient failure must not outlive the call that saw it.
+struct Memo<T>(Mutex<Option<(Instant, Vec<T>)>>);
+
+impl<T: Clone> Memo<T> {
+    const fn new() -> Self {
+        Self(Mutex::new(None))
+    }
+
+    fn get(&self, probe: impl FnOnce() -> Vec<T>) -> Vec<T> {
+        self.get_at(Instant::now(), probe)
+    }
+
+    /// The lock is held across the probe so concurrent callers share one.
+    fn get_at(&self, now: Instant, probe: impl FnOnce() -> Vec<T>) -> Vec<T> {
+        let mut slot = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some((at, value)) = slot.as_ref()
+            && now.saturating_duration_since(*at) < PROBE_TTL
+        {
+            return value.clone();
+        }
+        let value = probe();
+        *slot = (!value.is_empty()).then(|| (now, value.clone()));
+        value
+    }
+}
+
 /// L3 devices of every WAN zone: `uci show firewall` zones with `name='wan'`
 /// or `masq='1'` (except our own [`NYM_ZONE`], which masquerades into the
 /// tunnel), their `network` members resolved through `ubus call
 /// network.interface dump` to `l3_device` (`pppoe-wan`, not the underlying
 /// ethernet; `device` when the interface is down), plus raw `device` members.
 /// Empty when either tool fails; callers fail closed on that. A zone, not a
-/// route: `ip route get` points into the tunnel once connected.
+/// route: `ip route get` points into the tunnel once connected. Memoized
+/// for [`PROBE_TTL`].
 pub fn wan_zone_devices() -> Vec<String> {
+    static MEMO: Memo<String> = Memo::new();
+    MEMO.get(probe_wan_zone_devices)
+}
+
+fn probe_wan_zone_devices() -> Vec<String> {
     let Some(uci) = run_stdout("uci", &["show", "firewall"]) else {
         return Vec::new();
     };
@@ -130,7 +172,9 @@ fn resolve_wan_devices(uci_show: &str, dump: &str) -> Vec<String> {
 
 /// Device the kernel routes `ip` out on right now (`ip -o route get`): while
 /// connected an address without a more specific route resolves to the
-/// tunnel. `None` when unreachable.
+/// tunnel. `None` when unreachable. Not memoized: the answer changes within
+/// a connect, when the tunnel routes go in, and it only runs for a private
+/// custom resolver.
 pub fn route_device(ip: IpAddr) -> Option<String> {
     let out = run_stdout("ip", &["-o", "route", "get", &ip.to_string()])?;
     parse_route_get_device(&out)
@@ -318,15 +362,26 @@ pub fn ipv6_status() -> Ipv6Status {
     }
 }
 
+/// Without it `uci show mwan3` fails anyway; checked first so a router
+/// without mwan3 spawns nothing for it.
+const MWAN3_CONFIG: &str = "/etc/config/mwan3";
+
 /// mwan3's liveness ping targets. Blocking them makes mwan3 declare WAN down
 /// and trigger a firewall reload cascade, so they are always allowed.
+/// Memoized for [`PROBE_TTL`].
 pub fn get_mwan3_track_ips() -> Vec<IpAddr> {
-    let output = match std::process::Command::new("uci").args(["show", "mwan3"]).output() {
-        Ok(o) if o.status.success() => o,
-        _ => return Vec::new(),
-    };
+    static MEMO: Memo<IpAddr> = Memo::new();
+    MEMO.get(|| {
+        if !Path::new(MWAN3_CONFIG).exists() {
+            return Vec::new();
+        }
+        run_stdout("uci", &["show", "mwan3"])
+            .map(|stdout| parse_mwan3_track_ips(&stdout))
+            .unwrap_or_default()
+    })
+}
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
+fn parse_mwan3_track_ips(stdout: &str) -> Vec<IpAddr> {
     let mut ips = Vec::new();
 
     for line in stdout.lines() {
@@ -576,6 +631,59 @@ firewall.@forwarding[2].dest='lan'
             Some("nym0")
         );
         assert_eq!(parse_route_get_device(""), None);
+    }
+
+    #[test]
+    fn memo_serves_a_burst_from_one_probe_and_expires() {
+        let memo: Memo<String> = Memo::new();
+        let probes = std::cell::Cell::new(0);
+        let probe = |dev: &str| {
+            probes.set(probes.get() + 1);
+            vec![dev.to_string()]
+        };
+        let t0 = Instant::now();
+        assert_eq!(memo.get_at(t0, || probe("eth1")), ["eth1"]);
+        let within = t0 + PROBE_TTL - Duration::from_millis(1);
+        assert_eq!(memo.get_at(within, || probe("pppoe-wan")), ["eth1"]);
+        assert_eq!(probes.get(), 1);
+        let expired = t0 + PROBE_TTL;
+        assert_eq!(memo.get_at(expired, || probe("pppoe-wan")), ["pppoe-wan"]);
+        assert_eq!(probes.get(), 2);
+    }
+
+    /// Empty is "unknown" for the WAN zone: the next call must probe again,
+    /// and a failed re-probe must not leave the expired answer behind.
+    #[test]
+    fn memo_never_keeps_an_empty_answer() {
+        let memo: Memo<String> = Memo::new();
+        let probes = std::cell::Cell::new(0);
+        let failed = || {
+            probes.set(probes.get() + 1);
+            Vec::new()
+        };
+        let t0 = Instant::now();
+        assert!(memo.get_at(t0, failed).is_empty());
+        assert!(memo.get_at(t0, failed).is_empty());
+        assert_eq!(probes.get(), 2);
+
+        assert_eq!(memo.get_at(t0, || vec!["eth1".to_string()]), ["eth1"]);
+        let expired = t0 + PROBE_TTL;
+        assert!(memo.get_at(expired, failed).is_empty());
+        assert_eq!(memo.get_at(expired, || vec!["eth2".to_string()]), ["eth2"]);
+    }
+
+    #[test]
+    fn mwan3_track_ips_are_parsed_and_deduplicated() {
+        let uci = "mwan3.wan=interface\n\
+                   mwan3.wan.track_ip='1.1.1.1' '8.8.8.8'\n\
+                   mwan3.wanb.track_ip='8.8.8.8' '2606:4700:4700::1111'\n\
+                   mwan3.wanb.reliability='1'\n";
+        let ips: Vec<IpAddr> = ["1.1.1.1", "8.8.8.8", "2606:4700:4700::1111"]
+            .iter()
+            .map(|ip| ip.parse().unwrap())
+            .collect();
+        assert_eq!(parse_mwan3_track_ips(uci), ips);
+        assert!(parse_mwan3_track_ips("").is_empty());
     }
 
     fn tmp_root(tag: &str) -> std::path::PathBuf {

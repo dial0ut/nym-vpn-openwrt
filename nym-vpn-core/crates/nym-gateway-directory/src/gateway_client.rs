@@ -58,7 +58,7 @@ impl Config {
             nyxd_url,
             nym_api_urls,
             nym_vpn_api_urls,
-            min_gateway_performance,
+            min_gateway_performance: without_empty_thresholds(min_gateway_performance),
         })
     }
 
@@ -66,7 +66,7 @@ impl Config {
         mut self,
         min_gateway_performance: GatewayMinPerformance,
     ) -> Self {
-        self.min_gateway_performance = Some(min_gateway_performance);
+        self.min_gateway_performance = without_empty_thresholds(Some(min_gateway_performance));
         self
     }
 
@@ -85,6 +85,15 @@ impl Config {
     pub fn min_gateway_performance(&self) -> Option<GatewayMinPerformance> {
         self.min_gateway_performance
     }
+}
+
+/// Thresholds with no values filter nothing, same as no thresholds. Keep one
+/// spelling for that, so the gateway cache comparing configs doesn't see a
+/// threshold change (and drop its lists) where there is none.
+fn without_empty_thresholds(
+    min_gateway_performance: Option<GatewayMinPerformance>,
+) -> Option<GatewayMinPerformance> {
+    min_gateway_performance.filter(|min| *min != GatewayMinPerformance::default())
 }
 
 impl fmt::Display for Config {
@@ -609,6 +618,43 @@ mod test {
             nym_vpn_api_urls: default_nym_vpn_api_urls,
             min_gateway_performance: None,
         }
+    }
+
+    #[test]
+    fn empty_min_performance_is_no_min_performance() {
+        let mainnet = new_mainnet();
+        let new_config = |min_performance| {
+            Config::new(
+                mainnet.nyxd_url.clone(),
+                mainnet.nym_api_urls.clone(),
+                mainnet.nym_vpn_api_urls.clone(),
+                min_performance,
+            )
+            .unwrap()
+        };
+        let empty = GatewayMinPerformance::from_percentage_values(None, None).unwrap();
+        let vpn_80 = GatewayMinPerformance::from_percentage_values(None, Some(80)).unwrap();
+
+        assert_eq!(new_config(Some(empty)).min_gateway_performance(), None);
+        assert_eq!(
+            new_config(None)
+                .with_min_gateway_performance(empty)
+                .min_gateway_performance(),
+            None
+        );
+        assert_eq!(
+            new_config(None)
+                .with_min_gateway_performance(vpn_80)
+                .min_gateway_performance(),
+            Some(vpn_80)
+        );
+        // Clearing thresholds still clears them
+        assert_eq!(
+            new_config(Some(vpn_80))
+                .with_min_gateway_performance(empty)
+                .min_gateway_performance(),
+            None
+        );
     }
 
     #[tokio::test]

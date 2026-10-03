@@ -29,7 +29,10 @@ mod rules;
 
 pub use detect::{FirewallSystem, detect_system};
 
+use std::time::{Duration, Instant};
+
 use crate::{FirewallArguments, FirewallPolicy};
+use rules::RuleSet;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -39,10 +42,34 @@ pub enum Error {
     ApplyError(String),
 }
 
+/// An apply identical to the last one is skipped only this soon after it:
+/// a connect repeats its policy within seconds. Later, it runs in full, and
+/// that is what still repairs changes made behind the daemon's back (a table
+/// deleted by hand, a block an include installed) when the idle state
+/// re-applies on its periodic refresh or a settings change.
+const REAPPLY_AFTER: Duration = Duration::from_secs(30);
+
+/// What a successful backend call left in the firewall.
+#[derive(Debug, PartialEq)]
+enum Target {
+    /// Compiled, so a changed uplink is a changed target.
+    Policy(RuleSet),
+    Reset,
+}
+
+struct Applied {
+    system: FirewallSystem,
+    target: Target,
+    at: Instant,
+}
+
 /// OpenWrt firewall handle: detects fw3 vs fw4 at construction and dispatches
 /// to that backend. An `Unknown` detection is re-probed on each apply.
 pub struct Firewall {
     system: FirewallSystem,
+    /// Last successful backend call. Cleared before every call, so a failed
+    /// or interrupted one leaves nothing to skip against.
+    applied: Option<Applied>,
 }
 
 impl Firewall {
@@ -55,7 +82,10 @@ impl Firewall {
     pub fn new() -> Result<Self> {
         let system = detect_system();
         tracing::info!("Detected OpenWrt firewall system: {:?}", system);
-        Ok(Firewall { system })
+        Ok(Firewall {
+            system,
+            applied: None,
+        })
     }
 
     /// `Unknown` means the firewall was not up at construction; re-probe.
@@ -69,30 +99,211 @@ impl Firewall {
         }
     }
 
+    /// Skipped when the compiled rules match the last successful call; see
+    /// [`REAPPLY_AFTER`].
     pub fn apply_policy(&mut self, policy: FirewallPolicy) -> Result<()> {
         self.refresh_system_if_unknown();
-        let ruleset = policy::compile(&policy);
-        match self.system {
-            FirewallSystem::Fw3 => fw3::apply(&ruleset),
-            FirewallSystem::Fw4 => fw4::apply(&ruleset),
-            FirewallSystem::Unknown => {
-                tracing::warn!("Unknown firewall system, falling back to fw3/iptables");
-                fw3::apply(&ruleset)
-            }
-        }
+        let target = Target::Policy(policy::compile(&policy));
+        self.converge(target, false, Instant::now(), run_backend)
     }
 
     /// Removes any blocking rules and lifts the boot block. Also the whole
     /// of what a policy apply does with the kill-switch off: routing into
     /// the tunnel and the zone that NATs and forwards into it need nothing
-    /// from the daemon.
+    /// from the daemon. Always runs.
     pub fn reset_policy(&mut self) -> Result<()> {
         self.refresh_system_if_unknown();
-        match self.system {
-            FirewallSystem::Fw3 => fw3::reset(),
-            FirewallSystem::Fw4 => fw4::reset(),
-            FirewallSystem::Unknown => fw3::reset(),
+        self.converge(Target::Reset, true, Instant::now(), run_backend)
+    }
+
+    /// [`Self::reset_policy`], skipped like an identical apply: the
+    /// kill-switch-off path, taken at every step of a connect.
+    pub fn reset_policy_if_changed(&mut self) -> Result<()> {
+        self.refresh_system_if_unknown();
+        self.converge(Target::Reset, false, Instant::now(), run_backend)
+    }
+
+    /// The next apply or reset runs whatever it asks for.
+    pub fn forget_applied(&mut self) {
+        self.applied = None;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn remembers_an_apply(&self) -> bool {
+        self.applied.is_some()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn remember_reset_for_test(&mut self) {
+        self.applied = Some(Applied {
+            system: self.system,
+            target: Target::Reset,
+            at: Instant::now(),
+        });
+    }
+
+    /// `force` never skips. The window runs from the last call that reached
+    /// the backend, so a stream of skips cannot keep a stale memory alive.
+    fn converge(
+        &mut self,
+        target: Target,
+        force: bool,
+        now: Instant,
+        run: impl FnOnce(FirewallSystem, &Target) -> Result<()>,
+    ) -> Result<()> {
+        if !force
+            && let Some(applied) = &self.applied
+            && applied.system == self.system
+            && applied.target == target
+            && now.saturating_duration_since(applied.at) < REAPPLY_AFTER
+        {
+            tracing::debug!(
+                "Firewall unchanged since the apply {:?} ago; skipping",
+                now.saturating_duration_since(applied.at)
+            );
+            return Ok(());
         }
+        self.applied = None;
+        run(self.system, &target)?;
+        self.applied = Some(Applied {
+            system: self.system,
+            target,
+            at: now,
+        });
+        Ok(())
+    }
+}
+
+fn run_backend(system: FirewallSystem, target: &Target) -> Result<()> {
+    match (system, target) {
+        (FirewallSystem::Fw4, Target::Policy(rs)) => fw4::apply(rs),
+        (FirewallSystem::Fw4, Target::Reset) => fw4::reset(),
+        (FirewallSystem::Fw3, Target::Policy(rs)) => fw3::apply(rs),
+        (FirewallSystem::Unknown, Target::Policy(rs)) => {
+            tracing::warn!("Unknown firewall system, falling back to fw3/iptables");
+            fw3::apply(rs)
+        }
+        (FirewallSystem::Fw3 | FirewallSystem::Unknown, Target::Reset) => fw3::reset(),
+    }
+}
+
+#[cfg(test)]
+mod converge_tests {
+    use super::rules::{Family, Rule};
+    use super::*;
+
+    fn policy(dev: &str) -> Target {
+        let mut rs = RuleSet::default();
+        rs.filter.forward.push(Rule::return_(Family::Inet).iif(dev));
+        rs.filter.forward.push(Rule::reject(Family::Inet));
+        Target::Policy(rs)
+    }
+
+    /// An fw4 firewall whose backend counts its calls, failing them while
+    /// `fail` is set.
+    struct Harness {
+        fw: Firewall,
+        calls: usize,
+        fail: bool,
+    }
+
+    impl Harness {
+        fn new() -> Self {
+            let fw = Firewall {
+                system: FirewallSystem::Fw4,
+                applied: None,
+            };
+            Self {
+                fw,
+                calls: 0,
+                fail: false,
+            }
+        }
+
+        fn converge(&mut self, target: Target, force: bool, now: Instant) -> Result<()> {
+            let (calls, fail) = (&mut self.calls, self.fail);
+            self.fw.converge(target, force, now, |_, _| {
+                *calls += 1;
+                if fail {
+                    Err(Error::ApplyError("injected".into()))
+                } else {
+                    Ok(())
+                }
+            })
+        }
+
+        fn apply(&mut self, target: Target, now: Instant) {
+            self.converge(target, false, now).unwrap();
+        }
+    }
+
+    #[test]
+    fn identical_apply_is_skipped_only_within_the_window() {
+        let mut h = Harness::new();
+        let t0 = Instant::now();
+        h.apply(policy("eth1"), t0);
+        h.apply(policy("eth1"), t0 + REAPPLY_AFTER - Duration::from_millis(1));
+        assert_eq!(h.calls, 1);
+
+        // A skip does not extend the window: it runs from the last real call.
+        h.apply(policy("eth1"), t0 + REAPPLY_AFTER);
+        assert_eq!(h.calls, 2);
+    }
+
+    /// The compiled rules are the key, so a changed uplink under the same
+    /// policy is a change.
+    #[test]
+    fn changed_rules_system_or_target_kind_always_run() {
+        let mut h = Harness::new();
+        let t0 = Instant::now();
+        h.apply(policy("eth1"), t0);
+        h.apply(policy("pppoe-wan"), t0);
+        assert_eq!(h.calls, 2);
+
+        h.apply(Target::Reset, t0);
+        h.apply(policy("pppoe-wan"), t0);
+        assert_eq!(h.calls, 4);
+
+        h.fw.system = FirewallSystem::Fw3;
+        h.apply(policy("pppoe-wan"), t0);
+        assert_eq!(h.calls, 5);
+    }
+
+    #[test]
+    fn a_failed_call_leaves_nothing_to_skip_against() {
+        let mut h = Harness::new();
+        let t0 = Instant::now();
+        h.apply(policy("eth1"), t0);
+
+        h.fail = true;
+        assert!(h.converge(policy("eth2"), false, t0).is_err());
+        assert!(h.fw.applied.is_none());
+        h.fail = false;
+        // Identical to the last *successful* apply, yet the live state is
+        // unknown after the failure: it must run.
+        h.apply(policy("eth1"), t0);
+        assert_eq!(h.calls, 3);
+    }
+
+    #[test]
+    fn forced_reset_always_runs_and_later_ones_may_skip() {
+        let mut h = Harness::new();
+        let t0 = Instant::now();
+        h.converge(Target::Reset, true, t0).unwrap();
+        h.converge(Target::Reset, true, t0).unwrap();
+        assert_eq!(h.calls, 2);
+        h.apply(Target::Reset, t0);
+        assert_eq!(h.calls, 2);
+    }
+
+    #[test]
+    fn forget_applied_makes_the_next_call_run() {
+        let mut h = Harness::new();
+        let t0 = Instant::now();
+        h.apply(Target::Reset, t0);
+        h.fw.forget_applied();
+        h.apply(Target::Reset, t0);
+        assert_eq!(h.calls, 2);
     }
 }
 

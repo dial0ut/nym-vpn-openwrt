@@ -8,7 +8,7 @@ use crate::{
     commands::{AccountCommand, UpgradeModeCommand, common_handler, handler},
     state_machine::{
         AccountControllerStateHandler, DecentralisedState, ErrorState, LoggedOutState,
-        NextAccountControllerState, OfflineState, PrivateAccountControllerState,
+        NextAccountControllerState, OfflineState, PrivateAccountControllerState, join_task,
     },
 };
 use nym_offline_monitor::ConnectivityMonitor;
@@ -61,8 +61,13 @@ fn syncing_backoff(attempts: u32) -> Duration {
 /// - ErrorState : An actual error happened, or one of the above questions has a negative answers, preventing us to proceed.
 /// - OfflineState : the connectivity monitor is telling we're not connected
 /// - DecentralisedState : The loaded account is set to "decentralised" mode
+///
+/// The sync pauses while the VPN API is firewalled and resumes at the same
+/// attempt once it opens: a connect firewalls it mid-sync, and that is no
+/// failure to back off from.
 pub struct SyncingState {
-    syncing_state_handle: JoinHandle<SyncOutcome>,
+    /// `None` while paused
+    syncing_state_handle: Option<JoinHandle<SyncOutcome>>,
     attempts: u32,
 }
 
@@ -116,18 +121,22 @@ impl SyncingState {
             );
         };
 
-        let vpn_api_client = shared_state.vpn_api_client.clone();
-
-        let syncing_state_handle = tokio::spawn(async move {
-            let delay = syncing_backoff(attempts);
-            if !delay.is_zero() {
-                tracing::debug!(
-                    "Backing off {delay:?} before account-sync retry (attempt {attempts})"
-                );
-                tokio::time::sleep(delay).await;
-            }
-            SyncingState::syncing_account(&vpn_api_client, &vpn_api_account, &device).await
-        });
+        let syncing_state_handle = if shared_state.firewall_active {
+            tracing::debug!("VPN API is firewalled, account syncing paused");
+            None
+        } else {
+            let vpn_api_client = shared_state.vpn_api_client.clone();
+            Some(tokio::spawn(async move {
+                let delay = syncing_backoff(attempts);
+                if !delay.is_zero() {
+                    tracing::debug!(
+                        "Backing off {delay:?} before account-sync retry (attempt {attempts})"
+                    );
+                    tokio::time::sleep(delay).await;
+                }
+                SyncingState::syncing_account(&vpn_api_client, &vpn_api_account, &device).await
+            }))
+        };
 
         (
             Box::new(Self {
@@ -136,6 +145,12 @@ impl SyncingState {
             }),
             PrivateAccountControllerState::Syncing,
         )
+    }
+
+    fn abort_sync(&mut self) {
+        if let Some(handle) = self.syncing_state_handle.take() {
+            handle.abort();
+        }
     }
 
     async fn syncing_account(
@@ -257,10 +272,14 @@ impl<C: ConnectivityMonitor> AccountControllerStateHandler<C> for SyncingState {
         tokio::select! {
             biased;
             _ = shutdown_token.cancelled() => {
-                self.syncing_state_handle.abort();
+                self.abort_sync();
                 NextAccountControllerState::Finished
             }
-            syncing_result = &mut self.syncing_state_handle => {
+            syncing_result = join_task(&mut self.syncing_state_handle) => {
+                if !matches!(syncing_result, Ok(SyncOutcome { result: Ok(()), .. })) {
+                    // A failed re-check no longer vouches for the account.
+                    shared_state.last_validated.send_replace(None);
+                }
                 match syncing_result {
                     Ok(outcome) => {
                         if let Some(vpn_account_summary) = outcome.summary {
@@ -310,7 +329,7 @@ impl<C: ConnectivityMonitor> AccountControllerStateHandler<C> for SyncingState {
                         return if error {
                             NextAccountControllerState::SameState(self)
                         } else {
-                            self.syncing_state_handle.abort();
+                            self.abort_sync();
                             NextAccountControllerState::NewState(LoggedOutState::enter())
                         }
                     },
@@ -325,13 +344,13 @@ impl<C: ConnectivityMonitor> AccountControllerStateHandler<C> for SyncingState {
                         return if shared_state.firewall_active {
                             NextAccountControllerState::SameState(self)
                         } else {
-                            self.syncing_state_handle.abort();
+                            self.abort_sync();
                             NextAccountControllerState::NewState(SyncingState::enter(shared_state, 0))
                         }
                     },
                     AccountCommand::ResetDeviceIdentity(return_sender, seed) => {
                         return_sender.send(handler::handle_reset_device_identity(shared_state, seed).await);
-                        self.syncing_state_handle.abort();
+                        self.abort_sync();
                         return NextAccountControllerState::NewState(SyncingState::enter(shared_state,0));
                     },
 
@@ -339,6 +358,7 @@ impl<C: ConnectivityMonitor> AccountControllerStateHandler<C> for SyncingState {
                         return_sender.send(Ok(()));
                         // No-op if the firewall was already down
                         if shared_state.firewall_active {
+                            // Paused, so nothing runs: resume at the attempt it was on.
                             shared_state.firewall_active = false;
                             return NextAccountControllerState::NewState(SyncingState::enter(shared_state, self.attempts));
                         }
@@ -346,7 +366,7 @@ impl<C: ConnectivityMonitor> AccountControllerStateHandler<C> for SyncingState {
 
                     AccountCommand::VpnApiFirewallUp(return_sender) => {
                         shared_state.firewall_active = true;
-                        self.syncing_state_handle.abort();
+                        self.abort_sync();
                         return_sender.send(Ok(()));
                     },
                     AccountCommand::SetRefreshMode(mode) => {
@@ -354,7 +374,13 @@ impl<C: ConnectivityMonitor> AccountControllerStateHandler<C> for SyncingState {
                     },
 
                     AccountCommand::Common(common_command) => {
-                        common_handler::handle_common_command(common_command, shared_state).await
+                        let restart = self.syncing_state_handle.is_some()
+                            && common_handler::changes_api_path(&common_command, shared_state);
+                        common_handler::handle_common_command(common_command, shared_state).await;
+                        if restart {
+                            self.abort_sync();
+                            return NextAccountControllerState::NewState(SyncingState::enter(shared_state, self.attempts));
+                        }
                     },
                     AccountCommand::UpgradeMode(upgrade_mode_command) => match upgrade_mode_command {
                         UpgradeModeCommand::GetUpgradeModeEnabled(return_sender) => {
@@ -372,7 +398,7 @@ impl<C: ConnectivityMonitor> AccountControllerStateHandler<C> for SyncingState {
             }
             Some(connectivity) = shared_state.connectivity_handle.next() => {
                 if connectivity.is_offline() {
-                    self.syncing_state_handle.abort();
+                    self.abort_sync();
                     NextAccountControllerState::NewState(OfflineState::enter())
                 } else {
                     NextAccountControllerState::SameState(self)

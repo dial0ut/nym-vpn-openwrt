@@ -5,6 +5,7 @@ use nym_vpn_api_client::response::{
     NymErrorResponse, NymVpnAccountSummaryWithDeviceResponse, NymVpnDevice, NymVpnHealthResponse,
 };
 
+use std::time::Duration;
 use time::OffsetDateTime;
 use wiremock::{
     Mock, ResponseTemplate,
@@ -33,6 +34,20 @@ pub fn synced_health() -> Mock {
                 status: "ok".to_string(),
                 timestamp_utc: OffsetDateTime::now_utc(),
             }),
+        )
+}
+
+/// Like `synced_health`, but slow enough that a test can act while a sync is in flight
+pub fn slow_synced_health(delay: Duration) -> Mock {
+    Mock::given(method("GET"))
+        .and(path("/public/v1/health"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(NymVpnHealthResponse {
+                    status: "ok".to_string(),
+                    timestamp_utc: OffsetDateTime::now_utc(),
+                })
+                .set_delay(delay),
         )
 }
 

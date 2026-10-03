@@ -119,7 +119,9 @@ impl ConnectingState {
                     .as_ref()
                     .map(|v| v.entry_gateway().lp_endpoints())
                     .unwrap_or_default(),
-                api_endpoints: Vec::new(),
+                // Already admitted while disconnected; when the resolve below
+                // returns the same set, its re-apply is a no-op.
+                api_endpoints: shared_state.api_endpoints.clone(),
                 // Daemon resolvers plus any LAN custom resolver, admitted off-WAN.
                 dns_servers: shared_state.tunnel_settings.idle_dns_ips(),
                 tunnel_interface: None,
@@ -385,11 +387,13 @@ impl ConnectingState {
         NextTunnelState::SameState(self)
     }
 
-    async fn handle_registered_with_gateways(
+    /// The endpoint is admitted with the tunnel interfaces at `InterfaceUp`,
+    /// which comes before the devices start; nothing sends to it earlier.
+    fn handle_registered_with_gateways(
         &mut self,
         connection_data: Box<EstablishConnectionData>,
-        shared_state: &mut SharedState,
-    ) -> Result<()> {
+        shared_state: &SharedState,
+    ) {
         // With bridges on, the bridge endpoints are already admitted instead.
         let wg_entry_endpoint = if let Some(TunnelConnectionData::Wireguard(ref wg)) =
             connection_data.tunnel
@@ -400,11 +404,8 @@ impl ConnectingState {
             None
         };
         self.firewall_policy_params.wg_entry_endpoint = wg_entry_endpoint;
-        Self::set_firewall_policy(shared_state, &self.firewall_policy_params)?;
 
         self.connection_data = Some(*connection_data);
-
-        Ok(())
     }
 
     async fn handle_interface_up(
@@ -613,26 +614,10 @@ impl TunnelStateHandler for ConnectingState {
                         next_state
                     }
                     TunnelMonitorEvent::RegisteredWithGateways { connection_data, reply_tx } => {
-                        let next_state = match self.handle_registered_with_gateways(connection_data, shared_state).await {
-                            Ok(()) => {
-                                let new_state = self.make_connecting_tunnel_state(shared_state, EstablishConnectionState::ConnectingTunnel);
-                                NextTunnelState::NewState((self, new_state))
-                            }
-                            Err(e) => {
-                                trace_err_chain!(e, "Failed to set firewall policy");
-                                if let Some(tunnel_monitor_handle) = self.tunnel_monitor_handle {
-                                    NextTunnelState::NewState(DisconnectingState::enter(
-                                        PrivateActionAfterDisconnect::Error(ErrorStateReason::SetFirewallPolicy),
-                                        tunnel_monitor_handle,
-                                        shared_state
-                                    ).await)
-                                } else {
-                                    NextTunnelState::NewState(ErrorState::enter(ErrorStateReason::SetFirewallPolicy, shared_state).await)
-                                }
-                            }
-                        };
+                        self.handle_registered_with_gateways(connection_data, shared_state);
                         _ = reply_tx.send(());
-                        next_state
+                        let new_state = self.make_connecting_tunnel_state(shared_state, EstablishConnectionState::ConnectingTunnel);
+                        NextTunnelState::NewState((self, new_state))
                     }
                     TunnelMonitorEvent::InterfaceUp {
                         tunnel_interface, connection_data, reply_tx

@@ -268,6 +268,16 @@ impl TestBench {
     /// The delay allows tests that exhaust the syncing-state retries to proceed through all the
     /// backoff delays to the expected error.
     pub async fn assert_state(&mut self, expected_state: AccountControllerState) {
+        self.assert_state_within(expected_state, Duration::from_secs(60))
+            .await
+    }
+
+    /// Like `assert_state`, for tests where how soon the state is reached matters.
+    pub async fn assert_state_within(
+        &mut self,
+        expected_state: AccountControllerState,
+        timeout: Duration,
+    ) {
         // Make sure we're not running right away
         tokio::task::yield_now().await;
 
@@ -275,7 +285,7 @@ impl TestBench {
 
         let wait_for_state_fut = state_watcher.wait_for(|state| *state == expected_state);
 
-        let _ = tokio::time::timeout(Duration::from_secs(60), wait_for_state_fut).await;
+        let _ = tokio::time::timeout(timeout, wait_for_state_fut).await;
 
         // For the nice output in tests
         assert_eq!(self.state_receiver.get_state(), expected_state);
