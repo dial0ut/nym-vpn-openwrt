@@ -29,6 +29,10 @@ the GitHub release notes.
 
 ### Fixed
 
+- On armv7 and i686 routers the gateways rejected every bandwidth ticket, so
+  connecting failed through any gateway the account had no credit left on.
+  The bundled nym libraries now encode tickets the same way on 32-bit and
+  64-bit routers.
 - The kill-switch rejected the first WireGuard handshake of every connect,
   which was only retried after about 1.3 seconds. The tunnel interfaces are
   now admitted before the tunnel starts.
