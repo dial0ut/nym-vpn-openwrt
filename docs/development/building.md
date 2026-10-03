@@ -82,7 +82,7 @@ filesystem inside the container fixes it.
 4. Applies crate patches via `patch-crates.sh`, which fails the build when one does not apply:
     - `schemars` — `BTreeMap` instead of `IndexMap`
     - without 64-bit atomics (mips, armv5te): `portable-atomic` for `coarsetime`, `prometheus`,
-      `boringtun`, `opentelemetry_sdk`, gotatun, nym-lp and the nym gateway client
+      `boringtun`, `opentelemetry_sdk`, gotatun and the nym gateway client
 5. `cargo build --release -Z build-std=std,panic_abort`, then fails if `Cargo.lock` lists an
    unused patch (`scripts/ci/check-cargo-patches.sh`)
 6. Strips with the target `strip`

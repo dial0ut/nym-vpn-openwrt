@@ -342,37 +342,10 @@ patch_nym_gateway_client() {
     fi
 }
 
-# ============================================================================
-# Patch: nym-lp (git dependency)
-# ============================================================================
-# Problem: Uses std::sync::atomic::AtomicU64 which doesn't exist on 32-bit
-# Fix: Import AtomicU64 from portable-atomic instead
-patch_nym_lp() {
-    local dir="$1"
-    log_info "Patching nym-lp (AtomicU64 -> portable-atomic)..."
-
-    local f="$dir/common/nym-lp/src/session.rs"
-    if [ ! -f "$f" ]; then
-        log_error "  session.rs not found at $f"
-        exit 1
-    fi
-
-    if grep -q 'std::sync::atomic.*AtomicU64' "$f"; then
-        _sed_i 's|use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};|use std::sync::atomic::{AtomicBool, Ordering};\nuse portable_atomic::AtomicU64;|' "$f"
-        log_info "  patched session.rs"
-    fi
-
-    # Add portable-atomic dependency to nym-lp's Cargo.toml
-    local cargo_toml="$dir/common/nym-lp/Cargo.toml"
-    if [ -f "$cargo_toml" ]; then
-        add_portable_atomic_dep "$dir/common/nym-lp"
-    fi
-}
-
 # Find the nym git checkout directory in CARGO_HOME (the nym crates share
-# one checkout; nym-lp pins its revision).
+# one checkout; nym-gateway-client pins its revision).
 find_nym() {
-    find_git_checkout nym-lp nym
+    find_git_checkout nym-gateway-client nym
 }
 
 # ============================================================================
@@ -466,7 +439,6 @@ opentelemetry_sdk = { path = \"$otel_sdk_dir\" }"
         local nym_dir
         nym_dir=$(find_nym)
         patch_nym_gateway_client "$nym_dir"
-        patch_nym_lp "$nym_dir"
     fi
 
     # Append [patch.crates-io] to Cargo.toml
