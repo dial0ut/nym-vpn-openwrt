@@ -30,8 +30,8 @@ use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use hickory_resolver::TokioResolver;
-use hickory_resolver::config::{NameServerConfigGroup, ResolverConfig};
-use hickory_resolver::name_server::TokioConnectionProvider;
+use hickory_resolver::config::{NameServerConfig, ResolverConfig};
+use hickory_resolver::net::runtime::TokioRuntimeProvider;
 
 /// Same defaults as stock OpenWrt sysntpd.
 const NTP_POOL_HOSTS: &[&str] = &[
@@ -130,10 +130,20 @@ async fn bootstrap(now: SystemTime, floor: SystemTime) -> Result<SystemTime, Str
 /// which needs the working clock we don't have yet.
 async fn resolve_pool() -> Vec<SocketAddr> {
     let resolver_ips: Vec<IpAddr> = crate::DEFAULT_DNS_SERVERS.clone();
-    let group = NameServerConfigGroup::from_ips_clear(&resolver_ips, 53, true);
-    let config = ResolverConfig::from_parts(None, vec![], group);
-    let resolver =
-        TokioResolver::builder_with_config(config, TokioConnectionProvider::default()).build();
+    let name_servers = resolver_ips
+        .iter()
+        .map(|ip| NameServerConfig::udp_and_tcp(*ip))
+        .collect();
+    let config = ResolverConfig::from_parts(None, vec![], name_servers);
+    let resolver = match TokioResolver::builder_with_config(config, TokioRuntimeProvider::default())
+        .build()
+    {
+        Ok(resolver) => resolver,
+        Err(err) => {
+            tracing::debug!("Bootstrap resolver could not be built: {err}");
+            return Vec::new();
+        }
+    };
 
     let mut out: Vec<SocketAddr> = Vec::new();
     for host in NTP_POOL_HOSTS {

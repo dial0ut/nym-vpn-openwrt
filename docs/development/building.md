@@ -38,9 +38,7 @@ Inside the container, `cross-compile-dynamic.sh`:
 1. Detects the target from the available cross-compiler, unless `TARGET` is set
 2. Installs `pkg-config`, `curl`, and `protoc` 30.2 — the apt `protoc` is too old for
    `proto3 optional`
-3. On 32-bit targets (armv7, i686), applies the nym ecash fix via
-   `patch-crates.sh --ecash-only` after `cargo fetch`
-4. Builds `nym-vpnd` and `nym-vpnc` with `cargo build --bins --release`
+3. Builds `nym-vpnd` and `nym-vpnc` with `cargo build --bins --release`
 
 Binaries land in `nym-vpn-core/target/<triple>/release/`.
 
@@ -85,7 +83,6 @@ filesystem inside the container fixes it.
     - `schemars` — `BTreeMap` instead of `IndexMap`
     - without 64-bit atomics (mips, armv5te): `portable-atomic` for `coarsetime`, `prometheus`,
       `boringtun`, `opentelemetry_sdk`, gotatun and the nym gateway client
-    - every 32-bit target: the nym ecash fix (key lengths serialised as `u64`)
 5. `cargo build --release -Z build-std=std,panic_abort`, then fails if `Cargo.lock` lists an
    unused patch (`scripts/ci/check-cargo-patches.sh`)
 6. Strips with the target `strip`

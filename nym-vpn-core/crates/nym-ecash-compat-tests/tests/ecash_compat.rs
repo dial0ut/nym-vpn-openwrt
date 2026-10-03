@@ -4,8 +4,8 @@
 //! challenge, so those bytes must be the same on every architecture.
 //!
 //! The fixture was generated on x86_64 (`generate_spend_fixture`, ignored by
-//! default). On a 32-bit target without the ecash patch the round trips fail
-//! and the x86_64 payment no longer verifies.
+//! default). On a 32-bit target, a nym pin without nym #6528 fails the round
+//! trips and the x86_64 payment no longer verifies.
 
 use std::collections::HashMap;
 

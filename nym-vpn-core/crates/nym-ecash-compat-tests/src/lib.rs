@@ -1,9 +1,8 @@
 //! Tests only; see `tests/ecash_compat.rs`.
 //!
-//! The pinned `nym-compact-ecash` serialises two key lengths as `usize`, so a
-//! 32-bit build writes 4 bytes where a 64-bit gateway expects 8, the spend
-//! proof's challenge hash differs, and every ticket fails to verify. The
-//! 32-bit builds patch that in place (`docker/tier3-musl/patch-crates.sh`).
-//! These tests are what tells a patched build from an unpatched one: run them
-//! on the target (`cross test --target armv7-unknown-linux-musleabihf -p
-//! nym-ecash-compat-tests`, or under qemu-user), not only on the host.
+//! Before nym #6528, `nym-compact-ecash` serialised two key lengths as
+//! `usize`, so a 32-bit build wrote 4 bytes where a 64-bit gateway expects 8,
+//! the spend proof's challenge hash differed, and every ticket failed to
+//! verify. The nym pin carries the fix; these tests keep a pin without it from
+//! shipping. They only mean something on a 32-bit target (CI runs them on
+//! i686; armv7 runs under qemu-user), not on the host.

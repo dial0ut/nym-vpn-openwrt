@@ -84,9 +84,10 @@ cargo fetch --target="${TARGET}"
 
 log_info "Applying build-time crate patches..."
 bash "$PATCH_SCRIPT" "$HOME/.cargo" "$TARGET" "$BUILD_DIR/nym-vpn-core/Cargo.toml"
-# The ecash fix edits a git checkout in place, and cargo never re-checks a
-# git dependency's sources: drop any artifact built before the patch.
-cargo clean --release --target="${TARGET}" -p nym-compact-ecash
+# gotatun and nym-gateway-client are patched in place in their git checkouts,
+# and cargo never re-checks a git dependency's sources: drop any artifact
+# built before the patch.
+cargo clean --release --target="${TARGET}" -p gotatun -p nym-gateway-client
 
 # Set up environment
 export PKG_CONFIG_PATH="${MUSL_PREFIX}/${COMPILER_TRIPLET}/lib/pkgconfig"

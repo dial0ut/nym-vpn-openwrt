@@ -7,8 +7,8 @@ use nym_vpn_network_config::Network;
 
 use hickory_resolver::{
     Resolver, ResolverBuilder,
-    config::{NameServerConfig, NameServerConfigGroup, ResolverConfig, ResolverOpts},
-    name_server::TokioConnectionProvider,
+    config::{CLOUDFLARE, NameServerConfig, QUAD9, ResolverConfig, ResolverOpts},
+    net::runtime::TokioRuntimeProvider,
 };
 use std::{
     iter,
@@ -21,34 +21,38 @@ pub struct DnsDiagnostic {
 }
 
 impl DnsDiagnostic {
-    fn system() -> Result<Resolver<TokioConnectionProvider>, ResolveError> {
-        Ok(Self::build_resolver(Resolver::builder_tokio()?))
+    fn system() -> Result<ConfiguredResolver, ResolveError> {
+        let nameservers = hickory_resolver::system_conf::read_system_conf()
+            .map(|(config, _)| config.name_servers().to_vec())
+            .unwrap_or_default();
+        Ok(ConfiguredResolver {
+            resolver: Self::build_resolver(Resolver::builder_tokio()?)?,
+            nameservers,
+        })
     }
 
-    fn from_nameservers<G: Into<NameServerConfigGroup>>(
-        nameservers: G,
-    ) -> Resolver<TokioConnectionProvider> {
-        let nameservers: NameServerConfigGroup = nameservers.into();
-        let config = ResolverConfig::from_parts(None, Vec::new(), nameservers);
-        Self::from_config(config)
-    }
-
-    fn from_config(config: ResolverConfig) -> Resolver<TokioConnectionProvider> {
-        Self::build_resolver(Resolver::builder_with_config(
-            config,
-            TokioConnectionProvider::default(),
-        ))
+    fn from_nameservers(
+        nameservers: Vec<NameServerConfig>,
+    ) -> Result<ConfiguredResolver, ResolveError> {
+        let config = ResolverConfig::from_parts(None, Vec::new(), nameservers.clone());
+        Ok(ConfiguredResolver {
+            resolver: Self::build_resolver(Resolver::builder_with_config(
+                config,
+                TokioRuntimeProvider::default(),
+            ))?,
+            nameservers,
+        })
     }
 
     fn build_resolver(
-        base: ResolverBuilder<TokioConnectionProvider>,
-    ) -> Resolver<TokioConnectionProvider> {
+        base: ResolverBuilder<TokioRuntimeProvider>,
+    ) -> Result<Resolver<TokioRuntimeProvider>, ResolveError> {
         let mut options = ResolverOpts::default();
         options.attempts = 0;
         options.cache_size = 0;
         options.ip_strategy = hickory_resolver::config::LookupIpStrategy::Ipv4AndIpv6;
         options.timeout = Duration::from_secs(2);
-        base.with_options(options).build()
+        Ok(base.with_options(options).build()?)
     }
 
     pub async fn run_diagnostic(network: &Network) -> CompleteDnsReport {
@@ -81,12 +85,14 @@ impl DnsDiagnostic {
             many_diagnostic.hostnames
         );
 
-        let mut name_servers = NameServerConfigGroup::quad9_tls();
-        name_servers.merge(NameServerConfigGroup::quad9());
-        name_servers.merge(NameServerConfigGroup::quad9_https());
-        name_servers.merge(NameServerConfigGroup::cloudflare_tls());
-        name_servers.merge(NameServerConfigGroup::cloudflare());
-        name_servers.merge(NameServerConfigGroup::cloudflare_https());
+        let mut name_servers: Vec<NameServerConfig> = QUAD9
+            .tls()
+            .chain(QUAD9.udp_and_tcp())
+            .chain(QUAD9.https())
+            .chain(CLOUDFLARE.tls())
+            .chain(CLOUDFLARE.udp_and_tcp())
+            .chain(CLOUDFLARE.https())
+            .collect();
 
         // Also probe the host's actually-configured resolvers (e.g. dnsmasq on
         // 127.0.0.1, or the ISP/upstream resolver), so the per-nameserver report
@@ -96,9 +102,7 @@ impl DnsDiagnostic {
         // #5267). A missing/unparseable resolv.conf degrades gracefully.
         match hickory_resolver::system_conf::read_system_conf() {
             Ok((system_config, _)) => {
-                let system_group: NameServerConfigGroup =
-                    system_config.name_servers().to_vec().into();
-                name_servers.merge(system_group);
+                name_servers.extend(system_config.name_servers().iter().cloned());
             }
             Err(e) => {
                 tracing::warn!("Failed to read system DNS configuration for diagnostic: {e}");
@@ -106,10 +110,20 @@ impl DnsDiagnostic {
         }
 
         let mut results = Vec::new();
-        for nameserver in name_servers.into_inner().into_iter() {
+        for nameserver in name_servers {
             tracing::debug!("DNs diagnostic - {nameserver:?}");
-            let resolver = DnsDiagnostic::from_nameservers(vec![nameserver]);
-            results.append(&mut ns_diagnostic.resolve(&resolver).await);
+            let label = format!("{:?}", [&nameserver]);
+            match DnsDiagnostic::from_nameservers(vec![nameserver]) {
+                Ok(resolver) => results.append(&mut ns_diagnostic.resolve(&resolver).await),
+                // Reported, not dropped: a nameserver the resolver cannot even
+                // be built for is a finding of its own.
+                Err(err) => results.push(DnsResolution {
+                    nameservers: label,
+                    hostname: ns_diagnostic.hostnames[0].clone(),
+                    resolution: Err::<Vec<IpAddr>, _>(err).into(),
+                    resolution_duration_ms: 0,
+                }),
+            }
         }
 
         CompleteDnsReport {
@@ -169,13 +183,20 @@ trait DnsResolver {
     fn nameservers(&self) -> Vec<NameServerConfig>;
 }
 
+/// A resolver and the nameservers it was built from: hickory no longer
+/// exposes a resolver's configuration, and the report names them.
+struct ConfiguredResolver {
+    resolver: Resolver<TokioRuntimeProvider>,
+    nameservers: Vec<NameServerConfig>,
+}
+
 #[async_trait::async_trait]
-impl DnsResolver for Resolver<TokioConnectionProvider> {
+impl DnsResolver for ConfiguredResolver {
     async fn resolve(&self, hostname: &str) -> Result<Vec<IpAddr>, ResolveError> {
-        Ok(self.lookup_ip(hostname).await?.iter().collect())
+        Ok(self.resolver.lookup_ip(hostname).await?.iter().collect())
     }
 
     fn nameservers(&self) -> Vec<NameServerConfig> {
-        self.config().name_servers().to_vec()
+        self.nameservers.clone()
     }
 }

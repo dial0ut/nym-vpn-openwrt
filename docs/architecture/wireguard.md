@@ -53,8 +53,6 @@ Packet processing moves out of the kernel, adding context switches per packet. `
 
 On a router the trade is worth it: one toolchain, every device supported, obfuscation possible.
 
-32-bit targets need build-time patches from `docker/tier3-musl/patch-crates.sh`. Every 32-bit
-target (armv7 and i686 included) gets the nym ecash fix, which serialises two key lengths as `u64`
-instead of `usize` so the spend proof hashes the same bytes the gateway does. Targets without
-64-bit atomics (mips, armv5te) also get `portable-atomic` for gotatun's and other crates'
-`AtomicU64` usage.
+Targets without 64-bit atomics (mips, armv5te) need build-time patches from
+`docker/tier3-musl/patch-crates.sh`: `portable-atomic` for gotatun's and other crates' `AtomicU64`
+usage. armv7 and i686 build unpatched.

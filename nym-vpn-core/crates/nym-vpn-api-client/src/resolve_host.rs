@@ -113,6 +113,10 @@ mod tests {
             .await
             .unwrap();
         //assert!(addresses.len() > 2);
-        assert_eq!(limited_addresses.len(), 1);
+        // At most one address per family; IPv6 shows up when the resolver
+        // returns AAAA records too.
+        let v4 = limited_addresses.iter().filter(|a| a.is_ipv4()).count();
+        let v6 = limited_addresses.iter().filter(|a| a.is_ipv6()).count();
+        assert!(v4 <= 1 && v6 <= 1 && v4 + v6 >= 1, "{limited_addresses:?}");
     }
 }

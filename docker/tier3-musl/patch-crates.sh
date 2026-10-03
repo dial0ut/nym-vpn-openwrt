@@ -6,13 +6,9 @@
 # finds whatever version cargo resolved.
 #
 # Usage:
-#   ./patch-crates.sh [--ecash-only] <cargo-home> <target> <cargo-toml-path>
+#   ./patch-crates.sh <cargo-home> <target> <cargo-toml-path>
 #
 # Arguments:
-#   --ecash-only    Only the in-place nym ecash fix, on 32-bit targets; no
-#                   crate copies, Cargo.toml untouched. For the Tier 2 build
-#                   (scripts/cross-compile-dynamic.sh). Run it after
-#                   `cargo fetch`, so the nym git checkout exists.
 #   cargo-home      Path to CARGO_HOME (e.g., /root/.cargo)
 #   target          Rust target triple (e.g., mips-unknown-linux-musl)
 #   cargo-toml-path Path to workspace Cargo.toml to append [patch.crates-io]
@@ -31,32 +27,21 @@ set -euo pipefail
 log_info() { echo -e "\033[0;32m[PATCH]\033[0m $1" >&2; }
 log_error() { echo -e "\033[0;31m[PATCH ERROR]\033[0m $1" >&2; }
 
-PATCH_MODE=all
-if [ "${1:-}" = "--ecash-only" ]; then
-    PATCH_MODE=ecash
-    shift
-fi
 CARGO_HOME="${CARGO_HOME:-${1:-}}"
 TARGET="${TARGET:-${2:-}}"
 CARGO_TOML="${CARGO_TOML:-${3:-}}"
 PATCH_DIR="${PATCH_DIR:-/tmp/patches}"
 
 # Which patches a target needs follows from what rustc says the target
-# lacks, not from a list of triple names that can miss one (armv7 and i686
-# shipped without the ecash fix that way). load_target_cfg runs once in
-# main, outside any pipeline, so a rustc failure stops the script instead
-# of reading as "not needed".
+# lacks, not from a list of triple names that can miss one. load_target_cfg
+# runs once in main, outside any pipeline, so a rustc failure stops the
+# script instead of reading as "not needed".
 TARGET_CFG=""
 load_target_cfg() {
     if ! TARGET_CFG=$(rustc --print cfg --target "$TARGET") || [ -z "$TARGET_CFG" ]; then
         log_error "rustc cannot describe target '$TARGET'"
         exit 1
     fi
-}
-
-# Every 32-bit target: ecash serialises usize lengths, 4 bytes there.
-needs_ecash_patch() {
-    grep -qx 'target_pointer_width="32"' <<< "$TARGET_CFG"
 }
 
 # Targets without 64-bit atomics (mips, armv5te): std has no
@@ -331,52 +316,6 @@ find_gotatun() {
 }
 
 # ============================================================================
-# Patch: nym-compact-ecash (git dependency)
-# ============================================================================
-# Problem: VerificationKeyAuth::to_bytes() and SecretKeyAuth::to_bytes() use
-#          usize::to_le_bytes() to serialize vector lengths. On 32-bit this
-#          produces 4 bytes, but from_bytes() and the gateway (64-bit) expect
-#          8 bytes (u64). This causes ZK proof challenge hash mismatch and
-#          "the provided ticket failed to get verified" on all 32-bit platforms.
-# Fix: Cast usize to u64 before calling to_le_bytes()
-# A miss here still compiles and only fails at the gateway, so the patch
-# checks its own result and stops the build unless both casts are in place.
-patch_nym_ecash() {
-    local dir="$1"
-    log_info "Patching nym-compact-ecash (usize -> u64 in to_bytes)..."
-
-    local f="$dir/common/nym_offline_compact_ecash/src/scheme/keygen.rs"
-    if [ ! -f "$f" ]; then
-        log_error "  keygen.rs not found at $f"
-        exit 1
-    fi
-
-    if grep -q '&ys_len\.to_le_bytes()' "$f"; then
-        _sed_i 's|&ys_len\.to_le_bytes()|\&(ys_len as u64).to_le_bytes()|' "$f"
-        log_info "  patched SecretKeyAuth::to_bytes()"
-    fi
-
-    if grep -q '&beta_g1_len\.to_le_bytes()' "$f"; then
-        _sed_i 's|&beta_g1_len\.to_le_bytes()|\&(beta_g1_len as u64).to_le_bytes()|' "$f"
-        log_info "  patched VerificationKeyAuth::to_bytes()"
-    fi
-
-    local len
-    for len in ys_len beta_g1_len; do
-        if ! grep -qF "&(${len} as u64).to_le_bytes()" "$f"; then
-            log_error "  ecash patch did not apply: no '(${len} as u64).to_le_bytes()' in $f"
-            log_error "  the upstream code changed; update patch_nym_ecash"
-            exit 1
-        fi
-    done
-    # Any other usize length serialised the same way would break the same way.
-    if grep -nE '&[a-z_]+_len\.to_le_bytes\(\)' "$f"; then
-        log_error "  keygen.rs still serialises a usize length (above); update patch_nym_ecash"
-        exit 1
-    fi
-}
-
-# ============================================================================
 # Patch: nym-gateway-client (git dependency)
 # ============================================================================
 # Problem: Uses std::sync::atomic::AtomicI64 which doesn't exist on 32-bit
@@ -403,37 +342,10 @@ patch_nym_gateway_client() {
     fi
 }
 
-# ============================================================================
-# Patch: nym-lp (git dependency)
-# ============================================================================
-# Problem: Uses std::sync::atomic::AtomicU64 which doesn't exist on 32-bit
-# Fix: Import AtomicU64 from portable-atomic instead
-patch_nym_lp() {
-    local dir="$1"
-    log_info "Patching nym-lp (AtomicU64 -> portable-atomic)..."
-
-    local f="$dir/common/nym-lp/src/session.rs"
-    if [ ! -f "$f" ]; then
-        log_error "  session.rs not found at $f"
-        exit 1
-    fi
-
-    if grep -q 'std::sync::atomic.*AtomicU64' "$f"; then
-        _sed_i 's|use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};|use std::sync::atomic::{AtomicBool, Ordering};\nuse portable_atomic::AtomicU64;|' "$f"
-        log_info "  patched session.rs"
-    fi
-
-    # Add portable-atomic dependency to nym-lp's Cargo.toml
-    local cargo_toml="$dir/common/nym-lp/Cargo.toml"
-    if [ -f "$cargo_toml" ]; then
-        add_portable_atomic_dep "$dir/common/nym-lp"
-    fi
-}
-
 # Find the nym git checkout directory in CARGO_HOME (the nym crates share
-# one checkout; nym-compact-ecash pins its revision).
+# one checkout; nym-gateway-client pins its revision).
 find_nym() {
-    find_git_checkout nym-compact-ecash nym
+    find_git_checkout nym-gateway-client nym
 }
 
 # ============================================================================
@@ -459,33 +371,14 @@ patch_schemars() {
 # ============================================================================
 # Main
 # ============================================================================
-# The nym ecash fix, in place in the nym git checkout. Every 32-bit target
-# needs it, Tier 2 (armv7, i686) as much as Tier 3.
-apply_nym_ecash_patch() {
-    if ! needs_ecash_patch; then
-        log_info "64-bit target: ecash serialises 8-byte lengths already"
-        return
-    fi
-    log_info "32-bit target detected — applying the ecash usize fix"
-    local nym_dir
-    nym_dir=$(find_nym)
-    patch_nym_ecash "$nym_dir"
-}
-
 main() {
     if [ -z "$CARGO_HOME" ] || [ -z "$TARGET" ] || [ -z "$CARGO_TOML" ]; then
-        echo "Usage: $0 [--ecash-only] <cargo-home> <target> <cargo-toml-path>" >&2
+        echo "Usage: $0 <cargo-home> <target> <cargo-toml-path>" >&2
         echo "  Or set CARGO_HOME, TARGET, CARGO_TOML environment variables" >&2
         exit 1
     fi
 
     load_target_cfg
-
-    if [ "$PATCH_MODE" = ecash ]; then
-        log_info "=== ecash patch for target: ${TARGET} ==="
-        apply_nym_ecash_patch
-        return
-    fi
 
     log_info "=== Build-time crate patching for target: ${TARGET} ==="
     mkdir -p "$PATCH_DIR"
@@ -546,10 +439,7 @@ opentelemetry_sdk = { path = \"$otel_sdk_dir\" }"
         local nym_dir
         nym_dir=$(find_nym)
         patch_nym_gateway_client "$nym_dir"
-        patch_nym_lp "$nym_dir"
     fi
-
-    apply_nym_ecash_patch
 
     # Append [patch.crates-io] to Cargo.toml
     cat >> "$CARGO_TOML" << PATCH_EOF
