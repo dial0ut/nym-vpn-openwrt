@@ -1,20 +1,13 @@
 // Copyright 2025 Nym Technologies SA <contact@nymtech.net>
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{
-    borrow::Cow,
-    fmt,
-    net::{IpAddr, Ipv6Addr},
-    sync::LazyLock,
-};
+use std::{borrow::Cow, fmt, net::IpAddr};
 
-use ipnetwork::Ipv6Network;
 use nym_dns::ResolvedDnsConfig;
 
 mod openwrt;
 
 mod net;
-mod split_tunnel;
 pub use net::{
     AllowedClients, AllowedEndpoint, AllowedTunnelTraffic, Endpoint, InboundExemption,
     TransportProtocol, TunnelInterface, TunnelMetadata,
@@ -22,37 +15,11 @@ pub use net::{
 
 pub use openwrt::Error;
 
-static IPV6_LINK_LOCAL: LazyLock<Ipv6Network> =
-    LazyLock::new(|| Ipv6Network::new(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 0), 10).unwrap());
-/// The allowed target addresses of outbound DHCPv6 requests
-static DHCPV6_SERVER_ADDRS: LazyLock<[Ipv6Addr; 2]> = LazyLock::new(|| {
-    [
-        Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 1, 2),
-        Ipv6Addr::new(0xff05, 0, 0, 0, 0, 0, 1, 3),
-    ]
-});
-static ROUTER_SOLICITATION_OUT_DST_ADDR: LazyLock<Ipv6Addr> =
-    LazyLock::new(|| Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 2));
-static SOLICITED_NODE_MULTICAST: LazyLock<Ipv6Network> = LazyLock::new(|| {
-    Ipv6Network::new(Ipv6Addr::new(0xff02, 0, 0, 0, 0, 1, 0xFF00, 0), 104).unwrap()
-});
-
-const DHCPV4_SERVER_PORT: u16 = 67;
-
-const DHCPV4_CLIENT_PORT: u16 = 68;
-
-const DHCPV6_SERVER_PORT: u16 = 547;
-
-const DHCPV6_CLIENT_PORT: u16 = 546;
-
 const ROOT_UID: u32 = 0;
 
 /// `SO_MARK` on sockets that bypass the tunnel. Must equal
 /// `nym_vpn_lib::TUNNEL_FWMARK`, asserted there at compile time.
 pub const TUNNEL_FWMARK: u32 = 0x14d;
-
-/// Allowed TCP ports to DNS servers when connecting.
-const DNS_TCP_PORTS: [u16; 2] = [443, 853];
 
 /// A enum that describes network security strategy
 ///

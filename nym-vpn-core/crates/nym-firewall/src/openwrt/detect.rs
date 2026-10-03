@@ -135,23 +135,6 @@ fn succeeds(program: &str, args: &[&str]) -> bool {
         .unwrap_or(false)
 }
 
-/// Get the OpenWrt version string if available.
-pub fn get_openwrt_version() -> Option<String> {
-    std::fs::read_to_string("/etc/openwrt_release")
-        .ok()
-        .and_then(|content| {
-            content
-                .lines()
-                .find(|line| line.starts_with("DISTRIB_RELEASE="))
-                .map(|line| {
-                    line.trim_start_matches("DISTRIB_RELEASE=")
-                        .trim_matches('"')
-                        .trim_matches('\'')
-                        .to_string()
-                })
-        })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
