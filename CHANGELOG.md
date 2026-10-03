@@ -24,6 +24,8 @@ the GitHub release notes.
   transaction, and a repeat of the last policy within 30 seconds is skipped.
   With the kill-switch off, a failing `nft` during reset is now reported
   instead of ignored.
+- The daemon is about 30% smaller (31 MB down to 22 MB on aarch64), which
+  leaves more flash for upgrades. Speed is unchanged.
 
 ### Fixed
 
