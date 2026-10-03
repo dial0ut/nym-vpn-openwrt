@@ -116,7 +116,6 @@ base64 = "0.22"
 base64-url = "3.0.2"
 bincode = "1.3.3"
 bip39 = "2.2"
-bitflags = "2"
 boringtun = "0.7.0"
 bs58 = "0.5.1"
 bytes = "1.11"
@@ -128,7 +127,6 @@ duct = "1.1"
 ed25519-dalek = "2.2.0"
 futures = "0.3.32"
 futures-util = "0.3"
-ipnet = "2.11.0"
 hex = "0.4"
 hickory-resolver = "0.26"
 hickory-server = "0.26"
@@ -142,17 +140,14 @@ inotify = "0.11"
 ipnetwork = "0.21.1"
 itertools = "0.14.0"
 libc = "0.2"
-log = "0.4.29"
 log-panics = "2"
 netlink-packet-core = "0.8.1"
 netlink-packet-route = "0.25.1"
 netlink-sys = "0.8.7"
 nix = "0.31.1"
-once_cell = "1.21"
 opentelemetry = "0.31.0"
 opentelemetry_sdk = "0.31.0"
 pnet = { version = "0.35.0", default-features = false }
-pnet_packet = "0.35.0"
 prost = "0.14.3"
 prost-types = "0.14.3"
 pretty_assertions = "1.4.1"
@@ -178,14 +173,12 @@ serde_json = "1.0"
 serial_test = "3.3.1"
 sha2 = "0.10"
 si-scale = "0.3.0"
-signature = "2.2.0"
 sqlx = "0.8.6"
 socket2 = "0.6.2"
 surge-ping = "0.8.4"
 strum = { version = "0.28.0", features = ["derive"] }
 strum_macros = "0.28.0"
 sysinfo = "0.38"
-tap = "1.0.1"
 tempfile = "3.25"
 tabled = "0.20"
 thiserror = "2.0"
@@ -246,7 +239,6 @@ nym-wg-metadata-client = { path = "crates/nym-wg-metadata-client" }
 
 # For normal development
 nym-authenticator-client = { git = "https://github.com/nymtech/nym", branch = "vpn/release/2026.11-xynomizithra" }
-nym-authenticator-requests = { git = "https://github.com/nymtech/nym", branch = "vpn/release/2026.11-xynomizithra" }
 nym-api-requests = { git = "https://github.com/nymtech/nym", branch = "vpn/release/2026.11-xynomizithra" }
 nym-bandwidth-controller = { git = "https://github.com/nymtech/nym", branch = "vpn/release/2026.11-xynomizithra" }
 nym-bin-common = { git = "https://github.com/nymtech/nym", branch = "vpn/release/2026.11-xynomizithra" }
@@ -263,7 +255,6 @@ nym-crypto = { git = "https://github.com/nymtech/nym", branch = "vpn/release/202
 nym-ecash-time = { git = "https://github.com/nymtech/nym", branch = "vpn/release/2026.11-xynomizithra" }
 nym-gateway-requests = { git = "https://github.com/nymtech/nym", branch = "vpn/release/2026.11-xynomizithra" }
 nym-http-api-client = { git = "https://github.com/nymtech/nym", branch = "vpn/release/2026.11-xynomizithra" }
-nym-http-api-client-macro = { git = "https://github.com/nymtech/nym", branch = "vpn/release/2026.11-xynomizithra" }
 nym-lp = { git = "https://github.com/nymtech/nym", branch = "vpn/release/2026.11-xynomizithra" }
 nym-network-defaults = { git = "https://github.com/nymtech/nym", branch = "vpn/release/2026.11-xynomizithra" }
 nym-ip-packet-requests = { git = "https://github.com/nymtech/nym", branch = "vpn/release/2026.11-xynomizithra" }
@@ -284,7 +275,6 @@ nym-sqlx-pool-guard = { git = "https://github.com/nymtech/nym", branch = "vpn/re
 # For local development
 #[patch."https://github.com/nymtech/nym"]
 #nym-authenticator-client = { path = "../../nym/nym-authenticator-client" }
-#nym-authenticator-requests = { path = "../../nym/common/authenticator-requests" }
 #nym-api-requests = { path = "../../nym/nym-api/nym-api-requests" }
 #nym-bandwidth-controller = { path = "../../nym/common/bandwidth-controller" }
 #nym-bin-common = { path = "../../nym/common/bin-common" }
@@ -301,7 +291,6 @@ nym-sqlx-pool-guard = { git = "https://github.com/nymtech/nym", branch = "vpn/re
 #nym-ecash-time = { path = "../../nym/common/ecash-time" }
 #nym-gateway-requests = { path = "../../nym/common/gateway-requests"}
 #nym-http-api-client = { path = "../../nym/common/http-api-client" }
-#nym-http-api-client-macro = { path = "../../nym/common/http-api-client-macro" }
 #nym-network-defaults = { path = "../../nym/common/network-defaults" }
 #nym-ip-packet-requests = { path = "../../nym/common/ip-packet-requests" }
 #nym-ip-packet-client = { path = "../../nym/nym-ip-packet-client" }
