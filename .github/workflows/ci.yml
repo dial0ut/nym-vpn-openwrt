@@ -1,6 +1,8 @@
 # Continuous checks for develop and feature branches.
 #
 #   test      cargo test over the whole workspace, lockfile enforced.
+#   ecash-32bit  the ecash compatibility tests built for i686: an x86_64
+#             spend proof must verify there, as it does at the gateways.
 #   package-payload  stage the .ipk and .apk and fail when their payloads
 #             differ (no build, dummy binaries).
 #   security  fast checks that need no Rust build: secret scan of the pushed
@@ -123,6 +125,38 @@ jobs:
         # --locked: fail if Cargo.lock would have to change, i.e. Cargo.toml
         # was edited without updating the lockfile.
         run: cargo test --workspace --locked --no-fail-fast
+
+  ecash-32bit:
+    name: ecash on 32-bit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --target i686-unknown-linux-musl
+          rustup default stable
+
+      - name: Cache cargo registry and build outputs
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: nym-vpn-core
+          key: i686-musl
+
+      - name: Spend proof from x86_64 verifies on i686
+        # A 32-bit build hashes the ticket's key bytes too; a nym pin without
+        # nym #6528 gets every ticket rejected by the gateways. Static musl
+        # binaries run natively on the x86_64 runner.
+        working-directory: nym-vpn-core
+        env:
+          CARGO_TARGET_I686_UNKNOWN_LINUX_MUSL_LINKER: rust-lld
+        run: cargo test --locked --target i686-unknown-linux-musl -p nym-ecash-compat-tests
 
   security:
     name: security checks
