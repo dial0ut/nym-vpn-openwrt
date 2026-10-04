@@ -22,9 +22,9 @@ if [ "$PKG_UPGRADE" = "1" ]; then
     } > "$nym_rpcd_state"
 fi
 
-# On an upgrade the daemon keeps running through the file swap; postinst
-# restarts it via the new init script, whose restart path keeps the
-# kill-switch armed.
+# On an upgrade the daemon keeps running: apk runs this as pre-upgrade while
+# it is still downloading. opkg's preinst stops it after the download;
+# postinst starts the new one, with the kill-switch armed either way.
 if [ "$PKG_UPGRADE" != "1" ]; then
     /etc/init.d/nym-vpnd stop 2>/dev/null
 fi
