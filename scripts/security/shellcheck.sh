@@ -17,6 +17,7 @@ git ls-files -z \
     'luci-app-nym-vpn/root/etc/init.d/*' \
     'luci-app-nym-vpn/root/usr/libexec/rpcd/*' \
     'scripts/ipk/postinst' \
+    'scripts/ipk/preinst' \
     'scripts/ipk/prerm' \
     | xargs -0 $SHELLCHECK --severity=error --external-sources "$@"
 

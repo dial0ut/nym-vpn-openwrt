@@ -188,8 +188,9 @@ fi
 
 echo "=== Adding install scripts ==="
 cp "$SCRIPT_DIR/postinst" "$BUILD_DIR/control/"
+cp "$SCRIPT_DIR/preinst" "$BUILD_DIR/control/"
 cp "$SCRIPT_DIR/prerm" "$BUILD_DIR/control/"
-chmod 755 "$BUILD_DIR/control/postinst" "$BUILD_DIR/control/prerm"
+chmod 755 "$BUILD_DIR/control/postinst" "$BUILD_DIR/control/prerm" "$BUILD_DIR/control/preinst"
 
 echo "=== Normalising ownership and modes ==="
 # Everything the package installs belongs to root and must not be
@@ -203,7 +204,7 @@ normalise_tree() {
     find "$@" -type f ! -perm -u+x -exec chmod 644 {} +
 }
 normalise_tree "$BUILD_DIR/data" "$BUILD_DIR/control"
-chmod 755 "$BUILD_DIR/control/postinst" "$BUILD_DIR/control/prerm"
+chmod 755 "$BUILD_DIR/control/postinst" "$BUILD_DIR/control/prerm" "$BUILD_DIR/control/preinst"
 if tar --version 2>/dev/null | grep -q 'GNU tar'; then
     TAR_AS_ROOT=(--owner=0 --group=0 --numeric-owner)
 else

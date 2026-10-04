@@ -1,0 +1,14 @@
+#!/bin/sh
+# Pre-installation script for nym-vpn IPK package
+
+# Upgrade only: stop the daemon before opkg swaps the files, as OpenWrt's
+# default_prerm does, so the old binary's flash is freed before the new one
+# is written. opkg has already downloaded the package. `shutdown` keeps the
+# kill-switch armed; postinst starts the new daemon. Here, not in prerm:
+# an upgrade runs the old package's prerm, and apk runs prerm as
+# pre-upgrade while it is still downloading.
+if [ "$1" = "upgrade" ]; then
+    /etc/init.d/nym-vpnd shutdown 2>/dev/null
+fi
+
+exit 0
