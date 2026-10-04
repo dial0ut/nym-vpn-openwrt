@@ -11,6 +11,15 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+### Added
+
+- The key exchange of a two-hop session is shown: `nym-vpnc status` prints
+  `Key exchange: Lewes protocol (post-quantum)` or `standard`, and LuCI shows
+  it under the hop chain. `nym-vpnc gateway list` has a Lewes column for
+  two-hop lists, and the LuCI gateway picker tags gateways that do not offer
+  the Lewes protocol as **No PQ**, with the tags explained under the list and
+  in the docs.
+
 ### Changed
 
 - Connecting is more than twice as fast: 3.9 s down to 1.7 s on an x86 test
@@ -26,6 +35,55 @@ the GitHub release notes.
   instead of ignored.
 - The daemon is about 30% smaller (31 MB down to 22 MB on aarch64), which
   leaves more flash for upgrades. Speed is unchanged.
+- Removing the package no longer erases the account and settings in
+  `/etc/nym`, so a reinstall (`opkg install --force-reinstall`, or a removal
+  followed by an install) keeps the account and its paid tickets. Removal
+  prints how to erase them: `rm -rf /etc/nym`.
+- When a gateway keeps failing its bandwidth checks or top-ups, the session
+  now ends and the router connects through a fresh gateway pair after a
+  backoff that grows with each such session, instead of running until the
+  gateway cuts it off. After three such sessions in a row, failed checks no
+  longer end sessions, so a pinned or otherwise unavoidable gateway does not
+  keep spending tickets on reconnects. A session whose checks worked resets
+  the count.
+- 32-bit packages (ARM, i386, mips and mipsel) require musl 1.2, which
+  OpenWrt ships from 22.03 on; 21.02 is supported on x86_64 and aarch64 only.
+  The installer refuses an older 32-bit router with a clear message, and the
+  documented minimum is corrected (it said 18.06).
+- The package depends on `libgcc`, which the binaries need, instead of
+  `libmnl` and `libnftnl`, which they never used.
+
+### Security
+
+- fw3: with the kill-switch on, the router answered LuCI and SSH on its WAN
+  address to hosts on a private upstream network, forwarded WAN hosts into
+  the LAN, let a guest zone reach the LAN, and accepted connections to its
+  own services from the tunnel side. The kill-switch now hands all traffic
+  arriving from the WAN or the tunnel back to the firewall zones, as it
+  already did on fw4, and the boot block does the same for LAN forwards.
+- When the fw4 ruleset failed to load, for example because of a bad rule in
+  `/etc/nftables.d`, the daemon mistook the router for fw3 and applied no
+  kill-switch. It now recognises fw4 from its init script and arms the
+  kill-switch without fw4's table.
+- LuCI showed gateway operator names, daemon and API error messages,
+  split-tunnel labels, DHCP hostnames and the account ID as HTML, so a
+  gateway operator could run script in the admin's LuCI session through its
+  name. They are now always shown as text.
+- Split-tunnel MAC addresses and domains are validated again when the
+  firewall file is written, not only when LuCI adds them. An entry set
+  directly in UCI (`uci set`, a restored backup) can no longer inject rules
+  into the fw4 ruleset or stop it from loading; invalid entries are skipped
+  and logged. LuCI's rpcd permissions are cut to the `nym-vpn` methods the
+  page calls, with no UCI write access.
+- A sysupgrade erased the account and settings, including the kill-switch
+  setting, so the router came back with the kill-switch off. sysupgrade now
+  keeps `/etc/nym`, `/etc/config/nym-vpn` and the split-tunnel firewall file.
+- Packets that matched an existing connection skipped the CVE-2019-14899
+  guard, which drops packets for the tunnel address arriving on other
+  interfaces. The guard now comes first.
+- On fw4 the kill-switch's DHCP exceptions matched both IP families, so
+  IPv6 traffic on the DHCPv4 ports, and IPv4 on the DHCPv6 ports, passed
+  while blocked.
 
 ### Fixed
 
@@ -42,6 +100,48 @@ the GitHub release notes.
   new route instead of hanging until its timeout.
 - The first connect after boot discarded the gateway lists fetched at
   startup.
+- A dropped tunnel could switch servers on an even-numbered retry even
+  when the gateway was still owed a retry.
+- The check that decides whether a dead gateway or the network is at fault
+  went through the dying tunnel. In mixnet mode it always failed, so the
+  router waited the full two minutes before leaving a dead gateway. It now
+  leaves via the WAN.
+- A gateway that passed the connection check and then dropped within a
+  minute (three minutes for mixnet) was retried forever. After three such
+  sessions in a row the router picks another gateway, if the API is
+  reachable.
+- When the blacklist ruled out every entry gateway the settings allow, as
+  in a country with a single gateway, the connection failed instead of
+  trying that gateway again.
+- If the first bandwidth query of a session failed, the router stopped
+  checking and topping up bandwidth for the rest of the session. Queries
+  are now retried, a gateway gets a minute to answer for the first time
+  before its failures count, and a top-up with no ticket ready is retried.
+  A gateway that stops answering no longer holds up a disconnect for 30 s.
+- A slow blocklist download when enabling ad-blocking (up to two minutes)
+  could stall the daemon until its watchdog restarted it, dropping the
+  tunnel. Ad-blocking, diagnostics, account reads and SOCKS5 enable now run
+  in the background, so the CLI and LuCI stay responsive; quick ad-blocking
+  toggles apply only the last one, and status no longer misses a tunnel
+  state change made meanwhile.
+- Enabling ad-blocking for the first time, or editing split-tunnel
+  exclusions, saved the daemon's temporary DNS redirect into
+  `/etc/config/dhcp`. After a reboot LAN DNS was down until the daemon
+  started, and for good if it was disabled or removed.
+- Removing a split-tunnel domain left the addresses it had already resolved
+  bypassing the tunnel.
+- Split-tunnel edits report a failed firewall or dnsmasq reload instead of
+  always claiming success, client-only edits no longer restart dnsmasq, and
+  two edits at once no longer leave a stale ruleset.
+- Removing the package leaves no split-tunnel firewall file or dhcp domain
+  sets behind, and an upgrade keeps the ad-blocking list instead of
+  downloading it again.
+- With a hung daemon, LuCI reports the service as not responding after
+  about 25 s instead of failing with an opaque timeout, and the gateway list
+  no longer retries per country against the same hung daemon. `nym-vpnc`
+  gives up after 5 s when the daemon's socket does not accept a connection.
+- The LuCI gateway picker ranked and labelled gateways by any tier word in
+  their performance text, so "Low (load: High, …)" showed as High.
 
 ## [1.35.0] - 2026-09-21
 
