@@ -100,6 +100,14 @@ the GitHub release notes.
   new route instead of hanging until its timeout.
 - The first connect after boot discarded the gateway lists fetched at
   startup.
+- An opkg upgrade on a router short on flash could run out of space partway,
+  leaving a truncated daemon and a truncated `/usr/lib/opkg/status`, opkg's
+  record of every installed package. Since 1.35.0 the daemon kept running
+  through the upgrade and held the old binary on flash, so both copies had
+  to fit. opkg upgrades now stop the daemon once the package is downloaded,
+  as OpenWrt packages normally do, and the kill-switch stays armed until the
+  new daemon starts. apk needs room for both copies and fails safely without
+  it; the troubleshooting guide shows how to upgrade with little flash.
 - A dropped tunnel could switch servers on an even-numbered retry even
   when the gateway was still owed a retry.
 - The check that decides whether a dead gateway or the network is at fault
