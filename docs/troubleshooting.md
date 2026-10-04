@@ -103,19 +103,38 @@ another 2–3 MB. Devices with a small RAM-backed `/tmp` may not have room to st
 df -h
 ```
 
-Most devices have a writable overlay with more room than tmpfs:
-
-```bash
-mkdir -p /overlay/tmp
-# stage the package there instead of /tmp
-```
-
-Or free some up:
+Free some up:
 
 ```bash
 rm -rf /tmp/opkg-lists          # re-fetch later with opkg update
 rm -f /tmp/sf_log.txt /tmp/log/*
 ```
+
+Don't stage the package on the overlay (`/overlay/tmp` or similar): that puts a third copy of the
+daemon on flash.
+
+### Upgrading with little flash
+
+opkg stops the daemon once the package is downloaded, so an upgrade needs room for one copy of
+`nym-vpnd`. The kill-switch stays armed until the new daemon starts.
+
+apk writes the new file before it removes the old one, so it needs room for both. If they don't
+fit, it fails with *No space left on device* and keeps the old version. Then upgrade by hand:
+download first, while the tunnel is up, and delete the old binary before installing. `shutdown`
+keeps the kill-switch armed, so the router stays blocked until the new daemon starts.
+
+```bash
+cd /tmp && apk update && apk fetch nym-vpn
+/etc/init.d/nym-vpnd shutdown
+rm /usr/sbin/nym-vpnd
+apk add --allow-untrusted /tmp/nym-vpn-*.apk && rm -f /tmp/nym-vpn-*.apk
+sed -i 's/^nym-vpn[<>=~].*$/nym-vpn/' /etc/apk/world
+```
+
+The last line matters: installing a local file pins the package to it, and `apk upgrade` would
+skip later releases.
+
+If the install fails, `/etc/init.d/nym-vpnd stop` opens the router again.
 
 ## Not enough RAM (OOM crash)
 
