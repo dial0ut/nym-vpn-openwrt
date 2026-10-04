@@ -39,8 +39,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  docs-ui-harness:
-    name: docs, LuCI and harness checks
+  docs-ui:
+    name: docs and LuCI checks
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -55,7 +55,7 @@ jobs:
       - name: Install test dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends nodejs npm tcpdump
+          sudo apt-get install -y -qq --no-install-recommends nodejs npm
       - name: LuCI behavior and documentation links
         working-directory: luci-app-nym-vpn/tests
         run: |
@@ -65,9 +65,6 @@ jobs:
         run: |
           pip install -r docs/requirements.txt
           mkdocs build --strict
-      - name: Leak harness regression tests
-        run: |
-          for test in tests/leak/tests/*.sh; do bash "$test"; done
 
   package-payload:
     name: ipk and apk payloads match

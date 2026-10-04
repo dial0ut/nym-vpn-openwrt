@@ -147,9 +147,7 @@ the GitHub release notes.
   scanning, shell scripts and workflows. Dependency advisories are currently
   reported without failing CI.
 - Integration and fault-injection suites cover package lifecycle, DNS,
-  kill-switch behavior, management access and recovery. See the
-  [integration harness](tests/harness/README.md) and
-  [fault-injection suite](tests/leak/README.md) for usage and coverage.
+  kill-switch behavior, management access and recovery.
 
 ## [1.34.0] - 2026-08-21
 

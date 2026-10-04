@@ -26,6 +26,5 @@ site/
 .mcp.json
 .tools/
 
-# test suites
-tests/leak/results/
-tests/harness/runs/
+# Lab test suites (Proxmox rigs, real routers): kept locally, not shipped
+/tests/
