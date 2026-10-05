@@ -62,3 +62,24 @@ jobs:
       - name: Run tests
         working-directory: nym-vpn-core
         run: cargo test --workspace --locked --no-fail-fast
+
+  workflow-lint:
+    name: workflow lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: zizmor
+        uses: zizmorcore/zizmor-action@70fb788f84895a7701f5643d103d587e460b5c99 # v0.6.3
+        with:
+          version: 1.30.0
+          # Fail the job on findings instead of uploading SARIF.
+          advanced-security: false
+          # Informational findings (e.g. static matrix values in run: blocks) don't block.
+          min-severity: low
