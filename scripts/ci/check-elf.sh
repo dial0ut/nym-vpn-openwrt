@@ -12,6 +12,10 @@
 #   - 32-bit: the same, except that musl 1.2's time64 symbols (__*64,
 #     __*64_r) are allowed: their packages depend on libc >= 1.2
 #     (scripts/pkg-depends.sh).
+#   - ARM also gets the EABI helpers ARM's libc.so exports on top
+#     (musl-1.1.24-arm-exports.txt: __aeabi_read_tp, which every TLS access
+#     calls, and the __aeabi_mem* family), the difference between 21.02.7's
+#     arm_cortex-a7_neon-vfpv4 libc.so and the x86_64 list.
 #   - Other 64-bit machines (riscv64) never ran 21.02; only NEEDED is checked.
 #
 # Usage: scripts/ci/check-elf.sh <binary>...
@@ -19,12 +23,15 @@ set -euo pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 EXPORTS="$DIR/musl-1.1.24-exports.txt"
+ARM_EXPORTS="$DIR/musl-1.1.24-arm-exports.txt"
 ALLOWED_NEEDED=(libc.so libgcc_s.so.1)
 TIME64_RE='^__[a-z_]+64(_r)?$'
 export LC_ALL=C
 
 [ $# -gt 0 ] || { echo "usage: $0 <binary>..." >&2; exit 2; }
-[ -s "$EXPORTS" ] || { echo "error: $EXPORTS missing" >&2; exit 2; }
+for f in "$EXPORTS" "$ARM_EXPORTS"; do
+    [ -s "$f" ] || { echo "error: $f missing" >&2; exit 2; }
+done
 
 fail=0
 for bin in "$@"; do
@@ -56,11 +63,13 @@ for bin in "$@"; do
             ;;
     esac
 
+    exports=("$EXPORTS")
+    [ "$machine" = ARM ] && exports+=("$ARM_EXPORTS")
     missing=$(comm -23 \
         <(readelf --dyn-syms -W "$bin" \
             | awk '$7 == "UND" && $5 == "GLOBAL" && $8 !~ /@GCC_/ { sub(/@.*/, "", $8); print $8 }' \
             | grep -v '^_Unwind_' | sort -u) \
-        <(sort -u "$EXPORTS"))
+        <(sort -u "${exports[@]}"))
     if [ "$class" = ELF32 ]; then
         missing=$(printf '%s\n' "$missing" | grep -Ev "$TIME64_RE" || true)
     fi
