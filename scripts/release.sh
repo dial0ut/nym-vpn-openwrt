@@ -66,6 +66,31 @@ git fetch origin
 [ "$(git rev-parse develop)" = "$(git rev-parse origin/develop)" ] \
     || fail "local develop != origin/develop — pull or push first"
 
+# The tag push builds every target, but only once the tag exists. Refuse to
+# tag what CI (tests plus the armv7 and mipsel cross-builds) has not passed.
+# Docs-only pushes skip CI, so use the newest commit that ran it and require
+# that only docs changed since.
+command -v gh >/dev/null 2>&1 || fail "gh is required to check CI on develop (https://cli.github.com)"
+command -v jq >/dev/null 2>&1 || fail "jq is required to check CI on develop"
+echo "Checking CI on develop..."
+CI_RUNS="$(gh run list --workflow ci.yml --branch develop --limit 50 \
+    --json headSha,status,conclusion,url)" || fail "could not list CI runs"
+CI_SHA="" CI_RUN=""
+for sha in $(git rev-list --max-count=50 HEAD); do
+    CI_RUN="$(jq -c --arg s "$sha" 'map(select(.headSha == $s)) | first // empty' <<< "$CI_RUNS")"
+    if [ -n "$CI_RUN" ]; then CI_SHA="$sha"; break; fi
+done
+[ -n "$CI_SHA" ] || fail "no CI run found for any of develop's last 50 commits"
+UNTESTED="$(git diff --name-only "$CI_SHA" HEAD -- . ':(exclude)docs/**' ':(exclude,glob)*.md')"
+[ -z "$UNTESTED" ] || fail "CI has not run on $(git rev-parse --short HEAD) yet (last run: ${CI_SHA:0:9}); wait for it.
+Changed since: $(echo "$UNTESTED" | tr '\n' ' ')"
+CI_STATUS="$(jq -r .status <<< "$CI_RUN")"
+CI_CONCLUSION="$(jq -r .conclusion <<< "$CI_RUN")"
+CI_URL="$(jq -r .url <<< "$CI_RUN")"
+[ "$CI_STATUS" = completed ] || fail "CI on ${CI_SHA:0:9} is still $CI_STATUS; wait for it: $CI_URL"
+[ "$CI_CONCLUSION" = success ] || fail "CI on ${CI_SHA:0:9} concluded '$CI_CONCLUSION': $CI_URL"
+echo "CI passed on ${CI_SHA:0:9}: $CI_URL"
+
 git merge-base --is-ancestor origin/openwrt develop \
     || fail "origin/openwrt is not an ancestor of develop — the fast-forward invariant is broken.
 Fix manually (openwrt must be a strict subset of develop; never commit to it directly)."
