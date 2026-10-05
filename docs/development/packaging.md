@@ -47,9 +47,9 @@ nym-vpn_1.33.1_aarch64_generic.ipk (tar.gz)
     └── etc/apk/keys/dial0ut.pub
 ```
 
-The `.apk` carries the same payload (`scripts/ci/check-pkg-payload.sh` fails CI when the two
-differ) with three format-specific exceptions: the apk feed key `etc/apk/keys/dial0ut-apk.pem`
-instead of the two keys above, and `lib/apk/packages/nym-vpn.conffiles` plus
+The `.apk` carries the same payload (`scripts/ci/check-pkg-payload.sh` compares the two) with
+three format-specific exceptions: the apk feed key `etc/apk/keys/dial0ut-apk.pem` instead of the
+two keys above, and `lib/apk/packages/nym-vpn.conffiles` plus
 `nym-vpn.conffiles_static`, apk's form of the conffiles list (see [conffiles](#conffiles)).
 
 The opkg key is installed under its **fingerprint**, not its filename — `build-ipk.sh` derives it

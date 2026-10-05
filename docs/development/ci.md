@@ -1,22 +1,16 @@
 # CI/CD
 
-Three workflows: `ci.yml` checks development changes, `release-musl.yml` builds and ships
-releases, and `docs.yml` deploys this site.
+Four workflows: `ci.yml` and `docs-check.yml` check development changes, `release-musl.yml`
+builds and ships releases, and `docs.yml` deploys this site.
 
 ## Development checks
 
-`ci.yml` runs on pushes to `develop`, `feat/**`, `fix/**` and `ci/**`, pull requests targeting
-`develop`, manual dispatch, and a weekly schedule.
+`ci.yml` runs on pushes to `develop` that touch more than docs and Markdown, on pull requests
+targeting `develop`, and on manual dispatch. It runs ShellCheck over the root-run scripts, then
+`cargo test --workspace --locked --no-fail-fast` with the required native libraries and
+unprivileged ICMP sockets enabled.
 
-- Rust: `cargo test --workspace --locked --no-fail-fast` on an Ubuntu runner with the required
-  native libraries and unprivileged ICMP sockets enabled.
-- Security: secret scanning, dependency license/source/ban checks, dependency advisories,
-  ShellCheck and workflow linting. **Advisory failures are non-blocking** while the backlog is
-  being triaged; the other checks fail their job on errors.
-
-The docs/UI job runs `npm ci` and `npm test` in `luci-app-nym-vpn/tests/` and
-`mkdocs build --strict` after installing `docs/requirements.txt`. The LuCI suite verifies that
-help buttons target matching guide headings. These commands can also be run locally.
+`docs-check.yml` runs `mkdocs build --strict` when `docs/` or `mkdocs.yml` change.
 
 Device-level integration and leak testing runs on the maintainers' own lab rigs and is not part
 of the repository or these workflows. Cross-compilation proves a target builds, not that it works on a
