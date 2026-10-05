@@ -63,6 +63,19 @@ jobs:
         working-directory: nym-vpn-core
         run: cargo test --workspace --locked --no-fail-fast
 
+  cross:
+    name: cross
+    # One target per build path, so a release tag is never the first build of
+    # either: armv7 (stock image, stable) and mipsel (custom image, pinned
+    # nightly with build-std, no 64-bit atomics). v1.34.0 and v1.35.0 both
+    # failed on these only after tagging.
+    # Switch to the `$/` self-repository syntax once actionlint and act support it.
+    uses: ./.github/workflows/build.yml # zizmor: ignore[self-repository]
+    permissions:
+      contents: read
+    with:
+      arches: armv7 mipsel
+
   workflow-lint:
     name: workflow lint
     runs-on: ubuntu-latest

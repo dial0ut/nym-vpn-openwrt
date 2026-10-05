@@ -64,12 +64,11 @@ install_system_deps() {
     local required_version="1.95"
     log_info "Current Rust: $current_version, Required: $required_version+"
 
+    # The image's toolchain is the release toolchain (CI pins the image by
+    # digest), so never swap in whatever stable is current: fail instead.
     if [ "$(printf '%s\n' "$required_version" "$current_version" | sort -V | head -n1)" != "$required_version" ]; then
-        log_info "Rust $current_version is too old, reinstalling latest stable..."
-        rustup self uninstall -y 2>/dev/null || true
-        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-        source "$HOME/.cargo/env"
-        log_info "Updated to: $(rustc --version)"
+        log_error "Rust $current_version in this image is older than $required_version; use a newer image (scripts/ci/targets.json pins the CI ones)"
+        exit 1
     fi
 
     # Ensure the cross-compilation target is installed

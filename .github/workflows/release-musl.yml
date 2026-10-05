@@ -65,174 +65,16 @@ jobs:
           echo "All release invariants hold."
 
   build:
-    name: Build ${{ matrix.arch }}
+    name: Build
     needs: verify
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Standard Tier 2 targets - use stock messense/rust-musl-cross images
-          - target: x86_64-unknown-linux-musl
-            arch: x86_64
-            docker_image: messense/rust-musl-cross:x86_64-musl@sha256:ce75e9174325d4fbb3de85c309e2d7ca29f7500169bc4b5d2c611ff7e86d549a
-          - target: i686-unknown-linux-musl
-            arch: i686
-            docker_image: messense/rust-musl-cross:i686-musl@sha256:e515546ceeb7fef8a70e7a59198981f5851cbcf16dd8d1adeb28736ea4751e05
-          - target: aarch64-unknown-linux-musl
-            arch: aarch64
-            docker_image: messense/rust-musl-cross:aarch64-musl@sha256:ecae5dd62d1c938c14f8071d36c16fa699860aace03bfb5284fb1216474d2643
-          - target: armv7-unknown-linux-musleabihf
-            arch: armv7
-            docker_image: messense/rust-musl-cross:armv7-musleabihf@sha256:714d7529ed9098699cc13abade83c565e6a946e53975c108089a8cd3b43cb871
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          submodules: recursive
-          persist-credentials: false
-
-      - name: Setup swap for LTO linking
-        run: |
-          # Use a unique swapfile name to avoid conflicts
-          SWAPFILE="/swapfile-nym-$$"
-          sudo fallocate -l 8G "$SWAPFILE"
-          sudo chmod 600 "$SWAPFILE"
-          sudo mkswap "$SWAPFILE"
-          sudo swapon "$SWAPFILE"
-          echo "Swap enabled:"
-          free -h
-
-      - name: Build
-        run: |
-          docker run --rm \
-            -v "${{ github.workspace }}:/home/rust/src" \
-            -e TARGET=${{ matrix.target }} \
-            ${{ matrix.docker_image }} \
-            bash /home/rust/src/scripts/cross-compile-dynamic.sh
-
-      - name: Check ELF imports and libraries
-        # Needed libraries within the package's depends, imports within
-        # musl 1.1.24 (plus time64 on 32-bit, which requires libc >= 1.2).
-        env:
-          TARGET: ${{ matrix.target }}
-        run: |
-          scripts/ci/check-elf.sh \
-            "nym-vpn-core/target/${TARGET}/release/nym-vpnd" \
-            "nym-vpn-core/target/${TARGET}/release/nym-vpnc"
-
-      - name: Prepare artifacts
-        run: |
-          mkdir -p artifacts
-          cp nym-vpn-core/target/${{ matrix.target }}/release/nym-vpnd artifacts/nym-vpnd-${{ matrix.arch }}
-          cp nym-vpn-core/target/${{ matrix.target }}/release/nym-vpnc artifacts/nym-vpnc-${{ matrix.arch }}
-
-          # Create tarball
-          cd artifacts
-          tar -czvf nym-vpn-${{ matrix.arch }}.tar.gz nym-vpnd-${{ matrix.arch }} nym-vpnc-${{ matrix.arch }}
-
-          # Generate checksums
-          sha256sum nym-vpnd-${{ matrix.arch }} > nym-vpnd-${{ matrix.arch }}.sha256
-          sha256sum nym-vpnc-${{ matrix.arch }} > nym-vpnc-${{ matrix.arch }}.sha256
-          sha256sum nym-vpn-${{ matrix.arch }}.tar.gz > nym-vpn-${{ matrix.arch }}.tar.gz.sha256
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: nym-vpn-${{ matrix.arch }}
-          path: artifacts/*
-          retention-days: 7
-
-  build-tier3:
-    name: Build ${{ matrix.arch }} (Tier 3)
-    needs: verify
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: mipsel-unknown-linux-musl
-            arch: mipsel
-            dockerfile: Dockerfile.mipsel
-          - target: mips-unknown-linux-musl
-            arch: mips
-            dockerfile: Dockerfile.mips
-          - target: riscv64gc-unknown-linux-musl
-            arch: riscv64
-            dockerfile: Dockerfile.riscv64
-          - target: armv5te-unknown-linux-musleabi
-            arch: armv5te
-            dockerfile: Dockerfile.armv5te
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          submodules: recursive
-          persist-credentials: false
-
-      - name: Setup swap for Tier 3 linking
-        run: |
-          SWAPFILE="/swapfile-nym-$$"
-          sudo fallocate -l 8G "$SWAPFILE"
-          sudo chmod 600 "$SWAPFILE"
-          sudo mkswap "$SWAPFILE"
-          sudo swapon "$SWAPFILE"
-          echo "Swap enabled:"
-          free -h
-
-      - name: Build Docker image
-        run: |
-          source scripts/versions.sh
-          docker build \
-            --build-arg RUST_NIGHTLY="$RUST_NIGHTLY" \
-            -f docker/tier3-musl/${{ matrix.dockerfile }} \
-            -t nym-musl-cross:${{ matrix.arch }}-musl \
-            docker/tier3-musl/
-
-      - name: Build
-        run: |
-          docker run --rm \
-            -v "${{ github.workspace }}:/home/rust/src" \
-            nym-musl-cross:${{ matrix.arch }}-musl \
-            /opt/build-tier3-dynamic.sh
-
-      - name: Check ELF imports and libraries
-        # Needed libraries within the package's depends, imports within
-        # musl 1.1.24 (plus time64 on 32-bit, which requires libc >= 1.2).
-        env:
-          TARGET: ${{ matrix.target }}
-        run: |
-          scripts/ci/check-elf.sh \
-            "nym-vpn-core/target/${TARGET}/release/nym-vpnd" \
-            "nym-vpn-core/target/${TARGET}/release/nym-vpnc"
-
-      - name: Prepare artifacts
-        run: |
-          mkdir -p artifacts
-          cp nym-vpn-core/target/${{ matrix.target }}/release/nym-vpnd artifacts/nym-vpnd-${{ matrix.arch }}
-          cp nym-vpn-core/target/${{ matrix.target }}/release/nym-vpnc artifacts/nym-vpnc-${{ matrix.arch }}
-
-          # Create tarball
-          cd artifacts
-          tar -czvf nym-vpn-${{ matrix.arch }}.tar.gz nym-vpnd-${{ matrix.arch }} nym-vpnc-${{ matrix.arch }}
-
-          # Generate checksums
-          sha256sum nym-vpnd-${{ matrix.arch }} > nym-vpnd-${{ matrix.arch }}.sha256
-          sha256sum nym-vpnc-${{ matrix.arch }} > nym-vpnc-${{ matrix.arch }}.sha256
-          sha256sum nym-vpn-${{ matrix.arch }}.tar.gz > nym-vpn-${{ matrix.arch }}.tar.gz.sha256
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: nym-vpn-${{ matrix.arch }}
-          path: artifacts/*
-          retention-days: 7
+    # Switch to the `$/` self-repository syntax once actionlint and act support it.
+    uses: ./.github/workflows/build.yml # zizmor: ignore[self-repository]
+    permissions:
+      contents: read
 
   package:
     name: Create packages (${{ matrix.openwrt_arch }})
-    needs: [build, build-tier3]
+    needs: build
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -349,7 +191,7 @@ jobs:
 
   release:
     name: Create Release
-    needs: [build, build-tier3, package]
+    needs: [build, package]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
