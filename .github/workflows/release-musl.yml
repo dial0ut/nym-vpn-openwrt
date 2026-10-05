@@ -1,4 +1,8 @@
-# Build and release musl binaries for OpenWrt/Linux
+# Build and release musl binaries and packages for OpenWrt.
+#
+# A v* tag runs everything. Manual dispatch with a tag is a dry run of the
+# same pipeline from that tag: it builds, packages and smoke-tests an
+# unsigned feed, and never releases or publishes.
 name: Release musl binaries
 
 on:
@@ -12,17 +16,19 @@ on:
         required: true
         type: string
 
-env:
-  CARGO_TERM_COLOR: always
-
-# Read-only token for every job unless it says otherwise.
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   verify:
     name: Verify release invariants
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.verify.outputs.tag }}
+      version: ${{ steps.verify.outputs.version }}
+      prerelease: ${{ steps.verify.outputs.prerelease }}
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -32,6 +38,7 @@ jobs:
           persist-credentials: false
 
       - name: Verify tag, version, and branches
+        id: verify
         env:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_TAG: ${{ inputs.tag }}
@@ -62,6 +69,18 @@ jobs:
           git show "$TAG:CHANGELOG.md" | grep -q "^## \[$VERSION\]" \
             || { echo "::error::CHANGELOG.md has no section for $VERSION"; exit 1; }
 
+          # A semver pre-release suffix (v1.2.0-rc1) ships to GitHub as a
+          # pre-release and never reaches the feed.
+          case "$VERSION" in
+            *-*) PRERELEASE=true ;;
+            *) PRERELEASE=false ;;
+          esac
+
+          {
+            echo "tag=$TAG"
+            echo "version=$VERSION"
+            echo "prerelease=$PRERELEASE"
+          } >> "$GITHUB_OUTPUT"
           echo "All release invariants hold."
 
   build:
@@ -71,129 +90,206 @@ jobs:
     uses: ./.github/workflows/build.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read
+    with:
+      ref: refs/tags/${{ needs.verify.outputs.tag }}
 
   package:
-    name: Create packages (${{ matrix.openwrt_arch }})
-    needs: build
+    name: Create packages
+    needs: [verify, build]
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          # mipsel
-          - arch: mipsel
-            openwrt_arch: mipsel_24kc
-          # mips
-          - arch: mips
-            openwrt_arch: mips_24kc
-          - arch: mipsel
-            openwrt_arch: mips_siflower
-          # riscv64
-          - arch: riscv64
-            openwrt_arch: riscv64_riscv64
-          # armv5te
-          - arch: armv5te
-            openwrt_arch: arm_arm926ej-s
-          # aarch64
-          - arch: aarch64
-            openwrt_arch: aarch64_generic
-          - arch: aarch64
-            openwrt_arch: aarch64_cortex-a53
-          - arch: aarch64
-            openwrt_arch: aarch64_cortex-a53_neon-vfpv4
-          - arch: aarch64
-            openwrt_arch: aarch64_cortex-a72
-          # x86
-          - arch: x86_64
-            openwrt_arch: x86_64
-          - arch: i686
-            openwrt_arch: i386_pentium4
-          - arch: i686
-            openwrt_arch: i386_pentium-mmx
-          # armv7
-          - arch: armv7
-            openwrt_arch: arm_cortex-a5_vfpv4
-          - arch: armv7
-            openwrt_arch: arm_cortex-a7
-          - arch: armv7
-            openwrt_arch: arm_cortex-a7_neon-vfpv4
-          - arch: armv7
-            openwrt_arch: arm_cortex-a7_vfpv4
-          - arch: armv7
-            openwrt_arch: arm_cortex-a8_vfpv3
-          - arch: armv7
-            openwrt_arch: arm_cortex-a9
-          - arch: armv7
-            openwrt_arch: arm_cortex-a9_neon
-          - arch: armv7
-            openwrt_arch: arm_cortex-a9_vfpv3-d16
-          - arch: armv7
-            openwrt_arch: arm_cortex-a15_neon-vfpv4
-
+    timeout-minutes: 30
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          ref: refs/tags/${{ needs.verify.outputs.tag }}
           persist-credentials: false
 
-      - name: Download artifacts
+      - name: Download binaries
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: nym-vpn-${{ matrix.arch }}
+          pattern: nym-vpn-*
           path: artifacts
+          merge-multiple: true
 
-      - name: Get version
-        id: version
+      - name: Build IPK and APK packages
+        # One .ipk (OpenWrt <=24.10, opkg) and one .apk (25.x+, apk) for every
+        # OpenWrt architecture in scripts/ci/targets.json.
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          INPUT_TAG: ${{ inputs.tag }}
+          VERSION: ${{ needs.verify.outputs.version }}
         run: |
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            VERSION="$INPUT_TAG"
-          else
-            VERSION="${GITHUB_REF#refs/tags/}"
-          fi
-          # Strip 'v' prefix for package version
-          echo "version=${VERSION#v}" >> $GITHUB_OUTPUT
-          echo "tag=${VERSION}" >> $GITHUB_OUTPUT
+          set -euo pipefail
+          while read -r arch openwrt_arch; do
+            echo "::group::$openwrt_arch ($arch)"
+            mkdir -p "bin/$arch"
+            cp "artifacts/nym-vpnd-$arch" "bin/$arch/nym-vpnd"
+            cp "artifacts/nym-vpnc-$arch" "bin/$arch/nym-vpnc"
+            scripts/ipk/build-ipk.sh "$VERSION" "$openwrt_arch" "bin/$arch" luci-app-nym-vpn packages
+            scripts/apk/build-apk.sh "$VERSION" "$openwrt_arch" "bin/$arch" luci-app-nym-vpn packages
+            echo "::endgroup::"
+          done < <(jq -r '.[] | .arch as $a | .openwrt[] | "\($a) \(.)"' scripts/ci/targets.json)
 
-      - name: Prepare binaries
-        run: |
-          mkdir -p binaries
-          cp artifacts/nym-vpnd-${{ matrix.arch }} binaries/nym-vpnd
-          cp artifacts/nym-vpnc-${{ matrix.arch }} binaries/nym-vpnc
+          expected=$(jq '[.[].openwrt[]] | length' scripts/ci/targets.json)
+          for ext in ipk apk; do
+            n=$(find packages -maxdepth 1 -name "*.$ext" | wc -l)
+            [ "$n" -eq "$expected" ] \
+              || { echo "::error::$n .$ext packages, expected $expected"; exit 1; }
+          done
 
-      - name: Build IPK (for OpenWrt ≤24.10 with opkg)
-        run: |
-          scripts/ipk/build-ipk.sh \
-            "${{ steps.version.outputs.version }}" \
-            "${{ matrix.openwrt_arch }}" \
-            "binaries" \
-            "luci-app-nym-vpn" \
-            "."
-
-      - name: Build APK (for OpenWrt 25.x+ with apk)
-        run: |
-          scripts/apk/build-apk.sh \
-            "${{ steps.version.outputs.version }}" \
-            "${{ matrix.openwrt_arch }}" \
-            "binaries" \
-            "luci-app-nym-vpn" \
-            "."
-
-      - name: Upload package artifacts
+      - name: Upload packages
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: pkg-${{ matrix.openwrt_arch }}
-          path: |
-            *.ipk
-            *.apk
+          name: packages
+          path: packages/*
+          if-no-files-found: error
+          retention-days: 7
+
+  feed:
+    name: Build and smoke-test the feed
+    needs: [verify, package]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      # Only a tag signs; a dry run builds the same feed unsigned.
+      SIGN: ${{ startsWith(github.ref, 'refs/tags/') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: refs/tags/${{ needs.verify.outputs.tag }}
+          persist-credentials: false
+
+      - name: Download packages
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: packages
+          path: artifacts
+
+      - name: Install signify
+        if: env.SIGN == 'true'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends signify-openbsd
+
+      - name: Write signing keys
+        if: env.SIGN == 'true'
+        # Keys reach the shell through the environment, never by interpolating
+        # the secret into the command line.
+        env:
+          OPKG_SIGNING_KEY: ${{ secrets.DIAL0UT_OPKG }}
+          APK_SIGNING_KEY: ${{ secrets.DIAL0UT_APK }}
+        run: |
+          umask 077
+          printf '%s\n' "$OPKG_SIGNING_KEY" > /tmp/opkg.sec
+          # Basename must match the public key shipped on-device
+          # (/etc/apk/keys/dial0ut-apk.pem) — apk matches signatures by key name.
+          printf '%s\n' "$APK_SIGNING_KEY" > /tmp/dial0ut-apk.pem
+
+      - name: Generate opkg and apk feeds
+        run: |
+          OPKG_KEY="" APK_KEY=""
+          if [ "$SIGN" = true ]; then
+            OPKG_KEY=/tmp/opkg.sec APK_KEY=/tmp/dial0ut-apk.pem
+          else
+            echo "::notice::not a tag: the feed is built unsigned"
+          fi
+          mkdir -p feed/opkg feed/apk
+          cp artifacts/*.ipk feed/opkg/
+          cp artifacts/*.apk feed/apk/
+          bash scripts/feed/generate-feed.sh opkg feed/opkg "$OPKG_KEY"
+          bash scripts/feed/generate-feed.sh apk feed/apk "$APK_KEY"
+
+      - name: Clean up signing keys
+        if: always()
+        run: rm -f /tmp/opkg.sec /tmp/dial0ut-apk.pem
+
+      - name: Check every architecture has an index
+        # generate-feed.sh skips what it cannot index or sign with a warning;
+        # a release must not publish a feed with holes in it.
+        run: |
+          expected=$(jq '[.[].openwrt[]] | length' scripts/ci/targets.json)
+          check() {
+            n=$(find "$1" -mindepth 2 -maxdepth 2 -name "$2" | wc -l)
+            [ "$n" -eq "$expected" ] \
+              || { echo "::error::$n of $expected architectures have $1/*/$2"; exit 1; }
+          }
+          check feed/opkg Packages.gz
+          check feed/apk packages.adb
+          if [ "$SIGN" = true ]; then
+            check feed/opkg Packages.sig
+          fi
+          echo "All $expected architectures indexed."
+
+      - name: Smoke-test the apk feed with a real apk client
+        run: |
+          # Nothing else in this pipeline ever consumes the feed it publishes,
+          # which is how a filename mismatch went unnoticed for four releases:
+          # apk stores no filename in packages.adb and rebuilds the URL as
+          # <name>-<version>.apk, so a feed holding only nym-vpn_<ver>_<arch>.apk
+          # 404s on every `apk add/upgrade` while looking perfectly healthy.
+          # Serve the generated feed locally and make apk actually fetch from it.
+          set -euo pipefail
+          source scripts/versions.sh
+          ( cd feed/apk && python3 -m http.server 8899 --bind 127.0.0.1 & )
+          # `cmd && break` would abort the whole step under set -e on the
+          # first miss, which is exactly when we still need to wait.
+          for _ in $(seq 20); do
+            if curl -fsS -o /dev/null "http://127.0.0.1:8899/"; then break; fi
+            sleep 1
+          done
+
+          # A tag trusts the index only via the public key we ship on-device,
+          # so this also catches a signing-key regression. A dry run's feed is
+          # unsigned.
+          trust=(-v "$PWD/scripts/feed/dial0ut-apk.pem:/etc/apk/keys/dial0ut-apk.pem:ro")
+          untrusted=""
+          if [ "$SIGN" != true ]; then
+            trust=()
+            untrusted="--allow-untrusted"
+          fi
+
+          failed=0
+          for arch_dir in feed/apk/*/; do
+            arch="$(basename "$arch_dir")"
+            [ -f "$arch_dir/packages.adb" ] || continue
+            echo "::group::apk fetch nym-vpn ($arch)"
+            # --arch so one runner can exercise every published architecture.
+            if docker run --rm --network host "${trust[@]}" "$ALPINE_IMAGE" sh -c "
+                   set -e
+                   echo 'http://127.0.0.1:8899/$arch/packages.adb' > /etc/apk/repositories
+                   apk update $untrusted
+                   apk fetch $untrusted --arch '$arch' -o /tmp nym-vpn
+                   ls -la /tmp/nym-vpn-*.apk
+                 "; then
+              echo "  OK: $arch"
+            else
+              echo "::error::apk cannot fetch nym-vpn from the $arch feed"
+              failed=1
+            fi
+            echo "::endgroup::"
+          done
+
+          pkill -f "http.server 8899" || true
+          [ "$failed" -eq 0 ]
+
+      - name: Upload feed
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: feed
+          path: feed/
+          if-no-files-found: error
           retention-days: 7
 
   release:
     name: Create Release
-    needs: [build, package]
+    needs: [verify, package, feed]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
+    timeout-minutes: 15
     permissions:
       contents: write
 
@@ -201,30 +297,32 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          fetch-depth: 0
-          fetch-tags: true
+          ref: refs/tags/${{ needs.verify.outputs.tag }}
           persist-credentials: false
 
-      - name: Download all artifacts
+      - name: Download binaries
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          path: artifacts
+          pattern: nym-vpn-*
+          path: dist
           merge-multiple: true
 
-      - name: List artifacts
-        run: ls -la artifacts/
+      - name: Download packages
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: packages
+          path: dist
 
-      - name: Get version
-        id: version
+      - name: Add the install script
         run: |
-          echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          cp scripts/install.sh dist/
+          ls -la dist/
 
       - name: Extract changelog
         id: changelog
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
         run: |
-          VERSION="${GITHUB_REF#refs/tags/}"
-          VERSION="${VERSION#v}"
-
           # Print the "## [VERSION]" section of CHANGELOG.md (up to the next "## [")
           awk -v ver="$VERSION" '
             $0 ~ "^## \\[" ver "\\]" { found=1; next }
@@ -241,39 +339,18 @@ jobs:
             echo "changelog<<CHANGELOG_EOF"
             cat /tmp/changelog.md
             echo "CHANGELOG_EOF"
-          } >> $GITHUB_OUTPUT
+          } >> "$GITHUB_OUTPUT"
 
       - name: Create Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
-          tag_name: ${{ steps.version.outputs.version }}
-          name: Nym VPN ${{ steps.version.outputs.version }}
+          tag_name: ${{ needs.verify.outputs.tag }}
+          name: Nym VPN ${{ needs.verify.outputs.tag }}
           draft: false
-          prerelease: ${{ contains(steps.version.outputs.version, 'beta') || contains(steps.version.outputs.version, 'alpha') || contains(steps.version.outputs.version, 'rc') }}
-          files: |
-            artifacts/nym-vpnd-x86_64
-            artifacts/nym-vpnd-i686
-            artifacts/nym-vpnd-aarch64
-            artifacts/nym-vpnd-armv7
-            artifacts/nym-vpnd-mipsel
-            artifacts/nym-vpnd-mips
-            artifacts/nym-vpnd-riscv64
-            artifacts/nym-vpnd-armv5te
-            artifacts/nym-vpnc-x86_64
-            artifacts/nym-vpnc-i686
-            artifacts/nym-vpnc-aarch64
-            artifacts/nym-vpnc-armv7
-            artifacts/nym-vpnc-mipsel
-            artifacts/nym-vpnc-mips
-            artifacts/nym-vpnc-riscv64
-            artifacts/nym-vpnc-armv5te
-            artifacts/*.tar.gz
-            artifacts/*.sha256
-            artifacts/*.ipk
-            artifacts/*.apk
-            scripts/install.sh
+          prerelease: ${{ needs.verify.outputs.prerelease == 'true' }}
+          files: dist/*
           body: |
-            ## Nym VPN ${{ steps.version.outputs.version }} for OpenWrt
+            ## Nym VPN ${{ needs.verify.outputs.tag }} for OpenWrt
 
             ${{ steps.changelog.outputs.changelog }}
 
@@ -349,114 +426,54 @@ jobs:
 
   publish-feed:
     name: Publish package feed
-    needs: [package, release]
+    needs: [verify, release]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') && needs.verify.outputs.prerelease == 'false'
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    # Two releases never sync at once; with the newest-release check below,
+    # whichever finishes last cannot roll the feed back.
+    concurrency:
+      group: publish-feed
+      cancel-in-progress: false
 
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          ref: refs/tags/${{ needs.verify.outputs.tag }}
           persist-credentials: false
 
-      - name: Download all package artifacts
+      - name: Download feed
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          path: artifacts
-          pattern: pkg-*
-          merge-multiple: true
+          name: feed
+          path: feed
 
-      - name: Get version from tag
-        id: version
-        run: echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
-
-      - name: List downloaded packages
-        run: ls -la artifacts/
-
-      - name: Install signify
-        run: sudo apt-get install -y -qq signify-openbsd
-
-      - name: Write signing keys
-        # Keys reach the shell through the environment, never by interpolating
-        # the secret into the command line.
+      - name: Only the newest release updates the feed
+        id: newest
         env:
-          OPKG_SIGNING_KEY: ${{ secrets.DIAL0UT_OPKG }}
-          APK_SIGNING_KEY: ${{ secrets.DIAL0UT_APK }}
+          TAG: ${{ needs.verify.outputs.tag }}
         run: |
-          umask 077
-          printf '%s\n' "$OPKG_SIGNING_KEY" > /tmp/opkg.sec
-          # Basename must match the public key shipped on-device
-          # (/etc/apk/keys/dial0ut-apk.pem) — apk matches signatures by key name.
-          printf '%s\n' "$APK_SIGNING_KEY" > /tmp/dial0ut-apk.pem
-
-      - name: Generate opkg feed
-        run: |
-          mkdir -p feed/opkg
-          cp artifacts/*.ipk feed/opkg/ 2>/dev/null || true
-          bash scripts/feed/generate-feed.sh opkg feed/opkg /tmp/opkg.sec
-
-      - name: Generate apk feed
-        run: |
-          mkdir -p feed/apk
-          cp artifacts/*.apk feed/apk/ 2>/dev/null || true
-          bash scripts/feed/generate-feed.sh apk feed/apk /tmp/dial0ut-apk.pem
-
-      - name: Smoke-test the apk feed with a real apk client
-        run: |
-          # Nothing else in this pipeline ever consumes the feed it publishes,
-          # which is how a filename mismatch went unnoticed for four releases:
-          # apk stores no filename in packages.adb and rebuilds the URL as
-          # <name>-<version>.apk, so a feed holding only nym-vpn_<ver>_<arch>.apk
-          # 404s on every `apk add/upgrade` while looking perfectly healthy.
-          # Serve the generated feed locally and make apk actually fetch from it.
-          set -euo pipefail
-          source scripts/versions.sh
-          ( cd feed/apk && python3 -m http.server 8899 --bind 127.0.0.1 & )
-          # `cmd && break` would abort the whole step under set -e on the
-          # first miss, which is exactly when we still need to wait.
-          for _ in $(seq 20); do
-            if curl -fsS -o /dev/null "http://127.0.0.1:8899/"; then break; fi
-            sleep 1
-          done
-
-          failed=0
-          for arch_dir in feed/apk/*/; do
-            arch="$(basename "$arch_dir")"
-            [ -f "$arch_dir/packages.adb" ] || continue
-            echo "::group::apk fetch nym-vpn ($arch)"
-            # --arch so one runner can exercise every published architecture.
-            # The index is signed; trust it via the public key we ship on-device,
-            # so this also catches a signing-key regression.
-            if docker run --rm --network host \
-                 -v "$PWD/scripts/feed/dial0ut-apk.pem:/etc/apk/keys/dial0ut-apk.pem:ro" \
-                 "$ALPINE_IMAGE" sh -c "
-                   set -e
-                   echo 'http://127.0.0.1:8899/$arch/packages.adb' > /etc/apk/repositories
-                   apk update
-                   apk fetch --arch '$arch' -o /tmp nym-vpn
-                   ls -la /tmp/nym-vpn-*.apk
-                 "; then
-              echo "  OK: $arch"
-            else
-              echo "::error::apk cannot fetch nym-vpn from the $arch feed"
-              failed=1
-            fi
-            echo "::endgroup::"
-          done
-
-          pkill -f "http.server 8899" || true
-          [ "$failed" -eq 0 ]
-
-      - name: Clean up signing keys
-        if: always()
-        run: rm -f /tmp/opkg.sec /tmp/dial0ut-apk.pem
+          # Checked now, not at verify time: a newer tag may have been pushed
+          # (or this may be a re-run of an old release) since.
+          newest=$(git ls-remote --tags --refs origin 'v*' \
+            | sed 's|.*refs/tags/||' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          if [ "$TAG" = "$newest" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::$TAG is not the newest release ($newest); the feed is left alone"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Upload to Cloudflare R2
+        if: steps.newest.outputs.publish == 'true'
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
           R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.eu.r2.cloudflarestorage.com
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
-          VERSION: ${{ steps.version.outputs.version }}
-        run: scripts/feed/publish-r2.sh feed "$VERSION"
+          TAG: ${{ needs.verify.outputs.tag }}
+        run: scripts/feed/publish-r2.sh feed "$TAG"

@@ -1,16 +1,26 @@
 # CI/CD
 
-Four workflows: `ci.yml` and `docs-check.yml` check development changes, `release-musl.yml`
-builds and ships releases, and `docs.yml` deploys this site.
+Five workflows: `ci.yml` and `docs-check.yml` check development changes, `release-musl.yml`
+builds and ships releases, `build.yml` is the cross-build both of those call, and `docs.yml`
+deploys this site.
 
 ## Development checks
 
 `ci.yml` runs on pushes to `develop` that touch more than docs and Markdown, on pull requests
-targeting `develop`, and on manual dispatch. It runs ShellCheck over the root-run scripts, then
-`cargo test --workspace --locked --no-fail-fast` with the required native libraries and
-unprivileged ICMP sockets enabled.
+targeting `develop`, and on manual dispatch:
+
+- **test** — ShellCheck over the root-run scripts, then
+  `cargo test --workspace --locked --no-fail-fast` on the latest stable with the required native
+  libraries and unprivileged ICMP sockets enabled.
+- **cross** — `build.yml` for armv7 and mipsel: one target per build path (the stock Tier 2
+  image, and a Tier 3 image with nightly `-Z build-std` and no 64-bit atomics). These are full
+  release builds with the ELF check, so the binaries they upload can go straight onto a router.
+- **workflow lint** — zizmor over `.github/workflows/`.
 
 `docs-check.yml` runs `mkdocs build --strict` when `docs/` or `mkdocs.yml` change.
+
+`scripts/release.sh` will not tag a commit whose `ci.yml` run on `develop` is missing, still
+running or not green, so a release tag is never the first build of either build path.
 
 Device-level integration and leak testing runs on the maintainers' own lab rigs and is not part
 of the repository or these workflows. Cross-compilation proves a target builds, not that it works on a
@@ -21,9 +31,10 @@ skipped or inconclusive cases.
 
 `release-musl.yml`, triggered by pushing a `v*` tag, or manually with a `tag` input.
 
-Manual dispatch builds and packages but **does not release** — the `release` and `publish-feed`
-jobs are gated on `startsWith(github.ref, 'refs/tags/')`, which a `workflow_dispatch` run does not
-satisfy. Use it to test a build, not to ship one.
+Manual dispatch is a dry run of the same pipeline from that tag: it builds, packages, and builds
+and smoke-tests an **unsigned** feed, then stops. The `release` and `publish-feed` jobs are gated
+on `startsWith(github.ref, 'refs/tags/')`, which a `workflow_dispatch` run does not satisfy, and
+only a tag run signs.
 
 ### 1. Verify release invariants
 
@@ -34,39 +45,26 @@ Everything else depends on this job, so a release that violates any of it never 
 - the tagged commit is an ancestor of **both** `origin/develop` and `origin/openwrt`
 - `CHANGELOG.md` at that tag has a `## [VERSION]` section
 
-### 2. Tier 2 binaries
+It also decides whether this is a pre-release: any version with a `-` suffix (`1.36.0-rc1`).
 
-Four parallel builds on stock `messense/rust-musl-cross` images:
+### 2. Build
 
-| Target | Image |
-|--------|-------|
-| x86_64 | `messense/rust-musl-cross:x86_64-musl` |
-| i686 | `messense/rust-musl-cross:i686-musl` |
-| aarch64 | `messense/rust-musl-cross:aarch64-musl` |
-| armv7 | `messense/rust-musl-cross:armv7-musleabihf` |
-
-Each sets up an 8 GB swap file — LTO linking needs it and the runners do not have the RAM — runs
-`cross-compile-dynamic.sh`, and produces `nym-vpnd-{arch}`, `nym-vpnc-{arch}`,
+`build.yml` with every target in `scripts/ci/targets.json`, checked out at the tag. Each job
+runs in a pinned image, checks the ELF imports, and uploads `nym-vpnd-{arch}`, `nym-vpnc-{arch}`,
 `nym-vpn-{arch}.tar.gz` and SHA256 sums.
 
-### 3. Tier 3 binaries
+| Target | Image | Toolchain |
+|--------|-------|-----------|
+| x86_64, i686, aarch64, armv7 | `messense/rust-musl-cross`, digest in `targets.json` | the image's stable |
+| mips, mipsel, riscv64, armv5te | `docker/tier3-musl/Dockerfile.*`, built per run | `RUST_NIGHTLY` (`scripts/versions.sh`) |
 
-Four parallel builds on custom images from `docker/tier3-musl/`:
+Each sets up an 8 GB swap file first: LTO linking needs it and the runners do not have the RAM.
 
-| Target | Dockerfile |
-|--------|-----------|
-| mips | `Dockerfile.mips` |
-| mipsel | `Dockerfile.mipsel` |
-| riscv64 | `Dockerfile.riscv64` |
-| armv5te | `Dockerfile.armv5te` |
+### 3. Package
 
-Each builds its image, then runs `build-tier3-dynamic.sh` inside it with nightly Rust and
-`-Z build-std`. Same 8 GB swap.
-
-### 4. Package
-
-Waits on both build jobs, then runs 21 parallel packaging jobs mapping 8 binary targets onto 21
-OpenWrt architecture variants:
+One job that runs `build-ipk.sh` then `build-apk.sh` for each OpenWrt architecture listed under
+its binary in `targets.json`, against the tag's `luci-app-nym-vpn/`, and fails unless there is
+one `.ipk` and one `.apk` per architecture:
 
 | Binary | OpenWrt architectures |
 |--------|----------------------|
@@ -79,9 +77,23 @@ OpenWrt architecture variants:
 | riscv64 | `riscv64_riscv64` |
 | armv5te | `arm_arm926ej-s` |
 
-Each job downloads its binary artifact and runs `build-ipk.sh` then `build-apk.sh` against the
-in-repo `luci-app-nym-vpn/` directory. Output is `nym-vpn_{version}_{openwrt_arch}.ipk` and
-`.apk`, uploaded as `pkg-{openwrt_arch}`.
+Output is `nym-vpn_{version}_{openwrt_arch}.ipk` and `.apk`, uploaded as one `packages`
+artifact.
+
+### 4. Build and smoke-test the feed
+
+Before anything is public. `generate-feed.sh` sorts packages into per-arch directories by
+parsing the architecture out of each filename, then builds an index per directory:
+
+- **opkg** — `Packages` and `Packages.gz`, signed with usign/signify to `Packages.sig`
+- **apk** — `packages.adb`, built by `apk mkndx`, with each package under the name `apk` fetches
+  (`nym-vpn-<ver>-r0.apk`) and the one `install.sh` links to (`nym-vpn_<ver>_<arch>.apk`)
+
+Signing keys come from the `DIAL0UT_OPKG` and `DIAL0UT_APK` secrets, written to `/tmp` and removed
+in an `always()` step straight after indexing. The job then fails unless every architecture has
+an index (and, on a tag, a `Packages.sig`), and runs a real `apk` client against the feed served
+locally: `apk update && apk fetch --arch <arch> nym-vpn` for every architecture, trusting only
+the public key shipped on-device. The feed is uploaded as the `feed` artifact.
 
 ### 5. GitHub release
 
@@ -90,22 +102,26 @@ pass that prints the `## [VERSION]` section up to the next `## [`. There is no c
 parsing. An empty extraction fails the job, which is the second place a missing changelog section
 gets caught.
 
-Marked prerelease if the tag contains `beta`, `alpha` or `rc`. Attaches all 8 daemon binaries, 8
-CLI binaries, tarballs, checksums, every IPK and APK, and `scripts/install.sh`.
+Marked prerelease if verify said so. Attaches all 8 daemon binaries, 8 CLI binaries, tarballs,
+checksums, every IPK and APK, and `scripts/install.sh`.
 
 ### 6. Publish the feed
 
-Tagged commits only, after the release exists. `generate-feed.sh` sorts packages into per-arch
-directories by parsing the architecture out of each filename, then builds an index per directory:
+Tagged non-pre-release commits only, after the release exists, one at a time (a `publish-feed`
+concurrency group). It checks the remote tags again and publishes only if this tag is still the
+newest release, so a re-run of an old release or two tags in quick succession cannot roll the feed
+back.
 
-- **opkg** — `Packages` and `Packages.gz`, signed with usign/signify to `Packages.sig`
-- **apk** — `packages.adb`, built by `apk mkndx`
+`scripts/feed/publish-r2.sh` then uploads the feed to Cloudflare R2, then `install.sh` and a
+`latest` file holding the version tag — which is how the installer finds the current release — and
+only then deletes whatever under `opkg/` and `apk/` this release does not have. Installs keep
+working throughout. It finishes by checking that R2 holds exactly the feed that was built, keys
+and sizes, and refuses to publish an empty feed. Nothing else in the bucket (`toolchains/`) is
+touched.
 
-Signing keys come from the `DIAL0UT_OPKG` and `DIAL0UT_APK` secrets, written to `/tmp` and removed
-in an `always()` step.
-
-Everything is then synced to Cloudflare R2 with `--delete`, alongside `install.sh` and a `latest`
-file holding the version tag — which is how the installer finds the current release.
+It does not use `aws s3 sync --delete`: sync assumes both listings come back in byte order, R2
+lists `Packages` after `Packages.gz` and `Packages.sig`, and v1.35.0's sync uploaded and deleted
+each `Packages` at once, losing it in 12 of the 21 opkg directories.
 
 ```text
 packages.dial0ut.org/
@@ -120,10 +136,26 @@ packages.dial0ut.org/
 │   └── ...
 └── apk/
     ├── aarch64_generic/
+    │   ├── nym-vpn-1.33.1-r0.apk
     │   ├── nym-vpn_1.33.1_aarch64_generic.apk
     │   └── packages.adb
     └── ...
 ```
+
+## Pinned toolchains
+
+A release builds with exactly what the last CI run used. Nothing on the build path floats:
+
+| What | Where | Bumped by |
+|------|-------|-----------|
+| Actions | SHA in each `uses:` | Dependabot, monthly |
+| Tier 3 base images | digest in `docker/tier3-musl/Dockerfile.*` | Dependabot, monthly |
+| mips/mipsel GCC toolchains | `TOOLCHAIN_SHA256` in their Dockerfiles | hand |
+| Tier 2 images | digest in `scripts/ci/targets.json` | hand |
+| Tier 3 nightly | `RUST_NIGHTLY` in `scripts/versions.sh` | hand |
+| Alpine (apk mkpkg, mkndx, smoke test) | `ALPINE_IMAGE` in `scripts/versions.sh` | hand |
+
+The test job alone runs on the latest stable, as an early warning for the next toolchain.
 
 ## Feed signing
 
@@ -156,5 +188,6 @@ the directory. Given a bare directory, apk appends `$ARCH/APKINDEX.tar.gz` and 4
 
 ## Docs
 
-`docs.yml` runs `mkdocs gh-deploy --force` on any push to the **`openwrt`** branch that touches
-`docs/**` or `mkdocs.yml`. Pushing docs changes to `develop` deploys nothing.
+`docs.yml` runs `mkdocs gh-deploy --force --strict`, with the same `docs/requirements.txt` as
+`docs-check.yml`, on any push to the **`openwrt`** branch that touches `docs/**` or `mkdocs.yml`.
+Pushing docs changes to `develop` deploys nothing.
