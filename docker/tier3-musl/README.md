@@ -16,12 +16,13 @@ Docker images and build scripts for cross-compiling nym-vpn to Rust Tier 3 musl 
 ```bash
 cd docker/tier3-musl
 
-# Build Docker image (one-time setup)
-docker build -t nym-musl-cross:mipsel-musl -f Dockerfile.mipsel .
+# Build Docker image (one-time setup) with the pinned nightly
+source ../../scripts/versions.sh
+docker build --build-arg RUST_NIGHTLY="$RUST_NIGHTLY" -t nym-musl-cross:mipsel-musl -f Dockerfile.mipsel .
 
 # Run the build (from repository root)
 cd /path/to/nym-vpn-client
-docker run --rm -v "$(pwd)":/home/rust/src nym-musl-cross:mipsel-musl /opt/build-tier3.sh
+docker run --rm -v "$(pwd)":/home/rust/src nym-musl-cross:mipsel-musl /opt/build-tier3-dynamic.sh
 
 # Binaries output:
 # nym-vpn-core/target/mipsel-unknown-linux-musl/release/nym-vpnd
@@ -33,18 +34,19 @@ docker run --rm -v "$(pwd)":/home/rust/src nym-musl-cross:mipsel-musl /opt/build
 ```bash
 cd docker/tier3-musl
 
-# Build all Docker images
-docker build -t nym-musl-cross:mips-musl -f Dockerfile.mips .
-docker build -t nym-musl-cross:mipsel-musl -f Dockerfile.mipsel .
-docker build -t nym-musl-cross:riscv64-musl -f Dockerfile.riscv64 .
-docker build -t nym-musl-cross:armv5te-musl -f Dockerfile.armv5te .
+# Build all Docker images with the pinned nightly
+source ../../scripts/versions.sh
+docker build --build-arg RUST_NIGHTLY="$RUST_NIGHTLY" -t nym-musl-cross:mips-musl -f Dockerfile.mips .
+docker build --build-arg RUST_NIGHTLY="$RUST_NIGHTLY" -t nym-musl-cross:mipsel-musl -f Dockerfile.mipsel .
+docker build --build-arg RUST_NIGHTLY="$RUST_NIGHTLY" -t nym-musl-cross:riscv64-musl -f Dockerfile.riscv64 .
+docker build --build-arg RUST_NIGHTLY="$RUST_NIGHTLY" -t nym-musl-cross:armv5te-musl -f Dockerfile.armv5te .
 
 # Run builds (from repository root)
 cd /path/to/nym-vpn-client
-docker run --rm -v "$(pwd)":/home/rust/src nym-musl-cross:mips-musl /opt/build-tier3.sh
-docker run --rm -v "$(pwd)":/home/rust/src nym-musl-cross:mipsel-musl /opt/build-tier3.sh
-docker run --rm -v "$(pwd)":/home/rust/src nym-musl-cross:riscv64-musl /opt/build-tier3.sh
-docker run --rm -v "$(pwd)":/home/rust/src nym-musl-cross:armv5te-musl /opt/build-tier3.sh
+docker run --rm -v "$(pwd)":/home/rust/src nym-musl-cross:mips-musl /opt/build-tier3-dynamic.sh
+docker run --rm -v "$(pwd)":/home/rust/src nym-musl-cross:mipsel-musl /opt/build-tier3-dynamic.sh
+docker run --rm -v "$(pwd)":/home/rust/src nym-musl-cross:riscv64-musl /opt/build-tier3-dynamic.sh
+docker run --rm -v "$(pwd)":/home/rust/src nym-musl-cross:armv5te-musl /opt/build-tier3-dynamic.sh
 ```
 
 ## Build Output

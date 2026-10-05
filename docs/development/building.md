@@ -71,13 +71,17 @@ cd docker/tier3-musl
 `docker/tier3-musl/` holds a Dockerfile per target with musl.cc toolchains, plus patch scripts for
 crates that lack `portable-atomic` support on 32-bit.
 
+The images install one dated nightly, `RUST_NIGHTLY` in `scripts/versions.sh`, passed in as a
+build arg (`docker build --build-arg RUST_NIGHTLY="$RUST_NIGHTLY" ...`). The mips and mipsel
+toolchain tarballs are checked against the SHA-256 in their Dockerfiles.
+
 `build-tier3-dynamic.sh` — the script CI runs inside those images — exists mainly to work around
 one thing: autocfg probes fail on Docker volume mounts because extended file attributes are
 missing, and crates silently compile in `no_std` mode as a result. Copying the source to a local
 filesystem inside the container fixes it.
 
 1. Detects target and compiler triplet from the available GCC
-2. Switches to nightly, installs `rust-src`
+2. Switches to the pinned nightly, installs `rust-src`
 3. Copies the tree to `/tmp/nym-build`
 4. Applies crate patches via `patch-crates.sh`, which fails the build when one does not apply:
     - `schemars` — `BTreeMap` instead of `IndexMap`

@@ -25,6 +25,8 @@ mkdir -p "$OUTPUT_DIR"
 OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"
 # shellcheck source=../pkg-depends.sh
 source "$REPO_ROOT/scripts/pkg-depends.sh"
+# shellcheck source=../versions.sh
+source "$REPO_ROOT/scripts/versions.sh"
 
 echo "=== Validating inputs ==="
 
@@ -243,7 +245,7 @@ elif command -v docker >/dev/null 2>&1; then
         -v "$SCRIPTS_DIR:/work/scripts:ro" \
         -v "$OUTPUT_DIR:/work/out" \
         -e "HOST_OWNER=$(id -u):$(id -g)" \
-        alpine:latest \
+        "$ALPINE_IMAGE" \
         sh -c 'chown -R 0:0 /work/data && "$@"; rc=$?; chown -R "$HOST_OWNER" /work/data; exit $rc' _ \
         apk mkpkg \
             "${MKPKG_INFO_ARGS[@]}" \

@@ -59,10 +59,11 @@ fi
 log_info "=== Building for Tier 3 target: ${TARGET} (dynamic linking) ==="
 log_info "=== Using local filesystem to fix autocfg probe ==="
 
-# Ensure we're using nightly
-log_info "Setting up nightly Rust with rust-src..."
+# Ensure we're using the pinned nightly (the image already has it; a plain
+# `nightly` here would pull whatever is current)
+log_info "Setting up ${RUST_NIGHTLY} with rust-src..."
 source "$HOME/.cargo/env" 2>/dev/null || true
-rustup default nightly
+rustup default "$RUST_NIGHTLY"
 rustup component add rust-src
 
 # Step 1: Copy source to local filesystem

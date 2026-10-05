@@ -4,10 +4,11 @@
 # The MIPS 24Kc cores (used in mipsel_24kc OpenWrt devices) have NO FPU,
 # so we MUST use soft-float for everything: toolchain, musl libc, and Rust code.
 
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251
 
 ARG TARGET=mipsel-unknown-linux-musl
 ARG TOOLCHAIN_URL=https://packages.dial0ut.org/toolchains/mipsel-linux-muslsf-cross.tgz
+ARG TOOLCHAIN_SHA256=a61c3bbf9fbb0be80fe2abdb4ea8b6f5afdf664b5b4104a3784a326270905216
 
 # Install base dependencies
 RUN apt-get update -qq && apt-get install -y -qq \
@@ -23,7 +24,10 @@ RUN apt-get update -qq && apt-get install -y -qq \
 
 # Download and install soft-float mipsel toolchain from musl.cc
 RUN mkdir -p /opt/cross && \
-    curl -fsSL "${TOOLCHAIN_URL}" | tar -xzf - -C /opt/cross --strip-components=1
+    curl -fsSL -o /tmp/toolchain.tgz "${TOOLCHAIN_URL}" && \
+    echo "${TOOLCHAIN_SHA256}  /tmp/toolchain.tgz" | sha256sum -c - && \
+    tar -xzf /tmp/toolchain.tgz -C /opt/cross --strip-components=1 && \
+    rm /tmp/toolchain.tgz
 
 # Add toolchain to PATH
 ENV PATH="/opt/cross/bin:${PATH}"
@@ -44,8 +48,10 @@ RUN mkdir -p /usr/local/musl/mipsel-unknown-linux-musl && \
     ln -sf /opt/cross/mipsel-linux-muslsf/lib /usr/local/musl/mipsel-unknown-linux-musl/lib && \
     ln -sf /opt/cross/mipsel-linux-muslsf/include /usr/local/musl/mipsel-unknown-linux-musl/include
 
-# Install Rust (nightly required for build-std)
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain nightly && \
+# Install the pinned nightly (required for build-std)
+ARG RUST_NIGHTLY
+RUN test -n "$RUST_NIGHTLY" || { echo "pass --build-arg RUST_NIGHTLY (see scripts/versions.sh)" >&2; exit 1; }; \
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain "$RUST_NIGHTLY" && \
     . "$HOME/.cargo/env" && \
     rustup component add rust-src
 

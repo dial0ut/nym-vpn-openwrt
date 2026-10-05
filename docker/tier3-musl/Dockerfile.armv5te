@@ -12,9 +12,11 @@ FROM messense/rust-musl-cross:armv5te-musleabi@sha256:7405f08bc670a579a150d9c91d
 
 ARG TARGET=armv5te-unknown-linux-musleabi
 
-# Install latest Rust (nightly required for build-std due to portable-atomic)
-RUN rustup self uninstall -y 2>/dev/null || true && \
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain nightly && \
+# Install the pinned nightly (required for build-std due to portable-atomic)
+ARG RUST_NIGHTLY
+RUN test -n "$RUST_NIGHTLY" || { echo "pass --build-arg RUST_NIGHTLY (see scripts/versions.sh)" >&2; exit 1; }; \
+    (rustup self uninstall -y 2>/dev/null || true) && \
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain "$RUST_NIGHTLY" && \
     . "$HOME/.cargo/env" && \
     rustup component add rust-src
 

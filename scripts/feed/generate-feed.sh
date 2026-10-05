@@ -23,6 +23,9 @@ if [ $# -lt 2 ]; then
     exit 1
 fi
 
+# shellcheck source=../versions.sh
+source "$(dirname "$0")/../versions.sh"
+
 FORMAT="$1"
 PACKAGES_DIR="$2"
 SIGNING_KEY="${3:-}"
@@ -243,7 +246,7 @@ generate_apk_feed() {
                 container_pkgs+=("/work/pkgs/$(basename "$f")")
             done
 
-            docker run --rm "${docker_args[@]}" alpine:latest \
+            docker run --rm "${docker_args[@]}" "$ALPINE_IMAGE" \
                 apk mkndx --allow-untrusted $sign_args \
                     -o /work/pkgs/packages.adb \
                     "${container_pkgs[@]}"

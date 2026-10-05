@@ -5,10 +5,12 @@ FROM messense/rust-musl-cross:riscv64gc-musl@sha256:9102e9fa3128e6a817c68fb2b7ef
 
 ARG TARGET=riscv64gc-unknown-linux-musl
 
-# Install latest Rust (nightly required for build-std)
+# Install the pinned nightly (required for build-std)
 # Also install llvm-tools for rust-lld (avoids GCC 11.2 linker issues with newer RISC-V extensions)
-RUN rustup self uninstall -y 2>/dev/null || true && \
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain nightly && \
+ARG RUST_NIGHTLY
+RUN test -n "$RUST_NIGHTLY" || { echo "pass --build-arg RUST_NIGHTLY (see scripts/versions.sh)" >&2; exit 1; }; \
+    (rustup self uninstall -y 2>/dev/null || true) && \
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain "$RUST_NIGHTLY" && \
     . "$HOME/.cargo/env" && \
     rustup component add rust-src llvm-tools
 
