@@ -4,6 +4,7 @@ target/
 build/
 bin/
 .env/
+/.env
 .env.dev/
 .vscode/
 .zed/
