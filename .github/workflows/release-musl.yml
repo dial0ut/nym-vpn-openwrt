@@ -614,23 +614,4 @@ jobs:
           R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.eu.r2.cloudflarestorage.com
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
           VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          # Upload install script
-          aws s3 cp scripts/install.sh s3://$R2_BUCKET/install.sh \
-            --endpoint-url "$R2_ENDPOINT"
-
-          # Upload latest version marker
-          printf '%s\n' "$VERSION" > /tmp/latest
-          aws s3 cp /tmp/latest s3://$R2_BUCKET/latest \
-            --endpoint-url "$R2_ENDPOINT" \
-            --content-type "text/plain"
-
-          # Upload opkg feed
-          aws s3 sync feed/opkg/ s3://$R2_BUCKET/opkg/ \
-            --endpoint-url "$R2_ENDPOINT" \
-            --delete
-
-          # Upload apk feed
-          aws s3 sync feed/apk/ s3://$R2_BUCKET/apk/ \
-            --endpoint-url "$R2_ENDPOINT" \
-            --delete
+        run: scripts/feed/publish-r2.sh feed "$VERSION"

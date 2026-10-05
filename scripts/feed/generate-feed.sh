@@ -53,7 +53,9 @@ generate_opkg_feed() {
             continue
         fi
         mkdir -p "$PACKAGES_DIR/$arch"
-        cp "$pkg" "$PACKAGES_DIR/$arch/"
+        # Move, not copy: a copy left at the top level was published as a
+        # second, unused copy of every package.
+        mv "$pkg" "$PACKAGES_DIR/$arch/"
         echo "  $arch/$filename"
     done
 
@@ -181,7 +183,7 @@ generate_apk_feed() {
         local canonical="nym-vpn-${ver}-r0.${ext}"
         mkdir -p "$PACKAGES_DIR/$arch"
         cp "$pkg" "$PACKAGES_DIR/$arch/$canonical"
-        cp "$pkg" "$PACKAGES_DIR/$arch/$filename"
+        mv "$pkg" "$PACKAGES_DIR/$arch/$filename"
         echo "  $arch/$canonical (+ $filename)"
     done
 
