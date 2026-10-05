@@ -144,16 +144,20 @@ packages.dial0ut.org/
 
 ## Pinned toolchains
 
-A release builds with exactly what the last CI run used. Nothing on the build path floats:
+A release builds with exactly what the last CI run used. Nothing on the build path floats, and
+nothing bumps itself: every pin below changes by hand.
 
-| What | Where | Bumped by |
-|------|-------|-----------|
-| Actions | SHA in each `uses:` | Dependabot, monthly |
-| Tier 3 base images | digest in `docker/tier3-musl/Dockerfile.*` | Dependabot, monthly |
-| mips/mipsel GCC toolchains | `TOOLCHAIN_SHA256` in their Dockerfiles | hand |
-| Tier 2 images | digest in `scripts/ci/targets.json` | hand |
-| Tier 3 nightly | `RUST_NIGHTLY` in `scripts/versions.sh` | hand |
-| Alpine (apk mkpkg, mkndx, smoke test) | `ALPINE_IMAGE` in `scripts/versions.sh` | hand |
+| What | Where |
+|------|-------|
+| Actions | SHA in each `uses:` |
+| Tier 3 base images | digest in `docker/tier3-musl/Dockerfile.*` |
+| mips/mipsel GCC toolchains | `TOOLCHAIN_SHA256` in their Dockerfiles |
+| Tier 2 images | digest in `scripts/ci/targets.json` |
+| Tier 3 nightly | `RUST_NIGHTLY` in `scripts/versions.sh` |
+| Alpine (apk mkpkg, mkndx, smoke test) | `ALPINE_IMAGE` in `scripts/versions.sh` |
+
+CI builds only armv7 and mipsel. After bumping something another target uses, build that target
+before tagging: add it to `arches` in `ci.yml` for that push, or build it locally.
 
 The test job alone runs on the latest stable, as an early warning for the next toolchain.
 
