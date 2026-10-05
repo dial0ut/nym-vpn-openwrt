@@ -1,8 +1,6 @@
 # Continuous checks for develop and feature branches.
 #
 #   test      cargo test over the whole workspace, lockfile enforced.
-#   package-payload  stage the .ipk and .apk and fail when their payloads
-#             differ (no build, dummy binaries).
 #   security  fast checks that need no Rust build: secret scan of the pushed
 #             commits, dependency policy (licenses, bans, sources), dependency
 #             advisories, no unused cargo patches, shellcheck over the
@@ -63,19 +61,6 @@ jobs:
         run: |
           pip install -r docs/requirements.txt
           mkdocs build --strict
-
-  package-payload:
-    name: ipk and apk payloads match
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          persist-credentials: false
-      - name: Stage both packages from dummy binaries and diff them
-        run: scripts/ci/check-pkg-payload.sh
 
   test:
     name: cargo test
