@@ -11,6 +11,8 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+## [1.36.1] - 2026-10-05
+
 ### Added
 
 - The LuCI gateway pickers have a search box that narrows the list by name,
