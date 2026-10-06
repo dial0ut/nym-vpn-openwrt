@@ -66,10 +66,8 @@ git fetch origin
 [ "$(git rev-parse develop)" = "$(git rev-parse origin/develop)" ] \
     || fail "local develop != origin/develop — pull or push first"
 
-# The tag push builds every target, but only once the tag exists. Refuse to
-# tag what CI (tests plus the armv7 and mipsel cross-builds) has not passed.
-# Docs-only pushes skip CI, so use the newest commit that ran it and require
-# that only docs changed since.
+# Refuse to tag what CI has not passed. Docs-only pushes skip CI, so use the
+# newest commit that ran it and require that only docs changed since.
 command -v gh >/dev/null 2>&1 || fail "gh is required to check CI on develop (https://cli.github.com)"
 command -v jq >/dev/null 2>&1 || fail "jq is required to check CI on develop"
 echo "Checking CI on develop..."

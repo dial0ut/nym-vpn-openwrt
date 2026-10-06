@@ -83,15 +83,116 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "All release invariants hold."
 
-  build:
-    name: Build
+  plan:
+    name: Plan builds
     needs: verify
-    # Switch to the `$/` self-repository syntax once actionlint and act support it.
-    uses: ./.github/workflows/build.yml # zizmor: ignore[self-repository]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
-    with:
-      ref: refs/tags/${{ needs.verify.outputs.tag }}
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: refs/tags/${{ needs.verify.outputs.tag }}
+          persist-credentials: false
+
+      - name: One build per target in scripts/ci/targets.json
+        id: plan
+        run: echo "matrix=$(jq -c 'map(del(.openwrt))' scripts/ci/targets.json)" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.arch }}
+    needs: [verify, plan]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      CARGO_TERM_COLOR: always
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: refs/tags/${{ needs.verify.outputs.tag }}
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Set up swap for LTO linking
+        # Under act the host's memory and swap apply.
+        if: ${{ !env.ACT }}
+        run: |
+          SWAPFILE="/swapfile-nym-$$"
+          sudo fallocate -l 8G "$SWAPFILE"
+          sudo chmod 600 "$SWAPFILE"
+          sudo mkswap "$SWAPFILE"
+          sudo swapon "$SWAPFILE"
+          free -h
+
+      - name: Build the Tier 3 image
+        if: matrix.dockerfile
+        env:
+          ARCH: ${{ matrix.arch }}
+          DOCKERFILE: ${{ matrix.dockerfile }}
+        run: |
+          source scripts/versions.sh
+          docker build \
+            --build-arg RUST_NIGHTLY="$RUST_NIGHTLY" \
+            -f "docker/tier3-musl/$DOCKERFILE" \
+            -t "nym-musl-cross:$ARCH" \
+            docker/tier3-musl/
+
+      - name: Build
+        env:
+          ARCH: ${{ matrix.arch }}
+          TARGET: ${{ matrix.target }}
+          IMAGE: ${{ matrix.image }}
+        run: |
+          if [ -n "$IMAGE" ]; then
+            docker run --rm -v "$GITHUB_WORKSPACE:/home/rust/src" -e TARGET="$TARGET" \
+              "$IMAGE" bash /home/rust/src/scripts/cross-compile-dynamic.sh
+          else
+            docker run --rm -v "$GITHUB_WORKSPACE:/home/rust/src" -e TARGET="$TARGET" \
+              "nym-musl-cross:$ARCH" /opt/build-tier3-dynamic.sh
+          fi
+
+      - name: Check ELF imports and libraries
+        # Needed libraries within the package's depends, imports within
+        # musl 1.1.24 (plus time64 on 32-bit, which requires libc >= 1.2).
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          scripts/ci/check-elf.sh \
+            "nym-vpn-core/target/${TARGET}/release/nym-vpnd" \
+            "nym-vpn-core/target/${TARGET}/release/nym-vpnc"
+
+      - name: Prepare artifacts
+        env:
+          ARCH: ${{ matrix.arch }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          mkdir -p artifacts
+          cp "nym-vpn-core/target/$TARGET/release/nym-vpnd" "artifacts/nym-vpnd-$ARCH"
+          cp "nym-vpn-core/target/$TARGET/release/nym-vpnc" "artifacts/nym-vpnc-$ARCH"
+          cd artifacts
+          tar -czf "nym-vpn-$ARCH.tar.gz" "nym-vpnd-$ARCH" "nym-vpnc-$ARCH"
+          for f in "nym-vpnd-$ARCH" "nym-vpnc-$ARCH" "nym-vpn-$ARCH.tar.gz"; do
+            sha256sum "$f" > "$f.sha256"
+          done
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: nym-vpn-${{ matrix.arch }}
+          path: artifacts/*
+          if-no-files-found: error
+          retention-days: 7
 
   package:
     name: Create packages

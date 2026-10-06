@@ -24,8 +24,7 @@ linked; the firewall is driven through the `nft` and `iptables-restore` binaries
 | i686 | `messense/rust-musl-cross:i686-musl` |
 | armv7 | `messense/rust-musl-cross:armv7-musleabihf` |
 
-CI and releases use these images pinned by digest in `scripts/ci/targets.json`, so a release
-builds with the toolchain the last CI run did. The script refuses an image whose Rust is older
+Releases use these images pinned by digest in `scripts/ci/targets.json`. The script refuses an image whose Rust is older
 than the workspace MSRV rather than installing a newer one.
 
 Without the wrapper:

@@ -1,8 +1,7 @@
 # CI/CD
 
-Five workflows: `ci.yml` and `docs-check.yml` check development changes, `release-musl.yml`
-builds and ships releases, `build.yml` is the cross-build both of those call, and `docs.yml`
-deploys this site.
+Four workflows: `ci.yml` and `docs-check.yml` check development changes, `release-musl.yml`
+builds and ships releases, and `docs.yml` deploys this site.
 
 ## Development checks
 
@@ -12,15 +11,12 @@ targeting `develop`, and on manual dispatch:
 - **test** — ShellCheck over the root-run scripts, then
   `cargo test --workspace --locked --no-fail-fast` on the latest stable with the required native
   libraries and unprivileged ICMP sockets enabled.
-- **cross** — `build.yml` for armv7 and mipsel: one target per build path (the stock Tier 2
-  image, and a Tier 3 image with nightly `-Z build-std` and no 64-bit atomics). These are full
-  release builds with the ELF check, so the binaries they upload can go straight onto a router.
 - **workflow lint** — zizmor over `.github/workflows/`.
 
 `docs-check.yml` runs `mkdocs build --strict` when `docs/` or `mkdocs.yml` change.
 
 `scripts/release.sh` will not tag a commit whose `ci.yml` run on `develop` is missing, still
-running or not green, so a release tag is never the first build of either build path.
+running or not green.
 
 Device-level integration and leak testing runs on the maintainers' own lab rigs and is not part
 of the repository or these workflows. Cross-compilation proves a target builds, not that it works on a
@@ -49,8 +45,8 @@ It also decides whether this is a pre-release: any version with a `-` suffix (`1
 
 ### 2. Build
 
-`build.yml` with every target in `scripts/ci/targets.json`, checked out at the tag. Each job
-runs in a pinned image, checks the ELF imports, and uploads `nym-vpnd-{arch}`, `nym-vpnc-{arch}`,
+One job per target in `scripts/ci/targets.json`, checked out at the tag. Each runs in a pinned
+image, checks the ELF imports, and uploads `nym-vpnd-{arch}`, `nym-vpnc-{arch}`,
 `nym-vpn-{arch}.tar.gz` and SHA256 sums.
 
 | Target | Image | Toolchain |
@@ -144,8 +140,8 @@ packages.dial0ut.org/
 
 ## Pinned toolchains
 
-A release builds with exactly what the last CI run used. Nothing on the build path floats, and
-nothing bumps itself: every pin below changes by hand.
+A release builds with exactly what is pinned below. Nothing on the build path floats, and nothing
+bumps itself: every pin changes by hand.
 
 | What | Where |
 |------|-------|
@@ -156,8 +152,7 @@ nothing bumps itself: every pin below changes by hand.
 | Tier 3 nightly | `RUST_NIGHTLY` in `scripts/versions.sh` |
 | Alpine (apk mkpkg, mkndx, smoke test) | `ALPINE_IMAGE` in `scripts/versions.sh` |
 
-CI builds only armv7 and mipsel. After bumping something another target uses, build that target
-before tagging: add it to `arches` in `ci.yml` for that push, or build it locally.
+CI does not cross-build, so a bumped pin is first built by the next release, or locally.
 
 The test job alone runs on the latest stable, as an early warning for the next toolchain.
 
