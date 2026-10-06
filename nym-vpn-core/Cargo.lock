@@ -4603,7 +4603,7 @@ dependencies = [
 
 [[package]]
 name = "nym-common"
-version = "1.35.0"
+version = "1.36.0"
 dependencies = [
  "tracing",
  "tracing-test",
@@ -4649,12 +4649,12 @@ dependencies = [
 
 [[package]]
 name = "nym-connection-monitor"
-version = "1.35.0"
+version = "1.36.0"
 dependencies = [
  "async-trait",
  "futures",
  "nix 0.31.2",
- "nym-common 1.35.0",
+ "nym-common 1.36.0",
  "pretty_assertions",
  "socket2 0.6.2",
  "surge-ping",
@@ -4823,7 +4823,7 @@ dependencies = [
 
 [[package]]
 name = "nym-dbus"
-version = "1.35.0"
+version = "1.36.0"
 dependencies = [
  "dbus",
  "libc",
@@ -4834,7 +4834,7 @@ dependencies = [
 
 [[package]]
 name = "nym-diagnostic"
-version = "1.35.0"
+version = "1.36.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4880,13 +4880,13 @@ dependencies = [
 
 [[package]]
 name = "nym-dns"
-version = "1.35.0"
+version = "1.36.0"
 dependencies = [
  "duct",
  "futures",
  "inotify",
  "nix 0.31.2",
- "nym-common 1.35.0",
+ "nym-common 1.36.0",
  "nym-dbus",
  "nym-routing",
  "resolv-conf",
@@ -4900,7 +4900,7 @@ dependencies = [
 
 [[package]]
 name = "nym-ecash-compat-tests"
-version = "1.35.0"
+version = "1.36.0"
 dependencies = [
  "nym-compact-ecash",
 ]
@@ -4958,7 +4958,7 @@ dependencies = [
 
 [[package]]
 name = "nym-firewall"
-version = "1.35.0"
+version = "1.36.0"
 dependencies = [
  "ipnetwork",
  "libc",
@@ -4971,7 +4971,7 @@ dependencies = [
 
 [[package]]
 name = "nym-firewall-config"
-version = "1.35.0"
+version = "1.36.0"
 dependencies = [
  "ipnetwork",
 ]
@@ -5017,7 +5017,7 @@ dependencies = [
 
 [[package]]
 name = "nym-gateway-directory"
-version = "1.35.0"
+version = "1.36.0"
 dependencies = [
  "anyhow",
  "ipnetwork",
@@ -5192,7 +5192,7 @@ dependencies = [
 
 [[package]]
 name = "nym-ipc"
-version = "1.35.0"
+version = "1.36.0"
 dependencies = [
  "hyper-util",
  "tokio",
@@ -5458,10 +5458,10 @@ dependencies = [
 
 [[package]]
 name = "nym-offline-monitor"
-version = "1.35.0"
+version = "1.36.0"
 dependencies = [
  "async-trait",
- "nym-common 1.35.0",
+ "nym-common 1.36.0",
  "nym-routing",
  "thiserror 2.0.18",
  "tokio",
@@ -5518,7 +5518,7 @@ dependencies = [
 
 [[package]]
 name = "nym-platform-metadata"
-version = "1.35.0"
+version = "1.36.0"
 dependencies = [
  "nym-dbus",
  "rs-release",
@@ -5573,7 +5573,7 @@ dependencies = [
 
 [[package]]
 name = "nym-routing"
-version = "1.35.0"
+version = "1.36.0"
 dependencies = [
  "futures",
  "ipnetwork",
@@ -5581,7 +5581,7 @@ dependencies = [
  "netlink-packet-core",
  "netlink-packet-route",
  "netlink-sys",
- "nym-common 1.35.0",
+ "nym-common 1.36.0",
  "rtnetlink",
  "thiserror 2.0.18",
  "tokio",
@@ -6087,7 +6087,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpn-account-controller"
-version = "1.35.0"
+version = "1.36.0"
 dependencies = [
  "aes-gcm 0.10.3",
  "anyhow",
@@ -6097,7 +6097,7 @@ dependencies = [
  "bs58",
  "futures",
  "hkdf",
- "nym-common 1.35.0",
+ "nym-common 1.36.0",
  "nym-compact-ecash",
  "nym-credential-proxy-requests",
  "nym-credential-storage",
@@ -6139,7 +6139,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpn-api-client"
-version = "1.35.0"
+version = "1.36.0"
 dependencies = [
  "backon",
  "base64-url",
@@ -6147,7 +6147,7 @@ dependencies = [
  "bs58",
  "chrono",
  "itertools 0.14.0",
- "nym-common 1.35.0",
+ "nym-common 1.36.0",
  "nym-compact-ecash",
  "nym-config",
  "nym-contracts-common",
@@ -6172,7 +6172,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpn-lib"
-version = "1.35.0"
+version = "1.36.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -6192,7 +6192,7 @@ dependencies = [
  "nym-bandwidth-controller",
  "nym-bin-common",
  "nym-client-core",
- "nym-common 1.35.0",
+ "nym-common 1.36.0",
  "nym-config",
  "nym-connection-monitor",
  "nym-credential-storage",
@@ -6245,7 +6245,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpn-lib-types"
-version = "1.35.0"
+version = "1.36.0"
 dependencies = [
  "ipnetwork",
  "nym-bandwidth-controller",
@@ -6269,12 +6269,12 @@ dependencies = [
 
 [[package]]
 name = "nym-vpn-network-config"
-version = "1.35.0"
+version = "1.36.0"
 dependencies = [
  "futures-util",
  "itertools 0.14.0",
  "nym-api-requests",
- "nym-common 1.35.0",
+ "nym-common 1.36.0",
  "nym-http-api-client",
  "nym-network-defaults",
  "nym-offline-monitor",
@@ -6295,7 +6295,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpn-proto"
-version = "1.35.0"
+version = "1.36.0"
 dependencies = [
  "nym-ipc",
  "nym-vpn-lib-types",
@@ -6313,7 +6313,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpn-store"
-version = "1.35.0"
+version = "1.36.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6336,7 +6336,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpnc"
-version = "1.35.0"
+version = "1.36.0"
 dependencies = [
  "anyhow",
  "celes",
@@ -6353,7 +6353,7 @@ dependencies = [
 
 [[package]]
 name = "nym-vpnd"
-version = "1.35.0"
+version = "1.36.0"
 dependencies = [
  "anyhow",
  "bip39",
@@ -6365,7 +6365,7 @@ dependencies = [
  "hyper-util",
  "log-panics",
  "nym-bin-common",
- "nym-common 1.35.0",
+ "nym-common 1.36.0",
  "nym-diagnostic",
  "nym-dns",
  "nym-firewall",
@@ -6425,7 +6425,7 @@ dependencies = [
 
 [[package]]
 name = "nym-wg-gotatun"
-version = "1.35.0"
+version = "1.36.0"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -6442,7 +6442,7 @@ dependencies = [
 
 [[package]]
 name = "nym-wg-metadata-client"
-version = "1.35.0"
+version = "1.36.0"
 dependencies = [
  "nym-credentials-interface",
  "nym-gateway-directory",

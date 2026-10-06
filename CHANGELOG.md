@@ -11,6 +11,8 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+## [1.36.0] - 2026-10-05
+
 ### Added
 
 - The key exchange of a two-hop session is shown: `nym-vpnc status` prints
