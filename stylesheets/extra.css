@@ -1,0 +1,84 @@
+/* NymVPN dark theme — matches LuCI interface */
+
+/* Dark mode (default) */
+[data-md-color-scheme="slate"] {
+    --md-primary-fg-color: #00ff94;
+    --md-primary-fg-color--light: rgba(0, 255, 148, 0.4);
+    --md-primary-fg-color--dark: #00e085;
+    --md-accent-fg-color: #00ff94;
+    --md-accent-fg-color--transparent: rgba(0, 255, 148, 0.1);
+    --md-default-bg-color: #121218;
+    --md-default-bg-color--light: #1a1a24;
+    --md-default-bg-color--lighter: #1e1e2a;
+    --md-default-bg-color--lightest: #252532;
+    --md-default-fg-color: #e8e8ec;
+    --md-default-fg-color--light: #9090a0;
+    --md-default-fg-color--lighter: #606070;
+    --md-default-fg-color--lightest: #2a2a3a;
+    --md-code-bg-color: #0d0d12;
+    --md-code-fg-color: #e8e8ec;
+    --md-code-hl-color: rgba(0, 255, 148, 0.15);
+    --md-typeset-a-color: #00ff94;
+}
+
+/* Light mode */
+[data-md-color-scheme="default"] {
+    --md-primary-fg-color: #0BA84E;
+    --md-primary-fg-color--light: rgba(11, 168, 78, 0.4);
+    --md-primary-fg-color--dark: #098a3f;
+    --md-accent-fg-color: #14E76F;
+    --md-accent-fg-color--transparent: rgba(20, 231, 111, 0.1);
+    --md-typeset-a-color: #0BA84E;
+}
+
+/* Header bar */
+.md-header {
+    background-color: #0d0d12;
+}
+
+[data-md-color-scheme="default"] .md-header {
+    background-color: #0BA84E;
+}
+
+/* Navigation sidebar */
+[data-md-color-scheme="slate"] .md-nav__link--active,
+[data-md-color-scheme="slate"] .md-nav__link:hover {
+    color: #00ff94;
+}
+
+/* Code blocks */
+[data-md-color-scheme="slate"] .highlight code,
+[data-md-color-scheme="slate"] .highlighttable code {
+    border: 1px solid #2a2a3a;
+}
+
+/* Admonitions */
+[data-md-color-scheme="slate"] .md-typeset .admonition,
+[data-md-color-scheme="slate"] .md-typeset details {
+    background-color: #1a1a24;
+    border-color: #2a2a3a;
+}
+
+/* Tables */
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) th {
+    background-color: #1a1a24;
+}
+
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) tr:hover td {
+    background-color: rgba(0, 255, 148, 0.05);
+}
+
+/* Footer */
+[data-md-color-scheme="slate"] .md-footer {
+    background-color: #0d0d12;
+}
+
+/* Logo: invert to black on light mode header */
+[data-md-color-scheme="default"] .md-logo img {
+    filter: brightness(0) invert(1);
+}
+
+.md-logo img {
+    height: 28px;
+    width: auto;
+}
