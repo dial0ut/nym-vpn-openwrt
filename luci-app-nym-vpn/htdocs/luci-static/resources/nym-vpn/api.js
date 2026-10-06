@@ -245,13 +245,15 @@ return baseclass.extend({
         });
     },
 
-    // {gateways: [...]} for one country, from the full list or the older
-    // per-country RPC.
+    // {gateways: [...]} for one country ('all' for every gateway), from the
+    // full list or the older per-country RPC.
     gatewaysForCountry: function(gwType, country) {
         return this.gatewayList(gwType).then(function(list) {
+            if (country === 'all') return { gateways: list };
             return { gateways: list.filter(function(gw) { return gw.country === country; }) };
         }).catch(function(err) {
-            if (isDaemonTimeout(err)) throw err;
+            // The per-country RPC has no "every country".
+            if (isDaemonTimeout(err) || country === 'all') throw err;
             return rpc.gatewayListByCountry(gwType, country);
         });
     },

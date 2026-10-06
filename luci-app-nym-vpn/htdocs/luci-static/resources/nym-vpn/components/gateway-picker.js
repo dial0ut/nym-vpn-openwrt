@@ -5,10 +5,11 @@
 'require nym-vpn.components.details as details';
 
 // The two gateway pickers (entry and exit): a country dropdown filled on
-// first focus, a per-country server list (one ledger row per gateway: name
-// and a telemetry line on the left, a fixed status column with the tier and
-// the No CT / No PQ markers on the right, explained by an (i) legend under the
-// list), and the restore of the daemon's saved selection after a disconnect.
+// first focus (Random and All countries on top), a search box that narrows
+// the list, the gateway list itself (two lines per gateway: the name and
+// its tier, then a telemetry line with the No CT marker at its end,
+// explained by an (i) legend under the list), and the restore of the
+// daemon's saved selection after a disconnect.
 
 var E = dom.create.bind(dom);
 
@@ -52,6 +53,13 @@ var selectHasOption = function(select, value) {
     return false;
 };
 
+// Whitespace-separated terms, all of which must appear in a row's search
+// text (name, identity key, city, operator family, country).
+var searchTerms = function(input) {
+    var q = String(input.value || '').trim().toLowerCase();
+    return q ? q.split(/\s+/) : [];
+};
+
 return baseclass.extend({
     // Returns the picker pair. Each side exposes {select, list}; the pair
     // exposes markDirty/invalidate/settle/restore/selection.
@@ -70,6 +78,11 @@ return baseclass.extend({
             while (select.options.length > 0) select.remove(0);
             select.appendChild(E('option', { 'value': 'none' }, '— Select Country —'));
             select.appendChild(E('option', { 'value': 'random' }, '🌐 Random'));
+            // Every gateway in one list, for finding one by name without
+            // knowing its country. A view, not a location: selection()
+            // reports a pick from it by gateway id, or as Random.
+            var total = countryList.reduce(function(n, c) { return n + (c.count || 0); }, 0);
+            if (total) select.appendChild(E('option', { 'value': 'all' }, ['🗺️ All countries (' + total + ')']));
             // The directory returns countries in ISO-code order; sort by the
             // displayed name so the dropdown reads alphabetically.
             var sorted = countryList.slice().sort(function(a, b) {
@@ -110,9 +123,36 @@ return baseclass.extend({
             return select;
         };
 
-        var loadGatewaysForCountry = function(country, type, container) {
+        // Show the rows matching the side's search box and update the count
+        // under the list. The checked row stays visible whatever the query,
+        // so the pick that will connect is never hidden.
+        var applyFilter = function(side) {
+            var list = side.list.querySelector('.nym-gateway-list');
+            if (!list) return;
+            var terms = searchTerms(side.search);
+            var shown = 0, total = 0;
+            Array.prototype.forEach.call(list.querySelectorAll('.nym-gateway-option'), function(opt) {
+                var radio = opt.querySelector('input');
+                var isGateway = opt.searchText !== undefined;
+                var match = isGateway && terms.every(function(t) { return opt.searchText.indexOf(t) !== -1; });
+                opt.hidden = terms.length > 0 && !match && !(radio && radio.checked);
+                if (!isGateway) return;
+                total++;
+                if (match) shown++;
+            });
+            var empty = side.list.querySelector('.nym-gateway-nomatch');
+            if (empty) {
+                empty.hidden = !terms.length || shown > 0;
+                empty.textContent = 'No gateway matches "' + side.search.value.trim() + '"';
+            }
+            var count = side.list.querySelector('.nym-gateway-count');
+            if (count) count.textContent = terms.length ? shown + ' of ' + total + ' gateways' : total + ' gateways available';
+        };
+
+        var loadGatewaysForCountry = function(side, country) {
+            var type = side.type, container = side.list;
             if (!country || country === 'none') {
-                dom.content(container, E('div', { 'class': 'nym-gateway-loading' }, 'Select a country above'));
+                dom.content(container, E('div', { 'class': 'nym-gateway-loading' }, 'Select a country, or search by name'));
                 return Promise.resolve();
             }
             if (country === 'random') {
@@ -147,6 +187,7 @@ return baseclass.extend({
                 });
 
                 var gatewayList = E('div', { 'class': 'nym-gateway-list' });
+                var allCountries = country === 'all';
 
                 var selectOption = function(option) {
                     container.querySelectorAll('.nym-gateway-option').forEach(function(el) {
@@ -155,17 +196,17 @@ return baseclass.extend({
                     option.classList.add('selected');
                 };
 
-                // One ledger row, a two-column grid. Row 1: the name (two-
-                // line clamp, full text in the title) beside a status column
-                // sized by its own content, so the tier label and the No CT
-                // marker can never be pushed under the name's ellipsis. Rows
-                // 2 and 3 span the full width: a telemetry line (load,
-                // uptime, city) and the operator family, each a single line
-                // that ellipsises rather than wraps.
+                // One row per gateway, two lines on a two-column grid. Line
+                // 1: the name (one line, ellipsised, full text in its title)
+                // and the tier. Line 2: the telemetry (load, uptime, operator
+                // family, city) and the No CT marker. The side
+                // columns are sized by their content, so a marker can never
+                // be pushed under the name's ellipsis. Every row is the same
+                // height, so the list shows as many as fit.
                 // Every string here comes from the directory (operator-
                 // controlled) and is array-wrapped so it renders as text.
                 //   row: {name, value, checked, disabled, perf, city, family,
-                //         noCt, note, compact, index}
+                //         flag, search, noCt, note, index}
                 var buildRow = function(row) {
                     var inputAttrs = { 'type': 'radio', 'name': inputName, 'value': row.value };
                     if (row.checked) inputAttrs.checked = 'checked';
@@ -174,32 +215,23 @@ return baseclass.extend({
                     var name = String(row.name || 'Unknown');
                     var meta = [];
                     if (row.perf && row.perf.telemetry) {
-                        // One span: the parsed "load · uptime" line, or the raw
-                        // string for a bridge whose format the parser does not
-                        // know. "N/A" has nothing to say here and is skipped
-                        // (the tier label already reads N/A).
-                        meta.push(E('span', { 'class': 'nym-gateway-option-perf', 'title': row.perf.raw }, [row.perf.telemetry]));
+                        // The parsed "load · uptime" pair, or the raw string
+                        // for a bridge whose format the parser does not know.
+                        // "N/A" has nothing to say here and is skipped (the
+                        // tier label already reads N/A).
+                        meta.push(E('span', { 'class': 'nym-gateway-option-perf' }, [row.perf.telemetry]));
                     }
-                    // City last: the country is already known from the
-                    // dropdown, so it is the token to lose if the line clips.
-                    if (row.city) meta.push(E('span', { 'class': 'nym-gateway-option-city' }, [String(row.city)]));
+                    // Family before city: the family is what gateway
+                    // independence checks, the city the token to lose if the
+                    // line clips.
+                    if (row.family) meta.push(E('span', { 'class': 'nym-gateway-option-family' }, [row.family]));
+                    if (row.city) meta.push(E('span', { 'class': 'nym-gateway-option-city' }, [row.city]));
                     if (row.note) meta.push(E('span', { 'class': 'nym-gateway-option-note' }, [row.note]));
+                    var metaText = meta.map(function(el) { return el.textContent; }).join(' · ');
 
-                    var status = [];
-                    if (row.perf) {
-                        status.push(E('span', {
-                            'class': 'nym-gateway-tier ' + row.perf.tier,
-                            'title': row.perf.raw
-                        }, [row.perf.label]));
-                    }
-                    if (row.noPq) {
-                        status.push(E('span', {
-                            'class': 'nym-gateway-nopq-tag',
-                            'title': 'No post-quantum key exchange: this gateway does not offer the Lewes protocol'
-                        }, 'No PQ'));
-                    }
+                    var tags = [];
                     if (row.noCt) {
-                        status.push(E('span', {
+                        tags.push(E('span', {
                             'class': 'nym-gateway-ct-tag',
                             'title': 'No circumvention transport: not selectable while Circumvention Transports is on'
                         }, 'No CT'));
@@ -207,27 +239,25 @@ return baseclass.extend({
 
                     var children = [
                         E('input', inputAttrs),
-                        E('div', { 'class': 'nym-gateway-option-name', 'title': name }, [name])
+                        E('div', { 'class': 'nym-gateway-option-name', 'title': name },
+                            row.flag ? [E('span', { 'class': 'nym-gateway-option-flag' }, [row.flag]), name] : [name])
                     ];
-                    if (status.length) children.push(E('div', { 'class': 'nym-gateway-option-status' }, status));
-                    // The telemetry and family lines are always present (empty
-                    // when there is nothing to say) and the name has a two-line
-                    // slot, so every gateway row in a list is the same height.
-                    // The Random row is compact instead: it always sits at the
-                    // top, has no telemetry or family, and would only waste
-                    // height by reserving the slots.
-                    children.push(E('div', { 'class': 'nym-gateway-option-meta' }, meta));
-                    if (!row.compact) {
-                        var familyAttrs = { 'class': 'nym-gateway-option-family' };
-                        if (row.family) familyAttrs.title = 'Operator family: ' + row.family;
-                        children.push(E('div', familyAttrs, row.family ? [row.family] : []));
+                    if (row.perf) {
+                        children.push(E('span', {
+                            'class': 'nym-gateway-tier ' + row.perf.tier,
+                            'title': row.perf.raw
+                        }, [row.perf.label]));
                     }
+                    children.push(E('div', { 'class': 'nym-gateway-option-meta', 'title': metaText }, meta));
+                    if (tags.length) children.push(E('div', { 'class': 'nym-gateway-option-tags' }, tags));
 
                     var option = E('label', {
-                        'class': 'nym-gateway-option' + (row.compact ? ' compact' : '') + (row.checked ? ' selected' : '') + (row.disabled ? ' disabled' : ''),
+                        'class': 'nym-gateway-option' + (tags.length ? ' tagged' : '') + (row.checked ? ' selected' : '') + (row.disabled ? ' disabled' : ''),
                         // Staggered entrance; capped so a long list settles quickly.
                         'style': '--i:' + Math.min(row.index || 0, 10)
                     }, children);
+                    // Only gateway rows are searchable; Any Gateway has none.
+                    if (row.search !== undefined) option.searchText = row.search;
                     if (!row.disabled) {
                         option.addEventListener('click', function() { selectOption(option); });
                     }
@@ -239,7 +269,6 @@ return baseclass.extend({
                     value: '',
                     checked: true,
                     note: 'picked by the daemon at connect',
-                    compact: true,
                     index: 0
                 }));
 
@@ -249,16 +278,21 @@ return baseclass.extend({
                     // one and on an older bridge; city likewise.
                     var family = (typeof gw.family === 'string' && gw.family.trim()) ? gw.family.trim() : '';
                     var city = (typeof gw.city === 'string' && gw.city.trim()) ? gw.city.trim() : '';
+                    var where = gw.country ? countries.getDisplay(gw.country) : null;
                     gatewayList.appendChild(buildRow({
                         name: gw.name,
                         value: gw.id || '',
                         disabled: ctIncompatible,
                         noCt: ctIncompatible,
-                        // False only on two-hop lists; mixnet lists send null.
-                        noPq: gw.lewes === false,
                         perf: parsePerformance(gw.performance),
                         city: city,
                         family: family,
+                        // The country is the dropdown's in a per-country
+                        // list; in All countries each row shows its own.
+                        flag: allCountries && where ? where.flag : '',
+                        search: [gw.name, gw.id, city, family, gw.country, where && where.name]
+                            .filter(function(v) { return typeof v === 'string' && v; })
+                            .join(' ').toLowerCase(),
                         index: i + 1
                     }));
                 });
@@ -267,24 +301,40 @@ return baseclass.extend({
                     id: 'gateway-tags-' + (container.getAttribute('data-side') || 'list'),
                     label: 'the gateway tags',
                     text: [
-                        E('div', {}, ['HIGH, MEDIUM, LOW and OFFLINE are the gateway\'s performance tier; the line under the name shows its load, 24-hour uptime and city.']),
-                        E('div', {}, ['No CT: cannot carry Circumvention Transports, so it cannot be picked while that switch is on.']),
-                        E('div', {}, ['No PQ: does not offer the Lewes protocol, so a connection through it uses the standard key exchange instead of the post-quantum one.'])
+                        E('div', {}, ['HIGH, MEDIUM, LOW and OFFLINE are the gateway\'s performance tier; the line under the name shows its load, 24-hour uptime, operator family and city.']),
+                        E('div', {}, ['No CT: cannot carry Circumvention Transports, so it cannot be picked while that switch is on.'])
                     ],
                     docs: 'gateway-tags'
                 });
                 dom.content(container, [
-                    E('label', { 'class': 'nym-form-label' }, 'Gateway'),
                     gatewayList,
+                    E('div', { 'class': 'nym-gateway-nomatch', 'hidden': 'hidden' }),
                     E('div', { 'class': 'nym-gateway-list-footer' }, [
-                        E('span', {}, [result.gateways.length + ' gateways available']),
+                        E('span', { 'class': 'nym-gateway-count' }),
                         legend.button
                     ]),
                     legend.panel
                 ]);
+                applyFilter(side);
             }).catch(function(err) {
                 dom.content(container, E('div', { 'class': 'nym-gateway-loading', 'style': 'color: var(--danger)' },
                     ['Error: ' + (err && err.message ? err.message : err)]));
+            });
+        };
+
+        // Typing with no list on screen (no country yet, or Random) opens
+        // All countries, so a gateway can be found by name alone.
+        var onSearch = function(side) {
+            var current = side.select.value;
+            if (!searchTerms(side.search).length || (current !== 'none' && current !== 'random')) {
+                applyFilter(side);
+                return;
+            }
+            side.select.ensureLoaded().then(function() {
+                if (side.select.value !== current || !selectHasOption(side.select, 'all')) return;
+                markDirty();
+                side.select.value = 'all';
+                loadGatewaysForCountry(side, 'all');
             });
         };
 
@@ -292,14 +342,37 @@ return baseclass.extend({
             var side = { type: gwType };
             side.select = createCountrySelect(gwType, selectName, function(ev) {
                 markDirty();
-                loadGatewaysForCountry(ev.target.value, gwType, side.list);
+                loadGatewaysForCountry(side, ev.target.value);
+            });
+            // type=text, not search: LuCI's bootstrap theme gives
+            // input[type=search] content-box sizing, which outranks
+            // .nym-input and pushes the box out of the panel.
+            side.search = E('input', {
+                'type': 'text',
+                'enterkeyhint': 'search',
+                'class': 'nym-input nym-gateway-search',
+                'placeholder': 'Search by name, city or operator',
+                'aria-label': (gwType === 'mixnet-entry' ? 'Entry' : 'Exit') + ' gateway search',
+                'autocomplete': 'off',
+                'spellcheck': 'false',
+                'input': function() { onSearch(side); },
+                'keydown': function(ev) {
+                    // Enter would submit LuCI's page form; Escape clears.
+                    if (ev.key === 'Enter') {
+                        ev.preventDefault();
+                    } else if (ev.key === 'Escape' && side.search.value) {
+                        ev.preventDefault();
+                        side.search.value = '';
+                        applyFilter(side);
+                    }
+                }
             });
             // 'change' only fires on user interaction (radio clicks bubble;
             // programmatic prefill doesn't), so it is exactly the dirty
             // signal we want.
             side.list = E('div', { 'class': 'nym-form-group', 'style': 'margin-bottom: 0', 'change': markDirty,
                 'data-side': selectName.split('_')[0] },
-                E('div', { 'class': 'nym-gateway-loading' }, 'Select a country'));
+                E('div', { 'class': 'nym-gateway-loading' }, 'Select a country, or search by name'));
             return side;
         };
 
@@ -320,13 +393,13 @@ return baseclass.extend({
                 if (saved.type === 'random') {
                     if (selectHasOption(select, 'random')) {
                         select.value = 'random';
-                        return loadGatewaysForCountry('random', side.type, container);
+                        return loadGatewaysForCountry(side, 'random');
                     }
                     return;
                 }
                 if (!saved.country || !selectHasOption(select, saved.country)) return;
                 select.value = saved.country;
-                return loadGatewaysForCountry(saved.country, side.type, container).then(function() {
+                return loadGatewaysForCountry(side, saved.country).then(function() {
                     if (stale() || saved.type !== 'gateway' || !saved.id || !container) return;
                     var radio = container.querySelector('input[value="' + saved.id + '"]');
                     if (!radio || radio.disabled) return;
@@ -336,6 +409,7 @@ return baseclass.extend({
                     });
                     var opt = radio.closest('.nym-gateway-option');
                     if (opt) opt.classList.add('selected');
+                    applyFilter(side);
                 });
             });
         };
@@ -374,13 +448,21 @@ return baseclass.extend({
                 }).catch(function() {});
             },
             // Raw picker state: country values ('none', 'random' or a code)
-            // and the checked gateway ids (null when none).
+            // and the checked gateway ids (null when none). All countries
+            // is not a location: a gateway picked from it goes by its id,
+            // and its Any Gateway row is plain Random.
             selection: function() {
+                var entryId = checkedId(entry, 'entry_gateway_id');
+                var exitId = checkedId(exit, 'exit_gateway_id');
+                var country = function(side, id) {
+                    var v = side.select ? side.select.value : 'none';
+                    return v === 'all' && !id ? 'random' : v;
+                };
                 return {
-                    entry_country: entry.select ? entry.select.value : 'none',
-                    exit_country: exit.select ? exit.select.value : 'none',
-                    entry_id: checkedId(entry, 'entry_gateway_id'),
-                    exit_id: checkedId(exit, 'exit_gateway_id')
+                    entry_country: country(entry, entryId),
+                    exit_country: country(exit, exitId),
+                    entry_id: entryId,
+                    exit_id: exitId
                 };
             },
             focus: function() {

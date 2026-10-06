@@ -55,16 +55,22 @@ return baseclass.extend({
     .nym-status-hero.connecting .nym-status-label, .nym-status-hero.disconnecting .nym-status-label { color: var(--warning); }\
     .nym-uptime { font-family: var(--font-mono); font-size: 28px; font-weight: 300; color: var(--text-primary); margin-bottom: 8px; font-variant-numeric: tabular-nums; }\
     .nym-uptime-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: var(--label-spacing); }\
-    /* Connected-state display: the hero card is STATIC — nothing in it may\
-       change size on a state swap; the swap is a pure opacity dissolve.\
-       Each side panel is a one-cell grid overlaying its picker (disconnected)\
-       and the live connection info (connected): the hidden layer stays in the\
-       grid at opacity 0, so the panel keeps one footprint through the swap.\
-       Every earlier max-height choreography leaked some card movement.\
+    /* Connect / disconnect. Each side panel overlays its picker\
+       (disconnected) and the live connection info (connected) in one grid\
+       cell and dissolves between them. The picker also collapses, so once\
+       connected the hero shrinks smoothly to the connection info and grows\
+       back on disconnect. The collapse animates grid-template-rows 1fr -> 0fr,\
+       which tracks the real height of the picker (a long list, an open legend),\
+       unlike a max-height guess. The panels stretch to the row and the ring\
+       column is pinned to its top (hero grid rules below), so the ring never\
+       moves and the info, centred in its panel, glides rather than jumps.\
        visibility flips after the fade so the hidden layer is never clickable\
        and drops out of the tab order. */\
-    .nym-panel-picker { grid-area: 1 / 1; align-self: start; min-width: 0; opacity: 1; visibility: visible; transition: opacity 0.5s ease, visibility 0s linear; }\
-    .nym-status-hero.connected .nym-panel-picker, .nym-status-hero.disconnecting .nym-panel-picker { opacity: 0; visibility: hidden; transition: opacity 0.5s ease, visibility 0s linear 0.5s; }\
+    .nym-panel-picker { grid-area: 1 / 1; align-self: start; min-width: 0; display: grid; grid-template-rows: 1fr; opacity: 1; visibility: visible; transition: grid-template-rows 0.5s ease-in-out, opacity 0.35s ease, visibility 0s linear; }\
+    .nym-status-hero.connected .nym-panel-picker, .nym-status-hero.disconnecting .nym-panel-picker { grid-template-rows: 0fr; opacity: 0; visibility: hidden; transition: grid-template-rows 0.5s ease-in-out, opacity 0.35s ease, visibility 0s linear 0.5s; }\
+    /* The clip box reaches 4px past the content, so focus rings on the\
+       country and search fields are not cut off. */\
+    .nym-panel-picker-body { min-height: 0; overflow: hidden; margin: -4px; padding: 4px; }\
     .nym-panel-info { grid-area: 1 / 1; align-self: center; min-width: 0; opacity: 0; visibility: hidden; text-align: center; transition: opacity 0.5s ease, visibility 0s linear 0.5s; }\
     .nym-status-hero.connected .nym-panel-info, .nym-status-hero.disconnecting .nym-panel-info { opacity: 1; visibility: visible; transition: opacity 0.5s ease, visibility 0s linear; }\
     .nym-gateway-label { font-size: 10px; text-transform: uppercase; letter-spacing: var(--label-spacing); text-indent: 2px; color: var(--text-muted); margin-bottom: 8px; text-align: center; }\
@@ -76,8 +82,6 @@ return baseclass.extend({
     .nym-connection-wrapper { display: flex; flex-direction: column; align-items: center; justify-content: center; padding-top: 20px; min-height: 44px; opacity: 0; visibility: hidden; transition: opacity 0.5s ease, visibility 0s linear 0.5s; pointer-events: none; }\
     .nym-status-hero.connected .nym-connection-wrapper, .nym-status-hero.disconnecting .nym-connection-wrapper { opacity: 1; visibility: visible; pointer-events: auto; transition: opacity 0.5s ease, visibility 0s linear; }\
     .nym-mode-label { font-size: 10px; text-transform: uppercase; letter-spacing: var(--label-spacing); color: var(--nym-green); opacity: 0.8; margin-bottom: 8px; }\
-    .nym-kex-label { font-size: 10px; letter-spacing: var(--label-spacing); color: var(--text-muted); margin-top: 8px; min-height: 12px; }\
-    .nym-kex-label.pq { color: var(--nym-green); }\
     .nym-connection-chain { display: flex; align-items: center; justify-content: center; padding-top: 0; gap: 0; margin: 0; }\
     .nym-chain-node { width: 14px; height: 14px; border-radius: 50%; background: var(--nym-green); opacity: 0.8; flex-shrink: 0; box-shadow: 0 0 6px var(--nym-green-glow); }\
     .nym-chain-line { width: 24px; height: 2px; opacity: 0.5; position: relative; overflow: hidden; }\
@@ -241,12 +245,14 @@ return baseclass.extend({
     .nym-gateway-box-title { font-size: 11px; text-transform: uppercase; letter-spacing: var(--label-spacing); color: var(--nym-green); margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }\
     .nym-gateway-box-title::before { content: ""; width: 6px; height: 6px; background: var(--nym-green); border-radius: 50%; }\
     .nym-gateway-loading { color: var(--text-muted); font-size: 13px; font-style: italic; padding: 12px 0; }\
-    /* Gateway ledger row: a two-column grid. Row 1 is the name (minmax(0,\
-       1fr): it may shrink and clamps to two lines, full text in its title)\
-       beside a content-sized status column (tier, No CT) that therefore can\
-       never be squeezed. Rows 2-3 span both columns: one telemetry line and\
-       the operator family, each a single line that ellipsises, not wraps. */\
-    .nym-gateway-option { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; row-gap: 3px; align-items: start; padding: 10px 12px; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 6px; margin-bottom: 6px; cursor: pointer; transition: border-color 0.2s, background 0.2s, box-shadow 0.2s; animation: rowIn 0.22s ease both; animation-delay: calc(var(--i, 0) * 28ms); }\
+    /* Gateway row: two lines on a two-column grid. Line 1 is the name\
+       (minmax(0, 1fr): it may shrink; one line, ellipsised, full text in its\
+       title) and the tier; line 2 the telemetry and, on a .tagged row, the\
+       No CT marker. The right column is sized by its content, so the marker\
+       can never be squeezed. Every row is the same two lines high, so\
+       the list shows as many as fit. */\
+    .nym-gateway-option { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 10px; row-gap: 2px; align-items: center; padding: 7px 10px; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 6px; margin-bottom: 4px; cursor: pointer; transition: border-color 0.2s, background 0.2s, box-shadow 0.2s; animation: rowIn 0.22s ease both; animation-delay: calc(var(--i, 0) * 28ms); }\
+    .nym-gateway-option[hidden] { display: none; }\
     @keyframes rowIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }\
     .nym-gateway-option:hover { border-color: var(--border-accent); background: var(--bg-card-hover); }\
     .nym-gateway-option.selected, .nym-gateway-option.selected:hover { border-color: var(--nym-green); background: var(--nym-green-dim); box-shadow: inset 3px 0 0 var(--nym-green); }\
@@ -256,40 +262,40 @@ return baseclass.extend({
     .nym-gateway-option input[type="radio"] { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; pointer-events: none; }\
     .nym-gateway-option:focus-within { border-color: var(--nym-green); box-shadow: 0 0 0 3px var(--nym-green-dim); }\
     .nym-gateway-option.selected:focus-within { box-shadow: inset 3px 0 0 var(--nym-green), 0 0 0 3px var(--nym-green-dim); }\
-    /* Fixed slots so every row in a list is one height: two lines for the\
-       name (min-height, still clamped at two), one each for telemetry and\
-       family, which are rendered even when empty. */\
-    .nym-gateway-option-name { grid-column: 1; min-width: 0; font-size: 13px; line-height: 1.35; min-height: 2.7em; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; transition: color 0.2s; }\
-    /* Telemetry and family lines: mono, lower-case tokens separated by\
-       middle dots, one line each across the full row width. */\
-    .nym-gateway-option-meta, .nym-gateway-option-family { grid-column: 1 / -1; min-width: 0; min-height: 1.4em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); font-size: 10px; line-height: 1.4; letter-spacing: 0.2px; color: var(--text-muted); }\
+    .nym-gateway-option-name { grid-column: 1; grid-row: 1; min-width: 0; font-size: 13px; line-height: 1.35; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color 0.2s; }\
+    .nym-gateway-option-flag { margin-right: 6px; }\
+    /* Telemetry line: mono, lower-case tokens separated by middle dots, one\
+       line that ellipsises (full text in its title). It spans the row unless\
+       markers share the line. */\
+    .nym-gateway-option-meta { grid-column: 1 / -1; grid-row: 2; min-width: 0; min-height: 1.4em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); font-size: 10px; line-height: 1.4; letter-spacing: 0.2px; color: var(--text-muted); }\
+    .nym-gateway-option.tagged .nym-gateway-option-meta { grid-column: 1; }\
     .nym-gateway-option-meta > span + span::before { content: "\\00b7"; margin: 0 6px; color: var(--border-accent); }\
     .nym-gateway-option-family { color: var(--text-secondary); }\
     .nym-gateway-option-note { font-style: italic; }\
-    /* The Random row keeps a single-line name and no family slot. */\
-    .nym-gateway-option.compact .nym-gateway-option-name { min-height: 0; -webkit-line-clamp: 1; }\
-    .nym-gateway-option-status { grid-column: 2; grid-row: 1; justify-self: end; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; padding-top: 2px; }\
+    .nym-gateway-option-tags { grid-column: 2; grid-row: 2; justify-self: end; display: flex; gap: 4px; }\
     /* Tier: tracked micro-label with a state dot, same family as the\
        Inbound Services status. Colour lives in the dot; the word stays\
        readable without it. */\
-    .nym-gateway-tier { display: inline-flex; align-items: center; gap: 6px; font-size: 9px; line-height: 1; text-transform: uppercase; letter-spacing: var(--label-spacing); color: var(--text-secondary); white-space: nowrap; }\
+    .nym-gateway-tier { grid-column: 2; grid-row: 1; justify-self: end; display: inline-flex; align-items: center; gap: 6px; font-size: 9px; line-height: 1; text-transform: uppercase; letter-spacing: var(--label-spacing); color: var(--text-secondary); white-space: nowrap; }\
     .nym-gateway-tier::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); flex-shrink: 0; }\
     .nym-gateway-tier.high::before { background: var(--nym-green); box-shadow: 0 0 6px var(--nym-green-glow); }\
     .nym-gateway-tier.medium::before { background: var(--warning); }\
     .nym-gateway-tier.low::before { background: var(--danger); }\
     .nym-gateway-tier.offline, .nym-gateway-tier.unknown { color: var(--text-muted); }\
     /* No CT: an outlined tag like the reconnect tag, in the warning colour —\
-       "not applicable while Circumvention Transports is on", not an error. */\
-    .nym-gateway-ct-tag { flex-shrink: 0; font-size: 9px; line-height: 1; text-transform: uppercase; letter-spacing: var(--label-spacing); color: var(--warning); border: 1px solid var(--warning); border-radius: 4px; padding: 3px 5px 2px; white-space: nowrap; opacity: 0.9; }\
-    .nym-gateway-nopq-tag { flex-shrink: 0; font-size: 9px; line-height: 1; text-transform: uppercase; letter-spacing: var(--label-spacing); color: var(--text-muted); border: 1px solid var(--text-muted); border-radius: 4px; padding: 3px 5px 2px; white-space: nowrap; opacity: 0.9; }\
+       "not applicable while Circumvention Transports is on", not an error.\
+       Sized to the telemetry line, so a tagged row is no taller. */\
+    .nym-gateway-ct-tag { flex-shrink: 0; font-size: 9px; line-height: 1; text-transform: uppercase; letter-spacing: var(--label-spacing); color: var(--warning); border: 1px solid var(--warning); border-radius: 4px; padding: 2px 4px 1px; white-space: nowrap; opacity: 0.9; }\
     .nym-gateway-list-footer { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); margin-top: 8px; }\
-    /* CT-incompatible: the text column dims, the status column keeps full\
+    .nym-gateway-nomatch { color: var(--text-muted); font-size: 12px; font-style: italic; padding: 10px 0; text-align: center; }\
+    /* CT-incompatible: the text dims, the tier and the marker keep full\
        contrast so the reason is the most legible thing on the row. */\
     .nym-gateway-option.disabled { cursor: not-allowed; border-style: dashed; }\
     .nym-gateway-option.disabled:hover { border-color: var(--border-color); background: var(--bg-input); }\
-    .nym-gateway-option.disabled .nym-gateway-option-name, .nym-gateway-option.disabled .nym-gateway-option-meta, .nym-gateway-option.disabled .nym-gateway-option-family { opacity: 0.45; }\
+    .nym-gateway-option.disabled .nym-gateway-option-name, .nym-gateway-option.disabled .nym-gateway-option-meta { opacity: 0.45; }\
     .nym-gateway-option.disabled .nym-gateway-tier::before { background: var(--text-muted); box-shadow: none; }\
-    .nym-gateway-list { max-height: 200px; overflow-y: auto; }\
+    .nym-gateway-search { height: 36px; padding: 0 12px 0 32px; font-size: 12px; background-image: url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'14\' height=\'14\' viewBox=\'0 0 16 16\'%3E%3Ccircle cx=\'7\' cy=\'7\' r=\'4.8\' fill=\'none\' stroke=\'%23606070\' stroke-width=\'1.6\'/%3E%3Cpath d=\'M10.6 10.6L14 14\' stroke=\'%23606070\' stroke-width=\'1.6\' stroke-linecap=\'round\'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: 11px center; }\
+    .nym-gateway-list { max-height: 290px; overflow-y: auto; }\
     .nym-gateway-list::-webkit-scrollbar { width: 4px; }\
     .nym-gateway-list::-webkit-scrollbar-track { background: var(--bg-input); }\
     .nym-gateway-list::-webkit-scrollbar-thumb { background: var(--border-accent); border-radius: 2px; }\
@@ -436,32 +442,27 @@ return baseclass.extend({
     /* Hero grid: the pickers get most of the width, the ring column only what\
        the 160px ring, the uptime and the hop chain need (200px). Named areas\
        let the same three children re-flow: ring above the two panels on a\
-       mid-width screen, one column on a phone. */\
-    .nym-hero-gateway-row { display: grid; grid-template-columns: minmax(0, 1fr) 200px minmax(0, 1fr); grid-template-areas: "entry center exit"; column-gap: 20px; row-gap: 20px; align-items: start; margin-bottom: 24px; }\
+       mid-width screen, one column on a phone. The panels stretch to the\
+       row, so entry and exit are always the same height and their connected\
+       info sits level, centred beside the ring; the ring column stays at the\
+       top, so the ring holds still while the row resizes. */\
+    .nym-hero-gateway-row { display: grid; grid-template-columns: minmax(0, 1fr) 200px minmax(0, 1fr); grid-template-areas: "entry center exit"; column-gap: 20px; row-gap: 20px; align-items: stretch; margin-bottom: 24px; }\
     .nym-hero-gateway-row > .nym-hero-gateway-panel:first-child { grid-area: entry; }\
     .nym-hero-gateway-row > .nym-hero-gateway-panel:last-child { grid-area: exit; }\
-    /* Once connected, the entry/exit picker panels give way to the live\
-       connection display. The center column (status ring + uptime) lives inside\
-       this row, so hide only the panels and re-center the lone remaining child. */\
-    /* Connected: the panel sheds its card chrome and centers the connection\
-       info so the entry/exit hops sit cleanly to either side of the ring. The\
-       panel keeps its flex width in both states, so the center ring never\
-       shifts; only the inner picker/info content collapses (above). */\
-    /* Only the chrome fades when connected; padding and row alignment stay\
-       constant so the box never moves or resizes (static-hero rule above). */\
+    /* Connected: the panel sheds its card chrome; what is left is the\
+       connection info, centred beside the ring. */\
     .nym-status-hero.connected .nym-hero-gateway-panel, .nym-status-hero.disconnecting .nym-hero-gateway-panel { background: transparent; border-color: transparent; text-align: center; }\
     /* display:grid stacks .nym-panel-picker and .nym-panel-info in the same\
-       cell (grid-area 1/1) for the dissolve swap — see the static-hero rules. */\
+       cell (grid-area 1/1) for the swap — see the connect / disconnect rules. */\
     .nym-hero-gateway-panel { min-width: 0; display: grid; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 12px; padding: 18px; transition: background 0.4s ease, border-color 0.3s ease; text-align: left; }\
     .nym-hero-gateway-panel:hover { border-color: var(--border-accent); }\
     .nym-hero-gateway-panel .nym-gateway-box-title { margin-bottom: 14px; font-size: 11px; }\
     .nym-hero-gateway-panel .nym-select { font-size: 13px; padding: 0 16px; height: 44px; line-height: 44px; background-position: right 14px center; text-align: center; text-align-last: center; }\
-    .nym-hero-gateway-panel .nym-gateway-list { max-height: 160px; margin-top: 14px; }\
-    .nym-hero-gateway-panel .nym-gateway-option { padding: 9px 11px; gap: 10px; }\
+    .nym-hero-gateway-panel .nym-gateway-list { margin-top: 10px; }\
     .nym-hero-gateway-panel .nym-gateway-option-name { font-size: 12px; }\
     .nym-hero-gateway-panel .nym-gateway-loading { font-size: 12px; padding: 10px 0; text-align: center; }\
     .nym-hero-gateway-panel .nym-form-label { font-size: 10px; text-align: center; margin-top: 8px; margin-bottom: 10px; }\
-    .nym-hero-center { grid-area: center; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0; }\
+    .nym-hero-center { grid-area: center; align-self: start; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0; }\
     .nym-hero-center .nym-status-ring { margin-bottom: 24px; }\
     .nym-hero-center .nym-uptime { margin-top: 8px; }\
     /* Mid width: the ring alone on top, the two pickers side by side under it,\
