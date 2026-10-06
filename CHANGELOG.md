@@ -11,6 +11,33 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+### Added
+
+- The LuCI gateway pickers have a search box that narrows the list by name,
+  city, operator family, country or identity key, and an **All countries**
+  entry that lists every gateway with its flag. Typing a search before
+  choosing a country switches to it, so a gateway can be found by name alone.
+
+### Changed
+
+- LuCI gateway rows are two lines high (name and tier, then load, uptime,
+  operator family and city) and the list is taller, so about five gateways
+  show at once instead of one.
+
+### Removed
+
+- The key exchange line under the LuCI hop chain and the **No PQ** gateway
+  tag. The post-quantum key exchange is on by default, so it is not worth
+  the space; `nym-vpnc status` and `nym-vpnc gateway list` still report it.
+
+### Fixed
+
+- The LuCI connection card shrinks smoothly to the connection details once
+  connected again, and grows back on disconnect, with the entry and exit
+  details level and centred beside the ring. The card had kept the height of
+  the hidden pickers, so a side left on a long country list showed its
+  gateway lower than a side set to Random.
+
 ## [1.36.0] - 2026-10-05
 
 ### Added
