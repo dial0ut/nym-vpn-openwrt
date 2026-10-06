@@ -83,29 +83,9 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "All release invariants hold."
 
-  plan:
-    name: Plan builds
-    needs: verify
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    outputs:
-      matrix: ${{ steps.plan.outputs.matrix }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          ref: refs/tags/${{ needs.verify.outputs.tag }}
-          persist-credentials: false
-
-      - name: One build per target in scripts/ci/targets.json
-        id: plan
-        run: echo "matrix=$(jq -c 'map(del(.openwrt))' scripts/ci/targets.json)" >> "$GITHUB_OUTPUT"
-
   build:
     name: Build ${{ matrix.arch }}
-    needs: [verify, plan]
+    needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -115,7 +95,33 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+        include:
+          # Tier 2: stock images, pinned by digest
+          - arch: x86_64
+            target: x86_64-unknown-linux-musl
+            image: messense/rust-musl-cross:x86_64-musl@sha256:ce75e9174325d4fbb3de85c309e2d7ca29f7500169bc4b5d2c611ff7e86d549a
+          - arch: i686
+            target: i686-unknown-linux-musl
+            image: messense/rust-musl-cross:i686-musl@sha256:e515546ceeb7fef8a70e7a59198981f5851cbcf16dd8d1adeb28736ea4751e05
+          - arch: aarch64
+            target: aarch64-unknown-linux-musl
+            image: messense/rust-musl-cross:aarch64-musl@sha256:ecae5dd62d1c938c14f8071d36c16fa699860aace03bfb5284fb1216474d2643
+          - arch: armv7
+            target: armv7-unknown-linux-musleabihf
+            image: messense/rust-musl-cross:armv7-musleabihf@sha256:714d7529ed9098699cc13abade83c565e6a946e53975c108089a8cd3b43cb871
+          # Tier 3: images built from docker/tier3-musl/
+          - arch: mipsel
+            target: mipsel-unknown-linux-musl
+            dockerfile: Dockerfile.mipsel
+          - arch: mips
+            target: mips-unknown-linux-musl
+            dockerfile: Dockerfile.mips
+          - arch: riscv64
+            target: riscv64gc-unknown-linux-musl
+            dockerfile: Dockerfile.riscv64
+          - arch: armv5te
+            target: armv5te-unknown-linux-musleabi
+            dockerfile: Dockerfile.armv5te
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -217,12 +223,14 @@ jobs:
 
       - name: Build IPK and APK packages
         # One .ipk (OpenWrt <=24.10, opkg) and one .apk (25.x+, apk) for every
-        # OpenWrt architecture in scripts/ci/targets.json.
+        # OpenWrt architecture below, from the binary built for it.
         env:
           VERSION: ${{ needs.verify.outputs.version }}
         run: |
           set -euo pipefail
+          expected=0
           while read -r arch openwrt_arch; do
+            expected=$((expected + 1))
             echo "::group::$openwrt_arch ($arch)"
             mkdir -p "bin/$arch"
             cp "artifacts/nym-vpnd-$arch" "bin/$arch/nym-vpnd"
@@ -230,9 +238,30 @@ jobs:
             scripts/ipk/build-ipk.sh "$VERSION" "$openwrt_arch" "bin/$arch" luci-app-nym-vpn packages
             scripts/apk/build-apk.sh "$VERSION" "$openwrt_arch" "bin/$arch" luci-app-nym-vpn packages
             echo "::endgroup::"
-          done < <(jq -r '.[] | .arch as $a | .openwrt[] | "\($a) \(.)"' scripts/ci/targets.json)
+          done <<'EOF'
+          x86_64 x86_64
+          i686 i386_pentium4
+          i686 i386_pentium-mmx
+          aarch64 aarch64_generic
+          aarch64 aarch64_cortex-a53
+          aarch64 aarch64_cortex-a53_neon-vfpv4
+          aarch64 aarch64_cortex-a72
+          armv7 arm_cortex-a5_vfpv4
+          armv7 arm_cortex-a7
+          armv7 arm_cortex-a7_neon-vfpv4
+          armv7 arm_cortex-a7_vfpv4
+          armv7 arm_cortex-a8_vfpv3
+          armv7 arm_cortex-a9
+          armv7 arm_cortex-a9_neon
+          armv7 arm_cortex-a9_vfpv3-d16
+          armv7 arm_cortex-a15_neon-vfpv4
+          mipsel mipsel_24kc
+          mipsel mips_siflower
+          mips mips_24kc
+          riscv64 riscv64_riscv64
+          armv5te arm_arm926ej-s
+          EOF
 
-          expected=$(jq '[.[].openwrt[]] | length' scripts/ci/targets.json)
           for ext in ipk apk; do
             n=$(find packages -maxdepth 1 -name "*.$ext" | wc -l)
             [ "$n" -eq "$expected" ] \
@@ -312,7 +341,8 @@ jobs:
         # generate-feed.sh skips what it cannot index or sign with a warning;
         # a release must not publish a feed with holes in it.
         run: |
-          expected=$(jq '[.[].openwrt[]] | length' scripts/ci/targets.json)
+          expected=$(find artifacts -maxdepth 1 -name '*.ipk' | wc -l)
+          [ "$expected" -gt 0 ] || { echo "::error::no packages to index"; exit 1; }
           check() {
             n=$(find "$1" -mindepth 2 -maxdepth 2 -name "$2" | wc -l)
             [ "$n" -eq "$expected" ] \

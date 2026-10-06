@@ -45,13 +45,13 @@ It also decides whether this is a pre-release: any version with a `-` suffix (`1
 
 ### 2. Build
 
-One job per target in `scripts/ci/targets.json`, checked out at the tag. Each runs in a pinned
+One job per target, checked out at the tag. Each runs in a pinned
 image, checks the ELF imports, and uploads `nym-vpnd-{arch}`, `nym-vpnc-{arch}`,
 `nym-vpn-{arch}.tar.gz` and SHA256 sums.
 
 | Target | Image | Toolchain |
 |--------|-------|-----------|
-| x86_64, i686, aarch64, armv7 | `messense/rust-musl-cross`, digest in `targets.json` | the image's stable |
+| x86_64, i686, aarch64, armv7 | `messense/rust-musl-cross`, pinned by digest | the image's stable |
 | mips, mipsel, riscv64, armv5te | `docker/tier3-musl/Dockerfile.*`, built per run | `RUST_NIGHTLY` (`scripts/versions.sh`) |
 
 Each sets up an 8 GB swap file first: LTO linking needs it and the runners do not have the RAM.
@@ -59,7 +59,7 @@ Each sets up an 8 GB swap file first: LTO linking needs it and the runners do no
 ### 3. Package
 
 One job that runs `build-ipk.sh` then `build-apk.sh` for each OpenWrt architecture listed under
-its binary in `targets.json`, against the tag's `luci-app-nym-vpn/`, and fails unless there is
+its binary (a table in that step), against the tag's `luci-app-nym-vpn/`, and fails unless there is
 one `.ipk` and one `.apk` per architecture:
 
 | Binary | OpenWrt architectures |
@@ -148,7 +148,7 @@ bumps itself: every pin changes by hand.
 | Actions | SHA in each `uses:` |
 | Tier 3 base images | digest in `docker/tier3-musl/Dockerfile.*` |
 | mips/mipsel GCC toolchains | `TOOLCHAIN_SHA256` in their Dockerfiles |
-| Tier 2 images | digest in `scripts/ci/targets.json` |
+| Tier 2 images | digest in the build matrix of `release-musl.yml` |
 | Tier 3 nightly | `RUST_NIGHTLY` in `scripts/versions.sh` |
 | Alpine (apk mkpkg, mkndx, smoke test) | `ALPINE_IMAGE` in `scripts/versions.sh` |
 

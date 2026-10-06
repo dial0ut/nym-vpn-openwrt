@@ -67,7 +67,7 @@ install_system_deps() {
     # The image's toolchain is the release toolchain (CI pins the image by
     # digest), so never swap in whatever stable is current: fail instead.
     if [ "$(printf '%s\n' "$required_version" "$current_version" | sort -V | head -n1)" != "$required_version" ]; then
-        log_error "Rust $current_version in this image is older than $required_version; use a newer image (scripts/ci/targets.json pins the CI ones)"
+        log_error "Rust $current_version in this image is older than $required_version; use a newer image (release-musl.yml pins the release ones)"
         exit 1
     fi
 
