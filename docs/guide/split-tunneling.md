@@ -41,6 +41,10 @@ rules.
 Each exclusion has its own enable toggle, so you can park a rule without deleting it. Changes
 apply immediately, while connected.
 
+Each entry also has a route. **Bypass VPN** is the carve-out this page describes. **Mixnet** sends
+the device or domain through the mixnet instead, while fast mode carries everything else: see
+[Dual Tunnel](dual-tunnel.md).
+
 **Leave the kill-switch on.** Excluded traffic uses the WAN, everything else stays protected —
 including during reconnects, when the tunnel is briefly down. See [How it works](#how-it-works).
 

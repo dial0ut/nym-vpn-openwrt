@@ -56,7 +56,7 @@ already gone.
 | `NYM_INPUT`, `NYM_OUTPUT`, `NYM_FORWARD` (+ `NYM_MANGLE_*`) and their jumps from `*_rule` | daemon (`iptables-restore --noflush`, jumps inserted at position 1 or ahead of a foreign rule) | daemon (reset); include (no-policy path, stop marker); prerm (inline fallback only) | include after an fw3 restart (restore from `v4.rules`/`v6.rules`), after a reload (re-hook if displaced) | fw3 state lock |
 | `NYM_EMERGENCY_OUT`, `NYM_EMERGENCY_FWD` | daemon (transition set, first activation of a family); include (transition set on a stale marker or failed restore; boot set at boot) | daemon (last step of every apply/reset); include (conditions no longer hold, stop marker); prerm (inline fallback only) | include re-checks after installing without a lock | fw3 state lock; the unlocked fallback re-checks and lifts if the daemon hooked a policy meanwhile |
 | zone `nym` rules (masquerade, MSS clamp, `lan -> nym` forwarding; fw3 `zone_nym_*` chains, fw4 `inet fw4` zone chains) | fw3/fw4, from the `nym` zone and forwarding sections in `/etc/config/firewall` | fw3/fw4 on the reload after prerm deletes the sections | fw3/fw4 on every reload and restart; the daemon and the includes never touch them | none: fw3/fw4's own transaction |
-| fwmark `ip rule`s (0x14d → table 333, 0x14e → main) | daemon | daemon; prerm (removal only — the running daemon owns them across an upgrade) | — | none |
+| fwmark `ip rule`s (0x14d → table 333, 0x14e → main, 0x14f → table 335 then unreachable) | daemon | daemon; prerm (removal only — the running daemon owns them across an upgrade) | — | none |
 
 ## Configuration and package state
 

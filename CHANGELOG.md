@@ -11,6 +11,18 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+### Added
+
+- Dual tunnel: split-tunnel entries in LuCI can be routed via the
+  **Mixnet** instead of bypassing the VPN. While such an entry exists and the
+  VPN is connected in Fast mode, the router runs a mixnet tunnel beside the
+  fast one for those devices and domains; everything else stays on fast mode,
+  which never drops when the mixnet tunnel starts, stops or fails. Mixnet
+  routes never fall back to the fast tunnel or the WAN, kill-switch on or
+  off, and a mixnet device's DNS goes through the mixnet too. Gateways are
+  picked automatically. `nym-vpnc tunnel set --dual-tunnel on` runs the
+  mixnet tunnel for traffic marked `0x14f` by hand. See the Dual Tunnel guide.
+
 ## [1.36.1] - 2026-10-05
 
 ### Added

@@ -149,6 +149,11 @@ says so, with the `opkg` command, when it is missing). Each row has its own on/o
 `×`. See [Split Tunneling](split-tunneling.md) for the caveats — particularly that an excluded
 device's DNS still goes through the tunnel.
 
+Each row's route is **Bypass VPN** (straight to the WAN) or **Mixnet** (through the mixnet while
+fast mode carries everything else). The add forms take a route too. While an entry routes via the
+mixnet, a line above the list shows whether the mixnet tunnel is up; mixnet routes have no
+connection while it is not. See [Dual Tunnel](dual-tunnel.md).
+
 ### Legacy Split Tunneling (PBR)
 
 Listed under *Policy-based routing*. Hands routing to `luci-app-pbr`: only the traffic PBR selects
