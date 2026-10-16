@@ -46,6 +46,8 @@ pub(crate) enum RouteManagerCommand {
         oneshot::Sender<Result<(), PlatformError>>,
     ),
     ClearRoutes,
+    /// Removes the routes previously applied in one table.
+    ClearTableRoutes(u32, oneshot::Sender<()>),
     Shutdown(oneshot::Sender<()>),
     /// `(enable_ipv6, enable_exempt, sender)` — `enable_exempt` installs the
     /// fwmark→main routing rule used by the inbound-service exemption feature.
@@ -117,11 +119,24 @@ impl RouteManagerHandle {
             .map_err(|_| Error::RouteManagerDown)
     }
 
+    /// Removes the routes previously applied in `table_id`, leaving the
+    /// other tables' routes in place.
+    pub async fn clear_table_routes(&self, table_id: u32) -> Result<(), Error> {
+        let (done_tx, done_rx) = oneshot::channel();
+        self.tx
+            .send(RouteManagerCommand::ClearTableRoutes(table_id, done_tx))
+            .map_err(|_| Error::RouteManagerDown)?;
+        done_rx.await.map_err(|_| Error::ManagerChannelDown)
+    }
+
     /// Ensure that packets are routed using the correct tables.
     ///
     /// `enable_exempt` adds an extra `ip rule fwmark 0x14e lookup main pref 90`
     /// so traffic marked by the inbound-service-exemption firewall path exits
-    /// via the real WAN instead of the tunnel.
+    /// via the real WAN instead of the tunnel. The side-tunnel rules,
+    /// `fwmark 0x14f lookup 0x14f pref 150` and `fwmark 0x14f unreachable
+    /// pref 151`, are always added, for both families whatever `enable_ipv6`
+    /// says.
     pub async fn create_routing_rules(
         &self,
         enable_ipv6: bool,
