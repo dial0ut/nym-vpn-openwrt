@@ -358,6 +358,7 @@ mod e2e_tests {
         FirewallPolicy::Connected {
             peer_endpoints: vec![ep([1, 2, 3, 4], 51820)],
             tunnel: tunnel("wg0", [10, 64, 0, 2]),
+            side_tunnel: None,
             allow_lan: true,
             dns_config: dns(
                 &["10.64.0.1".parse().unwrap()],
@@ -496,6 +497,7 @@ mod e2e_tests {
         let policy = FirewallPolicy::Connected {
             peer_endpoints: vec![ep([1, 2, 3, 4], 51820)],
             tunnel: tunnel("nym0", [10, 64, 0, 2]),
+            side_tunnel: None,
             allow_lan: true,
             dns_config: dns(
                 &["10.64.0.1".parse().unwrap()],

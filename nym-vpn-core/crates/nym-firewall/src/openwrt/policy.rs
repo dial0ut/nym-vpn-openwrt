@@ -141,6 +141,7 @@ pub(crate) fn compile_with(policy: &FirewallPolicy, uplink: &Uplink<'_>) -> Rule
         FirewallPolicy::Connected {
             peer_endpoints,
             tunnel,
+            side_tunnel,
             allow_lan,
             dns_config,
             allowed_endpoints,
@@ -177,7 +178,9 @@ pub(crate) fn compile_with(policy: &FirewallPolicy, uplink: &Uplink<'_>) -> Rule
                     allow_dns_server(&mut rs, *dns, None);
                 }
             }
-            for m in tunnel.inner_metadatas() {
+            // The side tunnel's accepts come before block_dns too: its
+            // clients' DNS is routed into it.
+            for m in tunnel.inner_metadatas().into_iter().chain(side_tunnel) {
                 allow_tunnel(&mut rs, &m.interface);
                 if *allow_lan {
                     cve_2019_14899_protection(&mut rs, m);
@@ -313,7 +316,15 @@ fn tunnel_interfaces(policy: &FirewallPolicy) -> Vec<String> {
         FirewallPolicy::Connecting { tunnel, .. } => {
             tunnel.iter().flat_map(|t| t.inner_metadatas()).collect()
         }
-        FirewallPolicy::Connected { tunnel, .. } => tunnel.inner_metadatas(),
+        FirewallPolicy::Connected {
+            tunnel,
+            side_tunnel,
+            ..
+        } => tunnel
+            .inner_metadatas()
+            .into_iter()
+            .chain(side_tunnel)
+            .collect(),
         FirewallPolicy::Blocked { .. } => Vec::new(),
     };
     metadatas.into_iter().map(|m| m.interface.clone()).collect()
@@ -790,6 +801,7 @@ mod tests {
         let policy = FirewallPolicy::Connected {
             peer_endpoints: vec![],
             tunnel: tunnel_iface("wg0", [10, 64, 0, 2]),
+            side_tunnel: None,
             allow_lan: true,
             dns_config: dns_config(&[], &[]),
             allowed_endpoints: vec![],
@@ -806,6 +818,7 @@ mod tests {
         let policy = FirewallPolicy::Connected {
             peer_endpoints: vec![],
             tunnel: tunnel_iface("wg0", [10, 64, 0, 2]),
+            side_tunnel: None,
             allow_lan: false,
             dns_config: dns_config(&[], &[]),
             allowed_endpoints: vec![],
@@ -826,6 +839,7 @@ mod tests {
         let policy = FirewallPolicy::Connected {
             peer_endpoints: vec![],
             tunnel: tunnel_iface("wg0", [10, 64, 0, 2]),
+            side_tunnel: None,
             allow_lan: false,
             dns_config: dns_config(&[], &[]),
             allowed_endpoints: vec![ep([198, 41, 192, 167], 7844)],
@@ -867,6 +881,7 @@ mod tests {
         let policy = FirewallPolicy::Connected {
             peer_endpoints: vec![all_ep],
             tunnel: tunnel_iface("wg0", [10, 64, 0, 2]),
+            side_tunnel: None,
             allow_lan: false,
             dns_config: dns_config(&[], &[]),
             allowed_endpoints: vec![],
@@ -938,6 +953,7 @@ mod tests {
         let policy = FirewallPolicy::Connected {
             peer_endpoints: vec![],
             tunnel: tunnel_iface("wg0", [10, 64, 0, 2]),
+            side_tunnel: None,
             allow_lan: true,
             dns_config: dns_config(&[], &[]),
             allowed_endpoints: vec![],
@@ -960,6 +976,7 @@ mod tests {
         let policy = FirewallPolicy::Connected {
             peer_endpoints: vec![],
             tunnel: tunnel_iface("wg0", [10, 64, 0, 2]),
+            side_tunnel: None,
             allow_lan: false,
             dns_config: dns_config(&[], &[]),
             allowed_endpoints: vec![],
@@ -1004,6 +1021,7 @@ mod tests {
                 FirewallPolicy::Connected {
                     peer_endpoints: vec![],
                     tunnel: tunnel_iface("wg0", [10, 64, 0, 2]),
+                    side_tunnel: None,
                     allow_lan: true,
                     dns_config: dns_config(&[], &[]),
                     allowed_endpoints: vec![],
@@ -1373,6 +1391,7 @@ mod tests {
                 FirewallPolicy::Connected {
                     peer_endpoints: vec![ep([1, 2, 3, 4], 51820)],
                     tunnel: tunnel_iface("nym0", [10, 64, 0, 2]),
+                    side_tunnel: None,
                     allow_lan: true,
                     dns_config: dns_config(&["9.9.9.9".parse().unwrap()], &[pihole]),
                     allowed_endpoints: vec![],
@@ -1394,6 +1413,62 @@ mod tests {
 
     fn multi_wan() -> Vec<String> {
         vec!["eth1".to_string(), "pppoe-wanb".to_string()]
+    }
+
+    #[test]
+    fn connected_admits_the_side_tunnel_like_the_primary() {
+        let side_ip = IpAddr::V4(Ipv4Addr::new(10, 0, 9, 7));
+        let policy = FirewallPolicy::Connected {
+            peer_endpoints: vec![],
+            tunnel: tunnel_iface("nym1", [10, 64, 0, 2]),
+            side_tunnel: Some(TunnelMetadata {
+                interface: "nym2".to_string(),
+                ips: vec![side_ip],
+                ipv4_gateway: None,
+                ipv6_gateway: None,
+            }),
+            allow_lan: true,
+            dns_config: dns_config(&[], &[]),
+            allowed_endpoints: vec![],
+            inbound_exemptions: vec![],
+        };
+        let wan = vec!["eth1".to_string()];
+        let rs = compile_with(&policy, &uplink(&wan, None));
+
+        for chain in [&rs.filter.output, &rs.filter.forward] {
+            let accept = chain.rules.iter().position(|r| {
+                r.matches.oif.as_deref() == Some("nym2")
+                    && r.matches.proto.is_none()
+                    && r.verdict == Verdict::Accept
+            });
+            let dns_reject = chain
+                .rules
+                .iter()
+                .position(|r| r.matches.dport == Some(DNS_PORT) && r.verdict == Verdict::Reject);
+            let (Some(accept), Some(dns_reject)) = (accept, dns_reject) else {
+                panic!("side tunnel accept or DNS reject missing");
+            };
+            assert!(
+                accept < dns_reject,
+                "the side tunnel's clients' DNS is routed into it"
+            );
+        }
+        assert!(
+            rs.filter
+                .forward
+                .rules
+                .iter()
+                .any(|r| r.matches.iif.as_deref() == Some("nym2") && r.verdict == Verdict::Return),
+            "arrivals from the side tunnel are the zones' to judge"
+        );
+        assert!(
+            rs.filter.input.rules.iter().any(|r| {
+                r.matches.iif_not.as_deref() == Some("nym2")
+                    && r.matches.daddr == Some(AddrMatch::Ip(side_ip))
+                    && r.verdict == Verdict::Drop
+            }),
+            "CVE-2019-14899 drop for the side tunnel address"
+        );
     }
 
     fn pihole_forward_accepts(rs: &RuleSet, pihole: IpAddr) -> Vec<&Rule> {
@@ -1571,6 +1646,7 @@ mod tests {
         let policy = FirewallPolicy::Connected {
             peer_endpoints: vec![],
             tunnel: tunnel_iface("wg0", [10, 64, 0, 2]),
+            side_tunnel: None,
             allow_lan: false,
             dns_config: dns_config(&[], &[]),
             allowed_endpoints: vec![],
@@ -1646,6 +1722,7 @@ mod tests {
                     FirewallPolicy::Connected {
                         peer_endpoints: vec![ep([1, 2, 3, 4], 51820)],
                         tunnel: tunnel_iface("nym0", [10, 64, 0, 2]),
+                        side_tunnel: None,
                         allow_lan,
                         dns_config: dns_config(
                             &["10.64.0.1".parse().unwrap()],

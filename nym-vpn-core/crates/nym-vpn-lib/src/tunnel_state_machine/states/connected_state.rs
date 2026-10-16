@@ -432,6 +432,7 @@ impl ConnectedPolicyParameters {
         FirewallPolicy::Connected {
             peer_endpoints,
             tunnel,
+            side_tunnel: None,
             allow_lan: self.allow_lan,
             dns_config: self.dns_config.clone(),
             allowed_endpoints: self.allowed_endpoints.clone(),
