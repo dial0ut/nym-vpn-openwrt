@@ -739,12 +739,12 @@ async function scenarioSplit() {
   check(toasts(t).indexOf('Select a device') !== -1, 'device required');
   byId(t, 'nym-split-client').value = 'aa:bb:cc:dd:ee:ff';
   byId(t, 'nym-split-client-save').click();
-  check(toasts(t).indexOf('That device is already excluded') !== -1, 'duplicate device rejected');
+  check(toasts(t).indexOf('That device is already in the list') !== -1, 'duplicate device rejected');
   byId(t, 'nym-split-domain').value = 'Example.COM';
   byId(t, 'nym-split-domain-label').value = 'ex';
   byId(t, 'nym-split-domain-save').click();
   await sleep(20);
-  check(eq(callsTo(t, 'split_add'), [{ type: 'domain', mac: '', domain: 'example.com', label: 'ex' }]), 'domain lower-cased: ' + JSON.stringify(callsTo(t, 'split_add')));
+  check(eq(callsTo(t, 'split_add'), [{ type: 'domain', mac: '', domain: 'example.com', label: 'ex', via: 'wan' }]), 'domain lower-cased, bypass by default: ' + JSON.stringify(callsTo(t, 'split_add')));
   check(qa(t, '.nym-split-row').length === 2 && byId(t, 'nym-split-domain').value === '', 'row added and input cleared');
   const sw = qa(t, '.nym-split-row input[type="checkbox"]')[0];
   sw.checked = false;
@@ -780,6 +780,35 @@ async function scenarioSplit() {
   const t2 = setup({ init: baseInit({ split_status: { nftset_supported: false }, clients: [] }) });
   check(!byId(t2, 'nym-split-domain') && /dnsmasq-full/.test(q(t2, '.nym-split-section').textContent), 'no nftset: domain row replaced by the dnsmasq-full hint');
   check(byId(t2, 'nym-split-client').options[0].textContent === 'No DHCP leases found', 'no leases placeholder');
+
+  // Mixnet routes: the route select drives split_set_via, the add forms
+  // carry the route, and a note says what mixnet routes have right now.
+  const up = { state: 'up', connected_seconds: 9, entry: { id: 'M1' }, exit: { id: 'M2', name: 'mix-exit', country: 'CH' } };
+  const tm = setup({ init: baseInit({ status: Object.assign({}, CONNECTED, { mode: 'wireguard', side_tunnel: up }),
+      split_exclusions: [{ id: 'x1', type: 'client', mac: 'aa:bb:cc:dd:ee:ff', enabled: 1, via: 'wan' }] }),
+    rpc: { split_set_via: { success: true }, split_add: { success: true, id: 'x2' } } });
+  const note = byId(tm, 'nym-split-mixnet-note');
+  check(note.style.display === 'none', 'no mixnet route: no mixnet note');
+  const via = q(tm, '.nym-split-row .nym-split-via');
+  check(via.value === 'wan', 'route select shows the stored route');
+  via.value = 'mixnet';
+  fire(tm, via, 'change');
+  await sleep(20);
+  check(eq(callsTo(tm, 'split_set_via'), [{ id: 'x1', via: 'mixnet' }]) && q(tm, '.nym-split-row .nym-split-via').value === 'mixnet', 'route change -> split_set_via, row follows');
+  check(note.style.display === 'block' && note.textContent === 'Mixnet tunnel up, exiting via mix-exit.' && !note.classList.contains('nym-note-warn'), 'mixnet note: tunnel up');
+  const store = tm.require('nym-vpn.store');
+  store.applyStatus(Object.assign({}, CONNECTED, { mode: 'wireguard', side_tunnel: { state: 'connecting', retry_attempt: 2 } }));
+  check(/connecting \(retry 2\)/.test(note.textContent) && note.classList.contains('nym-note-warn'), 'mixnet note follows the poll: connecting, warned');
+  store.applyStatus(Object.assign({}, CONNECTED, { mode: 'mixnet' }));
+  check(/Anonymous mode/.test(note.textContent), 'mixnet note: Anonymous mode carries everything');
+  store.applyStatus({ state: 'disconnected' });
+  check(/while the VPN is disconnected/.test(note.textContent), 'mixnet note: VPN disconnected');
+  byId(tm, 'nym-split-domain').value = 'exchange.example.com';
+  byId(tm, 'nym-split-domain-route').value = 'mixnet';
+  byId(tm, 'nym-split-domain-save').click();
+  await sleep(20);
+  check(eq(callsTo(tm, 'split_add'), [{ type: 'domain', mac: '', domain: 'exchange.example.com', label: '', via: 'mixnet' }]) && toasts(tm).indexOf('Added mixnet route') !== -1, 'add with the mixnet route');
+  check(qa(tm, '.nym-split-row').length === 2 && qa(tm, '.nym-split-row .nym-split-via')[1].value === 'mixnet', 'added row shows its route');
 }
 
 async function scenarioDns() {

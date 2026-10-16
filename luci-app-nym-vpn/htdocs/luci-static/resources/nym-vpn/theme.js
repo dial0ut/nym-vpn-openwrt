@@ -374,12 +374,13 @@ return baseclass.extend({
     .nym-exemption-empty { font-size: 13px; color: var(--text-muted); font-style: italic; padding: 22px 12px; text-align: center; border: 1px dashed var(--border-accent); border-radius: 10px; }\
     /* Split-tunnel exclusions — wider value column for device names/domains, with\
        an inline enable toggle and delete per row. */\
-    .nym-split-header, .nym-split-row { display: grid; grid-template-columns: 76px minmax(0,1.4fr) minmax(0,1fr) 52px 28px; gap: 12px; align-items: center; }\
+    .nym-split-header, .nym-split-row { display: grid; grid-template-columns: 76px minmax(0,1.4fr) 124px minmax(0,1fr) 52px 28px; gap: 12px; align-items: center; }\
     .nym-split-header { padding: 0 12px; font-size: 10px; text-transform: uppercase; letter-spacing: var(--label-spacing); color: var(--text-muted); margin-bottom: 4px; }\
     .nym-split-row { padding: 10px 12px; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 6px; transition: opacity 0.2s; }\
     .nym-split-row.inert { opacity: 0.55; }\
     .nym-split-row.removing { opacity: 0; }\
-    .nym-split-section .nym-exemption-addrow { grid-template-columns: minmax(0,1fr) 150px auto; }\
+    .nym-split-section .nym-exemption-addrow { grid-template-columns: minmax(0,1fr) 132px 150px auto; }\
+    .nym-split-row .nym-split-via { height: 32px; line-height: 32px; padding: 0 26px 0 10px; font-size: 12px; background-position: right 10px center; }\
     .nym-toggle-sm { width: 40px; height: 22px; margin-left: 0; }\
     .nym-toggle-sm .nym-toggle-slider::before { height: 15px; width: 15px; bottom: 2px; }\
     .nym-toggle-sm input:checked + .nym-toggle-slider::before { transform: translateX(18px); }\
@@ -421,12 +422,13 @@ return baseclass.extend({
         .nym-exemption-addrow > input[type="text"]:nth-of-type(2) { grid-column: 1 / -1; }\
         .nym-exemption-addrow > button { grid-column: 1 / -1; }\
         .nym-split-header { display: none; }\
-        .nym-split-row { grid-template-columns: 1fr auto auto; }\
+        .nym-split-row { grid-template-columns: 1fr auto auto auto; }\
         .nym-split-row > .nym-exemption-proto { grid-row: 1; grid-column: 1; }\
         .nym-split-row > div:nth-of-type(2) { grid-row: 2; grid-column: 1 / -1; }\
         .nym-split-row > div:nth-of-type(3) { grid-row: 3; grid-column: 1 / -1; font-size: 11px; }\
-        .nym-split-row > .nym-toggle-sm { grid-row: 1; grid-column: 2; justify-self: end; }\
-        .nym-split-row > .nym-exemption-delete { grid-row: 1; grid-column: 3; justify-self: end; }\
+        .nym-split-row > .nym-split-via { grid-row: 1; grid-column: 2; width: auto; }\
+        .nym-split-row > .nym-toggle-sm { grid-row: 1; grid-column: 3; justify-self: end; }\
+        .nym-split-row > .nym-exemption-delete { grid-row: 1; grid-column: 4; justify-self: end; }\
         .nym-split-section .nym-exemption-addrow { grid-template-columns: 1fr auto; }\
         .nym-split-section .nym-exemption-addrow > input.nym-input { grid-column: 1 / -1; }\
     }\

@@ -286,9 +286,11 @@ return baseclass.extend({
     // --- inbound services / split tunneling --------------------------------
     inboundAdd: function(proto, dport, label) { return rpc.inboundAdd(proto, dport, label); },
     inboundDel: function(proto, dport) { return rpc.inboundDel(proto, dport); },
-    splitAdd: function(kind, mac, domain, label) { return rpc.splitAdd(kind, mac, domain, label); },
+    // via: 'wan' (a carve-out) or 'mixnet' (the dual tunnel's mixnet side).
+    splitAdd: function(kind, mac, domain, label, via) { return rpc.splitAdd(kind, mac, domain, label, via); },
     splitDel: function(id) { return rpc.splitDel(id); },
     splitSetEnabled: function(id, enabled) { return rpc.splitSetEnabled(id, enabled); },
+    splitSetVia: function(id, via) { return rpc.splitSetVia(id, via); },
 
     // --- DNS ---------------------------------------------------------------
     dnsSet: function(enabled, servers) { return rpc.dnsSet(enabled, servers); },

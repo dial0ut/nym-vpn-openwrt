@@ -3,6 +3,7 @@
 'require dom';
 'require nym-vpn.assets as assets';
 'require nym-vpn.components.card as card';
+'require nym-vpn.components.select as select';
 'require nym-vpn.components.toggle as toggle';
 'require nym-vpn.components.toast as toast';
 'require nym-vpn.flows.tunnel as tunnelFlow';
@@ -12,8 +13,10 @@
 // Exclusions (the built-in way): specific devices or domains go straight to
 // the WAN, everything else stays in the tunnel and the kill-switch keeps
 // covering it. Marked with fwmark 0x14e and stored in UCI independently of
-// the kill-switch. See docs/guide/split-tunneling.md and handle_split_* in
-// the rpcd bridge.
+// the kill-switch. An entry routed via the mixnet instead (fwmark 0x14f)
+// goes through the dual tunnel's mixnet side, which the bridge switches on
+// while such an entry exists. See docs/guide/split-tunneling.md,
+// docs/guide/dual-tunnel.md and split_* in the rpcd bridge.
 //
 // Policy-based routing (legacy): routing is handed to luci-app-pbr; only
 // the traffic PBR selects goes through the VPN. It is mutually exclusive
@@ -28,6 +31,43 @@ var E = dom.create.bind(dom);
 // what is stored and the toast carries the error.
 var stored = function(result) {
     return !!(result && (result.success || result.saved));
+};
+
+// An entry's route: the bridge's `via`.
+var ROUTES = [
+    { via: 'wan', label: 'Bypass VPN' },
+    { via: 'mixnet', label: 'Mixnet' }
+];
+
+var viaOf = function(ex) { return ex.via === 'mixnet' ? 'mixnet' : 'wan'; };
+
+var isOn = function(ex) {
+    return ex.enabled !== false && ex.enabled !== 0 && ex.enabled !== '0';
+};
+
+var routeSelect = function(attrs, via) {
+    return select.create(attrs, ROUTES.map(function(r) {
+        return { value: r.via, label: r.label, selected: r.via === via };
+    }));
+};
+
+// What the mixnet routes have right now, from the live status.
+var mixnetRouteNote = function(status) {
+    var st = status || {};
+    var side = st.side_tunnel;
+    if (!st.connected)
+        return { warn: true, text: 'Mixnet routes have no connection while the VPN is disconnected.' };
+    if (st.mode === 'mixnet')
+        return { warn: false, text: 'Anonymous mode: all traffic already goes through the mixnet.' };
+    if (side && side.state === 'up') {
+        var exit = side.exit && (side.exit.name || side.exit.country);
+        return { warn: false, text: 'Mixnet tunnel up' + (exit ? ', exiting via ' + exit : '') + '.' };
+    }
+    if (side && side.state === 'connecting') {
+        var retry = side.retry_attempt ? ' (retry ' + side.retry_attempt + ')' : '';
+        return { warn: true, text: 'Mixnet tunnel connecting' + retry + '. Mixnet routes have no connection until it is up.' };
+    }
+    return { warn: true, text: 'The mixnet tunnel is not running; mixnet routes have no connection.' };
 };
 
 return baseclass.extend({
@@ -47,10 +87,22 @@ return baseclass.extend({
         };
 
         var listEl = E('div', { 'class': 'nym-exemption-table' });
-        var clientSel, clientLabel, clientSave, domainInp, domainLabel, domainSave;
+        var clientSel, clientRoute, clientLabel, clientSave;
+        var domainInp, domainRoute, domainLabel, domainSave;
+
+        var mixnetNote = E('div', { 'class': 'nym-note', 'id': 'nym-split-mixnet-note' });
+        var updateMixnetNote = function() {
+            var routed = state.some(function(ex) { return isOn(ex) && viaOf(ex) === 'mixnet'; });
+            mixnetNote.style.display = routed ? 'block' : 'none';
+            if (!routed) return;
+            var note = mixnetRouteNote(store.status);
+            mixnetNote.className = 'nym-note' + (note.warn ? ' nym-note-warn' : '');
+            mixnetNote.textContent = note.text;
+        };
+        store.on('status', updateMixnetNote);
 
         var renderRow = function(ex) {
-            var on = ex.enabled !== false && ex.enabled !== 0 && ex.enabled !== '0';
+            var on = isOn(ex);
             return E('div', {
                 'class': 'nym-split-row' + (on ? '' : ' inert'),
                 'data-id': ex.id
@@ -58,6 +110,11 @@ return baseclass.extend({
                 E('div', { 'class': 'nym-exemption-proto' }, ex.type === 'domain' ? 'DOMAIN' : 'DEVICE'),
                 // UCI values and lease hostnames: text, never markup.
                 E('div', { 'class': 'nym-exemption-label' }, [String(valueOf(ex))]),
+                routeSelect({
+                    'class': 'nym-select nym-split-via',
+                    'title': 'Route',
+                    'change': function(ev) { setVia(ex, ev.target.value); }
+                }, viaOf(ex)),
                 E('div', { 'class': 'nym-exemption-label' }, [String(ex.label || '—')]),
                 E('label', { 'class': 'nym-toggle nym-toggle-sm', 'title': on ? 'Enabled' : 'Disabled' }, [
                     E('input', {
@@ -77,6 +134,7 @@ return baseclass.extend({
 
         var redraw = function() {
             listEl.innerHTML = '';
+            updateMixnetNote();
             if (state.length === 0) {
                 listEl.appendChild(E('div', { 'class': 'nym-exemption-empty' },
                     'No exclusions yet. Add a device or domain below.'));
@@ -85,6 +143,7 @@ return baseclass.extend({
             listEl.appendChild(E('div', { 'class': 'nym-split-header' }, [
                 E('div', {}, 'Type'),
                 E('div', {}, 'Device / Domain'),
+                E('div', {}, 'Route'),
                 E('div', {}, 'Label'),
                 E('div', {}, 'On'),
                 E('div', {}, '')
@@ -121,9 +180,22 @@ return baseclass.extend({
             });
         };
 
+        var setVia = function(ex, via) {
+            api.splitSetVia(ex.id, via).then(function(result) {
+                if (stored(result)) ex.via = via;
+                if (!(result && result.success)) toast.show((result && result.error) || 'Failed to update', 'error');
+                redraw();
+            }).catch(function(err) {
+                toast.show('Failed: ' + (err && err.message ? err.message : err), 'error');
+                redraw();
+            });
+        };
+
         var add = function(kind) {
             var labelInp = kind === 'domain' ? domainLabel : clientLabel;
             var saveBtn = kind === 'domain' ? domainSave : clientSave;
+            var routeSel = kind === 'domain' ? domainRoute : clientRoute;
+            var via = routeSel && routeSel.value === 'mixnet' ? 'mixnet' : 'wan';
             var label = (labelInp && labelInp.value || '').trim();
             if (label.length > 64) { toast.show('Label too long (max 64 characters)', 'error'); return; }
 
@@ -132,13 +204,13 @@ return baseclass.extend({
                 domain = (domainInp && domainInp.value || '').trim().toLowerCase();
                 if (!domain) { toast.show('Domain is required', 'error'); return; }
                 if (state.some(function(e) { return e.type === 'domain' && e.domain === domain; })) {
-                    toast.show(domain + ' is already excluded', 'error'); return;
+                    toast.show(domain + ' is already in the list', 'error'); return;
                 }
             } else {
                 mac = clientSel && clientSel.value || '';
                 if (!mac) { toast.show('Select a device', 'error'); return; }
                 if (state.some(function(e) { return e.type === 'client' && e.mac === mac; })) {
-                    toast.show('That device is already excluded', 'error'); return;
+                    toast.show('That device is already in the list', 'error'); return;
                 }
             }
 
@@ -146,10 +218,10 @@ return baseclass.extend({
                 saveBtn.disabled = true;
                 saveBtn.innerHTML = '<span class="nym-btn-spinner"></span>Saving';
             }
-            api.splitAdd(kind, mac, domain, label || '').then(function(result) {
+            api.splitAdd(kind, mac, domain, label || '', via).then(function(result) {
                 if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Add'; }
                 if (stored(result)) {
-                    var ex = { id: result.id, type: kind, enabled: 1 };
+                    var ex = { id: result.id, type: kind, enabled: 1, via: via };
                     if (kind === 'domain') ex.domain = domain; else ex.mac = mac;
                     if (label) ex.label = label;
                     state.push(ex);
@@ -157,7 +229,7 @@ return baseclass.extend({
                     if (kind === 'domain' && domainInp) domainInp.value = '';
                     if (labelInp) labelInp.value = '';
                 }
-                if (result && result.success) toast.show('Added exclusion', 'success');
+                if (result && result.success) toast.show(via === 'mixnet' ? 'Added mixnet route' : 'Added exclusion', 'success');
                 else toast.show((result && result.error) || 'Failed to add exclusion', 'error');
             }).catch(function(err) {
                 if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Add'; }
@@ -177,6 +249,7 @@ return baseclass.extend({
         });
 
         clientSel = E('select', { 'class': 'nym-select', 'id': 'nym-split-client', 'style': 'flex: 2' }, clientOptions);
+        clientRoute = routeSelect({ 'id': 'nym-split-client-route', 'title': 'Route' }, 'wan');
         clientLabel = E('input', {
             'type': 'text', 'class': 'nym-input', 'id': 'nym-split-client-label',
             'placeholder': 'Label (optional)', 'maxlength': '64'
@@ -194,6 +267,7 @@ return baseclass.extend({
                 'type': 'text', 'class': 'nym-input', 'id': 'nym-split-domain',
                 'placeholder': 'example.com', 'maxlength': '253', 'keydown': domainKeydown
             });
+            domainRoute = routeSelect({ 'id': 'nym-split-domain-route', 'title': 'Route' }, 'wan');
             domainLabel = E('input', {
                 'type': 'text', 'class': 'nym-input', 'id': 'nym-split-domain-label',
                 'placeholder': 'Label (optional)', 'maxlength': '64', 'keydown': domainKeydown
@@ -202,7 +276,7 @@ return baseclass.extend({
                 'class': 'nym-btn nym-btn-primary', 'id': 'nym-split-domain-save',
                 'click': function() { add('domain'); }
             }, 'Add');
-            domainAddRow = E('div', { 'class': 'nym-exemption-addrow' }, [domainInp, domainLabel, domainSave]);
+            domainAddRow = E('div', { 'class': 'nym-exemption-addrow' }, [domainInp, domainRoute, domainLabel, domainSave]);
         } else {
             domainAddRow = E('div', { 'class': 'nym-note nym-note-warn' },
                 'Domain exclusions need dnsmasq-full (built with nftset support): ' +
@@ -213,14 +287,15 @@ return baseclass.extend({
             card.group({
                 title: 'Exclusions',
                 moreId: 'exclusions',
-                more: 'Chosen devices or domains go straight to the WAN; everything else stays in the tunnel and the kill-switch keeps covering it. Devices are matched by MAC address, so they survive an IP change. Domain rules need clients to use this router for DNS, and an excluded device\'s own DNS still goes through the tunnel.',
+                more: 'Chosen devices or domains leave the tunnel. Bypass VPN sends them straight to the WAN; everything else stays in the tunnel and the kill-switch keeps covering it. Mixnet sends them through the mixnet while fast mode carries everything else (dual tunnel): they never fall back to the fast tunnel or the WAN, and have no connection until the mixnet tunnel is up. Devices are matched by MAC address, so they survive an IP change. Domain rules need clients to use this router for DNS. A bypassed device\'s own DNS still goes through the tunnel; a mixnet device\'s goes through the mixnet.',
                 docs: 'exclusions',
                 body: [
+                    mixnetNote,
                     listEl,
                     E('div', { 'class': 'nym-exemption-add' }, [
-                        E('div', { 'class': 'nym-form-label' }, 'Exclude a Device'),
-                        E('div', { 'class': 'nym-exemption-addrow' }, [clientSel, clientLabel, clientSave]),
-                        E('div', { 'class': 'nym-form-label', 'style': 'margin-top: 14px' }, 'Exclude a Domain'),
+                        E('div', { 'class': 'nym-form-label' }, 'Add a Device'),
+                        E('div', { 'class': 'nym-exemption-addrow' }, [clientSel, clientRoute, clientLabel, clientSave]),
+                        E('div', { 'class': 'nym-form-label', 'style': 'margin-top: 14px' }, 'Add a Domain'),
                         domainAddRow
                     ])
                 ]

@@ -181,7 +181,7 @@ return baseclass.extend({
     splitAdd: rpc.declare({
         object: 'nym-vpn',
         method: 'split_add',
-        params: ['type', 'mac', 'domain', 'label']
+        params: ['type', 'mac', 'domain', 'label', 'via']
     }),
 
     splitDel: rpc.declare({
@@ -194,6 +194,12 @@ return baseclass.extend({
         object: 'nym-vpn',
         method: 'split_set_enabled',
         params: ['id', 'enabled']
+    }),
+
+    splitSetVia: rpc.declare({
+        object: 'nym-vpn',
+        method: 'split_set_via',
+        params: ['id', 'via']
     }),
 
     splitStatus: rpc.declare({
