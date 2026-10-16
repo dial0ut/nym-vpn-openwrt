@@ -58,6 +58,10 @@ pub struct VpnServiceConfig {
     /// and keeps retrying error states with backoff until told to disconnect.
     /// A policy switch, not a tunnel setting: toggling it never reconnects.
     pub always_on: bool,
+    /// Run a mixnet tunnel beside the two-hop tunnel for the traffic carrying
+    /// the side-tunnel fwmark (0x14f), which is unreachable whenever no mixnet
+    /// tunnel carries it. Toggling it leaves the two-hop tunnel up.
+    pub dual_tunnel: bool,
 }
 
 /// Observed state, not configuration: whether the configured DNS is in force.
@@ -160,6 +164,7 @@ impl fmt::Display for VpnServiceConfig {
         writeln!(f, "stealth_api: {}", self.stealth_api)?;
         writeln!(f, "gateway_independence: {}", self.gateway_independence)?;
         writeln!(f, "always_on: {}", self.always_on)?;
+        writeln!(f, "dual_tunnel: {}", self.dual_tunnel)?;
         writeln!(f, "mixnet traffic config: {}", self.mixnet_traffic)?;
 
         Ok(())
@@ -195,6 +200,7 @@ impl Default for VpnServiceConfig {
             stealth_api: false,
             gateway_independence: GatewayIndependence::default(),
             always_on: false,
+            dual_tunnel: false,
         }
     }
 }

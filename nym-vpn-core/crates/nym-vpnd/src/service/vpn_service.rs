@@ -105,6 +105,7 @@ pub enum VpnServiceCommand {
     SetLegacySplitTunnel(oneshot::Sender<Result<(), String>>, bool),
     SetStealthApi(oneshot::Sender<Result<(), String>>, bool),
     SetAlwaysOn(oneshot::Sender<Result<(), String>>, bool),
+    SetDualTunnel(oneshot::Sender<Result<(), String>>, bool),
     GetAlwaysOnStatus(oneshot::Sender<AlwaysOnStatus>, ()),
     SetEnableGatewayIndependence(oneshot::Sender<Result<(), String>>, bool),
     SetGatewayIndependenceNotifications(oneshot::Sender<Result<(), String>>, bool),
@@ -843,7 +844,8 @@ impl NymVpnService {
             // Waits out a reader rather than dropping the update. Every reader
             // clones the state and releases its guard without awaiting, so the
             // wait is short and cannot deadlock.
-            *self.tunnel_state.write().await = new_state.clone();
+            let previous_state =
+                std::mem::replace(&mut *self.tunnel_state.write().await, new_state.clone());
             self.update_idle_hint(new_state);
 
             let action = self
@@ -878,7 +880,9 @@ impl NymVpnService {
             }
 
             // SOCKS5 enabled before the VPN may sit on a different gateway.
+            // A Connected repeated for a side-tunnel change is no new connection.
             if matches!(new_state, TunnelState::Connected { .. })
+                && !matches!(previous_state, TunnelState::Connected { .. })
                 && self.socks5_service.is_enabled()
             {
                 tracing::warn!(
@@ -991,6 +995,10 @@ impl NymVpnService {
             }
             VpnServiceCommand::SetAlwaysOn(tx, always_on) => {
                 let result = self.handle_set_always_on(always_on).await;
+                let _ = tx.send(result);
+            }
+            VpnServiceCommand::SetDualTunnel(tx, dual_tunnel) => {
+                let result = self.handle_set_dual_tunnel(dual_tunnel).await;
                 let _ = tx.send(result);
             }
             VpnServiceCommand::GetAlwaysOnStatus(tx, ()) => {
@@ -1277,6 +1285,13 @@ impl NymVpnService {
             .config_manager
             .set_legacy_split_tunnel(legacy_split_tunnel)
             .await;
+        self.update_tunnel_settings_with_throttle();
+        result
+    }
+
+    /// Starts or stops the mixnet side tunnel only; the two-hop tunnel stays.
+    async fn handle_set_dual_tunnel(&mut self, dual_tunnel: bool) -> Result<(), String> {
+        let result = self.config_manager.set_dual_tunnel(dual_tunnel).await;
         self.update_tunnel_settings_with_throttle();
         result
     }

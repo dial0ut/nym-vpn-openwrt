@@ -78,6 +78,7 @@ impl TryFrom<proto::VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
                 .map(nym_vpn_lib_types::GatewayIndependence::from)
                 .unwrap_or_default(),
             always_on: value.always_on,
+            dual_tunnel: value.dual_tunnel,
         };
         Ok(config)
     }
@@ -133,6 +134,7 @@ impl From<nym_vpn_lib_types::VpnServiceConfig> for proto::VpnServiceConfig {
                 value.gateway_independence,
             )),
             always_on: value.always_on,
+            dual_tunnel: value.dual_tunnel,
         }
     }
 }

@@ -178,7 +178,8 @@ location = "BE"
     "different_asn": true,
     "different_subnet": true
   },
-  "always_on": false
+  "always_on": false,
+  "dual_tunnel": false
 }"#;
 
     let entry_point = nym_vpn_lib_types::EntryPoint::Country {
@@ -244,7 +245,8 @@ identity = [ 99, 23, 98, 234, 66, 161, 195, 63, 155, 161, 250, 207, 17, 158, 136
     "different_asn": true,
     "different_subnet": true
   },
-  "always_on": false
+  "always_on": false,
+  "dual_tunnel": false
 }"#;
 
     let entry_point = nym_vpn_lib_types::EntryPoint::Gateway {
@@ -314,7 +316,8 @@ address = [5, 56, 84, 195, 94, 238, 210, 124, 65, 143, 209, 144, 22, 255, 91, 18
     "different_asn": true,
     "different_subnet": true
   },
-  "always_on": false
+  "always_on": false,
+  "dual_tunnel": false
 }"#;
 
     let entry_point = nym_vpn_lib_types::EntryPoint::Gateway {
@@ -374,7 +377,8 @@ exit_point = "Random"
     "different_asn": true,
     "different_subnet": true
   },
-  "always_on": false
+  "always_on": false,
+  "dual_tunnel": false
 }"#;
 
     let entry_point = nym_vpn_lib_types::EntryPoint::Random;
@@ -441,7 +445,8 @@ async fn test_service_config_migrate_from_v1() {
     "different_asn": true,
     "different_subnet": true
   },
-  "always_on": false
+  "always_on": false,
+  "dual_tunnel": false
 }"#;
 
     run_migrate_json_test(json_v1_content, json_latest_content).await;
@@ -517,7 +522,8 @@ async fn test_service_config_migrate_from_v2() {
     "different_asn": true,
     "different_subnet": true
   },
-  "always_on": false
+  "always_on": false,
+  "dual_tunnel": false
 }"#;
 
     run_migrate_json_test(json_v2_content, json_latest_content).await;
@@ -599,7 +605,8 @@ async fn test_service_config_migrate_from_v3() {
     "different_asn": true,
     "different_subnet": true
   },
-  "always_on": false
+  "always_on": false,
+  "dual_tunnel": false
 }"#;
 
     run_migrate_json_test(json_v3_content, json_latest_content).await;
@@ -686,7 +693,8 @@ async fn test_service_config_migrate_from_v4() {
     "different_asn": true,
     "different_subnet": true
   },
-  "always_on": false
+  "always_on": false,
+  "dual_tunnel": false
 }"#;
 
     run_migrate_json_test(json_v4_content, json_latest_content).await;
@@ -779,7 +787,8 @@ async fn test_service_config_migrate_from_v5() {
     "different_asn": true,
     "different_subnet": true
   },
-  "always_on": false
+  "always_on": false,
+  "dual_tunnel": false
 }"#;
 
     run_migrate_json_test(json_v5_content, json_latest_content).await;
@@ -866,7 +875,8 @@ async fn test_service_config_migrate_from_v6() {
     "different_asn": true,
     "different_subnet": true
   },
-  "always_on": false
+  "always_on": false,
+  "dual_tunnel": false
 }"#;
 
     run_migrate_json_test(json_v6_content, json_latest_content).await;
@@ -1073,6 +1083,7 @@ async fn test_service_config_serialize_full() {
             different_subnet: true,
         },
         always_on: true,
+        dual_tunnel: true,
     };
     run_serialize_test(config).await;
 }
@@ -1093,6 +1104,26 @@ async fn test_stealth_api_persists_across_restart() {
         .await
         .unwrap();
     assert!(config_manager.config().stealth_api);
+}
+
+#[tokio::test]
+async fn test_dual_tunnel_persists_and_reaches_the_tunnel_settings() {
+    let temp_dir = tempdir().unwrap();
+    let network_config_path = temp_dir.path().join("tulips");
+
+    let mut config_manager = VpnServiceConfigManager::new(&network_config_path, None)
+        .await
+        .unwrap();
+    assert!(!config_manager.config().dual_tunnel);
+    assert!(!config_manager.generate_tunnel_settings().dual_tunnel);
+    config_manager.set_dual_tunnel(true).await.unwrap();
+    drop(config_manager);
+
+    let config_manager = VpnServiceConfigManager::new(&network_config_path, None)
+        .await
+        .unwrap();
+    assert!(config_manager.config().dual_tunnel);
+    assert!(config_manager.generate_tunnel_settings().dual_tunnel);
 }
 
 // A v8 file predating the field is already the latest version, so the loader

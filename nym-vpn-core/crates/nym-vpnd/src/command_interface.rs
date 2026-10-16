@@ -242,6 +242,17 @@ impl NymVpnService for CommandInterface {
         Ok(tonic::Response::new(()))
     }
 
+    async fn set_dual_tunnel(&self, request: tonic::Request<bool>) -> Result<tonic::Response<()>> {
+        let dual_tunnel = request.into_inner();
+
+        self.send_and_wait(VpnServiceCommand::SetDualTunnel, dual_tunnel)
+            .await
+            .map_err(|e| tonic::Status::internal(format!("Failed to set dual tunnel: {e}")))?
+            .map_err(tonic::Status::internal)?;
+
+        Ok(tonic::Response::new(()))
+    }
+
     async fn get_always_on_status(
         &self,
         _request: tonic::Request<()>,

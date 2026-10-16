@@ -310,6 +310,8 @@ message VpnServiceConfig {
   GatewayIndependence gateway_independence = 32;
   // Connect on daemon start and keep retrying error states (see AlwaysOnStatus).
   bool always_on = 33;
+  // A mixnet tunnel beside the two-hop tunnel for fwmark 0x14f traffic.
+  bool dual_tunnel = 34;
 }
 
 // Which relations between the entry and the exit gateway rule a pair out.
@@ -514,6 +516,26 @@ message ConnectionData {
   GatewayLightInfo exit_gateway = 2;
   google.protobuf.Timestamp connected_at = 3;
   TunnelConnectionData tunnel = 4;
+  // The mixnet tunnel beside a two-hop tunnel; unset without the dual tunnel.
+  SideTunnelState side_tunnel = 5;
+}
+
+message SideTunnelState {
+  message Connecting {
+    uint32 retry_attempt = 1;
+  }
+
+  message Up {
+    GatewayLightInfo entry_gateway = 1;
+    GatewayLightInfo exit_gateway = 2;
+    google.protobuf.Timestamp connected_at = 3;
+    MixnetConnectionData tunnel = 4;
+  }
+
+  oneof state {
+    Connecting connecting = 1;
+    Up up = 2;
+  }
 }
 
 message MixnetConnectionData {
@@ -1097,6 +1119,7 @@ service NymVpnService {
   rpc SetStealthApi (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
   // Always On: connect on daemon start and keep the tunnel up until told otherwise
   rpc SetAlwaysOn (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
+  rpc SetDualTunnel (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
   rpc GetAlwaysOnStatus (google.protobuf.Empty) returns (AlwaysOnStatus) {}
   // Switch every gateway independence criterion on or off at once
   rpc SetEnableGatewayIndependence (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}

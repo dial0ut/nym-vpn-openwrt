@@ -184,6 +184,15 @@ impl RpcClient {
         Ok(())
     }
 
+    pub async fn set_dual_tunnel(&mut self, dual_tunnel: bool) -> Result<()> {
+        self.0
+            .set_dual_tunnel(dual_tunnel)
+            .await
+            .map_err(Error::Rpc)?
+            .into_inner();
+        Ok(())
+    }
+
     pub async fn set_enable_gateway_independence(&mut self, enabled: bool) -> Result<()> {
         self.0
             .set_enable_gateway_independence(enabled)

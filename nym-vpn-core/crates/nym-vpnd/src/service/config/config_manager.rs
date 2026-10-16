@@ -225,6 +225,15 @@ impl VpnServiceConfigManager {
         }
     }
 
+    pub async fn set_dual_tunnel(&mut self, dual_tunnel: bool) -> Result<(), String> {
+        if self.config.dual_tunnel != dual_tunnel {
+            self.config.dual_tunnel = dual_tunnel;
+            self.save_config_and_send_event().await
+        } else {
+            Ok(())
+        }
+    }
+
     /// Takes effect on the next API request; the tunnel is not touched.
     pub async fn set_stealth_api(&mut self, stealth_api: bool) -> Result<(), String> {
         if self.config.stealth_api != stealth_api {
@@ -541,6 +550,7 @@ impl VpnServiceConfigManager {
                 })
                 .collect(),
             gateway_independence: self.config.gateway_independence,
+            dual_tunnel: self.config.dual_tunnel,
         }
     }
 }

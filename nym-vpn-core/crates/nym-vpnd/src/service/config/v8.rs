@@ -41,6 +41,9 @@ pub struct VpnServiceConfig {
     /// Added after V8 shipped; a file without the key loads with it off.
     #[serde(default)]
     pub always_on: bool,
+    /// Added after V8 shipped; a file without the key loads with it off.
+    #[serde(default)]
+    pub dual_tunnel: bool,
 }
 
 // A v8 file without the key is hand-edited (serde writes every field), and the
@@ -178,6 +181,7 @@ impl TryFrom<VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
             stealth_api: value.stealth_api,
             gateway_independence: value.gateway_independence.into(),
             always_on: value.always_on,
+            dual_tunnel: value.dual_tunnel,
         };
 
         Ok(config)

@@ -697,6 +697,7 @@ mod tests {
                     exit: node(2),
                     lewes_protocol: false,
                 }),
+                side_tunnel: None,
             },
         }
     }

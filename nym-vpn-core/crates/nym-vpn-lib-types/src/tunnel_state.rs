@@ -164,10 +164,12 @@ impl std::fmt::Display for TunnelState {
                     )?;
 
                     if let Some(bridge_addr) = data.entry_bridge_addr.as_ref() {
-                        write!(f, " via bridge {}", bridge_addr.remote_addr)
-                    } else {
-                        Ok(())
+                        write!(f, " via bridge {}", bridge_addr.remote_addr)?;
                     }
+                    if let Some(side_tunnel) = connection_data.side_tunnel.as_ref() {
+                        write!(f, ", mixnet side tunnel {side_tunnel}")?;
+                    }
+                    Ok(())
                 }
             },
             Self::Disconnecting { after_disconnect } => match after_disconnect {

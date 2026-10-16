@@ -33,6 +33,7 @@ mod gateway_ext;
 mod ipv6_availability;
 mod lp_registration;
 mod route_handler;
+mod side_tunnel;
 mod states;
 mod tun_ipv6;
 pub mod tunnel;
@@ -185,6 +186,11 @@ pub struct TunnelSettings {
     /// (same node family, ASN, subnet). Only the criteria feed gateway
     /// selection; `enable_notifications` is a hint for user interfaces.
     pub gateway_independence: GatewayIndependence,
+
+    /// Run a mixnet tunnel beside the two-hop tunnel for the traffic carrying
+    /// [`nym_routing::SIDE_TUNNEL_FWMARK`]. That traffic is unreachable
+    /// whenever no mixnet tunnel carries it.
+    pub dual_tunnel: bool,
 }
 
 impl TunnelSettings {
@@ -255,6 +261,11 @@ impl TunnelSettings {
             && self.wireguard_tunnel_options.enable_bridges
     }
 
+    /// A mixnet primary tunnel carries the marked traffic itself.
+    pub fn side_tunnel_enabled(&self) -> bool {
+        self.dual_tunnel && self.tunnel_type == TunnelType::Wireguard
+    }
+
     pub fn diff(&self, other: &Self) -> Option<TunnelSettingsDiff> {
         let mut diff = TunnelSettingsDiff::new();
 
@@ -321,6 +332,9 @@ impl TunnelSettings {
         if criteria_of(&self.gateway_independence) != criteria_of(&other.gateway_independence) {
             diff.add(TunnelSettingsDiffFields::GatewayIndependence);
         }
+        if self.dual_tunnel != other.dual_tunnel {
+            diff.add(TunnelSettingsDiffFields::DualTunnel);
+        }
 
         if diff.is_empty() { None } else { Some(diff) }
     }
@@ -344,6 +358,7 @@ pub enum TunnelSettingsDiffFields {
     LegacySplitTunnel,
     InboundExemptions,
     GatewayIndependence,
+    DualTunnel,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
@@ -390,15 +405,23 @@ impl TunnelSettingsDiff {
         self.only_field_changed(&TunnelSettingsDiffFields::InboundExemptions)
     }
 
+    pub fn dual_tunnel_changed(&self) -> bool {
+        self.is_field_changed(&TunnelSettingsDiffFields::DualTunnel)
+    }
+
     /// Non-empty diff of only fields re-appliable without a reconnect.
     pub fn only_hot_appliable_changed(&self) -> bool {
         if self.0.is_empty() {
             return false;
         }
-        self.0.iter().all(|f| matches!(
-            f,
-            TunnelSettingsDiffFields::AllowLan | TunnelSettingsDiffFields::InboundExemptions
-        ))
+        self.0.iter().all(|f| {
+            matches!(
+                f,
+                TunnelSettingsDiffFields::AllowLan
+                    | TunnelSettingsDiffFields::InboundExemptions
+                    | TunnelSettingsDiffFields::DualTunnel
+            )
+        })
     }
 
     pub fn entry_point_changed(&self) -> bool {
@@ -1335,6 +1358,9 @@ pub enum Error {
 
     #[error("failed to configure probe due to missing IPv4 interface address")]
     ProbeRequiresIPv4Addr,
+
+    #[error("mixnet registration returned a WireGuard result")]
+    UnexpectedRegistrationResult,
 }
 
 impl Error {
@@ -1359,7 +1385,9 @@ impl Error {
             Self::GatewayDirectoryClient(e) => ErrorStateReason::Internal(e.to_string()),
             Self::CreateIcmpProbe(e) => ErrorStateReason::Internal(e.to_string()),
             Self::CreateTcpProbe(e) => ErrorStateReason::Internal(e.to_string()),
-            Self::ProbeRequiresIPv4Addr => ErrorStateReason::Internal(self.to_string()),
+            Self::ProbeRequiresIPv4Addr | Self::UnexpectedRegistrationResult => {
+                ErrorStateReason::Internal(self.to_string())
+            }
         })
     }
 }
@@ -1525,6 +1553,7 @@ mod tests {
             legacy_split_tunnel: false,
             inbound_exemptions: Vec::new(),
             gateway_independence: GatewayIndependence::default(),
+            dual_tunnel: false,
         }
     }
 
@@ -1898,9 +1927,23 @@ mod tests {
                     443,
                 ))
             }),
+            diff_of(|s| s.dual_tunnel = true),
         ] {
             assert!(diff.only_hot_appliable_changed());
             assert!(!diff.affects_gateway_selection());
         }
+    }
+
+    #[test]
+    fn only_a_two_hop_primary_runs_a_side_tunnel() {
+        let mut s = settings();
+        assert!(!s.side_tunnel_enabled());
+        s.dual_tunnel = true;
+        assert!(s.side_tunnel_enabled());
+        s.tunnel_type = TunnelType::Mixnet;
+        assert!(
+            !s.side_tunnel_enabled(),
+            "the mixnet primary carries marked traffic"
+        );
     }
 }

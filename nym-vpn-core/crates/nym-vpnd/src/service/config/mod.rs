@@ -222,6 +222,7 @@ impl TryFrom<&nym_vpn_lib_types::VpnServiceConfig> for VpnServiceConfigExt {
             stealth_api: value.stealth_api,
             gateway_independence: v8::GatewayIndependence::from(&value.gateway_independence),
             always_on: value.always_on,
+            dual_tunnel: value.dual_tunnel,
         };
 
         Ok(VpnServiceConfigExt::V8(v8))
