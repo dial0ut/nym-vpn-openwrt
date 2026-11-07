@@ -9,6 +9,7 @@ pub mod cache_refresh;
 pub(crate) mod clock_bootstrap;
 mod error;
 pub mod gateway_probe;
+mod http_pool;
 pub mod login;
 mod mixnet;
 pub mod tunnel_state_machine;
