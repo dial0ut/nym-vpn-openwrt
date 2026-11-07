@@ -23,6 +23,13 @@ the GitHub release notes.
   picked automatically. `nym-vpnc tunnel set --dual-tunnel on` runs the
   mixnet tunnel for traffic marked `0x14f` by hand. See the Dual Tunnel guide.
 
+### Fixed
+
+- After the VPN reconnected to new gateways, the daemon's next API request
+  could hang for 30 seconds on a connection left over from the old tunnel.
+  The mixnet tunnel of the dual tunnel often took about 35 seconds instead
+  of a few to come back after a reconnect.
+
 ## [1.36.1] - 2026-10-05
 
 ### Added
