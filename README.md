@@ -10,7 +10,7 @@
 [![Rust](https://img.shields.io/badge/Rust-1.95%2B-orange?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 
 
-**Privacy-preserving VPN for OpenWrt routers**
+**Nym VPN client for OpenWrt**
 
 Built from the [nym-vpn-client](https://github.com/nymtech/nym-vpn-client) codebase with OpenWrt-native integrations.
 
