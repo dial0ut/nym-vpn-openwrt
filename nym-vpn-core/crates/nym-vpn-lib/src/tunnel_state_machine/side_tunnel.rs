@@ -25,7 +25,7 @@ use nym_registration_client::{
     RegistrationMode, RegistrationResult,
 };
 use nym_vpn_lib_types::{
-    EntryPoint, ExitPoint, GatewayIndependence, GatewayLightInfo, MixnetConnectionData, NymAddress,
+    GatewayIndependence, GatewayLightInfo, MixnetConnectionData, NymAddress,
     SideTunnelConnectionData, TunnelType,
 };
 use nym_vpn_store::keys::wireguard::WireguardKeysDb;
@@ -226,6 +226,22 @@ impl SideTunnel {
 
     async fn select_gateways(&self, session_token: &CancellationToken) -> Result<SelectedGateways> {
         let settings = side_selection_settings(&self.tunnel_settings);
+        // Only a gateway pinned for both tunnels gets here: a two-hop
+        // selection leaves the side tunnel's pins alone.
+        for pinned in [
+            settings.entry_point.pinned_gateway(),
+            settings.exit_point.pinned_gateway(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if self.primary_gateways.contains(pinned.inner()) {
+                tracing::warn!(
+                    "Mixnet gateway {pinned} is pinned for the two-hop tunnel too; the side \
+                     tunnel cannot use it"
+                );
+            }
+        }
         let select = |criteria| {
             tunnel::select_gateways(
                 self.gateway_cache_handle.clone(),
@@ -512,8 +528,8 @@ impl SideTunnel {
 fn side_selection_settings(primary: &TunnelSettings) -> TunnelSettings {
     TunnelSettings {
         tunnel_type: TunnelType::Mixnet,
-        entry_point: Box::new(EntryPoint::Random),
-        exit_point: Box::new(ExitPoint::Random),
+        entry_point: primary.side_entry_point.clone(),
+        exit_point: primary.side_exit_point.clone(),
         ..primary.clone()
     }
 }

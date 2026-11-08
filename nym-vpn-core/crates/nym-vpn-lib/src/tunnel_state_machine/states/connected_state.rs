@@ -443,15 +443,23 @@ impl TunnelStateHandler for ConnectedState {
 
                         shared_state.tunnel_settings = tunnel_settings;
 
+                        // A gateway newly pinned for the side tunnel that the
+                        // two-hop pair already sits on: re-select the pair,
+                        // which then leaves it to the side tunnel.
+                        let side_pin_taken = diff.side_gateways_changed()
+                            && shared_state.tunnel_settings.side_tunnel_pins_taken_by(&self.selected_gateways);
+
                         // Not all changes require the tunnel to be reconnected
                         let mixnet_only = diff.only_mixnet_performance_options_changed() && shared_state.tunnel_settings.tunnel_type == TunnelType::Wireguard;
-                        if diff.only_hot_appliable_changed() || mixnet_only {
+                        if (diff.only_hot_appliable_changed() || mixnet_only) && !side_pin_taken {
                             // The side tunnel is the mixnet here: restart it
-                            // with the new options, or start or stop it.
+                            // with the new options or gateways, or start or
+                            // stop it.
                             let previous = self.connection_data.side_tunnel.clone();
                             let wanted = shared_state.tunnel_settings.side_tunnel_enabled();
                             let running = self.side_tunnel.is_some();
-                            if running && (!wanted || mixnet_only)
+                            let restart = mixnet_only || diff.side_gateways_changed();
+                            if running && (!wanted || restart)
                                 && let Err(e) = self.stop_side_tunnel(shared_state).await
                             {
                                 trace_err_chain!(e, "failed to set firewall policy");
@@ -466,7 +474,7 @@ impl TunnelStateHandler for ConnectedState {
                             // different server: carry the running pair through
                             // the reconnect unless the change is one gateway
                             // selection actually depends on.
-                            let gateways = (!diff.affects_gateway_selection())
+                            let gateways = (!diff.affects_gateway_selection() && !side_pin_taken)
                                 .then(|| self.selected_gateways.clone());
                             self.disconnect(PrivateActionAfterDisconnect::Reconnect { gateways }, shared_state).await
                         }

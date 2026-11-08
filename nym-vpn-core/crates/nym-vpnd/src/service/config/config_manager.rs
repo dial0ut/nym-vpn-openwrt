@@ -524,6 +524,9 @@ impl VpnServiceConfigManager {
             mixnet_client_config: Some(mixnet_client_config),
             entry_point: Box::new(self.config.entry_point.clone()),
             exit_point: Box::new(self.config.exit_point.clone()),
+            // Automatic until the daemon keeps a mixnet pair.
+            side_entry_point: Box::new(nym_vpn_lib_types::EntryPoint::Random),
+            side_exit_point: Box::new(nym_vpn_lib_types::ExitPoint::Random),
             dns,
             // Legacy/PBR mode needs non-tunnel WAN egress, so the effective
             // kill-switch is forced off whatever is stored.

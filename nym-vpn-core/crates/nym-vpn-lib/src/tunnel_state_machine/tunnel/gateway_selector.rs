@@ -328,8 +328,9 @@ async fn select_gateway_pair_excluding(
 
     let (entry_gateways, exit_gateways) =
         candidate_lists(gateway_cache_handle, tunnel_settings).await?;
-    let entry_gateways = without_gateways(entry_gateways, exclude);
-    let exit_gateways = without_gateways(exit_gateways, exclude);
+    let exclude = [exclude, &tunnel_settings.reserved_for_side_tunnel()].concat();
+    let entry_gateways = without_gateways(entry_gateways, &exclude);
+    let exit_gateways = without_gateways(exit_gateways, &exclude);
 
     tracing::info!("Found {} entry gateways", entry_gateways.len());
     tracing::info!("Found {} exit gateways", exit_gateways.len());
