@@ -22,6 +22,25 @@ the GitHub release notes.
   off, and a mixnet device's DNS goes through the mixnet too. Gateways are
   picked automatically. `nym-vpnc tunnel set --dual-tunnel on` runs the
   mixnet tunnel for traffic marked `0x14f` by hand. See the Dual Tunnel guide.
+- Fast and Mixnet mode each keep their own entry and exit gateways. A
+  **Fast | Mixnet** switch on top of the LuCI connection panel picks the
+  mode, and the pickers under it show that mode's gateways, remembering your
+  picks for the other; switching while connected asks first. A line under the
+  Connect button edits the other mode's gateways without switching, connected
+  or not; in Fast mode these are also the gateways the mixnet routes use, and
+  saving reconnects only the mixnet tunnel. A gateway never serves both
+  tunnels: the pickers grey out the other tunnel's gateways, and Automatic
+  avoids them. `nym-vpnc gateway set --tunnel mixnet|wireguard` sets either
+  pair. On update, your current pair stays with the mode you use; the other
+  mode gets the same countries, but Automatic in place of a pinned gateway.
+
+### Changed
+
+- The Two-Hop switch left LuCI's Tunnel Settings; the Fast | Mixnet switch
+  on the connection panel replaces it.
+- In Fast mode the LuCI gateway pickers list the WireGuard gateways with
+  their WireGuard scores, the ones Fast mode actually connects through. They
+  showed the mixnet lists before.
 
 ### Fixed
 

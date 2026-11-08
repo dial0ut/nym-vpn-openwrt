@@ -35,12 +35,15 @@ its exit), connecting, or the VPN is disconnected.
 - **Your address stays hidden from the mixnet entry.** The mixnet tunnel reaches its entry gateway
   through the fast tunnel, so the entry sees the fast tunnel's exit address, not yours. As a
   consequence its traffic, cover traffic included, also counts against the fast tunnel's bandwidth.
-- **Gateways are automatic.** A random mixnet entry and exit, never one of the fast tunnel's two
-  gateways, with your gateway independence criteria applied. The exit location cannot be chosen
-  yet. After a failure the mixnet tunnel retries with backoff, avoiding the failed entry gateway
-  for 20 minutes.
-- **Anonymous mode needs none of this.** With the whole VPN in Anonymous (mixnet) mode, mixnet
-  routes simply follow the main tunnel.
+- **Gateways are yours to choose.** The mixnet routes use the Mixnet gateways, the same pair
+  Mixnet mode uses: in LuCI the **Mixnet gateways** line under the Connect button, or
+  `nym-vpnc gateway set --tunnel mixnet …`. **Automatic** (the default) picks a mixnet entry and
+  exit that are never one of the fast tunnel's two gateways, with your gateway independence
+  criteria applied. A gateway pinned for both tunnels cannot work: the mixnet tunnel then fails
+  and says so in the log. Changing the pair reconnects only the mixnet tunnel. After a failure the
+  mixnet tunnel retries with backoff, avoiding the failed entry gateway for 20 minutes.
+- **Mixnet mode needs none of this.** With the whole VPN in Mixnet mode, mixnet routes simply
+  follow the main tunnel.
 - **IPv6.** Mixnet devices get IPv6 through the mixnet only when IPv6 is enabled. Otherwise their
   IPv6 is unreachable; it never leaks.
 
@@ -78,7 +81,7 @@ ip rule:  from all fwmark 0x14e lookup main                # pri 90  -> real WAN
 ```
 
 Table 335 (`0x14f`) has a default route into the mixnet tunnel's device, `nym2`, only while that
-tunnel is up; in Anonymous mode it points at the main tunnel instead. When it is empty, marked
+tunnel is up; in Mixnet mode it points at the main tunnel instead. When it is empty, marked
 packets meet the `unreachable` rule. Both rules exist for IPv4 and IPv6 whenever the VPN is
 connected, which is what makes the no-fallback guarantee independent of the kill-switch.
 
