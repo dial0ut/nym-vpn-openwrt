@@ -28,8 +28,13 @@ use crate::{
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "typescript-bindings", serde(rename_all = "camelCase"))]
 pub struct VpnServiceConfig {
+    /// The WireGuard pair: the two-hop tunnel's entry and exit.
     pub entry_point: EntryPoint,
     pub exit_point: ExitPoint,
+    /// The mixnet pair, used wherever the mixnet runs: the main tunnel in
+    /// mixnet mode and the side tunnel beside two-hop.
+    pub mixnet_entry_point: EntryPoint,
+    pub mixnet_exit_point: ExitPoint,
     pub allow_lan: bool,
     pub disable_ipv6: bool,
     pub enable_two_hop: bool,
@@ -135,6 +140,11 @@ impl fmt::Display for VpnServiceConfig {
         )?;
         writeln!(
             f,
+            "mixnet entry point: {:?}, mixnet exit point: {:?}",
+            self.mixnet_entry_point, self.mixnet_exit_point,
+        )?;
+        writeln!(
+            f,
             "allow_lan: {}, disable_ipv6: {}, enable_two_hop: {}, enable_lewes_protocol: {}, netstack: {}",
             self.allow_lan,
             self.disable_ipv6,
@@ -180,6 +190,9 @@ impl Default for VpnServiceConfig {
             exit_point: ExitPoint::Country {
                 two_letter_iso_country_code: "CH".to_owned(),
             },
+            // Automatic: the side tunnel then avoids the two-hop pair freely.
+            mixnet_entry_point: EntryPoint::Random,
+            mixnet_exit_point: ExitPoint::Random,
             allow_lan: true,
             // OpenWrt default: off. Exits without IPv6 egress would leave LAN
             // clients waiting out an IPv6 timeout before every IPv4 fallback.

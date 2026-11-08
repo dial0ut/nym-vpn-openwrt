@@ -312,6 +312,11 @@ message VpnServiceConfig {
   bool always_on = 33;
   // A mixnet tunnel beside the two-hop tunnel for fwmark 0x14f traffic.
   bool dual_tunnel = 34;
+  // The mixnet pair, used wherever the mixnet runs: the main tunnel in mixnet
+  // mode and the side tunnel beside two-hop. entry_point/exit_point are the
+  // WireGuard pair. A daemon predating the fields leaves them unset.
+  EntryNode mixnet_entry_point = 35;
+  ExitNode mixnet_exit_point = 36;
 }
 
 // Which relations between the entry and the exit gateway rule a pair out.
@@ -1103,6 +1108,9 @@ service NymVpnService {
   // Set the VPN service configuration
   rpc SetEntryPoint (EntryNode) returns (google.protobuf.Empty) {}
   rpc SetExitPoint (ExitNode) returns (google.protobuf.Empty) {}
+  // The mixnet pair (see VpnServiceConfig.mixnet_entry_point)
+  rpc SetMixnetEntryPoint (EntryNode) returns (google.protobuf.Empty) {}
+  rpc SetMixnetExitPoint (ExitNode) returns (google.protobuf.Empty) {}
   rpc SetDisableIpv6 (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
   rpc SetEnableTwoHop (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}
   rpc SetEnableBridges (google.protobuf.BoolValue) returns (google.protobuf.Empty) {}

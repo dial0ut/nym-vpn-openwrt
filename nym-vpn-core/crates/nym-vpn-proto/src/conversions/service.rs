@@ -20,6 +20,19 @@ impl TryFrom<proto::VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
             .transpose()?
             .ok_or(ConversionError::NoValueSet("VpnServiceConfig.exit_point"))?;
 
+        // Unset from a daemon predating the split pairs: Automatic.
+        let mixnet_entry_point = value
+            .mixnet_entry_point
+            .map(nym_vpn_lib_types::EntryPoint::try_from)
+            .transpose()?
+            .unwrap_or(nym_vpn_lib_types::EntryPoint::Random);
+
+        let mixnet_exit_point = value
+            .mixnet_exit_point
+            .map(nym_vpn_lib_types::ExitPoint::try_from)
+            .transpose()?
+            .unwrap_or(nym_vpn_lib_types::ExitPoint::Random);
+
         let custom_dns: Vec<IpAddr> = match value.custom_dns {
             Some(ip_addr_list) => ip_addr_list.try_into()?,
             None => vec![],
@@ -56,6 +69,8 @@ impl TryFrom<proto::VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
         let config = nym_vpn_lib_types::VpnServiceConfig {
             entry_point,
             exit_point,
+            mixnet_entry_point,
+            mixnet_exit_point,
             allow_lan: value.allow_lan,
             disable_ipv6: value.disable_ipv6,
             enable_two_hop: value.enable_two_hop,
@@ -89,6 +104,10 @@ impl From<nym_vpn_lib_types::VpnServiceConfig> for proto::VpnServiceConfig {
         let entry_point = Some(proto::EntryNode::from(value.entry_point));
 
         let exit_point = Some(proto::ExitNode::from(value.exit_point));
+
+        let mixnet_entry_point = Some(proto::EntryNode::from(value.mixnet_entry_point));
+
+        let mixnet_exit_point = Some(proto::ExitNode::from(value.mixnet_exit_point));
 
         let custom_dns = Some(proto::IpAddrList::from(value.custom_dns));
 
@@ -135,6 +154,8 @@ impl From<nym_vpn_lib_types::VpnServiceConfig> for proto::VpnServiceConfig {
             )),
             always_on: value.always_on,
             dual_tunnel: value.dual_tunnel,
+            mixnet_entry_point,
+            mixnet_exit_point,
         }
     }
 }

@@ -132,6 +132,30 @@ impl VpnServiceConfigManager {
         }
     }
 
+    pub async fn set_mixnet_entry_point(
+        &mut self,
+        entry_point: nym_vpn_lib_types::EntryPoint,
+    ) -> Result<(), String> {
+        if self.config.mixnet_entry_point != entry_point {
+            self.config.mixnet_entry_point = entry_point;
+            self.save_config_and_send_event().await
+        } else {
+            Ok(())
+        }
+    }
+
+    pub async fn set_mixnet_exit_point(
+        &mut self,
+        exit_point: nym_vpn_lib_types::ExitPoint,
+    ) -> Result<(), String> {
+        if self.config.mixnet_exit_point != exit_point {
+            self.config.mixnet_exit_point = exit_point;
+            self.save_config_and_send_event().await
+        } else {
+            Ok(())
+        }
+    }
+
     pub async fn set_disable_ipv6(&mut self, disable_ipv6: bool) -> Result<(), String> {
         if self.config.disable_ipv6 != disable_ipv6 {
             self.config.disable_ipv6 = disable_ipv6;
@@ -497,10 +521,19 @@ impl VpnServiceConfigManager {
                 .map(|ms| Duration::from_millis(ms.into())),
         };
 
-        let tunnel_type = if self.config.enable_two_hop {
-            nym_vpn_lib_types::TunnelType::Wireguard
+        // Each tunnel type has its own pair; the main tunnel takes its type's.
+        let (tunnel_type, entry_point, exit_point) = if self.config.enable_two_hop {
+            (
+                nym_vpn_lib_types::TunnelType::Wireguard,
+                &self.config.entry_point,
+                &self.config.exit_point,
+            )
         } else {
-            nym_vpn_lib_types::TunnelType::Mixnet
+            (
+                nym_vpn_lib_types::TunnelType::Mixnet,
+                &self.config.mixnet_entry_point,
+                &self.config.mixnet_exit_point,
+            )
         };
 
         let dns = if self.config.enable_custom_dns && !self.config.custom_dns.is_empty() {
@@ -522,11 +555,10 @@ impl VpnServiceConfigManager {
             },
             gateway_performance_options: gateway_options,
             mixnet_client_config: Some(mixnet_client_config),
-            entry_point: Box::new(self.config.entry_point.clone()),
-            exit_point: Box::new(self.config.exit_point.clone()),
-            // Automatic until the daemon keeps a mixnet pair.
-            side_entry_point: Box::new(nym_vpn_lib_types::EntryPoint::Random),
-            side_exit_point: Box::new(nym_vpn_lib_types::ExitPoint::Random),
+            entry_point: Box::new(entry_point.clone()),
+            exit_point: Box::new(exit_point.clone()),
+            side_entry_point: Box::new(self.config.mixnet_entry_point.clone()),
+            side_exit_point: Box::new(self.config.mixnet_exit_point.clone()),
             dns,
             // Legacy/PBR mode needs non-tunnel WAN egress, so the effective
             // kill-switch is forced off whatever is stored.

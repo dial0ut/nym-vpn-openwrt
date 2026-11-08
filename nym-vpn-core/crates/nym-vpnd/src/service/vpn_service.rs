@@ -96,6 +96,8 @@ pub enum VpnServiceCommand {
     GetConfig(oneshot::Sender<VpnServiceConfig>, ()),
     SetEntryPoint(oneshot::Sender<Result<(), String>>, EntryPoint),
     SetExitPoint(oneshot::Sender<Result<(), String>>, ExitPoint),
+    SetMixnetEntryPoint(oneshot::Sender<Result<(), String>>, EntryPoint),
+    SetMixnetExitPoint(oneshot::Sender<Result<(), String>>, ExitPoint),
     SetDisableIPv6(oneshot::Sender<Result<(), String>>, bool),
     SetEnableTwoHop(oneshot::Sender<Result<(), String>>, bool),
     SetEnableLewesProtocol(oneshot::Sender<Result<(), String>>, bool),
@@ -959,6 +961,14 @@ impl NymVpnService {
                 let result = self.handle_set_exit_point(exit_point).await;
                 let _ = tx.send(result);
             }
+            VpnServiceCommand::SetMixnetEntryPoint(tx, entry_point) => {
+                let result = self.handle_set_mixnet_entry_point(entry_point).await;
+                let _ = tx.send(result);
+            }
+            VpnServiceCommand::SetMixnetExitPoint(tx, exit_point) => {
+                let result = self.handle_set_mixnet_exit_point(exit_point).await;
+                let _ = tx.send(result);
+            }
             VpnServiceCommand::SetDisableIPv6(tx, disable_ipv6) => {
                 let result = self.handle_set_disable_ipv6(disable_ipv6).await;
                 let _ = tx.send(result);
@@ -1231,6 +1241,24 @@ impl NymVpnService {
 
     async fn handle_set_exit_point(&mut self, exit_point: ExitPoint) -> Result<(), String> {
         let result = self.config_manager.set_exit_point(exit_point).await;
+        self.update_tunnel_settings_with_throttle();
+        result
+    }
+
+    async fn handle_set_mixnet_entry_point(
+        &mut self,
+        entry_point: EntryPoint,
+    ) -> Result<(), String> {
+        let result = self
+            .config_manager
+            .set_mixnet_entry_point(entry_point)
+            .await;
+        self.update_tunnel_settings_with_throttle();
+        result
+    }
+
+    async fn handle_set_mixnet_exit_point(&mut self, exit_point: ExitPoint) -> Result<(), String> {
+        let result = self.config_manager.set_mixnet_exit_point(exit_point).await;
         self.update_tunnel_settings_with_throttle();
         result
     }
@@ -1580,10 +1608,16 @@ impl NymVpnService {
             )),
             _ => None,
         };
+        // The pair of the mode in use.
+        let (entry_point, exit_point) = if config.enable_two_hop {
+            (&config.entry_point, &config.exit_point)
+        } else {
+            (&config.mixnet_entry_point, &config.mixnet_exit_point)
+        };
         let ctx = GatewayTestContext {
             gateway_cache: self.gateway_cache_handle.clone(),
-            entry_point: config.entry_point.clone(),
-            exit_point: config.exit_point.clone(),
+            entry_point: entry_point.clone(),
+            exit_point: exit_point.clone(),
             two_hop: config.enable_two_hop,
             active,
         };

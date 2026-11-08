@@ -6,6 +6,7 @@ use crate::service::{
     config::{
         VpnServiceConfigExt,
         entry_exit::v1::{EntryPoint, ExitPoint},
+        split_shared_pair,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -30,9 +31,16 @@ impl TryFrom<VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
 
         let exit_point = nym_vpn_lib_types::ExitPoint::try_from(value.exit_point)?;
 
-        let config = nym_vpn_lib_types::VpnServiceConfig {
+        let pairs = split_shared_pair(
             entry_point,
             exit_point,
+            nym_vpn_lib_types::VpnServiceConfig::default().enable_two_hop,
+        );
+        let config = nym_vpn_lib_types::VpnServiceConfig {
+            entry_point: pairs.entry_point,
+            exit_point: pairs.exit_point,
+            mixnet_entry_point: pairs.mixnet_entry_point,
+            mixnet_exit_point: pairs.mixnet_exit_point,
             killswitch: false,
             legacy_split_tunnel: false,
             stealth_api: false,

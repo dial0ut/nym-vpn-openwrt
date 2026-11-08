@@ -84,6 +84,52 @@ impl TryFrom<&str> for NetworkEnvironments {
 }
 
 //
+// Gateway pairs
+//
+
+/// The WireGuard and the mixnet gateway pair.
+pub(super) struct GatewayPairs {
+    pub entry_point: nym_vpn_lib_types::EntryPoint,
+    pub exit_point: nym_vpn_lib_types::ExitPoint,
+    pub mixnet_entry_point: nym_vpn_lib_types::EntryPoint,
+    pub mixnet_exit_point: nym_vpn_lib_types::ExitPoint,
+}
+
+/// Configs written before the pairs were split per tunnel type held one pair
+/// for whichever type `two_hop` selected. It stays with that type. The other
+/// type gets a copy, except of a pinned gateway, which may not serve that
+/// type: that side starts on Automatic.
+pub(super) fn split_shared_pair(
+    entry_point: nym_vpn_lib_types::EntryPoint,
+    exit_point: nym_vpn_lib_types::ExitPoint,
+    two_hop: bool,
+) -> GatewayPairs {
+    let entry_copy = match entry_point.pinned_gateway() {
+        Some(_) => nym_vpn_lib_types::EntryPoint::Random,
+        None => entry_point.clone(),
+    };
+    let exit_copy = match exit_point.pinned_gateway() {
+        Some(_) => nym_vpn_lib_types::ExitPoint::Random,
+        None => exit_point.clone(),
+    };
+    if two_hop {
+        GatewayPairs {
+            entry_point,
+            exit_point,
+            mixnet_entry_point: entry_copy,
+            mixnet_exit_point: exit_copy,
+        }
+    } else {
+        GatewayPairs {
+            entry_point: entry_copy,
+            exit_point: exit_copy,
+            mixnet_entry_point: entry_point,
+            mixnet_exit_point: exit_point,
+        }
+    }
+}
+
+//
 // External, versioned, representation of the vpn service config file.
 //
 
@@ -173,8 +219,9 @@ impl TryFrom<&nym_vpn_lib_types::VpnServiceConfig> for VpnServiceConfigExt {
 
     fn try_from(value: &nym_vpn_lib_types::VpnServiceConfig) -> Result<Self, Self::Error> {
         let entry_point = EntryPoint::try_from(&value.entry_point)?;
-
         let exit_point = ExitPoint::try_from(&value.exit_point)?;
+        let mixnet_entry_point = EntryPoint::try_from(&value.mixnet_entry_point)?;
+        let mixnet_exit_point = ExitPoint::try_from(&value.mixnet_exit_point)?;
 
         let custom_dns = value
             .custom_dns
@@ -223,6 +270,8 @@ impl TryFrom<&nym_vpn_lib_types::VpnServiceConfig> for VpnServiceConfigExt {
             gateway_independence: v8::GatewayIndependence::from(&value.gateway_independence),
             always_on: value.always_on,
             dual_tunnel: value.dual_tunnel,
+            mixnet_entry_point: Some(mixnet_entry_point),
+            mixnet_exit_point: Some(mixnet_exit_point),
         };
 
         Ok(VpnServiceConfigExt::V8(v8))
