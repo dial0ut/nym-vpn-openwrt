@@ -4,12 +4,18 @@
 'require nym-vpn.countries as countries';
 'require nym-vpn.components.details as details';
 
-// The two gateway pickers (entry and exit): a country dropdown filled on
-// first focus (Random and All countries on top), a search box that narrows
-// the list, the gateway list itself (two lines per gateway: the name and
-// its tier, then a telemetry line with the No CT marker at its end,
-// explained by an (i) legend under the list), and the restore of the
+// The two gateway pickers (entry and exit) of one tunnel type: a country
+// dropdown filled on first focus (Random and All countries on top), a search
+// box that narrows the list, the gateway list itself (two lines per gateway:
+// the name and its tier, then a telemetry line with the No CT marker at its
+// end, explained by an (i) legend under the list), and the restore of the
 // daemon's saved selection after a disconnect.
+//
+// Each tunnel type has its own pair on the daemon and its own picker here:
+// 'wg' (Fast, both roles from the WireGuard list) and 'mixnet' (the mixnet
+// entry and exit lists; Mixnet mode and the dual tunnel's mixnet routes).
+// forTunnel() hands out one picker per type for the page, so the hero's side
+// columns and its other-mode line move the same picker, never a copy.
 
 var E = dom.create.bind(dom);
 
@@ -60,10 +66,49 @@ var searchTerms = function(input) {
     return q ? q.split(/\s+/) : [];
 };
 
+var LIST_TYPES = {
+    wg: { entry: 'wg', exit: 'wg' },
+    mixnet: { entry: 'mixnet-entry', exit: 'mixnet-exit' }
+};
+
+// One side of a gateway_get reply ({type, country, id, name}) in a few words.
+var describeSide = function(cfg, role) {
+    var type = cfg[role + '_type'];
+    var country = cfg[role + '_country'];
+    var where = country ? countries.getDisplay(country) : null;
+    if (type === 'random') return 'Automatic';
+    if (type === 'country' && where) return where.flag + ' ' + where.name;
+    if (type === 'gateway') {
+        var name = cfg[role + '_name'] || String(cfg[role + '_id'] || '').slice(0, 8);
+        return where ? where.flag + ' ' + name : name;
+    }
+    return '—';
+};
+
+// The gateways a gateway_get reply pins, as a taken map {id: label}.
+var pins = function(cfg, label) {
+    var map = {};
+    ['entry', 'exit'].forEach(function(role) {
+        if (cfg && cfg[role + '_type'] === 'gateway' && cfg[role + '_id']) map[cfg[role + '_id']] = label;
+    });
+    return map;
+};
+
 return baseclass.extend({
-    // Returns the picker pair. Each side exposes {select, list}; the pair
-    // exposes markDirty/invalidate/settle/restore/selection.
-    create: function(store, api) {
+    describeSide: describeSide,
+    pins: pins,
+
+    // The page's one picker for `tunnel`, kept on the store.
+    forTunnel: function(store, api, tunnel) {
+        var all = store.gatewayPickers || (store.gatewayPickers = {});
+        return all[tunnel] || (all[tunnel] = this.create(store, api, tunnel));
+    },
+
+    // Returns the picker pair for `tunnel` ('wg' or 'mixnet'). Each side
+    // exposes {select, search, list}; the pair exposes markDirty/invalidate/
+    // settle/restore/selection/request/setTaken.
+    create: function(store, api, tunnel) {
+        tunnel = LIST_TYPES[tunnel] ? tunnel : 'mixnet';
         // The daemon persists entry/exit points across disconnects; restore()
         // prefills the pickers from that saved config so the explicit-choice
         // guard in the connect flow passes with the previous selection
@@ -73,6 +118,11 @@ return baseclass.extend({
         var dirty = false;
         var generation = 0;
         var markDirty = function() { dirty = true; };
+        // The daemon's pair as last read (gateway_get), and the gateways the
+        // other tunnel holds: {id: label}. A held gateway is greyed with its
+        // label as the tag, so one gateway never serves both tunnels.
+        var saved = null;
+        var taken = {};
 
         var populateCountrySelect = function(select, countryList) {
             while (select.options.length > 0) select.remove(0);
@@ -149,6 +199,49 @@ return baseclass.extend({
             if (count) count.textContent = terms.length ? shown + ' of ' + total + ' gateways' : total + ' gateways available';
         };
 
+        // Grey the rows the other tunnel holds, or un-grey them; a held row
+        // that was checked hands the check back to Any Gateway.
+        var applyTaken = function(side) {
+            var list = side.list.querySelector('.nym-gateway-list');
+            if (!list) return;
+            Array.prototype.forEach.call(list.querySelectorAll('.nym-gateway-option'), function(opt) {
+                if (!opt.gatewayId) return;
+                var radio = opt.querySelector('input');
+                var label = taken[opt.gatewayId] || '';
+                var blocked = !!label || !!opt.noCt;
+                radio.disabled = blocked;
+                opt.classList.toggle('disabled', blocked);
+                var tag = opt.querySelector('.nym-gateway-taken-tag');
+                if (label && !tag) {
+                    var tags = opt.querySelector('.nym-gateway-option-tags');
+                    if (!tags) {
+                        tags = opt.appendChild(E('div', { 'class': 'nym-gateway-option-tags' }));
+                        opt.classList.add('tagged');
+                    }
+                    tags.appendChild(E('span', {
+                        'class': 'nym-gateway-ct-tag nym-gateway-taken-tag',
+                        'title': 'Used by the ' + label + ' tunnel'
+                    }, [label]));
+                } else if (!label && tag) {
+                    var box = tag.parentNode;
+                    box.removeChild(tag);
+                    if (!box.children.length) {
+                        box.parentNode.removeChild(box);
+                        opt.classList.remove('tagged');
+                    }
+                }
+                if (blocked && radio.checked) {
+                    radio.checked = false;
+                    var any = list.querySelector('input[value=""]');
+                    if (any) {
+                        any.checked = true;
+                        opt.classList.remove('selected');
+                        any.closest('.nym-gateway-option').classList.add('selected');
+                    }
+                }
+            });
+        };
+
         var loadGatewaysForCountry = function(side, country) {
             var type = side.type, container = side.list;
             if (!country || country === 'none') {
@@ -168,14 +261,15 @@ return baseclass.extend({
                     return;
                 }
 
-                var inputName = type === 'mixnet-entry' ? 'entry_gateway_id' : 'exit_gateway_id';
+                var inputName = side.inputName;
                 // Circumvention Transports gating: when CT is on, only bridge-
-                // capable gateways are valid ENTRY gateways. For the entry
-                // picker only, sink incompatible gateways and disable selecting
-                // them. gw.bridges is only present when the daemon reports it,
-                // so treat strictly === false to stay graceful against an
-                // older daemon.
-                var ctFilter = (inputName === 'entry_gateway_id') && store.circumvention;
+                // capable gateways are valid Fast ENTRY gateways (the
+                // transport wraps the two-hop entry connection only). Sink
+                // incompatible gateways and disable selecting them.
+                // gw.bridges is only present when the daemon reports it, so
+                // treat strictly === false to stay graceful against an older
+                // daemon.
+                var ctFilter = side.role === 'entry' && tunnel === 'wg' && store.circumvention;
 
                 var sorted = result.gateways.slice().sort(function(a, b) {
                     if (ctFilter) {
@@ -258,9 +352,11 @@ return baseclass.extend({
                     }, children);
                     // Only gateway rows are searchable; Any Gateway has none.
                     if (row.search !== undefined) option.searchText = row.search;
-                    if (!row.disabled) {
-                        option.addEventListener('click', function() { selectOption(option); });
-                    }
+                    if (row.value) option.gatewayId = row.value;
+                    option.noCt = !!row.noCt;
+                    option.addEventListener('click', function() {
+                        if (!option.querySelector('input').disabled) selectOption(option);
+                    });
                     return option;
                 };
 
@@ -298,7 +394,7 @@ return baseclass.extend({
                 });
 
                 var legend = details.create({
-                    id: 'gateway-tags-' + (container.getAttribute('data-side') || 'list'),
+                    id: 'gateway-tags-' + tunnel + '-' + side.role,
                     label: 'the gateway tags',
                     text: [
                         E('div', {}, ['HIGH, MEDIUM, LOW and OFFLINE are the gateway\'s performance tier; the line under the name shows its load, 24-hour uptime, operator family and city.']),
@@ -315,6 +411,7 @@ return baseclass.extend({
                     ]),
                     legend.panel
                 ]);
+                applyTaken(side);
                 applyFilter(side);
             }).catch(function(err) {
                 dom.content(container, E('div', { 'class': 'nym-gateway-loading', 'style': 'color: var(--danger)' },
@@ -338,9 +435,10 @@ return baseclass.extend({
             });
         };
 
-        var makeSide = function(gwType, selectName) {
-            var side = { type: gwType };
-            side.select = createCountrySelect(gwType, selectName, function(ev) {
+        var makeSide = function(role) {
+            var gwType = LIST_TYPES[tunnel][role];
+            var side = { type: gwType, role: role, inputName: tunnel + '_' + role + '_gateway_id' };
+            side.select = createCountrySelect(gwType, tunnel + '_' + role + '_country', function(ev) {
                 markDirty();
                 loadGatewaysForCountry(side, ev.target.value);
             });
@@ -352,7 +450,7 @@ return baseclass.extend({
                 'enterkeyhint': 'search',
                 'class': 'nym-input nym-gateway-search',
                 'placeholder': 'Search by name, city or operator',
-                'aria-label': (gwType === 'mixnet-entry' ? 'Entry' : 'Exit') + ' gateway search',
+                'aria-label': (role === 'entry' ? 'Entry' : 'Exit') + ' gateway search',
                 'autocomplete': 'off',
                 'spellcheck': 'false',
                 'input': function() { onSearch(side); },
@@ -371,13 +469,13 @@ return baseclass.extend({
             // programmatic prefill doesn't), so it is exactly the dirty
             // signal we want.
             side.list = E('div', { 'class': 'nym-form-group', 'style': 'margin-bottom: 0', 'change': markDirty,
-                'data-side': selectName.split('_')[0] },
+                'data-side': role },
                 E('div', { 'class': 'nym-gateway-loading' }, 'Select a country, or search by name'));
             return side;
         };
 
-        var entry = makeSide('mixnet-entry', 'entry_country');
-        var exit = makeSide('mixnet-exit', 'exit_country');
+        var entry = makeSide('entry');
+        var exit = makeSide('exit');
 
         // Prefill one side. saved = {type, country, id} from gateway_get:
         // type 'random' selects the Random option; 'country' opens the saved
@@ -414,55 +512,111 @@ return baseclass.extend({
             });
         };
 
-        var checkedId = function(side, name) {
-            var radio = side.list ? side.list.querySelector('input[name="' + name + '"]:checked') : null;
+        var checkedId = function(side) {
+            var radio = side.list ? side.list.querySelector('input[name="' + side.inputName + '"]:checked') : null;
             return radio ? radio.value : null;
         };
 
-        // Warm the picker data shortly after load instead of on first click:
-        // the transfer happens while the user is still looking at the
-        // dashboard, and a daemon whose directory cache is still cold (e.g.
-        // right after a restart) gets its fetch out of the way early. Errors
-        // are swallowed — the pickers retry on interaction.
-        window.setTimeout(function() {
-            api.gatewayList('mixnet-entry').catch(function() {});
-            api.gatewayList('mixnet-exit').catch(function() {});
-        }, 1500);
+        // Raw picker state: country values ('none', 'random' or a code) and
+        // the checked gateway ids (null when none). All countries is not a
+        // location: a gateway picked from it goes by its id, and its Any
+        // Gateway row is plain Random.
+        var selection = function() {
+            var entryId = checkedId(entry);
+            var exitId = checkedId(exit);
+            var country = function(side, id) {
+                var v = side.select ? side.select.value : 'none';
+                return v === 'all' && !id ? 'random' : v;
+            };
+            return {
+                entry_country: country(entry, entryId),
+                exit_country: country(exit, exitId),
+                entry_id: entryId,
+                exit_id: exitId
+            };
+        };
+
+        var warmed = false;
+        // Whether the pickers show the daemon's pair (or the user's picks);
+        // a read that leaves them alone clears it, and the next show()
+        // refills them.
+        var filled = false;
+        var warm = function() {
+            if (warmed) return;
+            warmed = true;
+            window.setTimeout(function() {
+                api.gatewayList(entry.type).catch(function() {});
+                if (exit.type !== entry.type) api.gatewayList(exit.type).catch(function() {});
+            }, 1500);
+        };
 
         return {
+            tunnel: tunnel,
             entry: entry,
             exit: exit,
             markDirty: markDirty,
+            // The pickers just went on screen. Warm their lists shortly after
+            // instead of on first click: the transfer happens while the user
+            // is still looking, and a daemon whose directory cache is still
+            // cold (e.g. right after a restart) gets its fetch out of the way
+            // early. Errors are swallowed — the pickers retry on interaction.
+            // Pickers that never showed the daemon's pair get it now.
+            show: function() {
+                warm();
+                if (!filled) this.restore();
+            },
+            // The daemon's pair as last read, or null.
+            saved: function() { return saved; },
+            // The gateways the other tunnel holds, {id: label}.
+            setTaken: function(map) {
+                taken = map || {};
+                applyTaken(entry);
+                applyTaken(exit);
+            },
             // Abort any in-flight restore: what the pickers show now stands.
             invalidate: function() { generation++; },
             // The picks have reached the daemon; the dirty flag has served
             // its purpose.
             settle: function() { dirty = false; },
-            restore: function() {
-                if (dirty) return;
+            // Resolves with the daemon's pair (or null); the pickers follow
+            // it unless the user is mid-pick or `fill` is false.
+            restore: function(fill) {
                 var gen = ++generation;
-                api.gatewayGet().then(function(cfg) {
-                    if (!cfg || gen !== generation || dirty) return;
+                filled = fill !== false || dirty;
+                return api.gatewayGet(tunnel).then(function(cfg) {
+                    if (!cfg || cfg.error) return null;
+                    saved = cfg;
+                    store.emit('gateway-pair', { tunnel: tunnel, saved: cfg });
+                    if (fill === false || gen !== generation || dirty) return cfg;
                     restoreSide(entry, { type: cfg.entry_type, country: cfg.entry_country, id: cfg.entry_id }, gen);
                     restoreSide(exit, { type: cfg.exit_type, country: cfg.exit_country, id: cfg.exit_id }, gen);
-                }).catch(function() {});
+                    return cfg;
+                }).catch(function() { return null; });
             },
-            // Raw picker state: country values ('none', 'random' or a code)
-            // and the checked gateway ids (null when none). All countries
-            // is not a location: a gateway picked from it goes by its id,
-            // and its Any Gateway row is plain Random.
-            selection: function() {
-                var entryId = checkedId(entry, 'entry_gateway_id');
-                var exitId = checkedId(exit, 'exit_gateway_id');
-                var country = function(side, id) {
-                    var v = side.select ? side.select.value : 'none';
-                    return v === 'all' && !id ? 'random' : v;
+            selection: selection,
+            // The gateway_set arguments for what the pickers show, or
+            // {missing: 'entry' | 'exit' | 'entry and exit'} while a side has
+            // no choice: an unpicked side never falls back to whatever was
+            // last saved on the daemon.
+            request: function() {
+                var sel = selection();
+                var entryMissing = sel.entry_country === 'none' && !sel.entry_id;
+                var exitMissing = sel.exit_country === 'none' && !sel.exit_id;
+                if (entryMissing || exitMissing) {
+                    return { missing: entryMissing && exitMissing ? 'entry and exit' : (entryMissing ? 'entry' : 'exit') };
+                }
+                var side = function(role) {
+                    var country = sel[role + '_country'], id = sel[role + '_id'];
+                    if (country === 'random') return { country: null, id: null, random: true };
+                    return { country: id ? null : country, id: id || null, random: false };
                 };
+                var e = side('entry'), x = side('exit');
                 return {
-                    entry_country: country(entry, entryId),
-                    exit_country: country(exit, exitId),
-                    entry_id: entryId,
-                    exit_id: exitId
+                    tunnel: tunnel,
+                    entry_country: e.country, exit_country: x.country,
+                    entry_id: e.id, exit_id: x.id,
+                    entry_random: e.random, exit_random: x.random,
+                    residential_exit: null
                 };
             },
             focus: function() {

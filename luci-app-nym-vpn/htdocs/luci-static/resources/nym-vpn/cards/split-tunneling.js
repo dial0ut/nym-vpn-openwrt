@@ -58,7 +58,7 @@ var mixnetRouteNote = function(status) {
     if (!st.connected)
         return { warn: true, text: 'Mixnet routes have no connection while the VPN is disconnected.' };
     if (st.mode === 'mixnet')
-        return { warn: false, text: 'Anonymous mode: all traffic already goes through the mixnet.' };
+        return { warn: false, text: 'Mixnet mode: all traffic already goes through the mixnet.' };
     if (side && side.state === 'up') {
         var exit = side.exit && (side.exit.name || side.exit.country);
         return { warn: false, text: 'Mixnet tunnel up' + (exit ? ', exiting via ' + exit : '') + '.' };
@@ -134,6 +134,10 @@ return baseclass.extend({
 
         var redraw = function() {
             listEl.innerHTML = '';
+            // The hero greys the mixnet pins in the Fast picker while a
+            // mixnet route exists.
+            store.data.split_exclusions = state;
+            store.emit('split', state);
             updateMixnetNote();
             if (state.length === 0) {
                 listEl.appendChild(E('div', { 'class': 'nym-exemption-empty' },

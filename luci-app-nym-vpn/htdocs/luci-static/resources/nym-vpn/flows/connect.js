@@ -198,23 +198,12 @@ return baseclass.extend({
             // any in-flight prefill so it can't mutate them mid-flow.
             pickers.invalidate();
 
-            var sel = pickers.selection();
-            var entry_country = sel.entry_country;
-            var exit_country = sel.exit_country;
-            var entry_id = sel.entry_id;
-            var exit_id = sel.exit_id;
-
-            // Require an explicit choice for both entry and exit. 'none'
-            // means the user has not picked anything, and we must not
-            // silently fall back to whatever was last saved on the daemon.
-            var entryMissing = (entry_country === 'none') && !entry_id;
-            var exitMissing = (exit_country === 'none') && !exit_id;
-            if (entryMissing || exitMissing) {
-                var which;
-                if (entryMissing && exitMissing) which = 'entry and exit';
-                else if (entryMissing) which = 'entry';
-                else which = 'exit';
-                toast.show('Please select a country for ' + which + ' before connecting.', 'error');
+            // Require an explicit choice for both entry and exit: an
+            // unpicked side must not silently fall back to whatever was last
+            // saved on the daemon.
+            var request = pickers.request();
+            if (request.missing) {
+                toast.show('Please select a country for ' + request.missing + ' before connecting.', 'error');
                 return;
             }
 
@@ -223,25 +212,10 @@ return baseclass.extend({
             // Cancel once the connect is actually issued.
             hero.showConnecting(false);
 
-            var entry_random = false;
-            var exit_random = false;
-
-            if (entry_country === 'none') entry_country = null;
-            if (exit_country === 'none') exit_country = null;
-            if (entry_country === 'random') { entry_country = null; entry_id = null; entry_random = true; }
-            if (exit_country === 'random') { exit_country = null; exit_id = null; exit_random = true; }
-            if (entry_id) entry_country = null;
-            if (exit_id) exit_country = null;
-
-            // Save gateway settings, ask the daemon which pair it would
-            // pick, then connect — plainly, relaxed, or after the user has
-            // agreed.
-            api.gatewaySet({
-                entry_country: entry_country, exit_country: exit_country,
-                entry_id: entry_id, exit_id: exit_id,
-                entry_random: entry_random, exit_random: exit_random,
-                residential_exit: null
-            })
+            // Save the mode's gateway pair, ask the daemon which pair it
+            // would pick, then connect — plainly, relaxed, or after the user
+            // has agreed.
+            api.gatewaySet(request)
                 .then(function(gwResult) {
                     if (!gwResult || !gwResult.success) {
                         console.warn('Gateway config warning:', gwResult ? gwResult.error : 'Unknown');

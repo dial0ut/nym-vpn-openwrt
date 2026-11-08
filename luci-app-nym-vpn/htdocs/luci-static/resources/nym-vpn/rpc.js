@@ -47,16 +47,17 @@ return baseclass.extend({
         params: []
     }),
 
+    // tunnel: 'wg' or 'mixnet' names a pair; absent, the current mode's.
     gatewayGet: rpc.declare({
         object: 'nym-vpn',
         method: 'gateway_get',
-        params: []
+        params: ['tunnel']
     }),
 
     gatewaySet: rpc.declare({
         object: 'nym-vpn',
         method: 'gateway_set',
-        params: ['entry_country', 'exit_country', 'entry_id', 'exit_id', 'entry_random', 'exit_random', 'residential_exit']
+        params: ['entry_country', 'exit_country', 'entry_id', 'exit_id', 'entry_random', 'exit_random', 'residential_exit', 'tunnel']
     }),
 
     // Served by the Rust rpcd bridge; one response feeds every per-country list.
