@@ -43,6 +43,10 @@ pub enum Command {
     /// 2. Set both entry and exit gateways
     ///
     /// nym-vpnc gateway set --entry-country US --exit-country CA
+    ///
+    /// 3. Set the mixnet pair while in two-hop mode (the side tunnel uses it)
+    ///
+    /// nym-vpnc gateway set --tunnel mixnet --exit-country CH
     Set(Box<SetArgs>),
 
     /// List available gateways (mixnet-entry, mixnet-exit, wg)
@@ -141,6 +145,11 @@ pub struct TestArgs {
 #[command(group = clap::ArgGroup::new("entry").multiple(false))]
 #[command(group = clap::ArgGroup::new("exit").multiple(false))]
 pub struct SetArgs {
+    /// Which pair to set. Each tunnel type keeps its own; defaults to the
+    /// pair of the current mode.
+    #[arg(long, value_enum)]
+    pub tunnel: Option<TunnelPair>,
+
     /// Mixnet public ID of the entry gateway.
     #[arg(long, group = "entry")]
     pub entry_id: Option<String>,
@@ -226,8 +235,16 @@ impl Args {
         match self.command {
             Command::Get => {
                 let config = rpc_client.get_config().await?;
-                println!("Entry point: {:?}", config.entry_point);
-                println!("Exit point: {:?}", config.exit_point);
+                let mode = if config.enable_two_hop {
+                    "two-hop"
+                } else {
+                    "mixnet"
+                };
+                println!("Mode: {mode}");
+                println!("WireGuard entry point: {:?}", config.entry_point);
+                println!("WireGuard exit point: {:?}", config.exit_point);
+                println!("Mixnet entry point: {:?}", config.mixnet_entry_point);
+                println!("Mixnet exit point: {:?}", config.mixnet_exit_point);
                 println!(
                     "Residential exit: {}",
                     display_on_off(config.residential_exit)
@@ -238,12 +255,27 @@ impl Args {
                 let entry_point = args.entry_point()?;
                 let exit_point = args.exit_point()?;
 
+                let tunnel = match args.tunnel {
+                    Some(tunnel) => tunnel,
+                    None if entry_point.is_none() && exit_point.is_none() => TunnelPair::Wireguard,
+                    None if rpc_client.get_config().await?.enable_two_hop => TunnelPair::Wireguard,
+                    None => TunnelPair::Mixnet,
+                };
+
                 if let Some(entry_point) = entry_point {
-                    rpc_client.set_entry_point(entry_point).await?;
+                    match tunnel {
+                        TunnelPair::Wireguard => rpc_client.set_entry_point(entry_point).await?,
+                        TunnelPair::Mixnet => {
+                            rpc_client.set_mixnet_entry_point(entry_point).await?
+                        }
+                    }
                 }
 
                 if let Some(exit_point) = exit_point {
-                    rpc_client.set_exit_point(exit_point).await?;
+                    match tunnel {
+                        TunnelPair::Wireguard => rpc_client.set_exit_point(exit_point).await?,
+                        TunnelPair::Mixnet => rpc_client.set_mixnet_exit_point(exit_point).await?,
+                    }
                 }
 
                 if let Some(residential_exit) = args.residential_exit {
@@ -383,6 +415,16 @@ impl Args {
 
         gateway_filters
     }
+}
+
+/// A gateway pair, by the tunnel type it serves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum TunnelPair {
+    /// The two-hop WireGuard pair.
+    #[value(alias = "wg")]
+    Wireguard,
+    /// The mixnet pair: mixnet mode, and the side tunnel beside two-hop.
+    Mixnet,
 }
 
 impl SetArgs {

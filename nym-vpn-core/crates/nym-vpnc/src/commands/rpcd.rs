@@ -153,10 +153,10 @@ fn method_signatures() -> Value {
         "connect": { "relax_independence": "bool" },
         "disconnect": {},
         "info": {},
-        "gateway_get": {},
+        "gateway_get": { "tunnel": "str" },
         "gateway_set": {
-            "entry_country": "str", "exit_country": "str", "entry_id": "str", "exit_id": "str",
-            "entry_random": "bool", "exit_random": "bool", "residential_exit": "bool"
+            "tunnel": "str", "entry_country": "str", "exit_country": "str", "entry_id": "str",
+            "exit_id": "str", "entry_random": "bool", "exit_random": "bool", "residential_exit": "bool"
         },
         "gateway_list_full": { "gateway_type": "str" },
         "gateway_list_countries": { "gateway_type": "str" },
@@ -207,6 +207,7 @@ fn method_takes_args(method: &str) -> bool {
     matches!(
         method,
         "connect"
+            | "gateway_get"
             | "gateway_set"
             | "gateway_list_full"
             | "gateway_list_countries"
@@ -239,7 +240,7 @@ fn read_stdin_args() -> Value {
 async fn dispatch(method: &str, args: &Value) -> Value {
     match method {
         "status" => status().await,
-        "gateway_get" => gateway_get().await,
+        "gateway_get" => gateway_get(args).await,
         "gateway_set" => gateway_set(args).await,
         "gateway_list_full" => gateway_list_full(args).await,
         "gateway_list_countries" => gateway_list_countries(args).await,
@@ -973,7 +974,51 @@ async fn insert_point_fields(
     }
 }
 
-async fn gateway_get() -> Value {
+/// A gateway pair, by the tunnel type it serves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PairTunnel {
+    Wireguard,
+    Mixnet,
+}
+
+impl PairTunnel {
+    /// `tunnel` is "wg" or "mixnet"; absent, the pair of the current mode.
+    /// `Err` for any other value.
+    fn from_args(args: &Value, two_hop: impl FnOnce() -> bool) -> Result<Self, String> {
+        match arg_str(args, "tunnel") {
+            Some("wg") => Ok(Self::Wireguard),
+            Some("mixnet") => Ok(Self::Mixnet),
+            Some(other) => Err(format!("Unknown tunnel '{other}' (wg or mixnet)")),
+            None if two_hop() => Ok(Self::Wireguard),
+            None => Ok(Self::Mixnet),
+        }
+    }
+
+    fn slug(self) -> &'static str {
+        match self {
+            Self::Wireguard => "wg",
+            Self::Mixnet => "mixnet",
+        }
+    }
+
+    /// The lists the pair's gateways come from: WireGuard picks both roles
+    /// from one list.
+    fn list_types(self) -> (GatewayType, GatewayType) {
+        match self {
+            Self::Wireguard => (GatewayType::Wg, GatewayType::Wg),
+            Self::Mixnet => (GatewayType::MixnetEntry, GatewayType::MixnetExit),
+        }
+    }
+
+    fn points(self, config: &VpnServiceConfig) -> (&EntryPoint, &ExitPoint) {
+        match self {
+            Self::Wireguard => (&config.entry_point, &config.exit_point),
+            Self::Mixnet => (&config.mixnet_entry_point, &config.mixnet_exit_point),
+        }
+    }
+}
+
+async fn gateway_get(args: &Value) -> Value {
     let degraded = |err: String| {
         json!({
             "entry_point": "",
@@ -991,21 +1036,26 @@ async fn gateway_get() -> Value {
         Ok(config) => config,
         Err(err) => return degraded(format!("{err:#}")),
     };
+    let tunnel = match PairTunnel::from_args(args, || config.enable_two_hop) {
+        Ok(tunnel) => tunnel,
+        Err(err) => return degraded(err),
+    };
+    let (entry_point, exit_point) = tunnel.points(&config);
 
     let mut out = serde_json::Map::new();
-    out.insert("entry_point".into(), json!(format_entry_point(&config.entry_point)));
-    out.insert("exit_point".into(), json!(format_exit_point(&config.exit_point)));
+    out.insert("tunnel".into(), json!(tunnel.slug()));
+    out.insert("entry_point".into(), json!(format_entry_point(entry_point)));
+    out.insert("exit_point".into(), json!(format_exit_point(exit_point)));
     out.insert(
         "residential_exit".into(),
         json!(display_on_off(config.residential_exit)),
     );
 
-    // Always the mixnet lists, matching the dashboard pickers (unlike status,
-    // which switches lists on the live connection mode).
-    let entry_kind = classify_entry_point(&config.entry_point);
-    let exit_kind = classify_exit_point(&config.exit_point);
-    insert_point_fields(&mut client, &mut out, "entry", entry_kind, GatewayType::MixnetEntry).await;
-    insert_point_fields(&mut client, &mut out, "exit", exit_kind, GatewayType::MixnetExit).await;
+    let (entry_list, exit_list) = tunnel.list_types();
+    let entry_kind = classify_entry_point(entry_point);
+    let exit_kind = classify_exit_point(exit_point);
+    insert_point_fields(&mut client, &mut out, "entry", entry_kind, entry_list).await;
+    insert_point_fields(&mut client, &mut out, "exit", exit_kind, exit_list).await;
 
     Value::Object(out)
 }
@@ -1112,15 +1162,37 @@ async fn gateway_set(args: &Value) -> Value {
         Err(err) => return fail(format!("{err:#}")),
     };
 
-    if let Some(entry_point) = entry_point
-        && let Err(err) = client.set_entry_point(entry_point).await
-    {
-        return fail(format!("{err:#}"));
+    // Only an unnamed pair needs the mode.
+    let two_hop = if arg_str(args, "tunnel").is_none() {
+        match client.get_config().await {
+            Ok(config) => config.enable_two_hop,
+            Err(err) => return fail(format!("{err:#}")),
+        }
+    } else {
+        true
+    };
+    let tunnel = match PairTunnel::from_args(args, || two_hop) {
+        Ok(tunnel) => tunnel,
+        Err(err) => return fail(err),
+    };
+
+    if let Some(entry_point) = entry_point {
+        let result = match tunnel {
+            PairTunnel::Wireguard => client.set_entry_point(entry_point).await,
+            PairTunnel::Mixnet => client.set_mixnet_entry_point(entry_point).await,
+        };
+        if let Err(err) = result {
+            return fail(format!("{err:#}"));
+        }
     }
-    if let Some(exit_point) = exit_point
-        && let Err(err) = client.set_exit_point(exit_point).await
-    {
-        return fail(format!("{err:#}"));
+    if let Some(exit_point) = exit_point {
+        let result = match tunnel {
+            PairTunnel::Wireguard => client.set_exit_point(exit_point).await,
+            PairTunnel::Mixnet => client.set_mixnet_exit_point(exit_point).await,
+        };
+        if let Err(err) = result {
+            return fail(format!("{err:#}"));
+        }
     }
     if let Some(residential_exit) = residential_exit
         && let Err(err) = client.set_residential_exit(residential_exit).await
@@ -3171,6 +3243,46 @@ fn insert_degraded_config_members(out: &mut serde_json::Map<String, Value>, err:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pair_is_named_or_follows_the_mode() {
+        let named = |tunnel: &str| PairTunnel::from_args(&json!({ "tunnel": tunnel }), || true);
+        assert_eq!(named("wg"), Ok(PairTunnel::Wireguard));
+        assert_eq!(named("mixnet"), Ok(PairTunnel::Mixnet));
+        assert!(named("fast").is_err());
+
+        assert_eq!(
+            PairTunnel::from_args(&json!({}), || true),
+            Ok(PairTunnel::Wireguard)
+        );
+        assert_eq!(
+            PairTunnel::from_args(&json!({}), || false),
+            Ok(PairTunnel::Mixnet)
+        );
+    }
+
+    #[test]
+    fn each_pair_reads_its_own_points_and_lists() {
+        let config = VpnServiceConfig {
+            mixnet_exit_point: ExitPoint::Country {
+                two_letter_iso_country_code: "CH".to_owned(),
+            },
+            ..VpnServiceConfig::default()
+        };
+        assert_eq!(PairTunnel::Wireguard.points(&config).1, &config.exit_point);
+        assert_eq!(
+            PairTunnel::Mixnet.points(&config).1,
+            &config.mixnet_exit_point
+        );
+        assert_eq!(
+            PairTunnel::Wireguard.list_types(),
+            (GatewayType::Wg, GatewayType::Wg)
+        );
+        assert_eq!(
+            PairTunnel::Mixnet.list_types(),
+            (GatewayType::MixnetEntry, GatewayType::MixnetExit)
+        );
+    }
     use nym_vpn_lib_types::{Location, Performance, Score};
 
     fn gateway(id: &str, name: &str, country: Option<&str>, score: Score) -> Gateway {
