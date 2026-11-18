@@ -6,7 +6,7 @@ use std::sync::Arc;
 use nym_crypto::asymmetric::x25519::KeyPair;
 use nym_gateway_directory::{
     BlacklistedGateways, EntryPoint, ExitPoint, Gateway, GatewayCacheHandle, GatewayFilter,
-    GatewayFilters, GatewayList, GatewayType,
+    GatewayFilters, GatewayList, GatewayType, NodeIdentity,
 };
 use nym_vpn_lib_types::GatewayIndependence;
 use nym_vpn_store::keys::wireguard::{WireguardKeyStore, WireguardKeysDb};
@@ -268,6 +268,19 @@ async fn candidate_lists(
     }
 }
 
+/// `list` without the gateways in `exclude`.
+fn without_gateways(list: GatewayList, exclude: &[NodeIdentity]) -> GatewayList {
+    if exclude.is_empty() {
+        return list;
+    }
+    GatewayList::new(
+        list.gw_type(),
+        list.into_iter()
+            .filter(|gateway| !exclude.contains(&gateway.identity()))
+            .collect(),
+    )
+}
+
 /// Resolve the entry and exit gateway identities for `tunnel_settings` under
 /// the given independence `criteria`, without touching key material. This is
 /// what a connect runs first, and what a preview of the probable pair runs on
@@ -277,6 +290,24 @@ pub async fn select_gateway_pair(
     blacklisted_entry_gateways: &BlacklistedGateways,
     tunnel_settings: &TunnelSettings,
     criteria: GatewayIndependence,
+) -> Result<(Gateway, Gateway), GatewayDirectoryError> {
+    select_gateway_pair_excluding(
+        gateway_cache_handle,
+        blacklisted_entry_gateways,
+        tunnel_settings,
+        criteria,
+        &[],
+    )
+    .await
+}
+
+/// [`select_gateway_pair`] with the gateways in `exclude` taking no role.
+async fn select_gateway_pair_excluding(
+    gateway_cache_handle: &GatewayCacheHandle,
+    blacklisted_entry_gateways: &BlacklistedGateways,
+    tunnel_settings: &TunnelSettings,
+    criteria: GatewayIndependence,
+    exclude: &[NodeIdentity],
 ) -> Result<(Gateway, Gateway), GatewayDirectoryError> {
     let selection = PairSelection::new(tunnel_settings, blacklisted_entry_gateways);
 
@@ -297,6 +328,9 @@ pub async fn select_gateway_pair(
 
     let (entry_gateways, exit_gateways) =
         candidate_lists(gateway_cache_handle, tunnel_settings).await?;
+    let exclude = [exclude, &tunnel_settings.reserved_for_side_tunnel()].concat();
+    let entry_gateways = without_gateways(entry_gateways, &exclude);
+    let exit_gateways = without_gateways(exit_gateways, &exclude);
 
     tracing::info!("Found {} entry gateways", entry_gateways.len());
     tracing::info!("Found {} exit gateways", exit_gateways.len());
@@ -353,12 +387,14 @@ pub async fn select_gateways(
     tunnel_settings: &TunnelSettings,
     criteria: GatewayIndependence,
     wg_keys_db: WireguardKeysDb,
+    exclude: &[NodeIdentity],
 ) -> Result<SelectedGateways, GatewayDirectoryError> {
-    let (entry_gateway, exit_gateway) = select_gateway_pair(
+    let (entry_gateway, exit_gateway) = select_gateway_pair_excluding(
         &gateway_cache_handle,
         blacklisted_entry_gateways,
         tunnel_settings,
         criteria,
+        exclude,
     )
     .await?;
 

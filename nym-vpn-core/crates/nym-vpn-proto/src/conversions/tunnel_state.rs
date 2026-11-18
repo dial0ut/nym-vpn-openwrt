@@ -9,8 +9,8 @@ use std::{
 use nym_vpn_lib_types::{
     ActionAfterDisconnect, BridgeAddress, ConnectionData, ErrorStateReason,
     EstablishConnectionData, EstablishConnectionState, GatewayId, GatewayLightInfo,
-    MixnetConnectionData, NymAddress, TunnelConnectionData, TunnelState, TunnelType,
-    WireguardConnectionData, WireguardNode,
+    MixnetConnectionData, NymAddress, SideTunnelConnectionData, SideTunnelState,
+    TunnelConnectionData, TunnelState, TunnelType, WireguardConnectionData, WireguardNode,
 };
 
 use crate::{conversions::ConversionError, proto};
@@ -334,7 +334,77 @@ impl TryFrom<proto::ConnectionData> for ConnectionData {
                 .map(GatewayLightInfo::from)
                 .ok_or(ConversionError::NoValueSet("ConnectionData.exit_gateway"))?,
             tunnel: TunnelConnectionData::try_from(tunnel_connection_data)?,
+            side_tunnel: value
+                .side_tunnel
+                .map(SideTunnelState::try_from)
+                .transpose()?,
         })
+    }
+}
+
+impl TryFrom<proto::SideTunnelState> for SideTunnelState {
+    type Error = ConversionError;
+
+    fn try_from(value: proto::SideTunnelState) -> Result<Self, Self::Error> {
+        let state = value
+            .state
+            .ok_or(ConversionError::NoValueSet("SideTunnelState.state"))?;
+
+        Ok(match state {
+            proto::side_tunnel_state::State::Connecting(proto::side_tunnel_state::Connecting {
+                retry_attempt,
+            }) => Self::Connecting { retry_attempt },
+            proto::side_tunnel_state::State::Up(up) => {
+                let connected_at = up.connected_at.ok_or(ConversionError::NoValueSet(
+                    "SideTunnelState::Up.connected_at",
+                ))?;
+                let connected_at =
+                    crate::conversions::prost::prost_timestamp_into_offset_datetime(connected_at)
+                        .map_err(|e| {
+                        ConversionError::ConvertTime("SideTunnelState::Up.connected_at", e)
+                    })?;
+
+                Self::Up(SideTunnelConnectionData {
+                    entry_gateway: up.entry_gateway.map(GatewayLightInfo::from).ok_or(
+                        ConversionError::NoValueSet("SideTunnelState::Up.entry_gateway"),
+                    )?,
+                    exit_gateway: up.exit_gateway.map(GatewayLightInfo::from).ok_or(
+                        ConversionError::NoValueSet("SideTunnelState::Up.exit_gateway"),
+                    )?,
+                    connected_at,
+                    tunnel: MixnetConnectionData::try_from(
+                        up.tunnel
+                            .ok_or(ConversionError::NoValueSet("SideTunnelState::Up.tunnel"))?,
+                    )?,
+                })
+            }
+        })
+    }
+}
+
+impl From<SideTunnelState> for proto::SideTunnelState {
+    fn from(value: SideTunnelState) -> Self {
+        let state = match value {
+            SideTunnelState::Connecting { retry_attempt } => {
+                proto::side_tunnel_state::State::Connecting(proto::side_tunnel_state::Connecting {
+                    retry_attempt,
+                })
+            }
+            SideTunnelState::Up(data) => {
+                proto::side_tunnel_state::State::Up(proto::side_tunnel_state::Up {
+                    entry_gateway: Some(proto::GatewayLightInfo::from(data.entry_gateway)),
+                    exit_gateway: Some(proto::GatewayLightInfo::from(data.exit_gateway)),
+                    connected_at: Some(
+                        crate::conversions::prost::offset_datetime_into_proto_timestamp(
+                            data.connected_at,
+                        ),
+                    ),
+                    tunnel: Some(proto::MixnetConnectionData::from(data.tunnel)),
+                })
+            }
+        };
+
+        proto::SideTunnelState { state: Some(state) }
     }
 }
 
@@ -357,6 +427,7 @@ impl From<ConnectionData> for proto::ConnectionData {
                 crate::conversions::prost::offset_datetime_into_proto_timestamp(value.connected_at),
             ),
             tunnel: Some(proto::TunnelConnectionData::from(value.tunnel)),
+            side_tunnel: value.side_tunnel.map(proto::SideTunnelState::from),
         }
     }
 }

@@ -33,6 +33,7 @@ mod gateway_ext;
 mod ipv6_availability;
 mod lp_registration;
 mod route_handler;
+mod side_tunnel;
 mod states;
 mod tun_ipv6;
 pub mod tunnel;
@@ -164,6 +165,12 @@ pub struct TunnelSettings {
     /// Exit node.
     pub exit_point: Box<ExitPoint>,
 
+    /// Entry node of the mixnet side tunnel.
+    pub side_entry_point: Box<EntryPoint>,
+
+    /// Exit node of the mixnet side tunnel.
+    pub side_exit_point: Box<ExitPoint>,
+
     /// DNS configuration.
     pub dns: DnsOptions,
 
@@ -185,6 +192,11 @@ pub struct TunnelSettings {
     /// (same node family, ASN, subnet). Only the criteria feed gateway
     /// selection; `enable_notifications` is a hint for user interfaces.
     pub gateway_independence: GatewayIndependence,
+
+    /// Run a mixnet tunnel beside the two-hop tunnel for the traffic carrying
+    /// [`nym_routing::SIDE_TUNNEL_FWMARK`]. That traffic is unreachable
+    /// whenever no mixnet tunnel carries it.
+    pub dual_tunnel: bool,
 }
 
 impl TunnelSettings {
@@ -255,6 +267,41 @@ impl TunnelSettings {
             && self.wireguard_tunnel_options.enable_bridges
     }
 
+    /// A mixnet primary tunnel carries the marked traffic itself.
+    pub fn side_tunnel_enabled(&self) -> bool {
+        self.dual_tunnel && self.tunnel_type == TunnelType::Wireguard
+    }
+
+    /// Gateways the side tunnel's pair names outright. A two-hop selection
+    /// leaves them to it, whether or not the side tunnel runs yet, so that
+    /// starting it later cannot collide. The two-hop pair's own pins win.
+    pub fn reserved_for_side_tunnel(&self) -> Vec<NodeIdentity> {
+        if self.tunnel_type != TunnelType::Wireguard {
+            return Vec::new();
+        }
+        let own = [
+            self.entry_point.pinned_gateway(),
+            self.exit_point.pinned_gateway(),
+        ];
+        [
+            self.side_entry_point.pinned_gateway(),
+            self.side_exit_point.pinned_gateway(),
+        ]
+        .into_iter()
+        .flatten()
+        .filter(|identity| !own.contains(&Some(*identity)))
+        .map(|identity| *identity.inner())
+        .collect()
+    }
+
+    /// Whether `gateways`, picked before the side tunnel's pins changed, sit
+    /// on a gateway now reserved for it.
+    pub fn side_tunnel_pins_taken_by(&self, gateways: &SelectedGateways) -> bool {
+        let reserved = self.reserved_for_side_tunnel();
+        reserved.contains(&gateways.entry_gateway().identity)
+            || reserved.contains(&gateways.exit_gateway().identity)
+    }
+
     pub fn diff(&self, other: &Self) -> Option<TunnelSettingsDiff> {
         let mut diff = TunnelSettingsDiff::new();
 
@@ -300,6 +347,11 @@ impl TunnelSettings {
         if self.exit_point != other.exit_point {
             diff.add(TunnelSettingsDiffFields::ExitPoint);
         }
+        if self.side_entry_point != other.side_entry_point
+            || self.side_exit_point != other.side_exit_point
+        {
+            diff.add(TunnelSettingsDiffFields::SideGateways);
+        }
         if self.dns != other.dns {
             diff.add(TunnelSettingsDiffFields::Dns);
         }
@@ -320,6 +372,9 @@ impl TunnelSettings {
         };
         if criteria_of(&self.gateway_independence) != criteria_of(&other.gateway_independence) {
             diff.add(TunnelSettingsDiffFields::GatewayIndependence);
+        }
+        if self.dual_tunnel != other.dual_tunnel {
+            diff.add(TunnelSettingsDiffFields::DualTunnel);
         }
 
         if diff.is_empty() { None } else { Some(diff) }
@@ -344,6 +399,8 @@ pub enum TunnelSettingsDiffFields {
     LegacySplitTunnel,
     InboundExemptions,
     GatewayIndependence,
+    DualTunnel,
+    SideGateways,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
@@ -390,15 +447,28 @@ impl TunnelSettingsDiff {
         self.only_field_changed(&TunnelSettingsDiffFields::InboundExemptions)
     }
 
+    pub fn dual_tunnel_changed(&self) -> bool {
+        self.is_field_changed(&TunnelSettingsDiffFields::DualTunnel)
+    }
+
+    pub fn side_gateways_changed(&self) -> bool {
+        self.is_field_changed(&TunnelSettingsDiffFields::SideGateways)
+    }
+
     /// Non-empty diff of only fields re-appliable without a reconnect.
     pub fn only_hot_appliable_changed(&self) -> bool {
         if self.0.is_empty() {
             return false;
         }
-        self.0.iter().all(|f| matches!(
-            f,
-            TunnelSettingsDiffFields::AllowLan | TunnelSettingsDiffFields::InboundExemptions
-        ))
+        self.0.iter().all(|f| {
+            matches!(
+                f,
+                TunnelSettingsDiffFields::AllowLan
+                    | TunnelSettingsDiffFields::InboundExemptions
+                    | TunnelSettingsDiffFields::DualTunnel
+                    | TunnelSettingsDiffFields::SideGateways
+            )
+        })
     }
 
     pub fn entry_point_changed(&self) -> bool {
@@ -1335,6 +1405,9 @@ pub enum Error {
 
     #[error("failed to configure probe due to missing IPv4 interface address")]
     ProbeRequiresIPv4Addr,
+
+    #[error("mixnet registration returned a WireGuard result")]
+    UnexpectedRegistrationResult,
 }
 
 impl Error {
@@ -1359,7 +1432,9 @@ impl Error {
             Self::GatewayDirectoryClient(e) => ErrorStateReason::Internal(e.to_string()),
             Self::CreateIcmpProbe(e) => ErrorStateReason::Internal(e.to_string()),
             Self::CreateTcpProbe(e) => ErrorStateReason::Internal(e.to_string()),
-            Self::ProbeRequiresIPv4Addr => ErrorStateReason::Internal(self.to_string()),
+            Self::ProbeRequiresIPv4Addr | Self::UnexpectedRegistrationResult => {
+                ErrorStateReason::Internal(self.to_string())
+            }
         })
     }
 }
@@ -1520,11 +1595,14 @@ mod tests {
             exit_point: Box::new(ExitPoint::Country {
                 two_letter_iso_country_code: "FR".to_owned(),
             }),
+            side_entry_point: Box::new(EntryPoint::Random),
+            side_exit_point: Box::new(ExitPoint::Random),
             dns: DnsOptions::Default,
             killswitch: true,
             legacy_split_tunnel: false,
             inbound_exemptions: Vec::new(),
             gateway_independence: GatewayIndependence::default(),
+            dual_tunnel: false,
         }
     }
 
@@ -1898,9 +1976,75 @@ mod tests {
                     443,
                 ))
             }),
+            diff_of(|s| s.dual_tunnel = true),
+            diff_of(|s| {
+                *s.side_entry_point = EntryPoint::Country {
+                    two_letter_iso_country_code: "CH".to_owned(),
+                }
+            }),
         ] {
             assert!(diff.only_hot_appliable_changed());
             assert!(!diff.affects_gateway_selection());
         }
+    }
+
+    fn pinned(index: usize) -> nym_vpn_lib_types::NodeIdentity {
+        // Valid ed25519 identities borrowed from the directory test fixtures.
+        const IDS: [&str; 3] = [
+            "2djmrzZ62M8jpzpYb7MMq6QjP15CkbnKHf3ZV3kSCXUE",
+            "3UBiq22tkNSRhyRNjL5mnw5Yk4z6FvgvjizT4ukeEaeB",
+            "6tGNU195QKNMaTxkvm917d3NNGLkpTp8mTfxqLzATbtB",
+        ];
+        nym_vpn_lib_types::NodeIdentity::from_base58_string(IDS[index]).unwrap()
+    }
+
+    #[test]
+    fn a_two_hop_selection_leaves_the_side_pins_alone() {
+        let mut s = settings();
+        *s.side_entry_point = EntryPoint::Gateway {
+            identity: pinned(1),
+        };
+        *s.side_exit_point = ExitPoint::Gateway {
+            identity: pinned(2),
+        };
+        assert_eq!(
+            s.reserved_for_side_tunnel(),
+            vec![*pinned(1).inner(), *pinned(2).inner()],
+            "reserved before the side tunnel runs, so starting it cannot collide"
+        );
+
+        *s.exit_point = ExitPoint::Gateway {
+            identity: pinned(2),
+        };
+        assert_eq!(
+            s.reserved_for_side_tunnel(),
+            vec![*pinned(1).inner()],
+            "the two-hop pair's own pin wins"
+        );
+
+        s.tunnel_type = TunnelType::Mixnet;
+        assert!(s.reserved_for_side_tunnel().is_empty());
+    }
+
+    #[test]
+    fn countries_reserve_nothing() {
+        let mut s = settings();
+        *s.side_entry_point = EntryPoint::Country {
+            two_letter_iso_country_code: "CH".to_owned(),
+        };
+        assert!(s.reserved_for_side_tunnel().is_empty());
+    }
+
+    #[test]
+    fn only_a_two_hop_primary_runs_a_side_tunnel() {
+        let mut s = settings();
+        assert!(!s.side_tunnel_enabled());
+        s.dual_tunnel = true;
+        assert!(s.side_tunnel_enabled());
+        s.tunnel_type = TunnelType::Mixnet;
+        assert!(
+            !s.side_tunnel_enabled(),
+            "the mixnet primary carries marked traffic"
+        );
     }
 }

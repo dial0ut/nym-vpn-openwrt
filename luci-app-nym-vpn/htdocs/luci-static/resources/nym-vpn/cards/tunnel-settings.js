@@ -15,7 +15,10 @@
 //               supervisor), then the kill-switch with its inbound-service
 //               exceptions nested beneath it, gateway independence and the
 //               family reminders
-//   Transport   two-hop, circumvention transports, stealth API, IPv6
+//   Transport   circumvention transports, stealth API, IPv6
+//
+// Fast or Mixnet (the daemon's two_hop) is the switch on top of the
+// connection card, next to the gateways it picks between.
 //
 // Each row states what the switch does in one clause; the full explanation
 // sits behind the row's (i) button (components/details via toggle.row's
@@ -200,23 +203,12 @@ return baseclass.extend({
         };
 
         // --- transport ------------------------------------------------------
-        var twoHopRow = toggle.row({
-            id: 'two-hop-toggle',
-            title: 'Two-Hop Mode',
-            tag: 'reconnect',
-            desc: 'Faster 2-hop WireGuard instead of the 5-hop mixnet.',
-            more: '2-hop WireGuard skips the mixnet: no per-hop delays or cover traffic, so it is much faster but offers weaker protection against traffic analysis. The two hops still hide your address from the exit.',
-            docs: 'two-hop-mode',
-            checked: switches.two_hop,
-            onChange: saveSwitch('two_hop')
-        });
-
         var circumventionRow = toggle.row({
             id: 'circumvention-toggle',
             title: 'Circumvention Transports',
             tag: 'reconnect',
             desc: 'Wraps the entry connection to get past censorship.',
-            more: 'Wraps the entry gateway connection in a QUIC transport. Two-hop mode only. While on, entry gateways that cannot carry it are greyed in the picker with a No CT tag and cannot be selected.',
+            more: 'Wraps the entry gateway connection in a QUIC transport. Fast mode only. While on, Fast entry gateways that cannot carry it are greyed in the picker with a No CT tag and cannot be selected.',
             docs: 'circumvention-transports',
             checked: switches.circumvention,
             onChange: saveSwitch('circumvention')
@@ -295,7 +287,7 @@ return baseclass.extend({
                 }),
                 card.group({
                     title: 'Transport',
-                    body: [twoHopRow, circumventionRow, stealthRow, ipv6Row]
+                    body: [circumventionRow, stealthRow, ipv6Row]
                 })
             ]
         }).el;

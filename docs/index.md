@@ -1,6 +1,6 @@
 # NymVPN for OpenWrt
 
-Run the Nym mixnet on your router, so every device on the LAN is behind it.
+Decentralized VPN for OpenWrt routers.
 
 ## Install
 

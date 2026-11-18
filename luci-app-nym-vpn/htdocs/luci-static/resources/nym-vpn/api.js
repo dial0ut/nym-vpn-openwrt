@@ -186,15 +186,17 @@ return baseclass.extend({
     },
 
     // --- gateways ----------------------------------------------------------
-    gatewayGet: function() { return rpc.gatewayGet(); },
+    // tunnel: 'wg' or 'mixnet' (each tunnel type keeps its own pair).
+    gatewayGet: function(tunnel) { return rpc.gatewayGet(tunnel || null); },
 
-    // sel: {entry_country, exit_country, entry_id, exit_id, entry_random,
-    // exit_random, residential_exit}; missing keys are sent as null.
+    // sel: {tunnel, entry_country, exit_country, entry_id, exit_id,
+    // entry_random, exit_random, residential_exit}; missing keys are sent as
+    // null, and without a tunnel the daemon picks the current mode's pair.
     gatewaySet: function(sel) {
         sel = sel || {};
         var nul = function(v) { return v === undefined ? null : v; };
         return rpc.gatewaySet(nul(sel.entry_country), nul(sel.exit_country), sel.entry_id || null, sel.exit_id || null,
-            !!sel.entry_random, !!sel.exit_random, nul(sel.residential_exit));
+            !!sel.entry_random, !!sel.exit_random, nul(sel.residential_exit), sel.tunnel || null);
     },
 
     // Full list for one gateway type, cached for the session. Rejects when
@@ -286,9 +288,11 @@ return baseclass.extend({
     // --- inbound services / split tunneling --------------------------------
     inboundAdd: function(proto, dport, label) { return rpc.inboundAdd(proto, dport, label); },
     inboundDel: function(proto, dport) { return rpc.inboundDel(proto, dport); },
-    splitAdd: function(kind, mac, domain, label) { return rpc.splitAdd(kind, mac, domain, label); },
+    // via: 'wan' (a carve-out) or 'mixnet' (the dual tunnel's mixnet side).
+    splitAdd: function(kind, mac, domain, label, via) { return rpc.splitAdd(kind, mac, domain, label, via); },
     splitDel: function(id) { return rpc.splitDel(id); },
     splitSetEnabled: function(id, enabled) { return rpc.splitSetEnabled(id, enabled); },
+    splitSetVia: function(id, via) { return rpc.splitSetVia(id, via); },
 
     // --- DNS ---------------------------------------------------------------
     dnsSet: function(enabled, servers) { return rpc.dnsSet(enabled, servers); },

@@ -108,7 +108,7 @@ nym-firewall.workspace = true
 nym-firewall-config.workspace = true
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "test-util"] }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "test-util"] }
 
 [build-dependencies]
 vergen-gitcl = { workspace = true, default-features = false, features = [

@@ -7,8 +7,11 @@ disconnected), uptime since the tunnel came up, and the hop chain through entry 
 While connected, each gateway also shows its operator family when the directory knows one; if
 entry and exit turn out to share a family, both are marked **Same operator family** in amber.
 
+The switch on top, **Fast | Mixnet**, is the mode every device uses; see
+[Fast and Mixnet](#fast-and-mixnet).
+
 While disconnected, the two side panels are the gateway pickers — entry on one side, exit on the
-other. Choose a country (the dropdown shows how many gateways each has, or **Random**), then a row
+other, for the mode the switch shows. Choose a country (the dropdown shows how many gateways each has, or **Random**), then a row
 in the list under it. The first row, **Any Gateway (Random)**, leaves the pick within that country
 to NymVPN; each row below is one gateway, showing its name, a performance tier — `HIGH`,
 `MEDIUM`, `LOW`, `OFFLINE` or `N/A`, with a green / amber / red / grey dot — and a line with its
@@ -26,6 +29,29 @@ Below the connection panel the settings come as expandable cards, in this order:
 Settings**, **Split Tunneling**, **Mixnet Tuning**, **DNS & Ad Blocking**, **Account**, **Service
 Management**, **Diagnostics**, **Daemon Logs**.
 
+## Fast and Mixnet
+
+**Fast** is 2-hop WireGuard: quick, and the two hops still hide your address from the exit.
+**Mixnet** is the 5-hop mixnet: your packets are delayed and blended with cover traffic on the way,
+which is much slower but protects far better against traffic analysis.
+
+Each mode keeps its own entry and exit. The pickers show the gateways of the mode the switch is on
+and remember your picks for the other, so switching back finds them as you left them. While
+disconnected the switch just saves; while connected it asks first, because the VPN reconnects
+through the other mode's gateways and every device loses its connection for a few seconds.
+
+The line under the Connect button holds the other mode's gateways: **Mixnet gateways** in Fast
+mode, **Fast gateways** in Mixnet mode (**Automatic** by default). **Change** opens that pair's
+pickers, **Save** stores it and **Cancel** goes back to it. This never switches the mode, so it
+works while connected too. Saved from Mixnet mode, the Fast pair waits for your next switch to
+Fast. Saved from Fast mode, the Mixnet pair is also the one the devices or domains you route via
+the mixnet in [Split Tunneling](#exclusions) go through; if that mixnet tunnel is running, only it
+reconnects and Fast stays up.
+
+Automatic never picks a gateway the Fast tunnel uses. In the Mixnet pickers, gateways Fast pins, or
+runs through while connected, are greyed with a `Fast` tag, since one gateway cannot serve both
+tunnels.
+
 ## Gateway Tags
 
 The right-hand end of a gateway row can show:
@@ -36,6 +62,10 @@ The right-hand end of a gateway row can show:
 - **`No CT`**, amber — the gateway cannot carry
   [Circumvention Transports](#circumvention-transports). While that switch is on it sinks to the
   bottom of the list, greyed out, and cannot be picked.
+- **`Fast`** or **`Mixnet`**, amber — the other tunnel uses the gateway, so it cannot be picked
+  here: one gateway never serves both tunnels. In the mixnet picker these are the Fast pins and,
+  while Fast is connected, the gateways it runs through; in the Fast picker, the mixnet pins while a device or domain routes via the
+  mixnet.
 
 ## Tunnel Settings
 
@@ -107,16 +137,13 @@ any refusal appears as a status error offering the same two choices.
 
 ### Transport
 
-#### Two-Hop Mode
-
-2-hop WireGuard instead of 5-hop mixnet routing. Faster, with less mixing: your packets are not
-delayed and blended with cover traffic on the way, so the two hops still hide your address from
-the exit but offer weaker protection against traffic analysis. Takes effect on your next connect.
+Fast or Mixnet is no longer a switch here: it is on top of the connection panel, next to the
+gateways it picks between. See [Fast and Mixnet](#fast-and-mixnet).
 
 #### Circumvention Transports
 
 Wraps the connection to the entry gateway so it is harder for a censor to recognise and block.
-Two-hop mode only; while it is on, entry gateways that cannot carry it sink to the bottom of the
+Fast mode only; while it is on, Fast entry gateways that cannot carry it sink to the bottom of the
 picker, greyed out with an amber `No CT` tag, and cannot be selected. Takes effect on your next
 connect.
 
@@ -148,6 +175,12 @@ change; domain rules need clients to use this router for DNS, and need `dnsmasq-
 says so, with the `opkg` command, when it is missing). Each row has its own on/off switch and a
 `×`. See [Split Tunneling](split-tunneling.md) for the caveats — particularly that an excluded
 device's DNS still goes through the tunnel.
+
+Each row's route is **Bypass VPN** (straight to the WAN) or **Mixnet** (through the mixnet while
+fast mode carries everything else). The add forms take a route too. While an entry routes via the
+mixnet, a line above the list shows whether the mixnet tunnel is up; mixnet routes have no
+connection while it is not. Their gateways are the Mixnet gateways, set from the connection
+panel; see [Fast and Mixnet](#fast-and-mixnet) and [Dual Tunnel](dual-tunnel.md).
 
 ### Legacy Split Tunneling (PBR)
 

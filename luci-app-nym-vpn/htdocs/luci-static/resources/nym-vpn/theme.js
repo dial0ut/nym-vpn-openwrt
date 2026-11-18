@@ -82,6 +82,12 @@ return baseclass.extend({
     .nym-connection-wrapper { display: flex; flex-direction: column; align-items: center; justify-content: center; padding-top: 20px; min-height: 44px; opacity: 0; visibility: hidden; transition: opacity 0.5s ease, visibility 0s linear 0.5s; pointer-events: none; }\
     .nym-status-hero.connected .nym-connection-wrapper, .nym-status-hero.disconnecting .nym-connection-wrapper { opacity: 1; visibility: visible; pointer-events: auto; transition: opacity 0.5s ease, visibility 0s linear; }\
     .nym-mode-label { font-size: 10px; text-transform: uppercase; letter-spacing: var(--label-spacing); color: var(--nym-green); opacity: 0.8; margin-bottom: 8px; }\
+    /* Fast | Mixnet: the mode every device uses, above the gateways it\
+       picks between. LuCI themes style bare buttons, hence !important. */\
+    .nym-mode-switch { display: inline-flex; gap: 2px; padding: 3px; margin: -12px 0 24px; border: 1px solid var(--border-color); border-radius: 999px; background: var(--bg-input); }\
+    .nym-mode-switch button { min-width: 96px; padding: 7px 18px !important; border: 0 !important; border-radius: 999px !important; background: transparent !important; color: var(--text-secondary) !important; font-size: 11px; text-transform: uppercase; letter-spacing: var(--label-spacing); cursor: pointer; box-shadow: none !important; transition: background 0.2s, color 0.2s; }\
+    .nym-mode-switch button:hover { color: var(--text-primary) !important; }\
+    .nym-mode-switch button.active { background: var(--nym-green-dim) !important; color: var(--nym-green) !important; }\
     .nym-connection-chain { display: flex; align-items: center; justify-content: center; padding-top: 0; gap: 0; margin: 0; }\
     .nym-chain-node { width: 14px; height: 14px; border-radius: 50%; background: var(--nym-green); opacity: 0.8; flex-shrink: 0; box-shadow: 0 0 6px var(--nym-green-glow); }\
     .nym-chain-line { width: 24px; height: 2px; opacity: 0.5; position: relative; overflow: hidden; }\
@@ -103,6 +109,18 @@ return baseclass.extend({
     .nym-gateway-family-warn { font-size: 10px; color: var(--warning); text-transform: uppercase; letter-spacing: var(--label-spacing); }\
     .nym-action-buttons { display: flex; justify-content: center; gap: 16px; margin-top: 32px; }\
     .nym-action-buttons .nym-btn { flex: 1; max-width: 200px; text-align: center; }\
+    /* The gateways of the mode the switch is not on, under the action\
+       button: summary line, then the pickers for that pair behind Change. */\
+    .nym-othergw { margin-top: 28px; padding-top: 18px; border-top: 1px solid var(--border-color); }\
+    .nym-othergw-summary { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px 10px; }\
+    .nym-othergw-label { font-size: 10px; text-transform: uppercase; letter-spacing: var(--label-spacing); color: var(--text-muted); margin-right: 4px; }\
+    .nym-othergw-value { font-size: 13px; color: var(--text-primary); }\
+    .nym-othergw-arrow { font-size: 12px; color: var(--text-muted); }\
+    .nym-othergw-summary .nym-btn { margin-left: 8px; }\
+    .nym-othergw-panel { margin-top: 16px; text-align: left; }\
+    .nym-othergw-sides { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; }\
+    .nym-othergw-side { min-width: 0; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 12px; padding: 18px; }\
+    .nym-othergw-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 14px; }\
     .nym-btn { padding: 14px 40px; font-size: 14px; font-weight: 600; letter-spacing: 0.3px; border: none; border-radius: 8px; cursor: pointer; transition: all 0.2s ease; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; outline: none !important; box-shadow: none; }\
     .nym-btn:focus, .nym-btn:active { outline: none !important; box-shadow: none !important; }\
     .nym-btn:disabled { opacity: 0.4; cursor: not-allowed; }\
@@ -374,12 +392,13 @@ return baseclass.extend({
     .nym-exemption-empty { font-size: 13px; color: var(--text-muted); font-style: italic; padding: 22px 12px; text-align: center; border: 1px dashed var(--border-accent); border-radius: 10px; }\
     /* Split-tunnel exclusions — wider value column for device names/domains, with\
        an inline enable toggle and delete per row. */\
-    .nym-split-header, .nym-split-row { display: grid; grid-template-columns: 76px minmax(0,1.4fr) minmax(0,1fr) 52px 28px; gap: 12px; align-items: center; }\
+    .nym-split-header, .nym-split-row { display: grid; grid-template-columns: 76px minmax(0,1.4fr) 124px minmax(0,1fr) 52px 28px; gap: 12px; align-items: center; }\
     .nym-split-header { padding: 0 12px; font-size: 10px; text-transform: uppercase; letter-spacing: var(--label-spacing); color: var(--text-muted); margin-bottom: 4px; }\
     .nym-split-row { padding: 10px 12px; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 6px; transition: opacity 0.2s; }\
     .nym-split-row.inert { opacity: 0.55; }\
     .nym-split-row.removing { opacity: 0; }\
-    .nym-split-section .nym-exemption-addrow { grid-template-columns: minmax(0,1fr) 150px auto; }\
+    .nym-split-section .nym-exemption-addrow { grid-template-columns: minmax(0,1fr) 132px 150px auto; }\
+    .nym-split-row .nym-split-via { height: 32px; line-height: 32px; padding: 0 26px 0 10px; font-size: 12px; background-position: right 10px center; }\
     .nym-toggle-sm { width: 40px; height: 22px; margin-left: 0; }\
     .nym-toggle-sm .nym-toggle-slider::before { height: 15px; width: 15px; bottom: 2px; }\
     .nym-toggle-sm input:checked + .nym-toggle-slider::before { transform: translateX(18px); }\
@@ -421,12 +440,13 @@ return baseclass.extend({
         .nym-exemption-addrow > input[type="text"]:nth-of-type(2) { grid-column: 1 / -1; }\
         .nym-exemption-addrow > button { grid-column: 1 / -1; }\
         .nym-split-header { display: none; }\
-        .nym-split-row { grid-template-columns: 1fr auto auto; }\
+        .nym-split-row { grid-template-columns: 1fr auto auto auto; }\
         .nym-split-row > .nym-exemption-proto { grid-row: 1; grid-column: 1; }\
         .nym-split-row > div:nth-of-type(2) { grid-row: 2; grid-column: 1 / -1; }\
         .nym-split-row > div:nth-of-type(3) { grid-row: 3; grid-column: 1 / -1; font-size: 11px; }\
-        .nym-split-row > .nym-toggle-sm { grid-row: 1; grid-column: 2; justify-self: end; }\
-        .nym-split-row > .nym-exemption-delete { grid-row: 1; grid-column: 3; justify-self: end; }\
+        .nym-split-row > .nym-split-via { grid-row: 1; grid-column: 2; width: auto; }\
+        .nym-split-row > .nym-toggle-sm { grid-row: 1; grid-column: 3; justify-self: end; }\
+        .nym-split-row > .nym-exemption-delete { grid-row: 1; grid-column: 4; justify-self: end; }\
         .nym-split-section .nym-exemption-addrow { grid-template-columns: 1fr auto; }\
         .nym-split-section .nym-exemption-addrow > input.nym-input { grid-column: 1 / -1; }\
     }\
@@ -456,12 +476,12 @@ return baseclass.extend({
        cell (grid-area 1/1) for the swap — see the connect / disconnect rules. */\
     .nym-hero-gateway-panel { min-width: 0; display: grid; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 12px; padding: 18px; transition: background 0.4s ease, border-color 0.3s ease; text-align: left; }\
     .nym-hero-gateway-panel:hover { border-color: var(--border-accent); }\
-    .nym-hero-gateway-panel .nym-gateway-box-title { margin-bottom: 14px; font-size: 11px; }\
-    .nym-hero-gateway-panel .nym-select { font-size: 13px; padding: 0 16px; height: 44px; line-height: 44px; background-position: right 14px center; text-align: center; text-align-last: center; }\
-    .nym-hero-gateway-panel .nym-gateway-list { margin-top: 10px; }\
-    .nym-hero-gateway-panel .nym-gateway-option-name { font-size: 12px; }\
-    .nym-hero-gateway-panel .nym-gateway-loading { font-size: 12px; padding: 10px 0; text-align: center; }\
-    .nym-hero-gateway-panel .nym-form-label { font-size: 10px; text-align: center; margin-top: 8px; margin-bottom: 10px; }\
+    .nym-hero-gateway-panel .nym-gateway-box-title, .nym-othergw-side .nym-gateway-box-title { margin-bottom: 14px; font-size: 11px; }\
+    .nym-hero-gateway-panel .nym-select, .nym-othergw-side .nym-select { font-size: 13px; padding: 0 16px; height: 44px; line-height: 44px; background-position: right 14px center; text-align: center; text-align-last: center; }\
+    .nym-hero-gateway-panel .nym-gateway-list, .nym-othergw-side .nym-gateway-list { margin-top: 10px; }\
+    .nym-hero-gateway-panel .nym-gateway-option-name, .nym-othergw-side .nym-gateway-option-name { font-size: 12px; }\
+    .nym-hero-gateway-panel .nym-gateway-loading, .nym-othergw-side .nym-gateway-loading { font-size: 12px; padding: 10px 0; text-align: center; }\
+    .nym-hero-gateway-panel .nym-form-label, .nym-othergw-side .nym-form-label { font-size: 10px; text-align: center; margin-top: 8px; margin-bottom: 10px; }\
     .nym-hero-center { grid-area: center; align-self: start; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0; }\
     .nym-hero-center .nym-status-ring { margin-bottom: 24px; }\
     .nym-hero-center .nym-uptime { margin-top: 8px; }\
@@ -478,6 +498,8 @@ return baseclass.extend({
         .nym-header { padding: 20px 0 24px; margin-bottom: 24px; }\
         .nym-status-hero { padding: 28px 18px; }\
         .nym-footer-info { flex-wrap: wrap; gap: 8px 24px; }\
+        .nym-mode-switch { margin-top: -8px; }\
+        .nym-othergw-sides { grid-template-columns: minmax(0, 1fr); }\
     }\
     /* Error strip inside the status hero */\
     .nym-error-strip { display: flex; align-items: center; gap: 14px; padding: 14px 18px; margin: 20px 0 0; border: 1px solid var(--danger); border-left-width: 3px; background: var(--danger-dim); border-radius: 8px; box-shadow: 0 0 24px rgba(255, 71, 87, 0.12); animation: errorSlide 240ms ease; text-align: left; }\

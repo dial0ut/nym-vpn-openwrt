@@ -100,6 +100,32 @@ impl RouteHandler {
         Ok(self.route_manager.set_exempt_rule(enable, enable_ipv6).await?)
     }
 
+    /// Default routes into the side tunnel, for the traffic carrying
+    /// [`nym_routing::SIDE_TUNNEL_FWMARK`].
+    pub async fn add_side_tunnel_routes(
+        &mut self,
+        tun_name: String,
+        tun_mtu: u16,
+        enable_ipv6: bool,
+    ) -> Result<()> {
+        let routes = Self::get_side_tunnel_routes(tun_name, tun_mtu, enable_ipv6);
+        Ok(self
+            .route_manager
+            .add_routes(routes.into_iter().collect())
+            .await?)
+    }
+
+    /// Leaves the marked traffic unreachable; the other routes stay.
+    pub async fn remove_side_tunnel_routes(&mut self) {
+        if let Err(e) = self
+            .route_manager
+            .clear_table_routes(nym_routing::SIDE_TUNNEL_TABLE_ID)
+            .await
+        {
+            trace_err_chain!(e, "Failed to remove side tunnel routes");
+        }
+    }
+
     pub async fn remove_routes(&mut self) {
         if let Err(e) = self.route_manager.clear_routes() {
             trace_err_chain!(e, "Failed to remove routes");
@@ -145,6 +171,13 @@ impl RouteHandler {
                 tun_name,
                 tun_mtu,
             } => {
+                // The mixnet tunnel is where marked traffic goes; with a
+                // mixnet primary there is no side tunnel to take it.
+                routes.extend(Self::get_side_tunnel_routes(
+                    tun_name.clone(),
+                    tun_mtu,
+                    enable_ipv6,
+                ));
                 if !legacy_split_tunnel {
                     routes.extend(Self::get_default_routes(tun_name, tun_mtu, enable_ipv6));
                 }
@@ -197,6 +230,13 @@ impl RouteHandler {
         RequiredRoute::new(IpNetwork::from(ip_addr), Node::device(iface))
             .use_main_table(false)
             .mtu(mtu)
+    }
+
+    fn get_side_tunnel_routes(iface: String, mtu: u16, enable_ipv6: bool) -> Vec<RequiredRoute> {
+        Self::get_default_routes(iface, mtu, enable_ipv6)
+            .into_iter()
+            .map(|route| route.in_table(nym_routing::SIDE_TUNNEL_TABLE_ID))
+            .collect()
     }
 
     fn get_default_routes(iface: String, mtu: u16, enable_ipv6: bool) -> Vec<RequiredRoute> {
@@ -286,9 +326,30 @@ mod tests {
     #[test]
     fn mixnet_default_routes_withheld_in_legacy_mode() {
         // Legacy (inclusive) split tunneling: no default route into the tunnel,
-        // so nothing is routed in until PBR selects it.
+        // so nothing is routed in until PBR selects it. Only the side-tunnel
+        // table, which marked traffic alone reaches, keeps its default.
         let routes = RouteHandler::get_routes(mixnet_config(), false, true);
-        assert!(routes.is_empty());
+        assert_eq!(
+            routes,
+            RouteHandler::get_side_tunnel_routes("nym0".to_string(), 1500, false)
+                .into_iter()
+                .collect()
+        );
+    }
+
+    #[test]
+    fn mixnet_primary_carries_the_marked_traffic() {
+        let routes = RouteHandler::get_routes(mixnet_config(), true, false);
+        let side = RouteHandler::get_side_tunnel_routes("nym0".to_string(), 1500, true);
+        assert_eq!(side.len(), 2, "IPv4 and IPv6 defaults");
+        assert!(side.iter().all(|route| routes.contains(route)));
+    }
+
+    #[test]
+    fn wireguard_leaves_the_side_tunnel_table_to_the_side_tunnel() {
+        let routes = RouteHandler::get_routes(wireguard_config(), true, false);
+        let side = RouteHandler::get_side_tunnel_routes("nymwg1".to_string(), 1340, true);
+        assert!(side.iter().all(|route| !routes.contains(route)));
     }
 
     #[test]

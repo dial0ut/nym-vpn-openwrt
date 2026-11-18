@@ -166,6 +166,73 @@ pub struct ConnectionData {
 
     /// Tunnel connection data.
     pub tunnel: TunnelConnectionData,
+
+    /// The mixnet tunnel running beside a two-hop tunnel, when the dual
+    /// tunnel is on.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub side_tunnel: Option<SideTunnelState>,
+}
+
+/// The mixnet tunnel that runs beside a two-hop tunnel for the traffic
+/// carrying the side-tunnel fwmark. That traffic is unreachable while the
+/// side tunnel is not up; it never falls back to the two-hop tunnel.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(
+    feature = "typescript-bindings",
+    derive(TS),
+    ts(export),
+    ts(export_to = "bindings.ts")
+)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "typescript-bindings", serde(rename_all = "camelCase"))]
+pub enum SideTunnelState {
+    /// Selecting gateways, registering, or waiting to retry.
+    Connecting { retry_attempt: u32 },
+
+    /// Carrying the marked traffic.
+    Up(SideTunnelConnectionData),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(
+    feature = "typescript-bindings",
+    derive(TS),
+    ts(export),
+    ts(export_to = "bindings.ts")
+)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "typescript-bindings", serde(rename_all = "camelCase"))]
+pub struct SideTunnelConnectionData {
+    /// Mixnet entry gateway.
+    pub entry_gateway: GatewayLightInfo,
+
+    /// Mixnet exit gateway.
+    pub exit_gateway: GatewayLightInfo,
+
+    /// When the side tunnel came up.
+    #[cfg_attr(feature = "typescript-bindings", ts(as = "String"))]
+    #[cfg_attr(feature = "serde", serde(with = "time::serde::iso8601"))]
+    pub connected_at: OffsetDateTime,
+
+    pub tunnel: MixnetConnectionData,
+}
+
+impl fmt::Display for SideTunnelState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SideTunnelState::Connecting { retry_attempt } => {
+                write!(f, "connecting, attempt {retry_attempt}")
+            }
+            SideTunnelState::Up(data) => write!(
+                f,
+                "up via {} [{}] → {} [{}]",
+                data.tunnel.entry_ip,
+                data.entry_gateway.id,
+                data.tunnel.exit_ip,
+                data.exit_gateway.id,
+            ),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]

@@ -118,6 +118,36 @@ impl NymVpnService for CommandInterface {
         Ok(tonic::Response::new(()))
     }
 
+    async fn set_mixnet_entry_point(
+        &self,
+        request: tonic::Request<proto::EntryNode>,
+    ) -> Result<tonic::Response<()>> {
+        let entry_point = EntryPoint::try_from(request.into_inner())
+            .map_err(|e| tonic::Status::invalid_argument(format!("Invalid entry point: {e}")))?;
+
+        self.send_and_wait(VpnServiceCommand::SetMixnetEntryPoint, entry_point)
+            .await
+            .map_err(|e| tonic::Status::internal(format!("Failed to set mixnet entry point: {e}")))?
+            .map_err(tonic::Status::internal)?;
+
+        Ok(tonic::Response::new(()))
+    }
+
+    async fn set_mixnet_exit_point(
+        &self,
+        request: tonic::Request<proto::ExitNode>,
+    ) -> Result<tonic::Response<()>> {
+        let exit_point = ExitPoint::try_from(request.into_inner())
+            .map_err(|e| tonic::Status::invalid_argument(format!("Invalid exit point: {e}")))?;
+
+        self.send_and_wait(VpnServiceCommand::SetMixnetExitPoint, exit_point)
+            .await
+            .map_err(|e| tonic::Status::internal(format!("Failed to set mixnet exit point: {e}")))?
+            .map_err(tonic::Status::internal)?;
+
+        Ok(tonic::Response::new(()))
+    }
+
     async fn set_disable_ipv6(&self, request: tonic::Request<bool>) -> Result<tonic::Response<()>> {
         let disable_ipv6 = request.into_inner();
 
@@ -237,6 +267,17 @@ impl NymVpnService for CommandInterface {
             .send_and_wait(VpnServiceCommand::SetAlwaysOn, always_on)
             .await
             .map_err(|e| tonic::Status::internal(format!("Failed to set always on: {e}")))?
+            .map_err(tonic::Status::internal)?;
+
+        Ok(tonic::Response::new(()))
+    }
+
+    async fn set_dual_tunnel(&self, request: tonic::Request<bool>) -> Result<tonic::Response<()>> {
+        let dual_tunnel = request.into_inner();
+
+        self.send_and_wait(VpnServiceCommand::SetDualTunnel, dual_tunnel)
+            .await
+            .map_err(|e| tonic::Status::internal(format!("Failed to set dual tunnel: {e}")))?
             .map_err(tonic::Status::internal)?;
 
         Ok(tonic::Response::new(()))

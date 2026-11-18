@@ -250,6 +250,14 @@ impl EntryPoint {
     pub fn from_base58_string(identity: &str) -> Result<Self, Ed25519RecoveryError> {
         NodeIdentity::from_base58_string(identity).map(|identity| EntryPoint::Gateway { identity })
     }
+
+    /// The gateway this point names outright, if any.
+    pub fn pinned_gateway(&self) -> Option<&NodeIdentity> {
+        match self {
+            EntryPoint::Gateway { identity } => Some(identity),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(feature = "nym-type-conversions")]
@@ -324,6 +332,18 @@ pub enum ExitPoint {
 
     // Select an exit gateway at random.
     Random,
+}
+
+impl ExitPoint {
+    /// The gateway this point names outright, if any. An exit address names
+    /// the gateway its router sits on.
+    pub fn pinned_gateway(&self) -> Option<&NodeIdentity> {
+        match self {
+            ExitPoint::Gateway { identity } => Some(identity),
+            ExitPoint::Address { address } => Some(address.gateway()),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(feature = "nym-type-conversions")]

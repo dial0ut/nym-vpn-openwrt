@@ -178,7 +178,18 @@ location = "BE"
     "different_asn": true,
     "different_subnet": true
   },
-  "always_on": false
+  "always_on": false,
+  "dual_tunnel": false,
+  "mixnet_entry_point": {
+    "country": {
+      "two_letter_iso_country_code": "FR"
+    }
+  },
+  "mixnet_exit_point": {
+    "country": {
+      "two_letter_iso_country_code": "BE"
+    }
+  }
 }"#;
 
     let entry_point = nym_vpn_lib_types::EntryPoint::Country {
@@ -244,7 +255,10 @@ identity = [ 99, 23, 98, 234, 66, 161, 195, 63, 155, 161, 250, 207, 17, 158, 136
     "different_asn": true,
     "different_subnet": true
   },
-  "always_on": false
+  "always_on": false,
+  "dual_tunnel": false,
+  "mixnet_entry_point": "random",
+  "mixnet_exit_point": "random"
 }"#;
 
     let entry_point = nym_vpn_lib_types::EntryPoint::Gateway {
@@ -314,7 +328,10 @@ address = [5, 56, 84, 195, 94, 238, 210, 124, 65, 143, 209, 144, 22, 255, 91, 18
     "different_asn": true,
     "different_subnet": true
   },
-  "always_on": false
+  "always_on": false,
+  "dual_tunnel": false,
+  "mixnet_entry_point": "random",
+  "mixnet_exit_point": "random"
 }"#;
 
     let entry_point = nym_vpn_lib_types::EntryPoint::Gateway {
@@ -374,7 +391,10 @@ exit_point = "Random"
     "different_asn": true,
     "different_subnet": true
   },
-  "always_on": false
+  "always_on": false,
+  "dual_tunnel": false,
+  "mixnet_entry_point": "random",
+  "mixnet_exit_point": "random"
 }"#;
 
     let entry_point = nym_vpn_lib_types::EntryPoint::Random;
@@ -441,7 +461,10 @@ async fn test_service_config_migrate_from_v1() {
     "different_asn": true,
     "different_subnet": true
   },
-  "always_on": false
+  "always_on": false,
+  "dual_tunnel": false,
+  "mixnet_entry_point": "random",
+  "mixnet_exit_point": "random"
 }"#;
 
     run_migrate_json_test(json_v1_content, json_latest_content).await;
@@ -517,7 +540,10 @@ async fn test_service_config_migrate_from_v2() {
     "different_asn": true,
     "different_subnet": true
   },
-  "always_on": false
+  "always_on": false,
+  "dual_tunnel": false,
+  "mixnet_entry_point": "random",
+  "mixnet_exit_point": "random"
 }"#;
 
     run_migrate_json_test(json_v2_content, json_latest_content).await;
@@ -599,7 +625,10 @@ async fn test_service_config_migrate_from_v3() {
     "different_asn": true,
     "different_subnet": true
   },
-  "always_on": false
+  "always_on": false,
+  "dual_tunnel": false,
+  "mixnet_entry_point": "random",
+  "mixnet_exit_point": "random"
 }"#;
 
     run_migrate_json_test(json_v3_content, json_latest_content).await;
@@ -686,7 +715,10 @@ async fn test_service_config_migrate_from_v4() {
     "different_asn": true,
     "different_subnet": true
   },
-  "always_on": false
+  "always_on": false,
+  "dual_tunnel": false,
+  "mixnet_entry_point": "random",
+  "mixnet_exit_point": "random"
 }"#;
 
     run_migrate_json_test(json_v4_content, json_latest_content).await;
@@ -779,7 +811,10 @@ async fn test_service_config_migrate_from_v5() {
     "different_asn": true,
     "different_subnet": true
   },
-  "always_on": false
+  "always_on": false,
+  "dual_tunnel": false,
+  "mixnet_entry_point": "random",
+  "mixnet_exit_point": "random"
 }"#;
 
     run_migrate_json_test(json_v5_content, json_latest_content).await;
@@ -866,7 +901,18 @@ async fn test_service_config_migrate_from_v6() {
     "different_asn": true,
     "different_subnet": true
   },
-  "always_on": false
+  "always_on": false,
+  "dual_tunnel": false,
+  "mixnet_entry_point": {
+    "country": {
+      "two_letter_iso_country_code": "CH"
+    }
+  },
+  "mixnet_exit_point": {
+    "country": {
+      "two_letter_iso_country_code": "CH"
+    }
+  }
 }"#;
 
     run_migrate_json_test(json_v6_content, json_latest_content).await;
@@ -1035,6 +1081,15 @@ async fn test_service_config_serialize_full() {
             )
             .unwrap(),
         },
+        mixnet_entry_point: nym_vpn_lib_types::EntryPoint::Gateway {
+            identity: nym_vpn_lib_types::NodeIdentity::from_str(
+                "2djmrzZ62M8jpzpYb7MMq6QjP15CkbnKHf3ZV3kSCXUE",
+            )
+            .unwrap(),
+        },
+        mixnet_exit_point: nym_vpn_lib_types::ExitPoint::Country {
+            two_letter_iso_country_code: "CH".to_string(),
+        },
         allow_lan: true,
         disable_ipv6: true,
         enable_two_hop: true,
@@ -1073,6 +1128,7 @@ async fn test_service_config_serialize_full() {
             different_subnet: true,
         },
         always_on: true,
+        dual_tunnel: true,
     };
     run_serialize_test(config).await;
 }
@@ -1093,6 +1149,157 @@ async fn test_stealth_api_persists_across_restart() {
         .await
         .unwrap();
     assert!(config_manager.config().stealth_api);
+}
+
+#[tokio::test]
+async fn test_dual_tunnel_persists_and_reaches_the_tunnel_settings() {
+    let temp_dir = tempdir().unwrap();
+    let network_config_path = temp_dir.path().join("tulips");
+
+    let mut config_manager = VpnServiceConfigManager::new(&network_config_path, None)
+        .await
+        .unwrap();
+    assert!(!config_manager.config().dual_tunnel);
+    assert!(!config_manager.generate_tunnel_settings().dual_tunnel);
+    config_manager.set_dual_tunnel(true).await.unwrap();
+    drop(config_manager);
+
+    let config_manager = VpnServiceConfigManager::new(&network_config_path, None)
+        .await
+        .unwrap();
+    assert!(config_manager.config().dual_tunnel);
+    assert!(config_manager.generate_tunnel_settings().dual_tunnel);
+}
+
+/// A minimal v8 file with one shared pair (pinned entry, country exit), as
+/// written before the pairs were split per tunnel type.
+fn v8_shared_pair_json(two_hop: bool) -> String {
+    format!(
+        r#"{{
+  "version": "v8",
+  "entry_point": {{
+    "gateway": {{
+      "identity": "2djmrzZ62M8jpzpYb7MMq6QjP15CkbnKHf3ZV3kSCXUE"
+    }}
+  }},
+  "exit_point": {{
+    "country": {{
+      "two_letter_iso_country_code": "BE"
+    }}
+  }},
+  "allow_lan": true,
+  "disable_ipv6": true,
+  "enable_two_hop": {two_hop},
+  "enable_bridges": false,
+  "enable_lewes_protocol": false,
+  "netstack": false,
+  "min_gateway_vpn_performance": null,
+  "residential_exit": false,
+  "enable_custom_dns": false,
+  "custom_dns": [],
+  "enable_ad_blocking": false,
+  "mixnet_traffic": {{
+    "poisson_parameter_for_loop_cover_stream": null,
+    "average_packet_delay": null,
+    "message_sending_average_delay": null,
+    "disable_poisson_rate": false,
+    "disable_background_cover_traffic": false,
+    "min_mixnode_performance": null,
+    "min_gateway_mixnet_performance": null
+  }}
+}}"#
+    )
+}
+
+/// The manager plus the directory it lives in, which must outlive it.
+async fn load_v8(json: &str) -> (tempfile::TempDir, VpnServiceConfigManager) {
+    let temp_dir = tempdir().unwrap();
+    let network_config_path = temp_dir.path().join("tulips");
+    let _ = fs::create_dir_all(&network_config_path).await;
+    fs::write(network_config_path.join(DEFAULT_CONFIG_FILE_JSON), json)
+        .await
+        .unwrap();
+    let config_manager = VpnServiceConfigManager::new(&network_config_path, None)
+        .await
+        .unwrap();
+    (temp_dir, config_manager)
+}
+
+fn pinned_entry() -> nym_vpn_lib_types::EntryPoint {
+    nym_vpn_lib_types::EntryPoint::from_base58_string(
+        "2djmrzZ62M8jpzpYb7MMq6QjP15CkbnKHf3ZV3kSCXUE",
+    )
+    .unwrap()
+}
+
+fn belgium() -> nym_vpn_lib_types::ExitPoint {
+    nym_vpn_lib_types::ExitPoint::Country {
+        two_letter_iso_country_code: "BE".to_owned(),
+    }
+}
+
+// The shared pair stays with the mode it served; the other mode gets the
+// country but not the pin.
+#[tokio::test]
+async fn test_shared_pair_stays_with_the_two_hop_mode() {
+    let (_dir, config_manager) = load_v8(&v8_shared_pair_json(true)).await;
+    let config = config_manager.config();
+    assert_eq!(config.entry_point, pinned_entry());
+    assert_eq!(config.exit_point, belgium());
+    assert_eq!(
+        config.mixnet_entry_point,
+        nym_vpn_lib_types::EntryPoint::Random
+    );
+    assert_eq!(config.mixnet_exit_point, belgium());
+}
+
+#[tokio::test]
+async fn test_shared_pair_stays_with_the_mixnet_mode() {
+    let (_dir, config_manager) = load_v8(&v8_shared_pair_json(false)).await;
+    let config = config_manager.config();
+    assert_eq!(config.mixnet_entry_point, pinned_entry());
+    assert_eq!(config.mixnet_exit_point, belgium());
+    assert_eq!(config.entry_point, nym_vpn_lib_types::EntryPoint::Random);
+    assert_eq!(config.exit_point, belgium());
+
+    // Mixnet mode connects through the pair it always used.
+    let settings = config_manager.generate_tunnel_settings();
+    assert_eq!(*settings.entry_point, pinned_entry());
+    assert_eq!(*settings.exit_point, belgium());
+}
+
+// Each mode connects through its own pair; the side tunnel always takes the
+// mixnet pair, and the pairs survive a restart.
+#[tokio::test]
+async fn test_each_tunnel_takes_its_type_s_pair() {
+    let temp_dir = tempdir().unwrap();
+    let network_config_path = temp_dir.path().join("tulips");
+    let mut config_manager = VpnServiceConfigManager::new(&network_config_path, None)
+        .await
+        .unwrap();
+    config_manager
+        .set_mixnet_entry_point(pinned_entry())
+        .await
+        .unwrap();
+    config_manager
+        .set_mixnet_exit_point(belgium())
+        .await
+        .unwrap();
+    drop(config_manager);
+
+    let mut config_manager = VpnServiceConfigManager::new(&network_config_path, None)
+        .await
+        .unwrap();
+    let wireguard_entry = config_manager.config().entry_point.clone();
+    let settings = config_manager.generate_tunnel_settings();
+    assert_eq!(*settings.entry_point, wireguard_entry);
+    assert_eq!(*settings.side_entry_point, pinned_entry());
+    assert_eq!(*settings.side_exit_point, belgium());
+
+    config_manager.set_enable_two_hop(false).await.unwrap();
+    let settings = config_manager.generate_tunnel_settings();
+    assert_eq!(*settings.entry_point, pinned_entry());
+    assert_eq!(*settings.exit_point, belgium());
 }
 
 // A v8 file predating the field is already the latest version, so the loader

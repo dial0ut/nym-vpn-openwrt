@@ -10,7 +10,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::tunnel_state_machine::{
     ConnectionData, NextTunnelState, PrivateActionAfterDisconnect, PrivateTunnelState,
-    SessionStart, SharedState, TunnelCommand, TunnelInterface, TunnelStateHandler,
+    SessionStart, SharedState, TunnelCommand, TunnelInterface, TunnelMetadata,
+    TunnelStateHandler,
+    side_tunnel::{self, SideTunnel, SideTunnelEvent, SideTunnelHandle},
     states::{ConnectingState, DisconnectingState},
     tunnel::SelectedGateways,
     tunnel_monitor::{TunnelMonitorEvent, TunnelMonitorEventReceiver, TunnelMonitorHandle},
@@ -18,7 +20,7 @@ use crate::tunnel_state_machine::{
 use crate::tunnel_state_machine::{Error, Result, gateway_ext::GatewayExt};
 use nym_common::trace_err_chain;
 use nym_firewall::{AllowedClients, AllowedEndpoint, Endpoint, FirewallPolicy, TransportProtocol};
-use nym_vpn_lib_types::TunnelConnectionData;
+use nym_vpn_lib_types::{SideTunnelState, TunnelConnectionData};
 
 use super::ErrorState;
 
@@ -34,6 +36,14 @@ pub struct ConnectedState {
     /// Whether the session's bandwidth checks worked.
     bandwidth_checks_worked: bool,
     connected_at: SessionStart,
+    /// What the Connected events carry; the side tunnel's state changes it.
+    connection_data: ConnectionData,
+    side_tunnel: Option<RunningSideTunnel>,
+}
+
+struct RunningSideTunnel {
+    handle: SideTunnelHandle,
+    event_rx: mpsc::UnboundedReceiver<SideTunnelEvent>,
 }
 
 impl ConnectedState {
@@ -72,12 +82,13 @@ impl ConnectedState {
                 ws_entry_endpoints: ws_endpoints,
                 dns_config: shared_state.tunnel_settings.resolved_dns_config(),
                 tunnel_interface: tunnel_interface.clone(),
+                side_tunnel: None,
                 allowed_endpoints: Vec::new(),
                 inbound_exemptions: shared_state.tunnel_settings.inbound_exemptions.clone(),
             }
         };
 
-        let connected_state = Self {
+        let mut connected_state = Self {
             tunnel_monitor_handle,
             tunnel_monitor_event_receiver,
             selected_gateways,
@@ -86,6 +97,8 @@ impl ConnectedState {
             bandwidth_failure: None,
             bandwidth_checks_worked: false,
             connected_at: SessionStart::now(),
+            connection_data,
+            side_tunnel: None,
         };
 
         if let Err(e) =
@@ -111,10 +124,119 @@ impl ConnectedState {
         // Reset DNS resolver overrides since connections can be established over the tunnel
         shared_state.reset_resolver_overrides().await;
 
-        (
-            Box::new(connected_state),
-            PrivateTunnelState::Connected { connection_data },
-        )
+        if shared_state.tunnel_settings.side_tunnel_enabled() {
+            connected_state.start_side_tunnel(shared_state);
+        }
+
+        let state = connected_state.private_state();
+        (Box::new(connected_state), state)
+    }
+
+    fn private_state(&self) -> PrivateTunnelState {
+        PrivateTunnelState::Connected {
+            connection_data: self.connection_data.clone(),
+        }
+    }
+
+    /// A new Connected event when the side tunnel's state changed since
+    /// `previous`, so that clients see it.
+    fn same_or_updated(self: Box<Self>, previous: &Option<SideTunnelState>) -> NextTunnelState {
+        if self.connection_data.side_tunnel == *previous {
+            NextTunnelState::SameState(self)
+        } else {
+            let state = self.private_state();
+            NextTunnelState::NewState((self, state))
+        }
+    }
+
+    fn start_side_tunnel(&mut self, shared_state: &SharedState) {
+        tracing::info!("Starting the mixnet side tunnel");
+        let (handle, event_rx) = SideTunnel::start(
+            shared_state.nym_config.clone(),
+            shared_state.tunnel_settings.clone(),
+            &self.selected_gateways,
+            shared_state.user_agent.clone(),
+            shared_state.route_handler.clone(),
+            shared_state.gateway_cache_handle.clone(),
+            shared_state.topology_service.clone(),
+            shared_state.wg_keys_db.clone(),
+        );
+        self.side_tunnel = Some(RunningSideTunnel { handle, event_rx });
+        self.connection_data.side_tunnel = Some(SideTunnelState::Connecting { retry_attempt: 0 });
+    }
+
+    /// Takes the side tunnel down and out of the firewall policy; the
+    /// two-hop tunnel stays.
+    async fn stop_side_tunnel(&mut self, shared_state: &mut SharedState) -> Result<()> {
+        if let Some(side_tunnel) = self.side_tunnel.take() {
+            tracing::info!("Stopping the mixnet side tunnel");
+            side_tunnel.handle.stop().await;
+        }
+        // Already done by the side tunnel, unless it did not stop in time.
+        shared_state.route_handler.remove_side_tunnel_routes().await;
+        self.connection_data.side_tunnel = None;
+        if self.firewall_policy_params.side_tunnel.take().is_some() {
+            Self::set_firewall_policy(shared_state, &self.firewall_policy_params)?;
+        }
+        Ok(())
+    }
+
+    /// Before leaving the state; the next state's policy and routes replace
+    /// this one's.
+    async fn stop_side_tunnel_on_exit(&mut self) {
+        if let Some(side_tunnel) = self.side_tunnel.take() {
+            side_tunnel.handle.stop().await;
+        }
+    }
+
+    async fn handle_side_tunnel_event(
+        mut self: Box<Self>,
+        event: SideTunnelEvent,
+        shared_state: &mut SharedState,
+    ) -> NextTunnelState {
+        let previous = self.connection_data.side_tunnel.clone();
+        match event {
+            SideTunnelEvent::Connecting { retry_attempt } => {
+                self.connection_data.side_tunnel =
+                    Some(SideTunnelState::Connecting { retry_attempt });
+            }
+            SideTunnelEvent::InterfaceUp { metadata, reply_tx } => {
+                self.firewall_policy_params.side_tunnel = Some(metadata);
+                let result = Self::set_firewall_policy(shared_state, &self.firewall_policy_params);
+                _ = reply_tx.send(());
+                if let Err(e) = result {
+                    trace_err_chain!(e, "failed to admit the side tunnel in the firewall");
+                    return self
+                        .disconnect(
+                            PrivateActionAfterDisconnect::Error(
+                                ErrorStateReason::SetFirewallPolicy,
+                            ),
+                            shared_state,
+                        )
+                        .await;
+                }
+            }
+            SideTunnelEvent::Up(connection_data) => {
+                self.connection_data.side_tunnel = Some(SideTunnelState::Up(*connection_data));
+            }
+            SideTunnelEvent::Down => {
+                if self.firewall_policy_params.side_tunnel.take().is_some()
+                    && let Err(e) =
+                        Self::set_firewall_policy(shared_state, &self.firewall_policy_params)
+                {
+                    trace_err_chain!(e, "failed to drop the side tunnel from the firewall");
+                    return self
+                        .disconnect(
+                            PrivateActionAfterDisconnect::Error(
+                                ErrorStateReason::SetFirewallPolicy,
+                            ),
+                            shared_state,
+                        )
+                        .await;
+                }
+            }
+        }
+        self.same_or_updated(&previous)
     }
 
     fn set_firewall_policy(
@@ -160,10 +282,11 @@ impl ConnectedState {
     }
 
     async fn disconnect(
-        self,
+        mut self,
         after_disconnect: PrivateActionAfterDisconnect,
         shared_state: &mut SharedState,
     ) -> NextTunnelState {
+        self.stop_side_tunnel_on_exit().await;
         Self::reset_dns(shared_state).await;
         Self::reset_routes(shared_state).await;
 
@@ -174,7 +297,7 @@ impl ConnectedState {
     }
 
     async fn handle_tunnel_down(
-        self,
+        mut self,
         error_state_reason: Option<ErrorStateReason>,
         shared_state: &mut SharedState,
     ) -> NextTunnelState {
@@ -182,6 +305,7 @@ impl ConnectedState {
             tracing::info!("Tunnel closed. Reconnecting.");
         }
 
+        self.stop_side_tunnel_on_exit().await;
         Self::reset_dns(shared_state).await;
         Self::reset_routes(shared_state).await;
 
@@ -319,15 +443,38 @@ impl TunnelStateHandler for ConnectedState {
 
                         shared_state.tunnel_settings = tunnel_settings;
 
+                        // A gateway newly pinned for the side tunnel that the
+                        // two-hop pair already sits on: re-select the pair,
+                        // which then leaves it to the side tunnel.
+                        let side_pin_taken = diff.side_gateways_changed()
+                            && shared_state.tunnel_settings.side_tunnel_pins_taken_by(&self.selected_gateways);
+
                         // Not all changes require the tunnel to be reconnected
-                        if diff.only_hot_appliable_changed() || (diff.only_mixnet_performance_options_changed() && shared_state.tunnel_settings.tunnel_type == TunnelType::Wireguard) {
-                            NextTunnelState::SameState(self)
+                        let mixnet_only = diff.only_mixnet_performance_options_changed() && shared_state.tunnel_settings.tunnel_type == TunnelType::Wireguard;
+                        if (diff.only_hot_appliable_changed() || mixnet_only) && !side_pin_taken {
+                            // The side tunnel is the mixnet here: restart it
+                            // with the new options or gateways, or start or
+                            // stop it.
+                            let previous = self.connection_data.side_tunnel.clone();
+                            let wanted = shared_state.tunnel_settings.side_tunnel_enabled();
+                            let running = self.side_tunnel.is_some();
+                            let restart = mixnet_only || diff.side_gateways_changed();
+                            if running && (!wanted || restart)
+                                && let Err(e) = self.stop_side_tunnel(shared_state).await
+                            {
+                                trace_err_chain!(e, "failed to set firewall policy");
+                                return self.disconnect(PrivateActionAfterDisconnect::Error(ErrorStateReason::SetFirewallPolicy), shared_state).await;
+                            }
+                            if wanted && self.side_tunnel.is_none() {
+                                self.start_side_tunnel(shared_state);
+                            }
+                            self.same_or_updated(&previous)
                         } else {
                             // Toggling a setting must not move the user to a
                             // different server: carry the running pair through
                             // the reconnect unless the change is one gateway
                             // selection actually depends on.
-                            let gateways = (!diff.affects_gateway_selection())
+                            let gateways = (!diff.affects_gateway_selection() && !side_pin_taken)
                                 .then(|| self.selected_gateways.clone());
                             self.disconnect(PrivateActionAfterDisconnect::Reconnect { gateways }, shared_state).await
                         }
@@ -349,6 +496,9 @@ impl TunnelStateHandler for ConnectedState {
                         NextTunnelState::SameState(self)
                     }
                 }
+            }
+            Some(event) = side_tunnel::next_event(self.side_tunnel.as_mut().map(|side_tunnel| &mut side_tunnel.event_rx)) => {
+                self.handle_side_tunnel_event(event, shared_state).await
             }
             Some(connectivity) = shared_state.connectivity_handle.next() => {
                 if connectivity.is_offline() {
@@ -388,6 +538,9 @@ struct ConnectedPolicyParameters {
 
     /// Tunnel interface
     tunnel_interface: TunnelInterface,
+
+    /// The side tunnel's device while it is up.
+    side_tunnel: Option<TunnelMetadata>,
 
     /// Outbound endpoints reachable while connected (cloudflared, frp, etc.).
     allowed_endpoints: Vec<nym_firewall::AllowedEndpoint>,
@@ -432,6 +585,10 @@ impl ConnectedPolicyParameters {
         FirewallPolicy::Connected {
             peer_endpoints,
             tunnel,
+            side_tunnel: self
+                .side_tunnel
+                .clone()
+                .map(nym_firewall::TunnelMetadata::from),
             allow_lan: self.allow_lan,
             dns_config: self.dns_config.clone(),
             allowed_endpoints: self.allowed_endpoints.clone(),
@@ -512,6 +669,7 @@ mod tests {
             ws_entry_endpoints: ws_endpoints,
             dns_config,
             tunnel_interface,
+            side_tunnel: None,
             allowed_endpoints: Vec::new(),
             inbound_exemptions: Vec::new(),
         };

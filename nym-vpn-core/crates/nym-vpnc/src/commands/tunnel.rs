@@ -72,6 +72,13 @@ pub struct SetParams {
     #[arg(long, value_parser = clap::value_parser!(BooleanOption))]
     always_on: Option<BooleanOption>,
 
+    /// Dual tunnel: run a mixnet tunnel beside the two-hop tunnel for the
+    /// traffic marked with fwmark 0x14f (LuCI marks the devices and domains
+    /// routed via the mixnet). Marked traffic is unreachable whenever no
+    /// mixnet tunnel carries it. Toggling it leaves the two-hop tunnel up.
+    #[arg(long, value_parser = clap::value_parser!(BooleanOption))]
+    dual_tunnel: Option<BooleanOption>,
+
     /// Enable Circumvention Transport (CT) wrapping for the connection to the entry gateway in two hop wireguard mode.
     #[arg(long, alias = "ct", value_parser = clap::value_parser!(BooleanOption))]
     circumvention_transports: Option<BooleanOption>,
@@ -160,6 +167,7 @@ impl Command {
                     display_on_off(config.gateway_independence.enable_notifications)
                 );
                 println!("Always on: {}", display_on_off(config.always_on));
+                println!("Dual tunnel: {}", display_on_off(config.dual_tunnel));
                 if config.inbound_exemptions.is_empty() {
                     println!("Inbound exemptions: none");
                 } else {
@@ -204,6 +212,10 @@ impl Command {
 
                 if let Some(always_on) = params.always_on {
                     rpc_client.set_always_on(*always_on).await?;
+                }
+
+                if let Some(dual_tunnel) = params.dual_tunnel {
+                    rpc_client.set_dual_tunnel(*dual_tunnel).await?;
                 }
 
                 if let Some(two_hop) = params.two_hop {

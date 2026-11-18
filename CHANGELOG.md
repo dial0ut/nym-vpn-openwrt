@@ -11,6 +11,44 @@ the GitHub release notes.
 
 ## [Unreleased]
 
+### Added
+
+- Dual tunnel: split-tunnel entries in LuCI can be routed via the
+  **Mixnet** instead of bypassing the VPN. While such an entry exists and the
+  VPN is connected in Fast mode, the router runs a mixnet tunnel beside the
+  fast one for those devices and domains; everything else stays on fast mode,
+  which never drops when the mixnet tunnel starts, stops or fails. Mixnet
+  routes never fall back to the fast tunnel or the WAN, kill-switch on or
+  off, and a mixnet device's DNS goes through the mixnet too. Gateways are
+  picked automatically. `nym-vpnc tunnel set --dual-tunnel on` runs the
+  mixnet tunnel for traffic marked `0x14f` by hand. See the Dual Tunnel guide.
+- Fast and Mixnet mode each keep their own entry and exit gateways. A
+  **Fast | Mixnet** switch on top of the LuCI connection panel picks the
+  mode, and the pickers under it show that mode's gateways, remembering your
+  picks for the other; switching while connected asks first. A line under the
+  Connect button edits the other mode's gateways without switching, connected
+  or not; in Fast mode these are also the gateways the mixnet routes use, and
+  saving reconnects only the mixnet tunnel. A gateway never serves both
+  tunnels: the pickers grey out the other tunnel's gateways, and Automatic
+  avoids them. `nym-vpnc gateway set --tunnel mixnet|wireguard` sets either
+  pair. On update, your current pair stays with the mode you use; the other
+  mode gets the same countries, but Automatic in place of a pinned gateway.
+
+### Changed
+
+- The Two-Hop switch left LuCI's Tunnel Settings; the Fast | Mixnet switch
+  on the connection panel replaces it.
+- In Fast mode the LuCI gateway pickers list the WireGuard gateways with
+  their WireGuard scores, the ones Fast mode actually connects through. They
+  showed the mixnet lists before.
+
+### Fixed
+
+- After the VPN reconnected to new gateways, the daemon's next API request
+  could hang for 30 seconds on a connection left over from the old tunnel.
+  The mixnet tunnel of the dual tunnel often took about 35 seconds instead
+  of a few to come back after a reconnect.
+
 ## [1.36.1] - 2026-10-05
 
 ### Added

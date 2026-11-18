@@ -23,7 +23,8 @@ use nym_vpn_lib_types::{
     DiagnosticRunParams,
     DnsUpstreamOwner, EntryPoint, ErrorStateReason, ExitPoint, Gateway, GatewayIndependence,
     GatewayType, InboundExemption, InboundExemptionProtocol, ListGatewaysOptions, NodeIdentity,
-    StoreAccountRequest, TentativeGateways, TunnelConnectionData, TunnelState, VpnServiceConfig,
+    SideTunnelState, StoreAccountRequest, TentativeGateways, TunnelConnectionData, TunnelState,
+    VpnServiceConfig,
 };
 use nym_vpn_proto::rpc_client::RpcClient;
 
@@ -152,10 +153,10 @@ fn method_signatures() -> Value {
         "connect": { "relax_independence": "bool" },
         "disconnect": {},
         "info": {},
-        "gateway_get": {},
+        "gateway_get": { "tunnel": "str" },
         "gateway_set": {
-            "entry_country": "str", "exit_country": "str", "entry_id": "str", "exit_id": "str",
-            "entry_random": "bool", "exit_random": "bool", "residential_exit": "bool"
+            "tunnel": "str", "entry_country": "str", "exit_country": "str", "entry_id": "str",
+            "exit_id": "str", "entry_random": "bool", "exit_random": "bool", "residential_exit": "bool"
         },
         "gateway_list_full": { "gateway_type": "str" },
         "gateway_list_countries": { "gateway_type": "str" },
@@ -185,9 +186,10 @@ fn method_signatures() -> Value {
         "ad_block_set": { "enabled": "bool" },
         "diagnostic_run": { "skip_dns": "bool", "skip_http": "bool", "gateway": "str" },
         "split_list": {},
-        "split_add": { "type": "str", "mac": "str", "domain": "str", "label": "str" },
+        "split_add": { "type": "str", "mac": "str", "domain": "str", "label": "str", "via": "str" },
         "split_del": { "id": "str" },
         "split_set_enabled": { "id": "str", "enabled": "int" },
+        "split_set_via": { "id": "str", "via": "str" },
         "split_status": {},
         "clients_list": {},
         "account_reset": {},
@@ -205,6 +207,7 @@ fn method_takes_args(method: &str) -> bool {
     matches!(
         method,
         "connect"
+            | "gateway_get"
             | "gateway_set"
             | "gateway_list_full"
             | "gateway_list_countries"
@@ -222,6 +225,7 @@ fn method_takes_args(method: &str) -> bool {
             | "split_add"
             | "split_del"
             | "split_set_enabled"
+            | "split_set_via"
     )
 }
 
@@ -236,7 +240,7 @@ fn read_stdin_args() -> Value {
 async fn dispatch(method: &str, args: &Value) -> Value {
     match method {
         "status" => status().await,
-        "gateway_get" => gateway_get().await,
+        "gateway_get" => gateway_get(args).await,
         "gateway_set" => gateway_set(args).await,
         "gateway_list_full" => gateway_list_full(args).await,
         "gateway_list_countries" => gateway_list_countries(args).await,
@@ -266,9 +270,10 @@ async fn dispatch(method: &str, args: &Value) -> Value {
         "init" => init_batch().await,
         "split_list" => split_list(),
         "split_status" => split_status().await,
-        "split_add" => with_split_lock(|| split_add(args)),
-        "split_del" => with_split_lock(|| split_del(args)),
-        "split_set_enabled" => with_split_lock(|| split_set_enabled(args)),
+        "split_add" => split_edit(|mixnet_dns| split_add(args, mixnet_dns)).await,
+        "split_del" => split_edit(|mixnet_dns| split_del(args, mixnet_dns)).await,
+        "split_set_enabled" => split_edit(|mixnet_dns| split_set_enabled(args, mixnet_dns)).await,
+        "split_set_via" => split_edit(|mixnet_dns| split_set_via(args, mixnet_dns)).await,
         "clients_list" => clients_list(),
         "daemon_status" => daemon_status(),
         "daemon_start" => daemon_start(),
@@ -771,6 +776,13 @@ async fn status() -> Value {
                     }),
                 );
             }
+
+            if let Some(side_tunnel) = &connection_data.side_tunnel {
+                out.insert(
+                    "side_tunnel".into(),
+                    side_tunnel_json(&mut client, side_tunnel).await,
+                );
+            }
         }
         TunnelState::Disconnected => {
             out.insert("state".into(), json!("disconnected"));
@@ -817,6 +829,49 @@ async fn status() -> Value {
     }
 
     Value::Object(out)
+}
+
+/// {state: connecting, retry_attempt} or {state: up, connected_seconds,
+/// entry, exit}: the dual tunnel's mixnet side.
+async fn side_tunnel_json(client: &mut RpcClient, side_tunnel: &SideTunnelState) -> Value {
+    match side_tunnel {
+        SideTunnelState::Connecting { retry_attempt } => {
+            json!({ "state": "connecting", "retry_attempt": retry_attempt })
+        }
+        SideTunnelState::Up(data) => {
+            let mut out = serde_json::Map::new();
+            out.insert("state".into(), json!("up"));
+            let connected_since = data.connected_at.unix_timestamp();
+            out.insert(
+                "connected_seconds".into(),
+                json!((now_unix() - connected_since).max(0)),
+            );
+            for (side, gw_info, list) in [
+                ("entry", &data.entry_gateway, GatewayType::MixnetEntry),
+                ("exit", &data.exit_gateway, GatewayType::MixnetExit),
+            ] {
+                let map = gateway_name_map(client, list).await;
+                let resolved = map.as_ref().and_then(|m| m.get(&gw_info.id));
+                let name = resolved
+                    .map(|(name, _)| name.clone())
+                    .filter(|n| !n.is_empty());
+                let country = gw_info
+                    .country_code
+                    .clone()
+                    .filter(|c| !c.is_empty())
+                    .or_else(|| {
+                        resolved
+                            .map(|(_, country)| country.clone())
+                            .filter(|c| !c.is_empty())
+                    });
+                out.insert(
+                    side.to_owned(),
+                    json!({ "id": gw_info.id, "name": name, "country": country }),
+                );
+            }
+            Value::Object(out)
+        }
+    }
 }
 
 fn insert_offline(out: &mut serde_json::Map<String, Value>, reconnect: bool) {
@@ -919,7 +974,51 @@ async fn insert_point_fields(
     }
 }
 
-async fn gateway_get() -> Value {
+/// A gateway pair, by the tunnel type it serves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PairTunnel {
+    Wireguard,
+    Mixnet,
+}
+
+impl PairTunnel {
+    /// `tunnel` is "wg" or "mixnet"; absent, the pair of the current mode.
+    /// `Err` for any other value.
+    fn from_args(args: &Value, two_hop: impl FnOnce() -> bool) -> Result<Self, String> {
+        match arg_str(args, "tunnel") {
+            Some("wg") => Ok(Self::Wireguard),
+            Some("mixnet") => Ok(Self::Mixnet),
+            Some(other) => Err(format!("Unknown tunnel '{other}' (wg or mixnet)")),
+            None if two_hop() => Ok(Self::Wireguard),
+            None => Ok(Self::Mixnet),
+        }
+    }
+
+    fn slug(self) -> &'static str {
+        match self {
+            Self::Wireguard => "wg",
+            Self::Mixnet => "mixnet",
+        }
+    }
+
+    /// The lists the pair's gateways come from: WireGuard picks both roles
+    /// from one list.
+    fn list_types(self) -> (GatewayType, GatewayType) {
+        match self {
+            Self::Wireguard => (GatewayType::Wg, GatewayType::Wg),
+            Self::Mixnet => (GatewayType::MixnetEntry, GatewayType::MixnetExit),
+        }
+    }
+
+    fn points(self, config: &VpnServiceConfig) -> (&EntryPoint, &ExitPoint) {
+        match self {
+            Self::Wireguard => (&config.entry_point, &config.exit_point),
+            Self::Mixnet => (&config.mixnet_entry_point, &config.mixnet_exit_point),
+        }
+    }
+}
+
+async fn gateway_get(args: &Value) -> Value {
     let degraded = |err: String| {
         json!({
             "entry_point": "",
@@ -937,21 +1036,26 @@ async fn gateway_get() -> Value {
         Ok(config) => config,
         Err(err) => return degraded(format!("{err:#}")),
     };
+    let tunnel = match PairTunnel::from_args(args, || config.enable_two_hop) {
+        Ok(tunnel) => tunnel,
+        Err(err) => return degraded(err),
+    };
+    let (entry_point, exit_point) = tunnel.points(&config);
 
     let mut out = serde_json::Map::new();
-    out.insert("entry_point".into(), json!(format_entry_point(&config.entry_point)));
-    out.insert("exit_point".into(), json!(format_exit_point(&config.exit_point)));
+    out.insert("tunnel".into(), json!(tunnel.slug()));
+    out.insert("entry_point".into(), json!(format_entry_point(entry_point)));
+    out.insert("exit_point".into(), json!(format_exit_point(exit_point)));
     out.insert(
         "residential_exit".into(),
         json!(display_on_off(config.residential_exit)),
     );
 
-    // Always the mixnet lists, matching the dashboard pickers (unlike status,
-    // which switches lists on the live connection mode).
-    let entry_kind = classify_entry_point(&config.entry_point);
-    let exit_kind = classify_exit_point(&config.exit_point);
-    insert_point_fields(&mut client, &mut out, "entry", entry_kind, GatewayType::MixnetEntry).await;
-    insert_point_fields(&mut client, &mut out, "exit", exit_kind, GatewayType::MixnetExit).await;
+    let (entry_list, exit_list) = tunnel.list_types();
+    let entry_kind = classify_entry_point(entry_point);
+    let exit_kind = classify_exit_point(exit_point);
+    insert_point_fields(&mut client, &mut out, "entry", entry_kind, entry_list).await;
+    insert_point_fields(&mut client, &mut out, "exit", exit_kind, exit_list).await;
 
     Value::Object(out)
 }
@@ -1058,15 +1162,37 @@ async fn gateway_set(args: &Value) -> Value {
         Err(err) => return fail(format!("{err:#}")),
     };
 
-    if let Some(entry_point) = entry_point
-        && let Err(err) = client.set_entry_point(entry_point).await
-    {
-        return fail(format!("{err:#}"));
+    // Only an unnamed pair needs the mode.
+    let two_hop = if arg_str(args, "tunnel").is_none() {
+        match client.get_config().await {
+            Ok(config) => config.enable_two_hop,
+            Err(err) => return fail(format!("{err:#}")),
+        }
+    } else {
+        true
+    };
+    let tunnel = match PairTunnel::from_args(args, || two_hop) {
+        Ok(tunnel) => tunnel,
+        Err(err) => return fail(err),
+    };
+
+    if let Some(entry_point) = entry_point {
+        let result = match tunnel {
+            PairTunnel::Wireguard => client.set_entry_point(entry_point).await,
+            PairTunnel::Mixnet => client.set_mixnet_entry_point(entry_point).await,
+        };
+        if let Err(err) = result {
+            return fail(format!("{err:#}"));
+        }
     }
-    if let Some(exit_point) = exit_point
-        && let Err(err) = client.set_exit_point(exit_point).await
-    {
-        return fail(format!("{err:#}"));
+    if let Some(exit_point) = exit_point {
+        let result = match tunnel {
+            PairTunnel::Wireguard => client.set_exit_point(exit_point).await,
+            PairTunnel::Mixnet => client.set_mixnet_exit_point(exit_point).await,
+        };
+        if let Err(err) = result {
+            return fail(format!("{err:#}"));
+        }
     }
     if let Some(residential_exit) = residential_exit
         && let Err(err) = client.set_residential_exit(residential_exit).await
@@ -1121,6 +1247,11 @@ fn tunnel_flags_json(config: &VpnServiceConfig) -> serde_json::Map<String, Value
         gateway_independence_json(&config.gateway_independence),
     );
     out.insert("always_on".into(), json!(display_on_off(config.always_on)));
+    // Read-only here: split_edit derives it from the split list.
+    out.insert(
+        "dual_tunnel".into(),
+        json!(display_on_off(config.dual_tunnel)),
+    );
     out
 }
 
@@ -1156,7 +1287,8 @@ fn degraded_tunnel_config(err: String) -> Value {
         "ipv6": "", "two_hop": "", "netstack": "", "lewes_protocol": "",
         "circumvention_transports": "", "killswitch": "", "legacy_split_tunnel": "",
         "stealth_api": "", "stealth_api_note": "", "gateway_independence": {},
-        "always_on": "", "loop_cover_delay": "", "packet_delay": "", "message_delay": "",
+        "always_on": "", "dual_tunnel": "", "loop_cover_delay": "", "packet_delay": "",
+        "message_delay": "",
         "disable_poisson": "", "disable_cover": "",
         "raw_config": err,
     })
@@ -1201,7 +1333,7 @@ async fn tunnel_get() -> Value {
             .join(", ")
     };
     let raw_config = format!(
-        "IPv6: {}\nTwo-hop: {}\n{}\nNetstack: {}\nCircumvention transports: {}\nKill-switch: {}\nLegacy-split-tunnel: {}\nStealth API connect: {}{}\nGateway independence: {}\nFamily reminders: {}\nAlways on: {}\nInbound exemptions: {}\nMixnet traffic configuration: {}",
+        "IPv6: {}\nTwo-hop: {}\n{}\nNetstack: {}\nCircumvention transports: {}\nKill-switch: {}\nLegacy-split-tunnel: {}\nStealth API connect: {}{}\nGateway independence: {}\nFamily reminders: {}\nAlways on: {}\nDual tunnel: {}\nInbound exemptions: {}\nMixnet traffic configuration: {}",
         display_on_off(!config.disable_ipv6),
         display_on_off(config.enable_two_hop),
         LEWES_PROTOCOL_LINE,
@@ -1218,6 +1350,7 @@ async fn tunnel_get() -> Value {
         gateway_independence_summary(&config.gateway_independence),
         display_on_off(config.gateway_independence.enable_notifications),
         display_on_off(config.always_on),
+        display_on_off(config.dual_tunnel),
         inbound,
         config.mixnet_traffic,
     );
@@ -1682,9 +1815,25 @@ async fn dns_set(args: &Value) -> Value {
     }
     .await;
 
-    match result {
-        Ok(()) => ok_msg("DNS configuration updated"),
-        Err(err) => fail(format!("{err:#}")),
+    if let Err(err) = result {
+        return fail(format!("{err:#}"));
+    }
+    // The redirect of the mixnet devices' DNS follows the custom servers.
+    if split_targets(&split_exclusions()).mixnet.clients.is_empty() {
+        return ok_msg("DNS configuration updated");
+    }
+    let rerendered = split_edit(|mixnet_dns| match regen_split(mixnet_dns) {
+        Ok(()) => json!({ "success": true }),
+        Err(err) => split_not_applied(&err),
+    })
+    .await;
+    if rerendered["success"] == json!(true) {
+        ok_msg("DNS configuration updated")
+    } else {
+        fail(format!(
+            "DNS configuration updated, but not the mixnet devices' DNS redirect: {}",
+            rerendered["error"].as_str().unwrap_or_default()
+        ))
     }
 }
 
@@ -1850,6 +1999,11 @@ fn parse_split_exclusions(uci_show: &str) -> Vec<Value> {
                     obj.insert(key.into(), json!(v));
                 }
             }
+            let via = opts.get("via").map(String::as_str);
+            obj.insert(
+                "via".into(),
+                json!(SplitVia::parse(via).map_or(via.unwrap_or_default(), |via| via.as_str())),
+            );
             let enabled = opts.get("enabled").map(String::as_str).unwrap_or("1");
             obj.insert("enabled".into(), json!(enabled != "0"));
             Some(Value::Object(obj))
@@ -1868,19 +2022,23 @@ fn split_list() -> Value {
 }
 
 async fn split_status() -> Value {
-    let (killswitch, legacy) = match RpcClient::new().await {
+    let (killswitch, legacy, dual_tunnel, two_hop) = match RpcClient::new().await {
         Ok(mut client) => match client.get_config().await {
             Ok(config) => (
                 display_on_off(config.killswitch).to_owned(),
                 display_on_off(config.legacy_split_tunnel).to_owned(),
+                display_on_off(config.dual_tunnel).to_owned(),
+                display_on_off(config.enable_two_hop).to_owned(),
             ),
-            Err(_) => (String::new(), String::new()),
+            Err(_) => (String::new(), String::new(), String::new(), String::new()),
         },
-        Err(_) => (String::new(), String::new()),
+        Err(_) => (String::new(), String::new(), String::new(), String::new()),
     };
     json!({
         "killswitch": killswitch,
         "legacy_split_tunnel": legacy,
+        "dual_tunnel": dual_tunnel,
+        "two_hop": two_hop,
         "nftset_supported": nftset_supported(),
     })
 }
@@ -1947,11 +2105,119 @@ fn logs_get(args: &Value) -> Value {
 //-------------------------------------------------------------------------------
 // Split-tunnel exclusions (UCI `exclusion` sections): an nftables drop-in
 // marks matching packets with the bypass fwmark 0x14e, which the priority-90
-// ip rule routes out the real WAN. See docs/guide/split-tunneling.md.
+// ip rule routes out the real WAN, or, for `via mixnet`, with 0x14f, which
+// the dual tunnel's mixnet side carries and nothing else does. See
+// docs/guide/split-tunneling.md and docs/guide/dual-tunnel.md.
 //-------------------------------------------------------------------------------
 
 const SPLIT_NFT: &str = "/etc/nftables.d/30-nym-split.nft";
 const SPLIT_MARK: &str = "0x14e";
+const MIXNET_MARK: &str = "0x14f";
+
+/// Where an exclusion's traffic goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SplitVia {
+    /// Out the real WAN, past the VPN.
+    Wan,
+    /// Through the dual tunnel's mixnet side.
+    Mixnet,
+}
+
+impl SplitVia {
+    /// A section without the option predates it: a carve-out.
+    fn parse(via: Option<&str>) -> Option<Self> {
+        match via {
+            None | Some("wan") => Some(Self::Wan),
+            Some("mixnet") => Some(Self::Mixnet),
+            Some(_) => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Wan => "wan",
+            Self::Mixnet => "mixnet",
+        }
+    }
+
+    fn mark(self) -> &'static str {
+        match self {
+            Self::Wan => SPLIT_MARK,
+            Self::Mixnet => MIXNET_MARK,
+        }
+    }
+
+    /// The nft sets dnsmasq fills with the domains' addresses.
+    fn sets(self) -> [&'static str; 2] {
+        match self {
+            Self::Wan => ["nym_bypass4", "nym_bypass6"],
+            Self::Mixnet => ["nym_mixnet4", "nym_mixnet6"],
+        }
+    }
+
+    /// The dhcp `ipset` section that hands the domains to dnsmasq.
+    fn ipset_section(self) -> &'static str {
+        match self {
+            Self::Wan => "nym_split_ipset",
+            Self::Mixnet => "nym_mixnet_ipset",
+        }
+    }
+}
+
+/// Where router-addressed DNS from mixnet devices goes instead: through
+/// the mixnet, like the rest of their traffic, to a public resolver. The
+/// configured custom servers when one is public, else Quad9, the daemon's
+/// first default. A local resolver (dnscrypt on 127.0.0.1, a LAN Pi-hole)
+/// cannot be reached through the mixnet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MixnetDns {
+    v4: std::net::Ipv4Addr,
+    v6: std::net::Ipv6Addr,
+}
+
+impl Default for MixnetDns {
+    fn default() -> Self {
+        Self {
+            v4: std::net::Ipv4Addr::new(9, 9, 9, 9),
+            v6: std::net::Ipv6Addr::new(0x2620, 0xfe, 0, 0, 0, 0, 0, 0xfe),
+        }
+    }
+}
+
+impl MixnetDns {
+    fn from_config(config: Option<&VpnServiceConfig>) -> Self {
+        let mut dns = Self::default();
+        let Some(config) = config.filter(|config| config.enable_custom_dns) else {
+            return dns;
+        };
+        let public = || config.custom_dns.iter().filter(|ip| is_public_ip(ip));
+        if let Some(std::net::IpAddr::V4(v4)) = public().find(|ip| ip.is_ipv4()) {
+            dns.v4 = *v4;
+        }
+        if let Some(std::net::IpAddr::V6(v6)) = public().find(|ip| ip.is_ipv6()) {
+            dns.v6 = *v6;
+        }
+        dns
+    }
+}
+
+fn is_public_ip(ip: &std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => {
+            let shared = v4.octets()[0] == 100 && (v4.octets()[1] & 0xc0) == 64;
+            !(v4.is_private()
+                || v4.is_loopback()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || shared)
+        }
+        std::net::IpAddr::V6(v6) => {
+            let unique_local = (v6.segments()[0] & 0xfe00) == 0xfc00;
+            let link_local = (v6.segments()[0] & 0xffc0) == 0xfe80;
+            !(v6.is_loopback() || v6.is_unspecified() || unique_local || link_local)
+        }
+    }
+}
 
 /// Where nym-vpnd repoints dnsmasq's `resolvfile` (nym-dns, OpenWrt dnsmasq
 /// backend). The daemon stages that with `uci set` and never commits it, so
@@ -2126,37 +2392,102 @@ fn split_section_name(kind: &str, mac: &str, domain: &str) -> Option<String> {
     }
 }
 
-fn render_split_nft(clients: &[String], domains: &[String]) -> String {
+fn render_split_nft(targets: &SplitTargets, mixnet_dns: MixnetDns) -> String {
     let mut out = String::new();
     out.push_str("# Managed by luci-app-nym-vpn — do not edit by hand.\n");
     out.push_str(&format!(
         "# Marks split-tunnel carve-outs with fwmark {SPLIT_MARK} (priority-90\n"
     ));
-    out.push_str("# ip rule routes them out the real WAN). Included into table inet fw4.\n");
-    if !domains.is_empty() {
-        // Plain sets (dnsmasq adds individual host addresses as it resolves).
-        out.push_str("set nym_bypass4 {\n\ttype ipv4_addr\n}\n");
-        out.push_str("set nym_bypass6 {\n\ttype ipv6_addr\n}\n");
+    out.push_str(&format!(
+        "# ip rule routes them out the real WAN) and mixnet routes with {MIXNET_MARK}\n"
+    ));
+    out.push_str("# (the dual tunnel's mixnet side; unreachable while it is down).\n");
+    out.push_str("# Included into table inet fw4.\n");
+    for via in [SplitVia::Wan, SplitVia::Mixnet] {
+        if !targets.of(via).domains.is_empty() {
+            // Plain sets (dnsmasq adds individual host addresses as it resolves).
+            let [v4, v6] = via.sets();
+            out.push_str(&format!("set {v4} {{\n\ttype ipv4_addr\n}}\n"));
+            out.push_str(&format!("set {v6} {{\n\ttype ipv6_addr\n}}\n"));
+        }
     }
     out.push_str("chain nym_split {\n");
     out.push_str("\ttype filter hook prerouting priority mangle - 1; policy accept;\n");
-    for mac in clients {
-        out.push_str(&format!("\tether saddr {mac} meta mark set {SPLIT_MARK}\n"));
-    }
-    if !domains.is_empty() {
-        out.push_str(&format!("\tip daddr @nym_bypass4 meta mark set {SPLIT_MARK}\n"));
-        out.push_str(&format!("\tip6 daddr @nym_bypass6 meta mark set {SPLIT_MARK}\n"));
+    // The last mark set wins: mixnet routes come last, so a device or a
+    // domain on both lists stays private.
+    for via in [SplitVia::Wan, SplitVia::Mixnet] {
+        let routes = targets.of(via);
+        let mark = via.mark();
+        for mac in &routes.clients {
+            out.push_str(&format!("\tether saddr {mac} meta mark set {mark}\n"));
+        }
+        if !routes.domains.is_empty() {
+            let [v4, v6] = via.sets();
+            out.push_str(&format!("\tip daddr @{v4} meta mark set {mark}\n"));
+            out.push_str(&format!("\tip6 daddr @{v6} meta mark set {mark}\n"));
+        }
     }
     out.push_str("}\n");
+    if !targets.mixnet.clients.is_empty() {
+        // Their DNS to the router goes through the mixnet too: the mark set
+        // above routes the rewritten packet there.
+        let macs = targets.mixnet.clients.join(", ");
+        let dns = "fib daddr type local meta l4proto { tcp, udp } th dport 53";
+        out.push_str("chain nym_mixnet_dns {\n");
+        out.push_str("\ttype nat hook prerouting priority dstnat - 1; policy accept;\n");
+        out.push_str(&format!(
+            "\tether saddr {{ {macs} }} meta nfproto ipv4 {dns} dnat ip to {}\n",
+            mixnet_dns.v4
+        ));
+        out.push_str(&format!(
+            "\tether saddr {{ {macs} }} meta nfproto ipv6 {dns} dnat ip6 to {}\n",
+            mixnet_dns.v6
+        ));
+        out.push_str("}\n");
+    }
     out
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct SplitRoutes {
+    clients: Vec<String>,
+    domains: Vec<String>,
+}
+
+impl SplitRoutes {
+    fn is_empty(&self) -> bool {
+        self.clients.is_empty() && self.domains.is_empty()
+    }
 }
 
 #[derive(Debug, Default)]
 struct SplitTargets {
-    clients: Vec<String>,
-    domains: Vec<String>,
+    /// Carve-outs, out the real WAN.
+    bypass: SplitRoutes,
+    /// Through the dual tunnel's mixnet side.
+    mixnet: SplitRoutes,
     /// One line per skipped entry, for the log.
     skipped: Vec<String>,
+}
+
+impl SplitTargets {
+    fn of(&self, via: SplitVia) -> &SplitRoutes {
+        match via {
+            SplitVia::Wan => &self.bypass,
+            SplitVia::Mixnet => &self.mixnet,
+        }
+    }
+
+    fn of_mut(&mut self, via: SplitVia) -> &mut SplitRoutes {
+        match via {
+            SplitVia::Wan => &mut self.bypass,
+            SplitVia::Mixnet => &mut self.mixnet,
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.bypass.is_empty() && self.mixnet.is_empty()
+    }
 }
 
 /// The enabled exclusions' MACs and domains, validated again here and not
@@ -2170,11 +2501,18 @@ fn split_targets(exclusions: &[Value]) -> SplitTargets {
             continue;
         }
         let id = excl["id"].as_str().unwrap_or_default();
+        let Some(via) = SplitVia::parse(excl["via"].as_str()) else {
+            targets.skipped.push(format!(
+                "split exclusion {id}: skipping unknown route {:?}",
+                excl["via"]
+            ));
+            continue;
+        };
         match excl["type"].as_str() {
             Some("client") => {
                 let raw = excl["mac"].as_str().unwrap_or_default();
                 match valid_mac(raw) {
-                    Some(mac) => targets.clients.push(mac),
+                    Some(mac) => targets.of_mut(via).clients.push(mac),
                     None => targets.skipped.push(format!(
                         "split exclusion {id}: skipping invalid MAC {raw:?}"
                     )),
@@ -2183,7 +2521,7 @@ fn split_targets(exclusions: &[Value]) -> SplitTargets {
             Some("domain") => {
                 let raw = excl["domain"].as_str().unwrap_or_default();
                 match valid_domain(raw) {
-                    Some(domain) => targets.domains.push(domain),
+                    Some(domain) => targets.of_mut(via).domains.push(domain),
                     None => targets.skipped.push(format!(
                         "split exclusion {id}: skipping invalid domain {raw:?}"
                     )),
@@ -2214,19 +2552,56 @@ fn write_split_nft(content: &str) -> std::io::Result<()> {
 const SPLIT_LOCK: &str = "/var/lock/nym-vpn-split.lock";
 
 /// rpcd runs one bridge process per call, so two split edits can overlap:
-/// interleaved, they leave a stale nft file, or one's dhcp commit lands in
-/// the other's revert/re-stage window and persists the repoint. The flock
-/// goes with the process, also when rpcd kills it at its timeout.
-fn with_split_lock<T>(edit: impl FnOnce() -> T) -> T {
-    let _lock = match lock_file(std::path::Path::new(SPLIT_LOCK)) {
+/// interleaved, they leave a stale nft file or a dual tunnel switched the
+/// wrong way, or one's dhcp commit lands in the other's revert/re-stage
+/// window and persists the repoint. The flock goes with the process, also
+/// when rpcd kills it at its timeout.
+fn split_lock() -> Option<std::fs::File> {
+    match lock_file(std::path::Path::new(SPLIT_LOCK)) {
         Ok(file) => Some(file),
         Err(err) => {
             // Unserialised, as before, rather than refusing every edit.
             log_warn(&format!("split exclusions: lock {SPLIT_LOCK}: {err}"));
             None
         }
+    }
+}
+
+/// Runs a split edit under the lock, then switches the daemon's dual tunnel
+/// to match the list: on while an enabled entry is routed via the mixnet.
+/// The nft file and the setting are both derived from the list here, and
+/// only here.
+async fn split_edit(edit: impl FnOnce(MixnetDns) -> Value) -> Value {
+    let mut client = RpcClient::new().await.ok();
+    let config = match client.as_mut() {
+        Some(client) => client.get_config().await.ok(),
+        None => None,
     };
-    edit()
+    let _lock = split_lock();
+    let mut reply = edit(MixnetDns::from_config(config.as_ref()));
+    if reply["success"] != json!(true) && reply["saved"] != json!(true) {
+        return reply;
+    }
+
+    let wanted = !split_targets(&split_exclusions()).mixnet.is_empty();
+    let switched = match (client.as_mut(), config) {
+        (Some(client), Some(config)) if config.dual_tunnel != wanted => client
+            .set_dual_tunnel(wanted)
+            .await
+            .map_err(|err| format!("dual tunnel not switched: {err:#}")),
+        (Some(_), Some(_)) => Ok(()),
+        // Nothing to switch on; a stale "on" is fixed by the next edit.
+        _ if !wanted => Ok(()),
+        _ => Err("nym-vpnd is not reachable; the dual tunnel is not switched on".to_owned()),
+    };
+    if let Err(err) = switched {
+        let id = reply["id"].clone();
+        reply = split_not_applied(&err);
+        if !id.is_null() {
+            reply["id"] = id;
+        }
+    }
+    reply
 }
 
 /// Opens `path` and holds an exclusive flock on it until the file is dropped.
@@ -2252,21 +2627,26 @@ fn lock_file(path: &std::path::Path) -> std::io::Result<std::fs::File> {
     }
 }
 
-/// Idempotent; an empty list tears everything down.
-fn regen_split() -> Result<(), String> {
-    let SplitTargets {
-        clients,
-        domains,
-        skipped,
-    } = split_targets(&split_exclusions());
-    for line in &skipped {
+/// Idempotent; an empty list tears everything down. A failed dhcp edit for
+/// one kind of route does not hold back the rest.
+fn regen_split(mixnet_dns: MixnetDns) -> Result<(), String> {
+    let targets = split_targets(&split_exclusions());
+    for line in &targets.skipped {
         log_warn(line);
     }
 
-    let wanted = (!domains.is_empty() && nftset_supported()).then_some(domains.as_slice());
-    let dhcp = sync_split_ipset(&mut SystemUci, wanted)?;
+    let mut errors: Vec<String> = Vec::new();
+    let mut dhcp: Vec<(SplitVia, DhcpChange)> = Vec::new();
+    for via in [SplitVia::Wan, SplitVia::Mixnet] {
+        let domains = &targets.of(via).domains;
+        let wanted = (!domains.is_empty() && nftset_supported()).then_some(domains.as_slice());
+        match sync_split_ipset(&mut SystemUci, via, wanted) {
+            Ok(change) => dhcp.push((via, change)),
+            Err(err) => errors.push(err),
+        }
+    }
 
-    let nft_file = if clients.is_empty() && domains.is_empty() {
+    let nft_file = if targets.is_empty() {
         match std::fs::remove_file(SPLIT_NFT) {
             Err(err) if err.kind() != std::io::ErrorKind::NotFound => {
                 Err(format!("remove {SPLIT_NFT}: {err}"))
@@ -2274,11 +2654,16 @@ fn regen_split() -> Result<(), String> {
             _ => Ok(()),
         }
     } else {
-        write_split_nft(&render_split_nft(&clients, &domains))
+        write_split_nft(&render_split_nft(&targets, mixnet_dns))
             .map_err(|err| format!("write {SPLIT_NFT}: {err}"))
     };
 
-    apply_split(&mut SystemApply, dhcp, nft_file)
+    errors.extend(apply_split(&mut SystemApply, &dhcp, nft_file).err());
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("; "))
+    }
 }
 
 /// What `sync_split_ipset` did to dhcp.
@@ -2294,7 +2679,7 @@ struct DhcpChange {
 /// can be tested.
 trait SplitApply {
     fn reload_firewall(&mut self) -> Result<(), String>;
-    fn flush_bypass_sets(&mut self) -> Result<(), String>;
+    fn flush_sets(&mut self, sets: [&'static str; 2]) -> Result<(), String>;
     fn reload_dnsmasq(&mut self) -> Result<(), String>;
 }
 
@@ -2304,16 +2689,16 @@ impl SplitApply for SystemApply {
     fn reload_firewall(&mut self) -> Result<(), String> {
         reload_firewall()
     }
-    fn flush_bypass_sets(&mut self) -> Result<(), String> {
+    fn flush_sets(&mut self, sets: [&'static str; 2]) -> Result<(), String> {
         let mut errors: Vec<String> = Vec::new();
-        for set in ["nym_bypass4", "nym_bypass6"] {
+        for set in sets {
             let what = format!("nft flush set inet fw4 {set}");
             match std::process::Command::new("nft")
                 .args(["flush", "set", "inet", "fw4", set])
                 .output()
             {
                 Ok(output) if output.status.success() => {}
-                // Never created (no domain exclusion since boot): nothing to flush.
+                // Never created (no such domain route since boot): nothing to flush.
                 Ok(output)
                     if String::from_utf8_lossy(&output.stderr)
                         .contains("No such file or directory") => {}
@@ -2337,21 +2722,23 @@ impl SplitApply for SystemApply {
 /// reload skipped here would never be retried. The errors are combined.
 fn apply_split(
     sys: &mut impl SplitApply,
-    dhcp: DhcpChange,
+    dhcp: &[(SplitVia, DhcpChange)],
     nft_file: Result<(), String>,
 ) -> Result<(), String> {
     let mut errors: Vec<String> = nft_file.err().into_iter().collect();
     // Firewall first so the sets exist before dnsmasq references them.
     errors.extend(sys.reload_firewall().err());
     // `fw4 reload` flushes the table's rules, not its set elements, so the
-    // addresses of a removed domain would keep bypassing the tunnel. Emptied
-    // before the dnsmasq reload, which drops its cache: the remaining
-    // domains' addresses come back as clients resolve them again, and are
-    // tunnelled until then.
-    if dhcp.removed {
-        errors.extend(sys.flush_bypass_sets().err());
+    // addresses of a removed domain would keep their route. Emptied before
+    // the dnsmasq reload, which drops its cache: the remaining domains'
+    // addresses come back as clients resolve them again, and take the
+    // default route until then.
+    for (via, change) in dhcp {
+        if change.removed {
+            errors.extend(sys.flush_sets(via.sets()).err());
+        }
     }
-    if dhcp.changed {
+    if dhcp.iter().any(|(_, change)| change.changed) {
         errors.extend(sys.reload_dnsmasq().err());
     }
     if errors.is_empty() {
@@ -2361,32 +2748,38 @@ fn apply_split(
     }
 }
 
-/// The domains `dhcp.nym_split_ipset` holds, None without the section. A
-/// section of another type under that name reads as an empty list, which
-/// never matches, so it gets rewritten.
-fn split_ipset_domains(uci: &mut impl Uci) -> Option<Vec<String>> {
-    let kind = uci.run(&["-q", "get", "dhcp.nym_split_ipset"]).ok()?;
+/// The domains the route's dhcp `ipset` section holds, None without the
+/// section. A section of another type under that name reads as an empty
+/// list, which never matches, so it gets rewritten.
+fn split_ipset_domains(uci: &mut impl Uci, via: SplitVia) -> Option<Vec<String>> {
+    let section = format!("dhcp.{}", via.ipset_section());
+    let kind = uci.run(&["-q", "get", &section]).ok()?;
     if kind.trim() != "ipset" {
         return Some(Vec::new());
     }
     let domains = uci
-        .run(&["-q", "get", "dhcp.nym_split_ipset.domain"])
+        .run(&["-q", "get", &format!("{section}.domain")])
         .unwrap_or_default();
     Some(domains.split_whitespace().map(str::to_owned).collect())
 }
 
-/// Brings `dhcp.nym_split_ipset` to `wanted` (None: no section) and says
-/// what changed; an unchanged domain list leaves dhcp untouched.
+/// Brings the route's dhcp `ipset` section to `wanted` (None: no section)
+/// and says what changed; an unchanged domain list leaves dhcp untouched.
 /// OpenWrt's dnsmasq turns `config ipset` into --nftset directives on fw4.
-fn sync_split_ipset(uci: &mut impl Uci, wanted: Option<&[String]>) -> Result<DhcpChange, String> {
-    let current = split_ipset_domains(uci);
+fn sync_split_ipset(
+    uci: &mut impl Uci,
+    via: SplitVia,
+    wanted: Option<&[String]>,
+) -> Result<DhcpChange, String> {
+    let current = split_ipset_domains(uci, via);
     if current.as_deref() == wanted {
         return Ok(DhcpChange::default());
     }
-    let staged = stage_split_ipset(uci, current.is_some(), wanted).and_then(|()| commit_dhcp(uci));
+    let staged =
+        stage_split_ipset(uci, via, current.is_some(), wanted).and_then(|()| commit_dhcp(uci));
     if let Err(err) = staged {
         // Drop the half-staged section so a later dhcp commit cannot pick it up.
-        let _ = uci.run(&["revert", "dhcp.nym_split_ipset"]);
+        let _ = uci.run(&["revert", &format!("dhcp.{}", via.ipset_section())]);
         return Err(err);
     }
     let kept = wanted.unwrap_or_default();
@@ -2401,23 +2794,26 @@ fn sync_split_ipset(uci: &mut impl Uci, wanted: Option<&[String]>) -> Result<Dhc
 
 fn stage_split_ipset(
     uci: &mut impl Uci,
+    via: SplitVia,
     exists: bool,
     wanted: Option<&[String]>,
 ) -> Result<(), String> {
+    let section = format!("dhcp.{}", via.ipset_section());
     if exists {
-        uci.run(&["delete", "dhcp.nym_split_ipset"])?;
+        uci.run(&["delete", &section])?;
     }
     let Some(domains) = wanted else {
         return Ok(());
     };
-    uci.run(&["set", "dhcp.nym_split_ipset=ipset"])?;
-    uci.run(&["add_list", "dhcp.nym_split_ipset.name=nym_bypass4"])?;
-    uci.run(&["add_list", "dhcp.nym_split_ipset.name=nym_bypass6"])?;
-    for domain in domains {
-        uci.run(&["add_list", &format!("dhcp.nym_split_ipset.domain={domain}")])?;
+    uci.run(&["set", &format!("{section}=ipset")])?;
+    for set in via.sets() {
+        uci.run(&["add_list", &format!("{section}.name={set}")])?;
     }
-    uci.run(&["set", "dhcp.nym_split_ipset.table=fw4"])?;
-    uci.run(&["set", "dhcp.nym_split_ipset.table_family=inet"])?;
+    for domain in domains {
+        uci.run(&["add_list", &format!("{section}.domain={domain}")])?;
+    }
+    uci.run(&["set", &format!("{section}.table=fw4")])?;
+    uci.run(&["set", &format!("{section}.table_family=inet")])?;
     Ok(())
 }
 
@@ -2486,12 +2882,27 @@ fn split_dup_exists(field: &str, value: &str) -> bool {
         .any(|excl| excl[field].as_str() == Some(value))
 }
 
-fn split_add(args: &Value) -> Value {
+/// `via` as a split method argument; absent is a carve-out.
+fn arg_via(args: &Value) -> Result<SplitVia, Value> {
+    match args.get("via") {
+        None | Some(Value::Null) => Ok(SplitVia::Wan),
+        Some(Value::String(via)) => {
+            SplitVia::parse(Some(via)).ok_or_else(|| fail("Invalid route (must be wan or mixnet)"))
+        }
+        Some(_) => Err(fail("Invalid route (must be wan or mixnet)")),
+    }
+}
+
+fn split_add(args: &Value, mixnet_dns: MixnetDns) -> Value {
     let label = match arg_str(args, "label") {
         Some(label) if !valid_label(label) => {
             return fail("Invalid label (max 64 chars, safe chars only)");
         }
         other => other.map(str::to_owned),
+    };
+    let via = match arg_via(args) {
+        Ok(via) => via,
+        Err(reply) => return reply,
     };
 
     let (kind, mac, domain) = match arg_str(args, "type") {
@@ -2500,7 +2911,7 @@ fn split_add(args: &Value) -> Value {
                 return fail("Invalid MAC address");
             };
             if split_dup_exists("mac", &mac) {
-                return fail(format!("{mac} is already excluded"));
+                return fail(format!("{mac} is already in the list"));
             }
             ("client", mac, String::new())
         }
@@ -2509,7 +2920,7 @@ fn split_add(args: &Value) -> Value {
                 return fail("Invalid domain");
             };
             if split_dup_exists("domain", &domain) {
-                return fail(format!("{domain} is already excluded"));
+                return fail(format!("{domain} is already in the list"));
             }
             ("domain", String::new(), domain)
         }
@@ -2540,12 +2951,13 @@ fn split_add(args: &Value) -> Value {
     if let Some(label) = &label {
         edits.push(set(format!("nym-vpn.{sid}.label={label}")));
     }
+    edits.push(set(format!("nym-vpn.{sid}.via={}", via.as_str())));
     edits.push(set(format!("nym-vpn.{sid}.enabled=1")));
     if let Err(err) = commit_split_section(&mut SystemUci, &sid, &edits) {
         return fail(format!("Failed to save exclusion: {err}"));
     }
 
-    let mut reply = match regen_split() {
+    let mut reply = match regen_split(mixnet_dns) {
         Ok(()) => json!({ "success": true, "message": "Added exclusion" }),
         Err(err) => split_not_applied(&err),
     };
@@ -2561,7 +2973,7 @@ fn split_section_exists(id: &str) -> bool {
     uci_get(&format!("nym-vpn.{id}")).as_deref() == Some("exclusion")
 }
 
-fn split_del(args: &Value) -> Value {
+fn split_del(args: &Value, mixnet_dns: MixnetDns) -> Value {
     let Some(id) = arg_str(args, "id").filter(|id| valid_section_id(id)) else {
         return fail("Invalid id");
     };
@@ -2572,13 +2984,13 @@ fn split_del(args: &Value) -> Value {
     if let Err(err) = commit_split_section(&mut SystemUci, id, &edits) {
         return fail(format!("Failed to remove exclusion: {err}"));
     }
-    match regen_split() {
+    match regen_split(mixnet_dns) {
         Ok(()) => json!({ "success": true, "message": "Removed exclusion" }),
         Err(err) => split_not_applied(&err),
     }
 }
 
-fn split_set_enabled(args: &Value) -> Value {
+fn split_set_enabled(args: &Value, mixnet_dns: MixnetDns) -> Value {
     let Some(id) = arg_str(args, "id").filter(|id| valid_section_id(id)) else {
         return fail("Invalid id");
     };
@@ -2599,7 +3011,34 @@ fn split_set_enabled(args: &Value) -> Value {
     if let Err(err) = commit_split_section(&mut SystemUci, id, &edits) {
         return fail(format!("Failed to update exclusion: {err}"));
     }
-    match regen_split() {
+    match regen_split(mixnet_dns) {
+        Ok(()) => json!({ "success": true }),
+        Err(err) => split_not_applied(&err),
+    }
+}
+
+fn split_set_via(args: &Value, mixnet_dns: MixnetDns) -> Value {
+    let Some(id) = arg_str(args, "id").filter(|id| valid_section_id(id)) else {
+        return fail("Invalid id");
+    };
+    let via = match args.get("via") {
+        None => return fail("Invalid route (must be wan or mixnet)"),
+        Some(_) => match arg_via(args) {
+            Ok(via) => via,
+            Err(reply) => return reply,
+        },
+    };
+    if !split_section_exists(id) {
+        return fail("No such exclusion");
+    }
+    let edits = [vec![
+        "set".to_owned(),
+        format!("nym-vpn.{id}.via={}", via.as_str()),
+    ]];
+    if let Err(err) = commit_split_section(&mut SystemUci, id, &edits) {
+        return fail(format!("Failed to update exclusion: {err}"));
+    }
+    match regen_split(mixnet_dns) {
         Ok(()) => json!({ "success": true }),
         Err(err) => split_not_applied(&err),
     }
@@ -2804,6 +3243,46 @@ fn insert_degraded_config_members(out: &mut serde_json::Map<String, Value>, err:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pair_is_named_or_follows_the_mode() {
+        let named = |tunnel: &str| PairTunnel::from_args(&json!({ "tunnel": tunnel }), || true);
+        assert_eq!(named("wg"), Ok(PairTunnel::Wireguard));
+        assert_eq!(named("mixnet"), Ok(PairTunnel::Mixnet));
+        assert!(named("fast").is_err());
+
+        assert_eq!(
+            PairTunnel::from_args(&json!({}), || true),
+            Ok(PairTunnel::Wireguard)
+        );
+        assert_eq!(
+            PairTunnel::from_args(&json!({}), || false),
+            Ok(PairTunnel::Mixnet)
+        );
+    }
+
+    #[test]
+    fn each_pair_reads_its_own_points_and_lists() {
+        let config = VpnServiceConfig {
+            mixnet_exit_point: ExitPoint::Country {
+                two_letter_iso_country_code: "CH".to_owned(),
+            },
+            ..VpnServiceConfig::default()
+        };
+        assert_eq!(PairTunnel::Wireguard.points(&config).1, &config.exit_point);
+        assert_eq!(
+            PairTunnel::Mixnet.points(&config).1,
+            &config.mixnet_exit_point
+        );
+        assert_eq!(
+            PairTunnel::Wireguard.list_types(),
+            (GatewayType::Wg, GatewayType::Wg)
+        );
+        assert_eq!(
+            PairTunnel::Mixnet.list_types(),
+            (GatewayType::MixnetEntry, GatewayType::MixnetExit)
+        );
+    }
     use nym_vpn_lib_types::{Location, Performance, Score};
 
     fn gateway(id: &str, name: &str, country: Option<&str>, score: Score) -> Gateway {
@@ -3000,26 +3479,138 @@ mod tests {
         assert!(valid_domain("example.c").is_none());
     }
 
+    fn targets(bypass: SplitRoutes, mixnet: SplitRoutes) -> SplitTargets {
+        SplitTargets {
+            bypass,
+            mixnet,
+            skipped: Vec::new(),
+        }
+    }
+
+    fn routes(clients: &[&str], domains: &[&str]) -> SplitRoutes {
+        SplitRoutes {
+            clients: strings(clients),
+            domains: strings(domains),
+        }
+    }
+
     #[test]
-    fn split_nft_rendering_matches_shell_output() {
-        let clients = vec!["aa:bb:cc:dd:ee:ff".to_owned()];
+    fn split_nft_rendering() {
+        let bypass_only = targets(routes(&["aa:bb:cc:dd:ee:ff"], &[]), SplitRoutes::default());
         assert_eq!(
-            render_split_nft(&clients, &[]),
+            render_split_nft(&bypass_only, MixnetDns::default()),
             "# Managed by luci-app-nym-vpn — do not edit by hand.\n\
              # Marks split-tunnel carve-outs with fwmark 0x14e (priority-90\n\
-             # ip rule routes them out the real WAN). Included into table inet fw4.\n\
+             # ip rule routes them out the real WAN) and mixnet routes with 0x14f\n\
+             # (the dual tunnel's mixnet side; unreachable while it is down).\n\
+             # Included into table inet fw4.\n\
              chain nym_split {\n\
              \ttype filter hook prerouting priority mangle - 1; policy accept;\n\
              \tether saddr aa:bb:cc:dd:ee:ff meta mark set 0x14e\n\
              }\n"
         );
 
-        let domains = vec!["example.com".to_owned()];
-        let rendered = render_split_nft(&clients, &domains);
+        let with_domains = targets(
+            routes(&["aa:bb:cc:dd:ee:ff"], &["example.com"]),
+            SplitRoutes::default(),
+        );
+        let rendered = render_split_nft(&with_domains, MixnetDns::default());
         assert!(rendered.contains("set nym_bypass4 {\n\ttype ipv4_addr\n}\n"));
         assert!(rendered.contains("\tip daddr @nym_bypass4 meta mark set 0x14e\n"));
         assert!(rendered.contains("\tip6 daddr @nym_bypass6 meta mark set 0x14e\n"));
+        assert!(
+            !rendered.contains("nym_mixnet"),
+            "no mixnet route, no mixnet rules"
+        );
         assert!(rendered.ends_with("}\n"));
+    }
+
+    #[test]
+    fn mixnet_routes_render_last_with_their_own_mark_and_sets() {
+        let both = targets(
+            routes(&["aa:bb:cc:dd:ee:01"], &["cdn.example.com"]),
+            routes(&["aa:bb:cc:dd:ee:02"], &["exchange.example.com"]),
+        );
+        let rendered = render_split_nft(&both, MixnetDns::default());
+        assert!(rendered.contains("set nym_mixnet4 {\n\ttype ipv4_addr\n}\n"));
+        assert!(rendered.contains("set nym_mixnet6 {\n\ttype ipv6_addr\n}\n"));
+        let marks: Vec<&str> = rendered
+            .lines()
+            .filter(|l| l.contains("meta mark set"))
+            .map(str::trim)
+            .collect();
+        // The last mark set wins, so the mixnet routes come last.
+        assert_eq!(
+            marks,
+            vec![
+                "ether saddr aa:bb:cc:dd:ee:01 meta mark set 0x14e",
+                "ip daddr @nym_bypass4 meta mark set 0x14e",
+                "ip6 daddr @nym_bypass6 meta mark set 0x14e",
+                "ether saddr aa:bb:cc:dd:ee:02 meta mark set 0x14f",
+                "ip daddr @nym_mixnet4 meta mark set 0x14f",
+                "ip6 daddr @nym_mixnet6 meta mark set 0x14f",
+            ]
+        );
+    }
+
+    #[test]
+    fn mixnet_devices_have_their_router_dns_redirected() {
+        let devices = targets(
+            SplitRoutes::default(),
+            routes(&["aa:bb:cc:dd:ee:02", "aa:bb:cc:dd:ee:03"], &[]),
+        );
+        let rendered = render_split_nft(&devices, MixnetDns::default());
+        let dns_chain = rendered
+            .split("chain nym_mixnet_dns {\n")
+            .nth(1)
+            .expect("a DNS redirect chain");
+        assert!(dns_chain.starts_with("\ttype nat hook prerouting priority dstnat - 1;"));
+        let macs = "ether saddr { aa:bb:cc:dd:ee:02, aa:bb:cc:dd:ee:03 }";
+        let match_dns = "fib daddr type local meta l4proto { tcp, udp } th dport 53";
+        assert!(dns_chain.contains(&format!(
+            "\t{macs} meta nfproto ipv4 {match_dns} dnat ip to 9.9.9.9\n"
+        )));
+        assert!(dns_chain.contains(&format!(
+            "\t{macs} meta nfproto ipv6 {match_dns} dnat ip6 to 2620:fe::fe\n"
+        )));
+
+        // Mixnet domains alone resolve through dnsmasq: no redirect.
+        let domains = targets(SplitRoutes::default(), routes(&[], &["example.com"]));
+        assert!(!render_split_nft(&domains, MixnetDns::default()).contains("nym_mixnet_dns"));
+    }
+
+    #[test]
+    fn mixnet_dns_follows_public_custom_servers_only() {
+        let mut config = VpnServiceConfig {
+            enable_custom_dns: true,
+            custom_dns: [
+                "127.0.0.1",
+                "192.168.1.2",
+                "fd00::53",
+                "1.1.1.1",
+                "2606:4700::1111",
+            ]
+            .iter()
+            .map(|ip| ip.parse().unwrap())
+            .collect(),
+            ..VpnServiceConfig::default()
+        };
+        assert_eq!(
+            MixnetDns::from_config(Some(&config)),
+            MixnetDns {
+                v4: "1.1.1.1".parse().unwrap(),
+                v6: "2606:4700::1111".parse().unwrap(),
+            }
+        );
+
+        // dnscrypt on the router cannot be reached through the mixnet.
+        config.custom_dns = vec!["127.0.0.1".parse().unwrap(), "100.64.0.1".parse().unwrap()];
+        assert_eq!(MixnetDns::from_config(Some(&config)), MixnetDns::default());
+
+        config.custom_dns = vec!["1.1.1.1".parse().unwrap()];
+        config.enable_custom_dns = false;
+        assert_eq!(MixnetDns::from_config(Some(&config)), MixnetDns::default());
+        assert_eq!(MixnetDns::from_config(None), MixnetDns::default());
     }
 
     #[test]
@@ -3045,16 +3636,22 @@ nym-vpn.dom_comma.domain='a.example.com,b.example.com'
 nym-vpn.dom_ok=exclusion
 nym-vpn.dom_ok.type='domain'
 nym-vpn.dom_ok.domain='Ok.Example.ORG'
+nym-vpn.cli_route=exclusion
+nym-vpn.cli_route.type='client'
+nym-vpn.cli_route.mac='aa:bb:cc:dd:ee:03'
+nym-vpn.cli_route.via='mixnet meta mark set 0x1'
 ";
         let targets = split_targets(&parse_split_exclusions(uci));
-        assert_eq!(targets.clients, vec!["aa:bb:cc:dd:ee:01"]);
-        assert_eq!(targets.domains, vec!["ok.example.org"]);
-        assert_eq!(targets.skipped.len(), 3, "{:?}", targets.skipped);
+        assert_eq!(targets.bypass.clients, vec!["aa:bb:cc:dd:ee:01"]);
+        assert_eq!(targets.bypass.domains, vec!["ok.example.org"]);
+        assert!(targets.mixnet.is_empty(), "an unknown route is no route");
+        assert_eq!(targets.skipped.len(), 4, "{:?}", targets.skipped);
         assert!(targets.skipped.iter().any(|l| l.contains("cli_evil")));
         assert!(targets.skipped.iter().any(|l| l.contains("dom_evil")));
         assert!(targets.skipped.iter().any(|l| l.contains("dom_comma")));
+        assert!(targets.skipped.iter().any(|l| l.contains("cli_route")));
 
-        let rendered = render_split_nft(&targets.clients, &targets.domains);
+        let rendered = render_split_nft(&targets, MixnetDns::default());
         for needle in ["evil", "0x1;", "hook input", "#/", ","] {
             assert!(
                 !rendered.contains(needle),
@@ -3245,6 +3842,7 @@ dhcp.nym_split_ipset=ipset
     }
 
     fn ipset_uci(domains: Option<&str>) -> FakeUci {
+        // The Wan section; the Mixnet one only differs in names.
         match domains {
             Some(domains) => FakeUci::default()
                 .reply("-q get dhcp.nym_split_ipset", Ok("ipset\n"))
@@ -3265,7 +3863,7 @@ dhcp.nym_split_ipset=ipset
         let wanted = strings(&["a.example.com", "b.example.com"]);
         let mut uci = ipset_uci(Some("a.example.com b.example.com\n"));
         assert_eq!(
-            sync_split_ipset(&mut uci, Some(&wanted)),
+            sync_split_ipset(&mut uci, SplitVia::Wan, Some(&wanted)),
             Ok(DhcpChange::default())
         );
         assert!(
@@ -3275,7 +3873,10 @@ dhcp.nym_split_ipset=ipset
         );
 
         let mut uci = ipset_uci(None);
-        assert_eq!(sync_split_ipset(&mut uci, None), Ok(DhcpChange::default()));
+        assert_eq!(
+            sync_split_ipset(&mut uci, SplitVia::Wan, None),
+            Ok(DhcpChange::default())
+        );
         assert!(
             uci.calls.iter().all(|c| c.starts_with("-q get ")),
             "{:?}",
@@ -3287,7 +3888,10 @@ dhcp.nym_split_ipset=ipset
     fn changed_split_domains_rewrite_the_section_and_commit() {
         let wanted = strings(&["a.example.com", "b.example.com"]);
         let mut uci = ipset_uci(Some("a.example.com\n"));
-        assert_eq!(sync_split_ipset(&mut uci, Some(&wanted)), Ok(ADDED));
+        assert_eq!(
+            sync_split_ipset(&mut uci, SplitVia::Wan, Some(&wanted)),
+            Ok(ADDED)
+        );
         let calls = &uci.calls;
         let delete = position(calls, "delete dhcp.nym_split_ipset");
         let create = position(calls, "set dhcp.nym_split_ipset=ipset");
@@ -3302,7 +3906,7 @@ dhcp.nym_split_ipset=ipset
         assert!(position(calls, "changes dhcp") < commit);
 
         let mut uci = ipset_uci(Some("a.example.com\n"));
-        assert_eq!(sync_split_ipset(&mut uci, None), Ok(REMOVED));
+        assert_eq!(sync_split_ipset(&mut uci, SplitVia::Wan, None), Ok(REMOVED));
         assert!(
             position(&uci.calls, "delete dhcp.nym_split_ipset")
                 < position(&uci.calls, "commit dhcp")
@@ -3311,13 +3915,35 @@ dhcp.nym_split_ipset=ipset
 
         // A foreign section under our name never counts as unchanged.
         let mut uci = FakeUci::default().reply("-q get dhcp.nym_split_ipset", Ok("ipset_other\n"));
-        assert_eq!(sync_split_ipset(&mut uci, None), Ok(ADDED));
+        assert_eq!(sync_split_ipset(&mut uci, SplitVia::Wan, None), Ok(ADDED));
         assert!(uci.calls.iter().any(|c| c == "delete dhcp.nym_split_ipset"));
 
         // Swapping one domain for another removes one.
         let wanted = strings(&["b.example.com"]);
         let mut uci = ipset_uci(Some("a.example.com\n"));
-        assert_eq!(sync_split_ipset(&mut uci, Some(&wanted)), Ok(REMOVED));
+        assert_eq!(
+            sync_split_ipset(&mut uci, SplitVia::Wan, Some(&wanted)),
+            Ok(REMOVED)
+        );
+    }
+
+    #[test]
+    fn mixnet_domains_get_their_own_ipset_section_and_sets() {
+        let wanted = strings(&["exchange.example.com"]);
+        let mut uci = FakeUci::default().reply("-q get dhcp.nym_mixnet_ipset", Err(""));
+        assert_eq!(
+            sync_split_ipset(&mut uci, SplitVia::Mixnet, Some(&wanted)),
+            Ok(ADDED)
+        );
+        for call in [
+            "set dhcp.nym_mixnet_ipset=ipset",
+            "add_list dhcp.nym_mixnet_ipset.name=nym_mixnet4",
+            "add_list dhcp.nym_mixnet_ipset.name=nym_mixnet6",
+            "add_list dhcp.nym_mixnet_ipset.domain=exchange.example.com",
+        ] {
+            position(&uci.calls, call);
+        }
+        assert!(!uci.calls.iter().any(|c| c.contains("nym_split_ipset")));
     }
 
     #[test]
@@ -3328,7 +3954,7 @@ dhcp.nym_split_ipset=ipset
             Err("uci: I/O error"),
         );
         assert_eq!(
-            sync_split_ipset(&mut uci, Some(&wanted)),
+            sync_split_ipset(&mut uci, SplitVia::Wan, Some(&wanted)),
             Err("uci: I/O error".to_owned())
         );
         assert!(uci.calls.iter().any(|c| c == "revert dhcp.nym_split_ipset"));
@@ -3338,13 +3964,13 @@ dhcp.nym_split_ipset=ipset
     /// Records the apply steps; `fail` names the steps that return an error.
     #[derive(Default)]
     struct FakeApply {
-        steps: Vec<&'static str>,
+        steps: Vec<String>,
         fail: Vec<&'static str>,
     }
 
     impl FakeApply {
-        fn step(&mut self, name: &'static str) -> Result<(), String> {
-            self.steps.push(name);
+        fn step(&mut self, name: &str) -> Result<(), String> {
+            self.steps.push(name.to_owned());
             if self.fail.contains(&name) {
                 Err(format!("{name} failed"))
             } else {
@@ -3357,8 +3983,8 @@ dhcp.nym_split_ipset=ipset
         fn reload_firewall(&mut self) -> Result<(), String> {
             self.step("firewall")
         }
-        fn flush_bypass_sets(&mut self) -> Result<(), String> {
-            self.step("flush")
+        fn flush_sets(&mut self, sets: [&'static str; 2]) -> Result<(), String> {
+            self.step(&format!("flush {}", sets[0]))
         }
         fn reload_dnsmasq(&mut self) -> Result<(), String> {
             self.step("dnsmasq")
@@ -3374,22 +4000,35 @@ dhcp.nym_split_ipset=ipset
         removed: true,
     };
 
+    fn wan(change: DhcpChange) -> [(SplitVia, DhcpChange); 1] {
+        [(SplitVia::Wan, change)]
+    }
+
     #[test]
     fn split_apply_order() {
         let mut sys = FakeApply::default();
-        assert_eq!(apply_split(&mut sys, ADDED, Ok(())), Ok(()));
+        assert_eq!(apply_split(&mut sys, &wan(ADDED), Ok(())), Ok(()));
         assert_eq!(sys.steps, vec!["firewall", "dnsmasq"]);
 
         // Emptied after the firewall reload (which keeps set elements) and
         // before dnsmasq reloads and starts refilling them.
         let mut sys = FakeApply::default();
-        assert_eq!(apply_split(&mut sys, REMOVED, Ok(())), Ok(()));
-        assert_eq!(sys.steps, vec!["firewall", "flush", "dnsmasq"]);
+        assert_eq!(apply_split(&mut sys, &wan(REMOVED), Ok(())), Ok(()));
+        assert_eq!(sys.steps, vec!["firewall", "flush nym_bypass4", "dnsmasq"]);
 
         // Client-only edit: the sets and dnsmasq are left alone.
         let mut sys = FakeApply::default();
-        assert_eq!(apply_split(&mut sys, DhcpChange::default(), Ok(())), Ok(()));
+        assert_eq!(
+            apply_split(&mut sys, &wan(DhcpChange::default()), Ok(())),
+            Ok(())
+        );
         assert_eq!(sys.steps, vec!["firewall"]);
+
+        // Only the route that lost a domain is flushed; one reload serves both.
+        let mut sys = FakeApply::default();
+        let dhcp = [(SplitVia::Wan, ADDED), (SplitVia::Mixnet, REMOVED)];
+        assert_eq!(apply_split(&mut sys, &dhcp, Ok(())), Ok(()));
+        assert_eq!(sys.steps, vec!["firewall", "flush nym_mixnet4", "dnsmasq"]);
     }
 
     #[test]
@@ -3398,8 +4037,8 @@ dhcp.nym_split_ipset=ipset
             fail: vec!["firewall"],
             ..FakeApply::default()
         };
-        let result = apply_split(&mut sys, REMOVED, Err("write nft failed".to_owned()));
-        assert_eq!(sys.steps, vec!["firewall", "flush", "dnsmasq"]);
+        let result = apply_split(&mut sys, &wan(REMOVED), Err("write nft failed".to_owned()));
+        assert_eq!(sys.steps, vec!["firewall", "flush nym_bypass4", "dnsmasq"]);
         assert_eq!(result, Err("write nft failed; firewall failed".to_owned()));
 
         let mut sys = FakeApply {
@@ -3407,7 +4046,7 @@ dhcp.nym_split_ipset=ipset
             ..FakeApply::default()
         };
         assert_eq!(
-            apply_split(&mut sys, ADDED, Ok(())),
+            apply_split(&mut sys, &wan(ADDED), Ok(())),
             Err("dnsmasq failed".to_owned())
         );
     }
@@ -3544,6 +4183,14 @@ nym-vpn.broken.mac='11:22:33:44:55:66'
         assert_eq!(parsed[1]["domain"], "example.com");
         assert_eq!(parsed[1]["label"], "Test site");
         assert_eq!(parsed[1]["enabled"], true);
+        // Sections predating the option are carve-outs.
+        assert_eq!(parsed[0]["via"], "wan");
+        assert_eq!(parsed[1]["via"], "wan");
+
+        let mixnet = parse_split_exclusions(
+            "nym-vpn.cli_1=exclusion\nnym-vpn.cli_1.type='client'\nnym-vpn.cli_1.via='mixnet'\n",
+        );
+        assert_eq!(mixnet[0]["via"], "mixnet");
     }
 
     #[test]

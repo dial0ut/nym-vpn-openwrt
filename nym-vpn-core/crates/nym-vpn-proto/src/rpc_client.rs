@@ -85,6 +85,24 @@ impl RpcClient {
         Ok(())
     }
 
+    pub async fn set_mixnet_entry_point(&mut self, entry_point: EntryPoint) -> Result<()> {
+        self.0
+            .set_mixnet_entry_point(proto::EntryNode::from(entry_point))
+            .await
+            .map_err(Error::Rpc)?;
+
+        Ok(())
+    }
+
+    pub async fn set_mixnet_exit_point(&mut self, exit_point: ExitPoint) -> Result<()> {
+        self.0
+            .set_mixnet_exit_point(proto::ExitNode::from(exit_point))
+            .await
+            .map_err(Error::Rpc)?;
+
+        Ok(())
+    }
+
     pub async fn set_disable_ipv6(&mut self, disable_ipv6: bool) -> Result<()> {
         self.0
             .set_disable_ipv6(disable_ipv6)
@@ -178,6 +196,15 @@ impl RpcClient {
     pub async fn set_always_on(&mut self, always_on: bool) -> Result<()> {
         self.0
             .set_always_on(always_on)
+            .await
+            .map_err(Error::Rpc)?
+            .into_inner();
+        Ok(())
+    }
+
+    pub async fn set_dual_tunnel(&mut self, dual_tunnel: bool) -> Result<()> {
+        self.0
+            .set_dual_tunnel(dual_tunnel)
             .await
             .map_err(Error::Rpc)?
             .into_inner();

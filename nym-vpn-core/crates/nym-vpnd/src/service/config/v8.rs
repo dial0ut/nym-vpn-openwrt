@@ -4,9 +4,10 @@
 use crate::service::{
     ConfigSetupError,
     config::{
-        VpnServiceConfigExt,
+        GatewayPairs, VpnServiceConfigExt,
         entry_exit::v2::{EntryPoint, ExitPoint},
         mixnet_traffic::v5::MixnetTrafficConfig,
+        split_shared_pair,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -41,6 +42,15 @@ pub struct VpnServiceConfig {
     /// Added after V8 shipped; a file without the key loads with it off.
     #[serde(default)]
     pub always_on: bool,
+    /// Added after V8 shipped; a file without the key loads with it off.
+    #[serde(default)]
+    pub dual_tunnel: bool,
+    /// Added after V8 shipped. A file without either key holds one pair for
+    /// both tunnel types; see [`split_shared_pair`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mixnet_entry_point: Option<EntryPoint>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mixnet_exit_point: Option<ExitPoint>,
 }
 
 // A v8 file without the key is hand-edited (serde writes every field), and the
@@ -128,8 +138,23 @@ impl TryFrom<VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
 
     fn try_from(value: VpnServiceConfig) -> Result<Self, Self::Error> {
         let entry_point = nym_vpn_lib_types::EntryPoint::try_from(value.entry_point)?;
-
         let exit_point = nym_vpn_lib_types::ExitPoint::try_from(value.exit_point)?;
+        let pairs = match (value.mixnet_entry_point, value.mixnet_exit_point) {
+            (None, None) => split_shared_pair(entry_point, exit_point, value.enable_two_hop),
+            // A hand-edited file missing one key: that side is Automatic.
+            (mixnet_entry_point, mixnet_exit_point) => GatewayPairs {
+                entry_point,
+                exit_point,
+                mixnet_entry_point: mixnet_entry_point
+                    .map(nym_vpn_lib_types::EntryPoint::try_from)
+                    .transpose()?
+                    .unwrap_or(nym_vpn_lib_types::EntryPoint::Random),
+                mixnet_exit_point: mixnet_exit_point
+                    .map(nym_vpn_lib_types::ExitPoint::try_from)
+                    .transpose()?
+                    .unwrap_or(nym_vpn_lib_types::ExitPoint::Random),
+            },
+        };
 
         let custom_dns: Vec<IpAddr> = value
             .custom_dns
@@ -143,8 +168,10 @@ impl TryFrom<VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
         let mixnet_traffic = nym_vpn_lib_types::MixnetTrafficConfig::from(value.mixnet_traffic);
 
         let config = nym_vpn_lib_types::VpnServiceConfig {
-            entry_point,
-            exit_point,
+            entry_point: pairs.entry_point,
+            exit_point: pairs.exit_point,
+            mixnet_entry_point: pairs.mixnet_entry_point,
+            mixnet_exit_point: pairs.mixnet_exit_point,
             allow_lan: value.allow_lan,
             disable_ipv6: value.disable_ipv6,
             enable_two_hop: value.enable_two_hop,
@@ -178,6 +205,7 @@ impl TryFrom<VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
             stealth_api: value.stealth_api,
             gateway_independence: value.gateway_independence.into(),
             always_on: value.always_on,
+            dual_tunnel: value.dual_tunnel,
         };
 
         Ok(config)

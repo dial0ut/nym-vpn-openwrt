@@ -10,7 +10,7 @@ pub mod transports;
 pub mod wireguard;
 
 pub use gateway_selector::{SelectedGateways, select_gateway_pair};
-use nym_gateway_directory::{BlacklistedGateways, GatewayCacheHandle};
+use nym_gateway_directory::{BlacklistedGateways, GatewayCacheHandle, NodeIdentity};
 use nym_vpn_lib_types::GatewayIndependence;
 use nym_vpn_store::keys::wireguard::WireguardKeysDb;
 use tokio_util::sync::CancellationToken;
@@ -25,6 +25,7 @@ pub async fn select_gateways(
     tunnel_settings: &TunnelSettings,
     independence_criteria: GatewayIndependence,
     wg_keys_db: WireguardKeysDb,
+    exclude: &[NodeIdentity],
     cancel_token: CancellationToken,
 ) -> Result<SelectedGateways> {
     let select_gateways_fut = gateway_selector::select_gateways(
@@ -33,6 +34,7 @@ pub async fn select_gateways(
         tunnel_settings,
         independence_criteria,
         wg_keys_db,
+        exclude,
     );
 
     cancel_token

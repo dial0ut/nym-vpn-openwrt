@@ -20,8 +20,13 @@ nym-vpnc gateway list mixnet-exit          # or mixnet-entry, wg
 nym-vpnc gateway set --entry-country DE --exit-country CH
 nym-vpnc gateway set --exit-id <base58-gateway-id>
 nym-vpnc gateway set --entry-random --exit-random
+nym-vpnc gateway set --tunnel mixnet --exit-country CH   # the mixnet pair while in two-hop mode
 nym-vpnc gateway tentative                 # the pair a connect would pick right now
 ```
+
+Two-hop (WireGuard) and mixnet mode each keep their own entry and exit. `gateway get` prints both
+pairs; `gateway set` changes the current mode's pair unless `--tunnel wireguard` or
+`--tunnel mixnet` names one. The mixnet pair is also what the dual tunnel's mixnet side uses.
 
 `gateway list` shows each gateway's operator **family** (node family) when it has declared one,
 and `status` names the family of the entry and exit while connected.

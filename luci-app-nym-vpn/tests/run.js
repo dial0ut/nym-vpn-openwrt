@@ -84,9 +84,14 @@ function setToggle(t, id, checked) {
   fire(t, el, 'change');
   return el;
 }
+// The hero shows the picker of the current mode: wg (Fast) or mixnet.
+const heroTunnel = (t) => (q(t, '.nym-mode-switch button.active').textContent === 'Fast' ? 'wg' : 'mixnet');
+const countrySel = (t, role, tunnel) => q(t, 'select[name="' + (tunnel || heroTunnel(t)) + '_' + role + '_country"]');
+const gatewayInput = (t, role, tunnel) => '[name="' + (tunnel || heroTunnel(t)) + '_' + role + '_gateway_id"]';
+const modeButton = (t, name) => qa(t, '.nym-mode-switch button').find((b) => b.textContent === name);
 async function pickGateways(t, entry, exit) {
-  const entrySel = q(t, 'select[name="entry_country"]');
-  const exitSel = q(t, 'select[name="exit_country"]');
+  const entrySel = countrySel(t, 'entry');
+  const exitSel = countrySel(t, 'exit');
   await entrySel.ensureLoaded();
   await exitSel.ensureLoaded();
   entrySel.value = entry || 'DE';
@@ -120,8 +125,8 @@ async function scenarioStructure() {
   check(strayText === 0, 'no "null"/"undefined" text rendered anywhere on the page: ' + strayText);
   const rows = Array.from(card(t, 'Tunnel Settings').querySelectorAll('.nym-toggle-row .nym-toggle-title')).map((e) => e.textContent);
   check(rows[0] === 'Always On' && rows[1] === 'Kill-Switch', 'Always On leads Protection, kill-switch second: ' + JSON.stringify(rows));
-  check(eq(rows.slice().sort(), ['Always On', 'Circumvention Transports', 'Gateway Independence', 'IPv6', 'Kill-Switch', 'Server Family Reminders', 'Stealth API Connect', 'Two-Hop Mode'].sort()),
-    'all eight tunnel rows present, legacy split moved out');
+  check(eq(rows.slice().sort(), ['Always On', 'Circumvention Transports', 'Gateway Independence', 'IPv6', 'Kill-Switch', 'Server Family Reminders', 'Stealth API Connect'].sort()),
+    'all seven tunnel rows present, legacy split moved out, Fast/Mixnet on the hero');
   const splitCard = card(t, 'Split Tunneling');
   check(!!splitCard && splitCard.contains(byId(t, 'legacy-split-toggle')) && splitCard.contains(q(t, '.nym-split-section')), 'Split Tunneling card holds the legacy PBR switch and the exclusions');
   check(card(t, 'Tunnel Settings').contains(q(t, '.nym-inbound-section')), 'inbound services stay in Tunnel Settings');
@@ -132,7 +137,7 @@ async function scenarioStructure() {
     'Protection holds kill-switch, its inbound exceptions, independence, reminders and always-on');
   check(q(t, '.nym-inbound-section').previousElementSibling === byId(t, 'killswitch-row'), 'inbound services sit directly under the kill-switch row');
   const tagged = qa(t, '.nym-toggle-row').filter((r) => r.querySelector('.nym-toggle-tag')).map((r) => r.querySelector('.nym-toggle-title').textContent);
-  check(eq(tagged, ['Kill-Switch', 'Gateway Independence', 'Two-Hop Mode', 'Circumvention Transports', 'IPv6', 'Legacy Split Tunneling (PBR)']), 'reconnect tag on exactly the switches that apply on the next connect: ' + JSON.stringify(tagged));
+  check(eq(tagged, ['Kill-Switch', 'Gateway Independence', 'Circumvention Transports', 'IPv6', 'Legacy Split Tunneling (PBR)']), 'reconnect tag on exactly the switches that apply on the next connect: ' + JSON.stringify(tagged));
   check(!qa(t, '.nym-toggle-desc').some((d) => /requires reconnect|applies immediately|no reconnect/i.test(d.textContent)), 'no row description repeats the reconnect note');
   check(byId(t, 'legacy-split-note').style.display === 'none', 'legacy note hidden while legacy split is off');
   check(q(t, '.nym-footer').textContent.indexOf('1.2.3') !== -1 && q(t, '.nym-footer').textContent.indexOf('mainnet') !== -1, 'footer shows version and network');
@@ -163,7 +168,7 @@ async function scenarioDisclosure() {
 
   const rowsWithMore = qa(t, '.nym-toggle-row').filter((r) => r.querySelector('.nym-more'));
   const titles = rowsWithMore.map((r) => r.querySelector('.nym-toggle-title').textContent);
-  check(eq(titles, ['Always On', 'Kill-Switch', 'Gateway Independence', 'Server Family Reminders', 'Two-Hop Mode', 'Circumvention Transports', 'Stealth API Connect', 'IPv6', 'Legacy Split Tunneling (PBR)', 'Disable Poisson Delays', 'Disable Background Cover Traffic', 'Custom DNS', 'Ad Blocking']), 'long-form text behind an expander on every switch row: ' + JSON.stringify(titles));
+  check(eq(titles, ['Always On', 'Kill-Switch', 'Gateway Independence', 'Server Family Reminders', 'Circumvention Transports', 'Stealth API Connect', 'IPv6', 'Legacy Split Tunneling (PBR)', 'Disable Poisson Delays', 'Disable Background Cover Traffic', 'Custom DNS', 'Ad Blocking']), 'long-form text behind an expander on every switch row: ' + JSON.stringify(titles));
   check(rowsWithMore.every((r) => {
     const b = r.querySelector('.nym-toggle-head .nym-info-btn');
     const p = r.querySelector('.nym-more');
@@ -208,7 +213,7 @@ async function scenarioDisclosure() {
   ksBtn.click();
   check(ksBtn.getAttribute('aria-expanded') === 'false' && ksPanel.hidden && t.window.localStorage.getItem('nym-more:killswitch-toggle') === null, 'click again closes and forgets');
 
-  check(qa(t, '.nym-toggle-tag').length >= 6 && qa(t, '.nym-toggle-tag').every((tg) => tg.title === 'Takes effect on the next connect'), 'reconnect tags carry the convention in their title');
+  check(qa(t, '.nym-toggle-tag').length >= 5 && qa(t, '.nym-toggle-tag').every((tg) => tg.title === 'Takes effect on the next connect'), 'reconnect tags carry the convention in their title');
   check(ksRow.querySelector('.nym-toggle-warning') && byId(t, 'legacy-split-note') && byId(t, 'gw-independence-note'), 'live-state notes (kill-switch off, PBR owns routing, older daemon) are kept');
   const css = t.modules['nym-vpn.theme'].css;
   check(/\.nym-info-btn:focus-visible/.test(css) && /\.nym-more\[hidden\] \{ display: none/.test(css) && !/\.nym-card-description/.test(css), 'theme: focus ring on the expander, hidden panels collapse, lead style retired');
@@ -245,9 +250,9 @@ async function scenarioTunnelToggles() {
   sets = callsTo(t, 'tunnel_set');
   check(sets[sets.length - 1].killswitch === 'on', 'kill-switch saved on');
 
-  // Two-hop change flips the hop count used by the chain.
+  // Fast on the hero switch flips the hop count used by the chain.
   const t2 = connectEnv({}, { tunnel_config: Object.assign({}, TUNNEL, { two_hop: 'off' }) });
-  setToggle(t2, 'two-hop-toggle', true);
+  modeButton(t2, 'Fast').click();
   await sleep(10);
   await pickGateways(t2);
   actionBtn(t2).click();
@@ -326,7 +331,7 @@ async function scenarioPickers() {
   section('gateway pickers');
   const t = setup({ rpc: { gateway_list_full: { gateways: GATEWAYS } } });
   await pickGateways(t);
-  check(callsTo(t, 'gateway_list_full').length === 2, 'one gateway_list_full per type (warm-up + pickers share the cache)');
+  check(callsTo(t, 'gateway_list_full').length === 1, 'one gateway_list_full for the Fast list (warm-up + both sides share the cache)');
   const rows = qa(t, '.nym-gateway-option');
   const fams = qa(t, '.nym-gateway-option-family').map((c) => c.textContent).filter((s) => s);
   check(rows.length === 5, 'entry (3 incl. random) + exit (2 incl. random) rows rendered: ' + rows.length);
@@ -359,12 +364,12 @@ async function scenarioPickers() {
   check(/\.nym-gateway-option-name \{[^}]*min-height: 2\.7em/.test(css) && /\.nym-gateway-option-meta, \.nym-gateway-option-family \{[^}]*min-height: 1\.4em/.test(css), 'theme: fixed two-line name slot and one-line telemetry/family slots');
   check(/\.nym-gateway-option\.compact \.nym-gateway-option-name \{[^}]*min-height: 0/.test(css), 'theme: compact Random row drops the two-line name minimum');
   check(/\.nym-hero-gateway-row \{[^}]*grid-template-columns: minmax\(0, 1fr\) 200px minmax\(0, 1fr\)/.test(css) && !/\.nym-hero-gateway-panel \{[^}]*max-width: 280px/.test(css) && /max-width: 960px\) \{\s*\.nym-hero-gateway-row \{[^}]*"center center" "entry exit"/.test(css) && /max-width: 700px\) \{\s*\.nym-hero-gateway-row \{[^}]*"center" "entry" "exit"/.test(css), 'theme: hero grid with a 200px ring column, pickers unconstrained, ring-on-top mid layout, single column on phones');
-  const entrySel = q(t, 'select[name="entry_country"]');
+  const entrySel = countrySel(t, 'entry');
   check(Array.from(entrySel.options).some((o) => o.value === 'DE' && /\(2\)/.test(o.textContent)), 'country dropdown counts intact');
   check(Array.from(entrySel.options).map((o) => o.value).slice(0, 2).join(',') === 'none,random', 'placeholder and Random options first');
   const names = qa(t, '.nym-gateway-option-name').map((e) => e.textContent);
   check(names[1] === 'alpha-entry' && names[2] === 'alpha-two', 'entry list sorted by performance (High before Medium)');
-  check(qa(t, 'input[name="entry_gateway_id"]:checked')[0].value === '', 'Random radio checked by default');
+  check(qa(t, 'input' + gatewayInput(t, 'entry') + ':checked')[0].value === '', 'Random radio checked by default');
   qa(t, '.nym-gateway-option')[1].click();
   check(qa(t, '.nym-gateway-option')[1].classList.contains('selected') && !qa(t, '.nym-gateway-option')[0].classList.contains('selected'), 'clicking a row moves the selected class');
 
@@ -372,14 +377,14 @@ async function scenarioPickers() {
   const t2 = setup({ rpc: { gateway_list_full: { gateways: GATEWAYS } } });
   setToggle(t2, 'circumvention-toggle', true);
   await pickGateways(t2);
-  const entryRows = Array.from(q(t2, 'select[name="entry_country"]').closest('.nym-panel-picker').querySelectorAll('.nym-gateway-option'));
+  const entryRows = Array.from(countrySel(t2, 'entry').closest('.nym-panel-picker').querySelectorAll('.nym-gateway-option'));
   const last = entryRows[entryRows.length - 1];
   check(last.classList.contains('disabled') && last.querySelector('input').disabled && /No CT/.test(last.textContent), 'CT on: bridges:false entry gateway disabled with No CT badge');
   const ctTag = last.querySelector('.nym-gateway-ct-tag');
   check(ctTag && ctTag.parentNode.classList.contains('nym-gateway-option-status') && !last.querySelector('.nym-gateway-option-name .nym-gateway-ct-tag') && ctTag.title.length > 0, 'No CT is its own tag in the status column, under the tier, with an explanatory title');
   check(last.querySelector('.nym-gateway-option-name').textContent === 'alpha-two', 'No CT no longer rides inside the name text');
   check(entryRows.filter((r) => r.querySelector('.nym-gateway-ct-tag')).length === 1 && qa(t2, '.nym-gateway-ct-tag').length === 1, 'exactly one No CT tag, on the bridges:false row');
-  const exitRows = Array.from(q(t2, 'select[name="exit_country"]').closest('.nym-panel-picker').querySelectorAll('.nym-gateway-option'));
+  const exitRows = Array.from(countrySel(t2, 'exit').closest('.nym-panel-picker').querySelectorAll('.nym-gateway-option'));
   check(exitRows.every((r) => !r.classList.contains('disabled')), 'CT gating applies to the entry side only');
 
   // Degraded performance strings and the optional city field.
@@ -409,7 +414,7 @@ async function scenarioPickers() {
   ];
   const t8 = setup({ rpc: { gateway_list_full: { gateways: MIXED } } });
   await pickGateways(t8);
-  const entryList = q(t8, 'select[name="entry_country"]').closest('.nym-panel-picker');
+  const entryList = countrySel(t8, 'entry').closest('.nym-panel-picker');
   const tierOf = (name) => Array.from(entryList.querySelectorAll('.nym-gateway-option')).find((r) => r.querySelector('.nym-gateway-option-name').textContent === name).querySelector('.nym-gateway-tier');
   check(tierOf('low-busy').textContent === 'Low' && tierOf('low-busy').classList.contains('low'), '"Low (load: High, ...)" is tier Low, not High');
   check(tierOf('med-busy').textContent === 'Medium' && tierOf('med-busy').classList.contains('medium'), '"Medium (load: High, ...)" is tier Medium');
@@ -421,8 +426,8 @@ async function scenarioPickers() {
   // Restore from the saved daemon selection on first render.
   const t3 = setup({ rpc: { gateway_list_full: { gateways: GATEWAYS }, gateway_get: { entry_type: 'gateway', entry_country: 'DE', entry_id: 'A2', exit_type: 'random' } } });
   await sleep(60);
-  check(q(t3, 'select[name="entry_country"]').value === 'DE' && q(t3, 'input[name="entry_gateway_id"][value="A2"]').checked, 'saved gateway restored into the entry picker');
-  check(q(t3, 'select[name="exit_country"]').value === 'random', 'saved random exit restored');
+  check(countrySel(t3, 'entry').value === 'DE' && q(t3, 'input' + gatewayInput(t3, 'entry') + '[value="A2"]').checked, 'saved gateway restored into the entry picker');
+  check(countrySel(t3, 'exit').value === 'random', 'saved random exit restored');
 
   // Fallback to the per-country RPCs when the full list is unavailable.
   const t4 = setup({ rpc: { gateway_list_full: { error: 'no bridge' }, gateway_list_countries: { countries: [{ code: 'DE', count: 1 }] }, gateway_list_by_country: { gateways: [GATEWAYS[0]] } } });
@@ -432,8 +437,153 @@ async function scenarioPickers() {
   await pickGateways(t5, 'DE', 'DE');
   check(qa(t5, '.nym-gateway-loading').filter((e) => e.textContent === 'No gateways available').length === 2, 'empty country shows No gateways available');
   const t6 = setup({ rpc: { gateway_list_full: { error: 'no bridge' }, gateway_list_countries: () => { throw new Error('down'); } } });
-  await q(t6, 'select[name="entry_country"]').ensureLoaded();
-  check(q(t6, 'select[name="entry_country"]').options[0].textContent === '— Failed to load —', 'country load failure shows in the placeholder');
+  await countrySel(t6, 'entry').ensureLoaded();
+  check(countrySel(t6, 'entry').options[0].textContent === '— Failed to load —', 'country load failure shows in the placeholder');
+}
+
+async function scenarioModeSwitch() {
+  section('Fast | Mixnet: one switch, a gateway pair per mode');
+  const PAIRS = {
+    wg: { tunnel: 'wg', entry_type: 'gateway', entry_country: 'DE', entry_id: 'A1', exit_type: 'country', exit_country: 'FR' },
+    mixnet: { tunnel: 'mixnet', entry_type: 'random', exit_type: 'gateway', exit_country: 'FR', exit_id: 'B1', exit_name: 'beta-exit' },
+  };
+  const gwGet = (params) => PAIRS[params.tunnel || 'wg'];
+  const t = connectEnv({ gateway_get: gwGet, tentative_gateways: { status: 'selected' } });
+  await sleep(80);
+  check(modeButton(t, 'Fast').classList.contains('active') && !modeButton(t, 'Mixnet').classList.contains('active'), 'two_hop on -> Fast active');
+  check(countrySel(t, 'entry', 'wg') && countrySel(t, 'entry', 'wg').closest('.nym-status-hero'), 'hero shows the Fast picker');
+  check(eq(callsTo(t, 'gateway_get').map((c) => c.tunnel).sort(), ['mixnet', 'wg']), 'each pair read with its tunnel');
+  check(countrySel(t, 'entry', 'wg').value === 'DE' && q(t, 'input' + gatewayInput(t, 'entry', 'wg') + '[value="A1"]').checked, 'Fast pair restored into the Fast picker');
+  check(callsTo(t, 'gateway_list_full').every((c) => c.gateway_type === 'wg'), 'Fast picker loads the WireGuard list: ' + JSON.stringify(callsTo(t, 'gateway_list_full')));
+  check(!byId(t, 'two-hop-toggle'), 'Two-Hop row gone from Tunnel Settings');
+
+  // Switch while disconnected: no question, the hero swaps pickers.
+  modeButton(t, 'Mixnet').click();
+  await sleep(30);
+  check(callsTo(t, 'tunnel_set').length === 1 && callsTo(t, 'tunnel_set')[0].two_hop === 'off', 'Mixnet -> tunnel_set two_hop off');
+  check(!modal(t) && modeButton(t, 'Mixnet').classList.contains('active'), 'no confirmation while disconnected');
+  check(countrySel(t, 'exit', 'mixnet').closest('.nym-status-hero') && !countrySel(t, 'exit', 'wg'), 'hero shows the mixnet picker');
+  check(q(t, '.nym-othergw-label').textContent === 'Fast gateways', 'the other-mode line names Fast in Mixnet mode');
+  await sleep(60);
+  check(countrySel(t, 'exit', 'mixnet').value === 'FR' && q(t, 'input' + gatewayInput(t, 'exit', 'mixnet') + '[value="B1"]').checked, 'mixnet pair restored into the mixnet picker');
+  actionBtn(t).click();
+  await sleep(400);
+  const gs = callsTo(t, 'gateway_set');
+  check(gs.length === 1 && gs[0].tunnel === 'mixnet' && gs[0].exit_id === 'B1' && gs[0].entry_random === true, 'connect in Mixnet saves the mixnet pair: ' + JSON.stringify(gs[0]));
+
+  // Switch while connected: asked first.
+  modeButton(t, 'Fast').click();
+  check(modal(t) && /Switch to Fast/.test(q(t, '.nym-modal-title').textContent), 'connected -> confirmation');
+  clickModalButton(t, 'Stay');
+  await sleep(10);
+  check(callsTo(t, 'tunnel_set').length === 1 && modeButton(t, 'Mixnet').classList.contains('active'), 'Stay -> nothing saved, still Mixnet');
+  modeButton(t, 'Fast').click();
+  clickModalButton(t, 'Switch');
+  await sleep(10);
+  check(callsTo(t, 'tunnel_set').length === 2 && callsTo(t, 'tunnel_set')[1].two_hop === 'on' && modeButton(t, 'Fast').classList.contains('active'), 'Switch -> two_hop on');
+  check(countrySel(t, 'entry', 'wg').value === 'DE', 'Fast picks kept across the round trip');
+
+  // A failed save puts the switch back.
+  const t2 = setup({ rpc: { tunnel_set: { success: false, error: 'nope' } } });
+  modeButton(t2, 'Mixnet').click();
+  await sleep(10);
+  check(modeButton(t2, 'Fast').classList.contains('active') && countrySel(t2, 'entry', 'wg'), 'failed save -> back to Fast, Fast picker shown');
+
+  // The other mode's gateways: a line under the action button, edited
+  // without touching the mode, connected or not.
+  const t3 = setup({ rpc: { gateway_get: gwGet, gateway_list_full: { gateways: GATEWAYS } } });
+  await sleep(80);
+  check(!byId(t3, 'nym-mixnet-gateways') && !card(t3, 'Split Tunneling').querySelector('.nym-gateway-list, select[name^="mixnet_"]'), 'no gateway picker left in Split Tunneling');
+  const line = byId(t3, 'nym-othergw');
+  check(line && line.closest('.nym-status-hero') && q(t3, '.nym-action-buttons').nextElementSibling === line, 'the line sits in the hero, right under the action button');
+  check(q(t3, '.nym-othergw-label').textContent === 'Mixnet gateways', 'Fast mode -> the line shows the mixnet pair');
+  const values = (tt) => qa(tt, '.nym-othergw-value').map((e) => e.textContent);
+  check(eq(values(t3), ['Automatic', '🇫🇷 beta-exit']), 'summary from the mixnet pair: ' + JSON.stringify(values(t3)));
+  check(q(t3, '.nym-othergw-panel').style.display === 'none', 'pickers closed until Change');
+  byId(t3, 'nym-othergw-change').click();
+  await sleep(10);
+  check(countrySel(t3, 'entry', 'mixnet').closest('#nym-othergw') && countrySel(t3, 'entry', 'wg').closest('.nym-hero-gateway-panel'), 'Change mounts the mixnet picker in the line, the Fast picker stays in the side columns');
+  check(byId(t3, 'nym-othergw-change').style.display === 'none', 'Change hides while open');
+  const entrySel = countrySel(t3, 'entry', 'mixnet');
+  await entrySel.ensureLoaded();
+  entrySel.value = 'DE';
+  fire(t3, entrySel, 'change');
+  await sleep(30);
+  const a1 = q(t3, 'input' + gatewayInput(t3, 'entry', 'mixnet') + '[value="A1"]');
+  check(a1.disabled && a1.closest('.nym-gateway-option').querySelector('.nym-gateway-taken-tag').textContent === 'Fast', 'the Fast pin is greyed and tagged Fast');
+  check(callsTo(t3, 'gateway_list_full').some((c) => c.gateway_type === 'mixnet-entry'), 'mixnet picker loads the mixnet lists');
+  byId(t3, 'nym-othergw-save').click();
+  await sleep(30);
+  const ms = callsTo(t3, 'gateway_set');
+  check(ms.length === 1 && ms[0].tunnel === 'mixnet' && ms[0].entry_country === 'DE', 'Save -> gateway_set on the mixnet pair: ' + JSON.stringify(ms[0]));
+  check(callsTo(t3, 'tunnel_set').length === 0 && modeButton(t3, 'Fast').classList.contains('active'), 'Save leaves the mode alone');
+  check(q(t3, '.nym-othergw-panel').style.display === 'none' && toasts(t3).indexOf('Mixnet gateways saved') !== -1, 'panel closes, saved toast');
+
+  // Connected in Fast with the mixnet tunnel up: the line still works, the
+  // Fast gateways in use are greyed, and only the mixnet tunnel reconnects.
+  const FAST_UP = Object.assign({}, CONNECTED, { mode: 'wireguard', side_tunnel: { state: 'up' } });
+  const tc = setup({ init: baseInit({ status: FAST_UP }), rpc: { status: FAST_UP, gateway_get: gwGet, gateway_list_full: { gateways: GATEWAYS } } });
+  await sleep(80);
+  check(q(tc, '.nym-status-hero').classList.contains('connected') && byId(tc, 'nym-othergw').style.display !== 'none' && !/\.connected [^{]*\.nym-othergw/.test(tc.modules['nym-vpn.theme'].css), 'connected: the line is shown');
+  byId(tc, 'nym-othergw-change').click();
+  await sleep(60);
+  const exitSel = countrySel(tc, 'exit', 'mixnet');
+  await exitSel.ensureLoaded();
+  exitSel.value = 'FR';
+  fire(tc, exitSel, 'change');
+  await sleep(30);
+  const live = q(tc, 'input' + gatewayInput(tc, 'exit', 'mixnet') + '[value="B1"]');
+  check(live.disabled && /Fast/.test(live.closest('.nym-gateway-option').textContent), 'connected: the exit Fast runs through is greyed in the mixnet picker');
+  byId(tc, 'nym-othergw-save').click();
+  await sleep(30);
+  check(callsTo(tc, 'gateway_set').length === 1 && callsTo(tc, 'gateway_set')[0].tunnel === 'mixnet' && !modal(tc), 'connected Save: mixnet pair saved, no confirmation');
+  check(callsTo(tc, 'tunnel_set').length === 0 && callsTo(tc, 'disconnect').length === 0 && modeButton(tc, 'Fast').classList.contains('active'), 'connected Save: no mode change, no disconnect');
+  check(toasts(tc).indexOf('Mixnet gateways saved — the mixnet tunnel reconnects') !== -1, 'side tunnel running -> toast says only it reconnects');
+
+  // Mixnet mode: the line edits the Fast pair.
+  const tm = setup({ init: baseInit({ tunnel_config: Object.assign({}, TUNNEL, { two_hop: 'off' }) }), rpc: { gateway_get: gwGet, gateway_list_full: { gateways: GATEWAYS } } });
+  await sleep(80);
+  check(q(tm, '.nym-othergw-label').textContent === 'Fast gateways' && eq(values(tm), ['🇩🇪 A1', '🇫🇷 France']), 'Mixnet mode -> the line shows the Fast pair: ' + JSON.stringify(values(tm)));
+  byId(tm, 'nym-othergw-change').click();
+  await sleep(60);
+  check(countrySel(tm, 'entry', 'wg').closest('#nym-othergw') && countrySel(tm, 'entry', 'mixnet').closest('.nym-hero-gateway-panel'), 'Fast picker in the line, mixnet picker in the side columns');
+  check(countrySel(tm, 'entry', 'wg').value === 'DE' && q(tm, 'input' + gatewayInput(tm, 'entry', 'wg') + '[value="A1"]').checked, 'the Fast pair is filled in on open');
+  byId(tm, 'nym-othergw-save').click();
+  await sleep(30);
+  const fs2 = callsTo(tm, 'gateway_set');
+  check(fs2.length === 1 && fs2[0].tunnel === 'wg' && fs2[0].entry_id === 'A1' && fs2[0].exit_country === 'FR', 'Save -> gateway_set on the Fast pair: ' + JSON.stringify(fs2[0]));
+  check(callsTo(tm, 'tunnel_set').length === 0 && modeButton(tm, 'Mixnet').classList.contains('active') && toasts(tm).indexOf('Fast gateways saved') !== -1, 'still Mixnet, saved toast');
+
+  // Cancel goes back to the daemon's pair; a mode switch closes the line and
+  // renames it.
+  const tx = setup({ rpc: { gateway_get: gwGet, gateway_list_full: { gateways: GATEWAYS } } });
+  await sleep(80);
+  byId(tx, 'nym-othergw-change').click();
+  await sleep(60);
+  const xSel = countrySel(tx, 'exit', 'mixnet');
+  xSel.value = 'DE';
+  fire(tx, xSel, 'change');
+  byId(tx, 'nym-othergw-cancel').click();
+  await sleep(60);
+  check(q(tx, '.nym-othergw-panel').style.display === 'none' && xSel.value === 'FR' && callsTo(tx, 'gateway_set').length === 0, 'Cancel: closed, back to the saved exit, nothing saved');
+  byId(tx, 'nym-othergw-change').click();
+  modeButton(tx, 'Mixnet').click();
+  await sleep(30);
+  check(q(tx, '.nym-othergw-panel').style.display === 'none' && q(tx, '.nym-othergw-label').textContent === 'Fast gateways' && countrySel(tx, 'exit', 'mixnet').closest('.nym-hero-gateway-panel'), 'mode switch: line closed and renamed, mixnet picker back in the side columns');
+
+  // The Fast picker greys the mixnet pins while a mixnet route exists.
+  const t4 = setup({
+    rpc: { gateway_get: gwGet, gateway_list_full: { gateways: GATEWAYS } },
+    init: baseInit({ split_exclusions: [{ id: 'cli_1', type: 'client', mac: 'aa:bb:cc:dd:ee:ff', enabled: 1, via: 'mixnet' }] }),
+  });
+  await sleep(80);
+  await pickGateways(t4, 'DE', 'FR');
+  const b1 = q(t4, 'input' + gatewayInput(t4, 'exit', 'wg') + '[value="B1"]');
+  check(b1.disabled && /Mixnet/.test(b1.closest('.nym-gateway-option').textContent), 'mixnet pin greyed in the Fast picker while a mixnet route exists');
+  const t5 = setup({ rpc: { gateway_get: gwGet, gateway_list_full: { gateways: GATEWAYS } } });
+  await sleep(80);
+  await pickGateways(t5, 'DE', 'FR');
+  check(!q(t5, 'input' + gatewayInput(t5, 'exit', 'wg') + '[value="B1"]').disabled, 'no mixnet route -> nothing greyed');
 }
 
 async function scenarioConnectSelectionGuard() {
@@ -458,8 +608,8 @@ async function scenarioConnectPlain() {
     actionBtn(t).click();
     await sleep(400);
     const gs = callsTo(t, 'gateway_set');
-    check(gs.length === 1 && eq(gs[0], { entry_country: 'DE', exit_country: 'FR', entry_id: null, exit_id: null, entry_random: false, exit_random: false, residential_exit: null }),
-      status + ': gateway_set carries the picked countries: ' + JSON.stringify(gs[0]));
+    check(gs.length === 1 && eq(gs[0], { entry_country: 'DE', exit_country: 'FR', entry_id: null, exit_id: null, entry_random: false, exit_random: false, residential_exit: null, tunnel: 'wg' }),
+      status + ': gateway_set carries the picked countries and the Fast pair: ' + JSON.stringify(gs[0]));
     check(t.calls.findIndex((c) => c.method === 'gateway_set') < t.calls.findIndex((c) => c.method === 'tentative_gateways') && t.calls.findIndex((c) => c.method === 'tentative_gateways') < t.calls.findIndex((c) => c.method === 'connect'),
       status + ': gateway_set -> tentative_gateways -> connect order');
     check(eq(callsTo(t, 'connect'), [{}]), status + ': connect() without relax flag');
@@ -470,10 +620,10 @@ async function scenarioConnectPlain() {
   // Random + specific gateway id mapping.
   const t = connectEnv({ tentative_gateways: { status: 'selected' } });
   await pickGateways(t, 'random', 'FR');
-  q(t, 'input[name="exit_gateway_id"][value="B1"]').click();
+  q(t, 'input' + gatewayInput(t, 'exit') + '[value="B1"]').click();
   actionBtn(t).click();
   await sleep(400);
-  check(eq(callsTo(t, 'gateway_set')[0], { entry_country: null, exit_country: null, entry_id: null, exit_id: 'B1', entry_random: true, exit_random: false, residential_exit: null }),
+  check(eq(callsTo(t, 'gateway_set')[0], { entry_country: null, exit_country: null, entry_id: null, exit_id: 'B1', entry_random: true, exit_random: false, residential_exit: null, tunnel: 'wg' }),
     'random entry + specific exit id: ' + JSON.stringify(callsTo(t, 'gateway_set')[0]));
 }
 
@@ -511,7 +661,7 @@ async function scenarioNeedsRelaxed() {
   check(!modal(t2) && callsTo(t2, 'connect').length === 0, 'modal closed, no connect issued');
   check(actionBtn(t2).textContent === 'Connect' && !actionBtn(t2).disabled, 'button back to Connect');
   check(q(t2, '.nym-status-hero').className === 'nym-status-hero disconnected', 'hero back to disconnected');
-  check(t2.document.activeElement === q(t2, 'select[name="entry_country"]'), 'entry picker focused');
+  check(t2.document.activeElement === countrySel(t2, 'entry'), 'entry picker focused');
 
   section('connect: needs_relaxed + reminders off -> relaxed connect + toast');
   const t3 = connectEnv({ tentative_gateways: { status: 'needs_relaxed' } }, { tunnel_config: Object.assign({}, TUNNEL, { gateway_independence: { enabled: true, notifications: false } }) });
@@ -638,7 +788,7 @@ async function scenarioConnectedFamilies() {
   const st3 = { state: 'connected', connected_seconds: 1, entry_name: 'a', entry_id: 'A', exit_name: 'b', exit_id: 'B' };
   const t3 = setup({ init: baseInit({ status: st3, tunnel_config: Object.assign({}, TUNNEL, { two_hop: 'off' }) }), rpc: { status: st3 } });
   check(qa(t3, '.nym-gateway-family').length === 0 && q(t3, '.nym-gateway-name').textContent === 'a', 'older bridge without family: panels unchanged');
-  check(t3.container.querySelectorAll('.nym-chain-node').length === 5 && q(t3, '.nym-mode-label').textContent === 'Anonymous Mode', 'five-hop chain, Anonymous Mode');
+  check(t3.container.querySelectorAll('.nym-chain-node').length === 5 && q(t3, '.nym-mode-label').textContent === 'Mixnet Mode', 'five-hop chain, Mixnet Mode');
   const chain = q(t3, '.nym-connection-chain').innerHTML;
   await t3.poll.fire(5);
   check(q(t3, '.nym-connection-chain').innerHTML === chain && qa(t3, '.nym-gateway-name').length === 2, 'unchanged status poll does not rebuild the chain');
@@ -739,12 +889,12 @@ async function scenarioSplit() {
   check(toasts(t).indexOf('Select a device') !== -1, 'device required');
   byId(t, 'nym-split-client').value = 'aa:bb:cc:dd:ee:ff';
   byId(t, 'nym-split-client-save').click();
-  check(toasts(t).indexOf('That device is already excluded') !== -1, 'duplicate device rejected');
+  check(toasts(t).indexOf('That device is already in the list') !== -1, 'duplicate device rejected');
   byId(t, 'nym-split-domain').value = 'Example.COM';
   byId(t, 'nym-split-domain-label').value = 'ex';
   byId(t, 'nym-split-domain-save').click();
   await sleep(20);
-  check(eq(callsTo(t, 'split_add'), [{ type: 'domain', mac: '', domain: 'example.com', label: 'ex' }]), 'domain lower-cased: ' + JSON.stringify(callsTo(t, 'split_add')));
+  check(eq(callsTo(t, 'split_add'), [{ type: 'domain', mac: '', domain: 'example.com', label: 'ex', via: 'wan' }]), 'domain lower-cased, bypass by default: ' + JSON.stringify(callsTo(t, 'split_add')));
   check(qa(t, '.nym-split-row').length === 2 && byId(t, 'nym-split-domain').value === '', 'row added and input cleared');
   const sw = qa(t, '.nym-split-row input[type="checkbox"]')[0];
   sw.checked = false;
@@ -780,6 +930,35 @@ async function scenarioSplit() {
   const t2 = setup({ init: baseInit({ split_status: { nftset_supported: false }, clients: [] }) });
   check(!byId(t2, 'nym-split-domain') && /dnsmasq-full/.test(q(t2, '.nym-split-section').textContent), 'no nftset: domain row replaced by the dnsmasq-full hint');
   check(byId(t2, 'nym-split-client').options[0].textContent === 'No DHCP leases found', 'no leases placeholder');
+
+  // Mixnet routes: the route select drives split_set_via, the add forms
+  // carry the route, and a note says what mixnet routes have right now.
+  const up = { state: 'up', connected_seconds: 9, entry: { id: 'M1' }, exit: { id: 'M2', name: 'mix-exit', country: 'CH' } };
+  const tm = setup({ init: baseInit({ status: Object.assign({}, CONNECTED, { mode: 'wireguard', side_tunnel: up }),
+      split_exclusions: [{ id: 'x1', type: 'client', mac: 'aa:bb:cc:dd:ee:ff', enabled: 1, via: 'wan' }] }),
+    rpc: { split_set_via: { success: true }, split_add: { success: true, id: 'x2' } } });
+  const note = byId(tm, 'nym-split-mixnet-note');
+  check(note.style.display === 'none', 'no mixnet route: no mixnet note');
+  const via = q(tm, '.nym-split-row .nym-split-via');
+  check(via.value === 'wan', 'route select shows the stored route');
+  via.value = 'mixnet';
+  fire(tm, via, 'change');
+  await sleep(20);
+  check(eq(callsTo(tm, 'split_set_via'), [{ id: 'x1', via: 'mixnet' }]) && q(tm, '.nym-split-row .nym-split-via').value === 'mixnet', 'route change -> split_set_via, row follows');
+  check(note.style.display === 'block' && note.textContent === 'Mixnet tunnel up, exiting via mix-exit.' && !note.classList.contains('nym-note-warn'), 'mixnet note: tunnel up');
+  const store = tm.require('nym-vpn.store');
+  store.applyStatus(Object.assign({}, CONNECTED, { mode: 'wireguard', side_tunnel: { state: 'connecting', retry_attempt: 2 } }));
+  check(/connecting \(retry 2\)/.test(note.textContent) && note.classList.contains('nym-note-warn'), 'mixnet note follows the poll: connecting, warned');
+  store.applyStatus(Object.assign({}, CONNECTED, { mode: 'mixnet' }));
+  check(/Mixnet mode/.test(note.textContent), 'mixnet note: Mixnet mode carries everything');
+  store.applyStatus({ state: 'disconnected' });
+  check(/while the VPN is disconnected/.test(note.textContent), 'mixnet note: VPN disconnected');
+  byId(tm, 'nym-split-domain').value = 'exchange.example.com';
+  byId(tm, 'nym-split-domain-route').value = 'mixnet';
+  byId(tm, 'nym-split-domain-save').click();
+  await sleep(20);
+  check(eq(callsTo(tm, 'split_add'), [{ type: 'domain', mac: '', domain: 'exchange.example.com', label: '', via: 'mixnet' }]) && toasts(tm).indexOf('Added mixnet route') !== -1, 'add with the mixnet route');
+  check(qa(tm, '.nym-split-row').length === 2 && qa(tm, '.nym-split-row .nym-split-via')[1].value === 'mixnet', 'added row shows its route');
 }
 
 async function scenarioDns() {
@@ -1037,13 +1216,13 @@ async function scenarioDaemonTimeout() {
   // which would each wait on the same hung daemon again.
   const hung = { success: false, error: TIMEOUT, error_code: 'daemon_timeout' };
   const tGw = setup({ rpc: { gateway_list_full: hung, gateway_list_countries: { countries: [{ code: 'DE', count: 1 }] } } });
-  await q(tGw, 'select[name="entry_country"]').ensureLoaded();
-  check(callsTo(tGw, 'gateway_list_countries').length === 0 && q(tGw, 'select[name="entry_country"]').options[0].textContent === '— Failed to load —', 'timed-out gateway list: no per-country fallback, dropdown says it failed');
+  await countrySel(tGw, 'entry').ensureLoaded();
+  check(callsTo(tGw, 'gateway_list_countries').length === 0 && countrySel(tGw, 'entry').options[0].textContent === '— Failed to load —', 'timed-out gateway list: no per-country fallback, dropdown says it failed');
   const tGw2 = setup({ rpc: { gateway_list_full: hung, gateway_list_by_country: { gateways: [GATEWAYS[0]] } } });
   const rejected = await tGw2.modules['nym-vpn.api'].gatewaysForCountry('mixnet-entry', 'DE').then(() => null, (e) => e);
   check(callsTo(tGw2, 'gateway_list_by_country').length === 0 && rejected && rejected.code === 'daemon_timeout' && rejected.message === TIMEOUT, 'timed-out gateway list: no per-country list fallback, rejects with the reason');
   const tOld = setup({ rpc: { gateway_list_full: { error: 'no bridge' }, gateway_list_countries: { countries: [{ code: 'DE', count: 1 }] } } });
-  await q(tOld, 'select[name="entry_country"]').ensureLoaded();
+  await countrySel(tOld, 'entry').ensureLoaded();
   check(callsTo(tOld, 'gateway_list_countries').length === 1, 'other failures still fall back for older backends');
 
   let diagTimeout;
@@ -1099,7 +1278,7 @@ async function scenarioHostileStrings() {
   const t2 = connectEnv({ gateway_list_full: { gateways: gws }, tentative_gateways: tent, connect: { success: false, error: H } });
   await pickGateways(t2, H, H);
   check(injected(t2) === 0, 'hostile directory: no injected elements (' + injected(t2) + ')');
-  check(Array.from(q(t2, 'select[name="entry_country"]').options).some((o) => o.textContent.indexOf(H) !== -1), 'unknown country code shown as text in the dropdown');
+  check(Array.from(countrySel(t2, 'entry').options).some((o) => o.textContent.indexOf(H) !== -1), 'unknown country code shown as text in the dropdown');
   check(qa(t2, '.nym-gateway-option-name').filter((e) => e.textContent === H && e.title === H).length === 2, 'picker row names round-trip');
   check(shows(t2, '.nym-gateway-option-perf') && shows(t2, '.nym-gateway-option-city') && shows(t2, '.nym-gateway-option-family'), 'performance, city and family round-trip');
   actionBtn(t2).click();
@@ -1128,6 +1307,7 @@ async function scenarioHostileStrings() {
   await scenarioIndependenceToggles();
   await scenarioFallbackTunnelGet();
   await scenarioPickers();
+  await scenarioModeSwitch();
   await scenarioConnectSelectionGuard();
   await scenarioConnectPlain();
   await scenarioNeedsRelaxed();

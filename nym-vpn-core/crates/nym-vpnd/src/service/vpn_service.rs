@@ -96,6 +96,8 @@ pub enum VpnServiceCommand {
     GetConfig(oneshot::Sender<VpnServiceConfig>, ()),
     SetEntryPoint(oneshot::Sender<Result<(), String>>, EntryPoint),
     SetExitPoint(oneshot::Sender<Result<(), String>>, ExitPoint),
+    SetMixnetEntryPoint(oneshot::Sender<Result<(), String>>, EntryPoint),
+    SetMixnetExitPoint(oneshot::Sender<Result<(), String>>, ExitPoint),
     SetDisableIPv6(oneshot::Sender<Result<(), String>>, bool),
     SetEnableTwoHop(oneshot::Sender<Result<(), String>>, bool),
     SetEnableLewesProtocol(oneshot::Sender<Result<(), String>>, bool),
@@ -105,6 +107,7 @@ pub enum VpnServiceCommand {
     SetLegacySplitTunnel(oneshot::Sender<Result<(), String>>, bool),
     SetStealthApi(oneshot::Sender<Result<(), String>>, bool),
     SetAlwaysOn(oneshot::Sender<Result<(), String>>, bool),
+    SetDualTunnel(oneshot::Sender<Result<(), String>>, bool),
     GetAlwaysOnStatus(oneshot::Sender<AlwaysOnStatus>, ()),
     SetEnableGatewayIndependence(oneshot::Sender<Result<(), String>>, bool),
     SetGatewayIndependenceNotifications(oneshot::Sender<Result<(), String>>, bool),
@@ -843,7 +846,8 @@ impl NymVpnService {
             // Waits out a reader rather than dropping the update. Every reader
             // clones the state and releases its guard without awaiting, so the
             // wait is short and cannot deadlock.
-            *self.tunnel_state.write().await = new_state.clone();
+            let previous_state =
+                std::mem::replace(&mut *self.tunnel_state.write().await, new_state.clone());
             self.update_idle_hint(new_state);
 
             let action = self
@@ -878,7 +882,9 @@ impl NymVpnService {
             }
 
             // SOCKS5 enabled before the VPN may sit on a different gateway.
+            // A Connected repeated for a side-tunnel change is no new connection.
             if matches!(new_state, TunnelState::Connected { .. })
+                && !matches!(previous_state, TunnelState::Connected { .. })
                 && self.socks5_service.is_enabled()
             {
                 tracing::warn!(
@@ -955,6 +961,14 @@ impl NymVpnService {
                 let result = self.handle_set_exit_point(exit_point).await;
                 let _ = tx.send(result);
             }
+            VpnServiceCommand::SetMixnetEntryPoint(tx, entry_point) => {
+                let result = self.handle_set_mixnet_entry_point(entry_point).await;
+                let _ = tx.send(result);
+            }
+            VpnServiceCommand::SetMixnetExitPoint(tx, exit_point) => {
+                let result = self.handle_set_mixnet_exit_point(exit_point).await;
+                let _ = tx.send(result);
+            }
             VpnServiceCommand::SetDisableIPv6(tx, disable_ipv6) => {
                 let result = self.handle_set_disable_ipv6(disable_ipv6).await;
                 let _ = tx.send(result);
@@ -991,6 +1005,10 @@ impl NymVpnService {
             }
             VpnServiceCommand::SetAlwaysOn(tx, always_on) => {
                 let result = self.handle_set_always_on(always_on).await;
+                let _ = tx.send(result);
+            }
+            VpnServiceCommand::SetDualTunnel(tx, dual_tunnel) => {
+                let result = self.handle_set_dual_tunnel(dual_tunnel).await;
                 let _ = tx.send(result);
             }
             VpnServiceCommand::GetAlwaysOnStatus(tx, ()) => {
@@ -1227,6 +1245,24 @@ impl NymVpnService {
         result
     }
 
+    async fn handle_set_mixnet_entry_point(
+        &mut self,
+        entry_point: EntryPoint,
+    ) -> Result<(), String> {
+        let result = self
+            .config_manager
+            .set_mixnet_entry_point(entry_point)
+            .await;
+        self.update_tunnel_settings_with_throttle();
+        result
+    }
+
+    async fn handle_set_mixnet_exit_point(&mut self, exit_point: ExitPoint) -> Result<(), String> {
+        let result = self.config_manager.set_mixnet_exit_point(exit_point).await;
+        self.update_tunnel_settings_with_throttle();
+        result
+    }
+
     async fn handle_set_disable_ipv6(&mut self, disable_ipv6: bool) -> Result<(), String> {
         let result = self.config_manager.set_disable_ipv6(disable_ipv6).await;
         self.update_tunnel_settings_with_throttle();
@@ -1277,6 +1313,13 @@ impl NymVpnService {
             .config_manager
             .set_legacy_split_tunnel(legacy_split_tunnel)
             .await;
+        self.update_tunnel_settings_with_throttle();
+        result
+    }
+
+    /// Starts or stops the mixnet side tunnel only; the two-hop tunnel stays.
+    async fn handle_set_dual_tunnel(&mut self, dual_tunnel: bool) -> Result<(), String> {
+        let result = self.config_manager.set_dual_tunnel(dual_tunnel).await;
         self.update_tunnel_settings_with_throttle();
         result
     }
@@ -1565,10 +1608,16 @@ impl NymVpnService {
             )),
             _ => None,
         };
+        // The pair of the mode in use.
+        let (entry_point, exit_point) = if config.enable_two_hop {
+            (&config.entry_point, &config.exit_point)
+        } else {
+            (&config.mixnet_entry_point, &config.mixnet_exit_point)
+        };
         let ctx = GatewayTestContext {
             gateway_cache: self.gateway_cache_handle.clone(),
-            entry_point: config.entry_point.clone(),
-            exit_point: config.exit_point.clone(),
+            entry_point: entry_point.clone(),
+            exit_point: exit_point.clone(),
             two_hop: config.enable_two_hop,
             active,
         };

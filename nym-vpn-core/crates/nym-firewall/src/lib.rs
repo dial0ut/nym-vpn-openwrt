@@ -56,6 +56,9 @@ pub enum FirewallPolicy {
         peer_endpoints: Vec<AllowedEndpoint>,
         /// Metadata about the tunnels and tunnel interfaces.
         tunnel: TunnelInterface,
+        /// A second tunnel running beside `tunnel` for marked traffic. It
+        /// reaches its gateway through `tunnel`, so it adds no peer endpoint.
+        side_tunnel: Option<TunnelMetadata>,
         /// Flag setting if communication with LAN networks should be possible.
         allow_lan: bool,
         /// Servers that are allowed to respond to DNS requests.
@@ -210,19 +213,23 @@ impl fmt::Display for FirewallPolicy {
             FirewallPolicy::Connected {
                 peer_endpoints,
                 tunnel,
+                side_tunnel,
                 allow_lan,
                 dns_config,
                 allowed_endpoints,
                 inbound_exemptions,
-                ..
             } => {
                 let dns_str = display_allowed_non_tunnel_dns(dns_config);
 
                 write!(
                     f,
-                    "Connected to {} over {}, {} LAN. Allowing endpoints: {}. Allowing non-tunnel DNS: {}. Inbound exemptions: {}",
+                    "Connected to {} over {}{}, {} LAN. Allowing endpoints: {}. Allowing non-tunnel DNS: {}. Inbound exemptions: {}",
                     display_peer_endpoints(peer_endpoints),
                     display_tunnel_interface(tunnel),
+                    side_tunnel
+                        .as_ref()
+                        .map(|side| format!(", side {}", display_tunnel_metadata(side)))
+                        .unwrap_or_default(),
                     if *allow_lan { "Allowing" } else { "Blocking" },
                     display_allowed_endpoints(allowed_endpoints),
                     dns_str,

@@ -58,6 +58,16 @@ const SUPPRESS_RULE_PRIORITY: u32 = 100;
 /// It must be evaluated AFTER the suppress rule to allow LAN routes to take precedence.
 const TUNNEL_RULE_PRIORITY: u32 = 200;
 
+/// Priority of the side-tunnel lookup. After the suppress rule, so marked
+/// traffic still reaches the LAN; before the tunnel rule, which would take it
+/// into the primary tunnel.
+const SIDE_TUNNEL_RULE_PRIORITY: u32 = 150;
+
+/// Priority of the rule that makes marked traffic unreachable when the
+/// side-tunnel table has no route for it: the side tunnel is down, or the
+/// family is not tunnelled.
+const SIDE_TUNNEL_UNREACHABLE_RULE_PRIORITY: u32 = 151;
+
 static SUPPRESS_RULE_V4: LazyLock<RuleMessage> = LazyLock::new(|| {
     let mut rule = RuleMessage::default();
     rule.header = RuleHeader {
@@ -137,6 +147,39 @@ fn exempt_rule_v6() -> RuleMessage {
     let mut v6_rule = exempt_rule_v4();
     v6_rule.header.family = AddressFamily::Inet6;
     v6_rule
+}
+
+/// Lookup and unreachable rules for [`crate::SIDE_TUNNEL_FWMARK`], both
+/// families: the side-tunnel table, then nothing.
+fn side_tunnel_rules() -> Vec<RuleMessage> {
+    let mut rules = Vec::new();
+    for family in [AddressFamily::Inet, AddressFamily::Inet6] {
+        let mut lookup = RuleMessage::default();
+        lookup.header = RuleHeader {
+            family,
+            action: RuleAction::ToTable,
+            ..RuleHeader::default()
+        };
+        lookup.attributes = vec![
+            RuleAttribute::Priority(SIDE_TUNNEL_RULE_PRIORITY),
+            RuleAttribute::FwMark(crate::SIDE_TUNNEL_FWMARK),
+            RuleAttribute::Table(crate::SIDE_TUNNEL_TABLE_ID),
+        ];
+        rules.push(lookup);
+
+        let mut unreachable = RuleMessage::default();
+        unreachable.header = RuleHeader {
+            family,
+            action: RuleAction::Unreachable,
+            ..RuleHeader::default()
+        };
+        unreachable.attributes = vec![
+            RuleAttribute::Priority(SIDE_TUNNEL_UNREACHABLE_RULE_PRIORITY),
+            RuleAttribute::FwMark(crate::SIDE_TUNNEL_FWMARK),
+        ];
+        rules.push(unreachable);
+    }
+    rules
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -250,15 +293,34 @@ impl RouteManagerImpl {
             .into_iter()
             .filter(|rule| rule.header.family == AddressFamily::Inet || enable_ipv6)
         {
-            let mut req = NetlinkMessage::from(RouteNetlinkMessage::NewRule(rule));
-            req.header.flags = NLM_F_REQUEST | NLM_F_ACK | NLM_F_CREATE | NLM_F_REPLACE;
+            self.add_rule(rule).await?;
+        }
 
-            let mut response = self.handle.request(req).map_err(Error::Netlink)?;
-
-            while let Some(message) = response.next().await {
-                if let NetlinkPayload::Error(error) = message.payload {
-                    return Err(Error::Netlink(rtnetlink::Error::NetlinkError(error)));
+        // Whether or not a side tunnel runs: marked traffic is unreachable
+        // unless one carries it. IPv6 too when the tunnels carry none, so
+        // that marked IPv6 never meets the main table's WAN route.
+        for rule in side_tunnel_rules() {
+            match self.add_rule(rule).await {
+                Err(Error::Netlink(rtnetlink::Error::NetlinkError(error)))
+                    if error.code == NonZeroI32::new(-libc::EAFNOSUPPORT) =>
+                {
+                    tracing::debug!("No IPv6 in the kernel; side-tunnel rules are IPv4 only");
                 }
+                result => result?,
+            }
+        }
+        Ok(())
+    }
+
+    async fn add_rule(&mut self, rule: RuleMessage) -> Result<()> {
+        let mut req = NetlinkMessage::from(RouteNetlinkMessage::NewRule(rule));
+        req.header.flags = NLM_F_REQUEST | NLM_F_ACK | NLM_F_CREATE | NLM_F_REPLACE;
+
+        let mut response = self.handle.request(req).map_err(Error::Netlink)?;
+
+        while let Some(message) = response.next().await {
+            if let NetlinkPayload::Error(error) = message.payload {
+                return Err(Error::Netlink(rtnetlink::Error::NetlinkError(error)));
             }
         }
         Ok(())
@@ -269,7 +331,10 @@ impl RouteManagerImpl {
         // Clear every rule we might ever have installed — including the
         // optional exempt rules — so a config flip from "exempt on" to
         // "exempt off" cleans up properly.
-        for rule in all_rules(self.fwmark, self.table_id, true) {
+        for rule in all_rules(self.fwmark, self.table_id, true)
+            .into_iter()
+            .chain(side_tunnel_rules())
+        {
             let mut matching_rule = None;
 
             // `RTM_DELRULE` is way too picky about which rules are considered the same.
@@ -323,14 +388,7 @@ impl RouteManagerImpl {
 
         if enable {
             for rule in rules {
-                let mut req = NetlinkMessage::from(RouteNetlinkMessage::NewRule(rule));
-                req.header.flags = NLM_F_REQUEST | NLM_F_ACK | NLM_F_CREATE | NLM_F_REPLACE;
-                let mut response = self.handle.request(req).map_err(Error::Netlink)?;
-                while let Some(message) = response.next().await {
-                    if let NetlinkPayload::Error(error) = message.payload {
-                        return Err(Error::Netlink(rtnetlink::Error::NetlinkError(error)));
-                    }
-                }
+                self.add_rule(rule).await?;
             }
         } else {
             // Walk the live rule table once, find any matching exempt rules
@@ -409,10 +467,10 @@ impl RouteManagerImpl {
         for route in required_routes {
             match route.node {
                 NetNode::RealNode(node) => {
-                    let table = if route.main_table {
-                        RouteHeader::RT_TABLE_MAIN.into()
-                    } else {
-                        self.table_id
+                    let table = match route.table_id {
+                        Some(table_id) => table_id,
+                        None if route.main_table => RouteHeader::RT_TABLE_MAIN.into(),
+                        None => self.table_id,
                     };
                     let mut new_route = Route::new(node, route.prefix).table(table);
                     new_route.mtu = route.mtu.map(u32::from);
@@ -485,6 +543,21 @@ impl RouteManagerImpl {
         }
     }
 
+    async fn cleanup_table_routes(&mut self, table_id: u32) {
+        let routes: Vec<Route> = self
+            .added_routes
+            .iter()
+            .filter(|route| route.table_id == table_id)
+            .cloned()
+            .collect();
+        for route in &routes {
+            self.added_routes.remove(route);
+            if let Err(e) = self.delete_route_if_exists(route).await {
+                tracing::error!("Failed to remove route: {}: {}", route, e);
+            }
+        }
+    }
+
     pub(crate) async fn run(
         mut self,
         mut manage_rx: UnboundedReceiver<RouteManagerCommand>,
@@ -541,6 +614,11 @@ impl RouteManagerImpl {
             Some(RouteManagerCommand::ClearRoutes) => {
                 tracing::debug!("Clearing routes");
                 self.cleanup_routes().await;
+            }
+            Some(RouteManagerCommand::ClearTableRoutes(table_id, done_tx)) => {
+                tracing::debug!("Clearing routes in table {table_id}");
+                self.cleanup_table_routes(table_id).await;
+                let _ = done_tx.send(());
             }
         }
         Ok(())
@@ -1046,6 +1124,44 @@ impl NetworkInterface {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    fn priority(rule: &RuleMessage) -> u32 {
+        rule.attributes
+            .iter()
+            .find_map(|nla| match nla {
+                RuleAttribute::Priority(priority) => Some(*priority),
+                _ => None,
+            })
+            .expect("every rule has a priority")
+    }
+
+    #[test]
+    fn side_tunnel_rules_sit_between_suppress_and_tunnel() {
+        let rules = side_tunnel_rules();
+        for family in [AddressFamily::Inet, AddressFamily::Inet6] {
+            let of_family: Vec<_> = rules.iter().filter(|r| r.header.family == family).collect();
+            let [lookup, unreachable] = of_family[..] else {
+                panic!("expected a lookup and an unreachable rule for {family:?}");
+            };
+            assert_eq!(lookup.header.action, RuleAction::ToTable);
+            assert!(
+                lookup
+                    .attributes
+                    .contains(&RuleAttribute::Table(crate::SIDE_TUNNEL_TABLE_ID))
+            );
+            assert_eq!(unreachable.header.action, RuleAction::Unreachable);
+            for rule in [lookup, unreachable] {
+                assert!(
+                    rule.attributes
+                        .contains(&RuleAttribute::FwMark(crate::SIDE_TUNNEL_FWMARK))
+                );
+                assert_eq!(rule.header.flags, RuleFlags::empty(), "positive mark match");
+            }
+            assert!(SUPPRESS_RULE_PRIORITY < priority(lookup));
+            assert!(priority(lookup) < priority(unreachable));
+            assert!(priority(unreachable) < TUNNEL_RULE_PRIORITY);
+        }
+    }
 
     /// Tests if dropping inside a tokio runtime panics
     #[test]

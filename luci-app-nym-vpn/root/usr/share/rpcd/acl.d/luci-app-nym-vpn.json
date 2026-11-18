@@ -45,6 +45,7 @@
           "split_add",
           "split_del",
           "split_set_enabled",
+          "split_set_via",
           "ad_block_set",
           "dns_set",
           "daemon_restart",

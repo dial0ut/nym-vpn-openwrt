@@ -16,6 +16,14 @@ use netlink_packet_route::route::RouteHeader;
 
 pub use imp::{Error, RouteManagerHandle};
 
+/// Firewall mark of traffic that goes through the side tunnel. It is looked
+/// up in [`SIDE_TUNNEL_TABLE_ID`] and is unreachable when that table has no
+/// route, so it never falls back to the primary tunnel or the WAN.
+pub const SIDE_TUNNEL_FWMARK: u32 = 0x14f;
+
+/// Routing table holding the side tunnel's default routes.
+pub const SIDE_TUNNEL_TABLE_ID: u32 = 0x14f;
+
 /// A network route with a specific network node, destination and an optional metric.
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
 pub struct Route {
@@ -73,6 +81,8 @@ pub struct RequiredRoute {
     node: NetNode,
     /// Specifies whether the route should be added to the main routing table or not.
     main_table: bool,
+    /// A table other than main or the tunnel table; overrides `main_table`.
+    table_id: Option<u32>,
     /// Specifies route MTU
     mtu: Option<u16>,
 }
@@ -84,6 +94,7 @@ impl RequiredRoute {
             node: node.into(),
             prefix,
             main_table: true,
+            table_id: None,
             mtu: None,
         }
     }
@@ -91,6 +102,12 @@ impl RequiredRoute {
     /// Sets the routing table ID of the route.
     pub fn use_main_table(mut self, main_table: bool) -> Self {
         self.main_table = main_table;
+        self
+    }
+
+    /// Puts the route in the given table instead.
+    pub fn in_table(mut self, table_id: u32) -> Self {
+        self.table_id = Some(table_id);
         self
     }
 

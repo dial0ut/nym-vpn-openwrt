@@ -753,12 +753,19 @@ impl TunnelStateHandler for ConnectingState {
                             }
                         }
 
+                        // As in the connected state: a pair picked before a
+                        // gateway was pinned for the side tunnel is re-selected.
+                        let side_pin_taken = diff.side_gateways_changed()
+                            && self.selected_gateways.as_ref().is_some_and(|gateways| {
+                                shared_state.tunnel_settings.side_tunnel_pins_taken_by(gateways)
+                            });
+
                         // Not all changes require the tunnel to be reconnected
-                        if diff.only_hot_appliable_changed() || (diff.only_mixnet_performance_options_changed() && shared_state.tunnel_settings.tunnel_type == TunnelType::Wireguard) {
+                        if (diff.only_hot_appliable_changed() || (diff.only_mixnet_performance_options_changed() && shared_state.tunnel_settings.tunnel_type == TunnelType::Wireguard)) && !side_pin_taken {
                             return NextTunnelState::SameState(self);
                         }
 
-                        let next_gateways = if diff.affects_gateway_selection() {
+                        let next_gateways = if diff.affects_gateway_selection() || side_pin_taken {
                             None
                         } else {
                             self.selected_gateways

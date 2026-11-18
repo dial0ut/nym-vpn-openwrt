@@ -71,6 +71,7 @@ nav:
       - CLI Usage: guide/cli.md
       - Inbound Services: guide/inbound-services.md
       - Split Tunneling: guide/split-tunneling.md
+      - Dual Tunnel: guide/dual-tunnel.md
       - DNS: guide/dns.md
   - Architecture:
       - Overview: architecture/overview.md

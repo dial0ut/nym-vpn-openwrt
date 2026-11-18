@@ -3,7 +3,10 @@
 
 use crate::service::{
     ConfigSetupError,
-    config::entry_exit::legacy::{EntryPoint, ExitPoint},
+    config::{
+        entry_exit::legacy::{EntryPoint, ExitPoint},
+        split_shared_pair,
+    },
 };
 use serde::Deserialize;
 
@@ -18,13 +21,21 @@ impl TryFrom<VpnServiceConfig> for nym_vpn_lib_types::VpnServiceConfig {
     type Error = ConfigSetupError;
 
     fn try_from(value: VpnServiceConfig) -> Result<Self, Self::Error> {
+        let pairs = split_shared_pair(
+            value.entry_point.try_into()?,
+            value.exit_point.try_into()?,
+            nym_vpn_lib_types::VpnServiceConfig::default().enable_two_hop,
+        );
         Ok(Self {
-            entry_point: value.entry_point.try_into()?,
-            exit_point: value.exit_point.try_into()?,
+            entry_point: pairs.entry_point,
+            exit_point: pairs.exit_point,
+            mixnet_entry_point: pairs.mixnet_entry_point,
+            mixnet_exit_point: pairs.mixnet_exit_point,
             killswitch: false,
             legacy_split_tunnel: false,
             stealth_api: false,
             always_on: false,
+            dual_tunnel: false,
             gateway_independence: Default::default(),
             ..Default::default()
         })
