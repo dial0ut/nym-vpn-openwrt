@@ -291,7 +291,7 @@ return baseclass.extend({
             card.group({
                 title: 'Exclusions',
                 moreId: 'exclusions',
-                more: 'Chosen devices or domains leave the tunnel. Bypass VPN sends them straight to the WAN; everything else stays in the tunnel and the kill-switch keeps covering it. Mixnet sends them through the mixnet while fast mode carries everything else (dual tunnel): they never fall back to the fast tunnel or the WAN, and have no connection until the mixnet tunnel is up. Devices are matched by MAC address, so they survive an IP change. Domain rules need clients to use this router for DNS. A bypassed device\'s own DNS still goes through the tunnel; a mixnet device\'s goes through the mixnet.',
+                more: 'Chosen devices or domains leave the tunnel. Bypass VPN sends them straight to the WAN; everything else stays in the tunnel and the kill-switch keeps covering it. Mixnet sends them through the mixnet while fast mode carries everything else (dual tunnel): they never fall back to the fast tunnel or the WAN, and have no connection until the mixnet tunnel is up. Where routes overlap the mixnet wins, so a bypass domain does not apply to a mixnet device. Devices are matched by MAC address, so they survive an IP change. Domain rules need clients to use this router for DNS. A bypassed device\'s own DNS still goes through the tunnel; a mixnet device\'s goes through the mixnet.',
                 docs: 'exclusions',
                 body: [
                     mixnetNote,

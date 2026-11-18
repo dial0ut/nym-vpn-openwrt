@@ -81,7 +81,8 @@ A domain exclusion is destination-IP based, not per-device. The router resolves 
 the answer addresses into an nftables set, which carves out traffic to those addresses from **all**
 clients. For a domain behind a large shared front-end — Cloudflare, Fastly, Akamai shared IPs —
 that can pull far more out of the tunnel than you intended, since the same addresses serve many
-unrelated sites.
+unrelated sites. Devices routed through the mixnet are the exception: their traffic stays in the
+mixnet ([Dual Tunnel](dual-tunnel.md)).
 
 Domain rules also need dnsmasq to actually see the query. A client using its own DoH — a browser
 with secure DNS on — never asks dnsmasq, so the rule silently does not apply to it. Same if

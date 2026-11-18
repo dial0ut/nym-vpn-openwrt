@@ -50,7 +50,8 @@ its exit), connecting, or the VPN is disconnected.
 The same limits as for [exclusions](split-tunneling.md#managed-exclusions-luci) apply: OpenWrt 22.03
 or newer (fw4), devices on the router's own network segment, and `dnsmasq-full` for domains.
 
-If a device is on the list twice, through a domain and as a device, the mixnet route wins.
+Where routes overlap, the mixnet wins. A mixnet device stays in the mixnet even when it reaches
+a bypass domain, and a bypassed device reaching a mixnet domain uses the mixnet.
 
 ## Without LuCI
 
