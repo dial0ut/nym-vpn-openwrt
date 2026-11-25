@@ -52,11 +52,13 @@ var routeSelect = function(attrs, via) {
 };
 
 // What the mixnet routes have right now, from the live status.
-var mixnetRouteNote = function(status) {
+var mixnetRouteNote = function(status, killswitchOn) {
     var st = status || {};
     var side = st.side_tunnel;
     if (!st.connected)
-        return { warn: true, text: 'Mixnet routes have no connection while the VPN is disconnected.' };
+        return { warn: true, text: killswitchOn
+            ? 'Mixnet routes have no connection while the VPN is disconnected.'
+            : 'The VPN is disconnected and the kill-switch is off: mixnet routes use your normal connection.' };
     if (st.mode === 'mixnet')
         return { warn: false, text: 'Mixnet mode: all traffic already goes through the mixnet.' };
     if (side && side.state === 'up') {
@@ -95,7 +97,7 @@ return baseclass.extend({
             var routed = state.some(function(ex) { return isOn(ex) && viaOf(ex) === 'mixnet'; });
             mixnetNote.style.display = routed ? 'block' : 'none';
             if (!routed) return;
-            var note = mixnetRouteNote(store.status);
+            var note = mixnetRouteNote(store.status, store.tunnelSwitches.killswitch && !store.tunnelSwitches.legacy_split_tunnel);
             mixnetNote.className = 'nym-note' + (note.warn ? ' nym-note-warn' : '');
             mixnetNote.textContent = note.text;
         };
