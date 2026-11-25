@@ -10,6 +10,7 @@
 pub mod amnezia;
 #[cfg(feature = "amnezia")]
 pub mod amnezia_udp;
+mod two_hop;
 pub mod wireguard_go;
 
 use std::{fmt, net::SocketAddr};

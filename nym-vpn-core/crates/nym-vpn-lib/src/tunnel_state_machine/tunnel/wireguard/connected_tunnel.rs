@@ -93,16 +93,20 @@ impl ConnectedTunnel {
             None,
         );
 
-        let entry_tunnel = wireguard_go::Tunnel::start(
+        // The exit tunnel's datagrams reach the entry tunnel in-process, not
+        // through the entry interface. That interface still carries the
+        // daemon's own traffic to the entry gateway's in-tunnel services.
+        let link = wireguard_go::TwoHopLink {
+            source_v4: self.connection_data.entry.private_ipv4,
+            source_v6: self.connection_data.entry.private_ipv6,
+            exit_endpoint: self.connection_data.exit.endpoint,
+        };
+        let (entry_tunnel, exit_tunnel) = wireguard_go::Tunnel::start_two_hop(
             wg_entry_config.into_wireguard_config(),
             options.entry_tun,
-        )
-        .await
-        .map_err(Error::Wireguard)?;
-
-        let exit_tunnel = wireguard_go::Tunnel::start(
             wg_exit_config.into_wireguard_config(),
             options.exit_tun,
+            link,
         )
         .await
         .map_err(Error::Wireguard)?;
