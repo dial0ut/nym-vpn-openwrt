@@ -195,8 +195,11 @@ impl RequestZkNymTask {
 
         // Once we successfully manage to import the zk-nym ticketbook,
         // or upgrade mode attestation, we tell the vpn-api that we
-        // have downloaded it.
-        self.confirm_zk_nym_downloaded(&id).await?;
+        // have downloaded it. The import already happened, so a failure
+        // here must not fail the request.
+        if let Err(err) = self.confirm_zk_nym_downloaded(&id).await {
+            tracing::warn!("Non-fatal error confirming zk-nym download: {err}");
+        }
 
         // Remove the pending request from the storage. We no longer need it.
         self.remove_pending_request(&id).await?;
