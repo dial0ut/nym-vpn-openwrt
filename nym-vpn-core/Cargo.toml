@@ -55,6 +55,7 @@ opt-level = "s"
 
 [profile.release.package]
 gotatun.opt-level = 2
+nym-wg-gotatun.opt-level = 2
 ring.opt-level = 2
 aws-lc-sys.opt-level = 2
 aws-lc-rs.opt-level = 2

@@ -11,8 +11,11 @@ pub mod amnezia;
 #[cfg(feature = "amnezia")]
 pub mod amnezia_udp;
 mod data_plane;
+mod offload_tun;
 mod two_hop;
 pub mod wireguard_go;
+
+pub use offload_tun::enable_offload as enable_tun_offload;
 
 use std::{fmt, net::SocketAddr};
 

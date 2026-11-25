@@ -1135,6 +1135,7 @@ impl TunnelMonitor {
             None,
             entry_mtu,
             "nym0",
+            false,
         )?;
         let entry_tun_name = entry_tun
             .deref()
@@ -1161,6 +1162,8 @@ impl TunnelMonitor {
             Some(conn_data.entry.private_ipv4.into()),
             exit_mtu,
             "nym1",
+            // All traffic of the LAN crosses this interface.
+            true,
         )?;
         let exit_tun_name = exit_tun
             .deref()
@@ -1290,8 +1293,12 @@ impl TunnelMonitor {
         destination: Option<IpAddr>,
         mtu: u16,
         name: &str,
+        segmentation_offload: bool,
     ) -> Result<AsyncDevice> {
         let mut tun_config = tun::Configuration::default();
+        if segmentation_offload {
+            nym_wg_gotatun::enable_tun_offload(&mut tun_config);
+        }
 
         tun_config
             .tun_name(name)

@@ -19,6 +19,7 @@ use crate::amnezia::AmneziaConfig;
 pub use crate::two_hop::TwoHopLink;
 use crate::{
     data_plane::DataPlane,
+    offload_tun::{TunRx, TunTx},
     two_hop::{EntryIpRx, EntryIpTx, ExitUdpFactory},
 };
 
@@ -89,7 +90,7 @@ enum AnyDevice {
     /// Entry hop of a two-hop tunnel: also carries the exit device's datagrams.
     Entry(device::Device<(SocketUdp, EntryIpTx, EntryIpRx)>),
     /// Exit hop of a two-hop tunnel: its datagrams go to the entry device.
-    Exit(device::Device<(ExitUdpFactory, TunDevice, TunDevice)>),
+    Exit(device::Device<(ExitUdpFactory, TunTx, TunRx)>),
 }
 
 /// Runs `$body` with `$device` bound to the device of whichever variant.
@@ -188,6 +189,9 @@ impl Tunnel {
     /// interface: they are handed to the entry tunnel directly. `entry_tun`
     /// keeps carrying everything else the entry tunnel allows.
     ///
+    /// `exit_tun` uses segmentation offload when it was created with
+    /// [`crate::enable_tun_offload`].
+    ///
     /// Returns the entry and the exit tunnel.
     pub async fn start_two_hop(
         entry_config: Config,
@@ -216,24 +220,24 @@ impl Tunnel {
             .map_err(|e| Error::DeviceBuild(e.to_string()))?;
         let entry = Self::new(AnyDevice::Entry(entry_device), entry_plane);
 
-        let exit_tun = match tun_device(exit_tun) {
-            Ok(tun) => tun,
-            Err(e) => {
-                entry.stop().await;
-                return Err(e);
-            }
-        };
         let exit_device = exit_plane
             .run(async move {
-                let builder = device::build().with_udp(exit_udp).with_ip(exit_tun);
-                configure(builder, &exit_config).build().await
+                let (exit_ip_tx, exit_ip_rx) = crate::offload_tun::open(exit_tun)
+                    .map_err(|e| Error::TunFromFd(e.to_string()))?;
+                let builder = device::build()
+                    .with_udp(exit_udp)
+                    .with_ip_pair(exit_ip_tx, exit_ip_rx);
+                configure(builder, &exit_config)
+                    .build()
+                    .await
+                    .map_err(|e| Error::DeviceBuild(e.to_string()))
             })
             .await;
         let exit_device = match exit_device {
             Ok(device) => device,
             Err(e) => {
                 entry.stop().await;
-                return Err(Error::DeviceBuild(e.to_string()));
+                return Err(e);
             }
         };
 
