@@ -8,12 +8,20 @@
 
 use std::{fmt, sync::Arc, time::Duration};
 
-use gotatun::device::{self, Peer};
-use gotatun::tun::tun_async_device::TunDevice;
+use gotatun::{
+    device::{self, Peer},
+    tun::tun_async_device::TunDevice,
+};
 
 use super::{Error, PeerConfig, PeerEndpointUpdate, PrivateKey, Result};
 #[cfg(feature = "amnezia")]
 use crate::amnezia::AmneziaConfig;
+pub use crate::two_hop::TwoHopLink;
+use crate::{
+    data_plane::DataPlane,
+    offload_tun::{TunRx, TunTx},
+    two_hop::{EntryIpRx, EntryIpTx, ExitUdpFactory},
+};
 
 /// `SO_RCVBUF`/`SO_SNDBUF` forced on the WireGuard UDP sockets.
 ///
@@ -65,23 +73,85 @@ pub struct Config {
     pub peers: Vec<PeerConfig>,
 }
 
-/// Device transport type used by gotatun.
+/// UDP side of a device that talks to its peer over the network.
 ///
-/// When the `amnezia` feature is enabled, we wrap the default UDP factory with
-/// [`AmneziaUdpFactory`] to apply AmneziaWG obfuscation at the UDP layer.
+/// With the `amnezia` feature the default UDP factory is wrapped in
+/// [`AmneziaUdpFactory`], which applies AmneziaWG obfuscation at the UDP layer.
 #[cfg(feature = "amnezia")]
-type DeviceTransports = (
-    crate::amnezia_udp::AmneziaUdpFactory<gotatun::udp::socket::UdpSocketFactory>,
-    TunDevice,
-    TunDevice,
-);
+type SocketUdp = crate::amnezia_udp::AmneziaUdpFactory<gotatun::udp::socket::UdpSocketFactory>;
 
 #[cfg(not(feature = "amnezia"))]
-type DeviceTransports = device::DefaultDeviceTransports;
+type SocketUdp = gotatun::udp::socket::UdpSocketFactory;
+
+/// A gotatun device over one of the transport sets a tunnel can run on.
+enum AnyDevice {
+    /// UDP socket and TUN interface.
+    Socket(device::Device<(SocketUdp, TunDevice, TunDevice)>),
+    /// Entry hop of a two-hop tunnel: also carries the exit device's datagrams.
+    Entry(device::Device<(SocketUdp, EntryIpTx, EntryIpRx)>),
+    /// Exit hop of a two-hop tunnel: its datagrams go to the entry device.
+    Exit(device::Device<(ExitUdpFactory, TunTx, TunRx)>),
+}
+
+/// Runs `$body` with `$device` bound to the device of whichever variant.
+macro_rules! with_device {
+    ($any:expr, $device:ident => $body:expr) => {
+        match $any {
+            AnyDevice::Socket($device) => $body,
+            AnyDevice::Entry($device) => $body,
+            AnyDevice::Exit($device) => $body,
+        }
+    };
+}
+
+impl AnyDevice {
+    async fn stop(self) {
+        with_device!(self, device => device.stop().await)
+    }
+
+    async fn set_endpoint(
+        &self,
+        public_key: &x25519_dalek::PublicKey,
+        endpoint: std::net::SocketAddr,
+    ) -> Result<()> {
+        with_device!(self, device => {
+            device
+                .write(async |device| {
+                    device
+                        .modify_peer(public_key, |peer_mut| {
+                            peer_mut.set_endpoint(Some(endpoint));
+                        })
+                        .await;
+                })
+                .await
+                .map_err(|e| Error::UpdatePeers(e.to_string()))
+        })
+    }
+
+    async fn last_handshakes(&self) -> Vec<Option<Duration>> {
+        with_device!(self, device => {
+            device
+                .read(async |device| {
+                    device
+                        .peers()
+                        .await
+                        .into_iter()
+                        .map(|peer_stats| peer_stats.stats.last_handshake)
+                        .collect::<Vec<_>>()
+                })
+                .await
+        })
+    }
+}
+
+type SharedDevice = Arc<tokio::sync::RwLock<Option<AnyDevice>>>;
 
 /// WireGuard tunnel backed by gotatun.
 pub struct Tunnel {
-    device: Arc<tokio::sync::RwLock<Option<device::Device<DeviceTransports>>>>,
+    device: SharedDevice,
+    /// The thread the device runs on. Whatever may start or stop device
+    /// tasks is done there.
+    plane: Arc<DataPlane>,
 }
 
 impl fmt::Debug for Tunnel {
@@ -97,56 +167,89 @@ impl Tunnel {
     ///
     /// Takes a `tun::AsyncDevice` directly instead of an `OwnedFd`.
     pub async fn start(config: Config, tun: tun::AsyncDevice) -> Result<Self> {
-        // Wrap the tun::AsyncDevice in gotatun's TunDevice
-        let tun_device = TunDevice::from_tun_device(tun)
-            .map_err(|e| Error::TunFromFd(e.to_string()))?;
-
-        // Build the gotatun device
-        let private_key =
-            x25519_dalek::StaticSecret::from(config.interface.private_key.to_bytes());
-
-        // When amnezia feature is enabled, wrap UDP factory with AmneziaUdpFactory.
-        // When disabled, use the default UDP factory.
-        let socket_factory = gotatun::udp::socket::UdpSocketFactory {
-            recv_buffer_size: Some(UDP_SOCKET_BUFFER_SIZE),
-            send_buffer_size: Some(UDP_SOCKET_BUFFER_SIZE),
-        };
-
-        #[cfg(feature = "amnezia")]
-        let udp_factory = crate::amnezia_udp::AmneziaUdpFactory::new(
-            socket_factory,
-            config.interface.azwg_config.as_ref(),
-        );
-
-        #[cfg(not(feature = "amnezia"))]
-        let udp_factory = socket_factory;
-
-        let mut builder = device::build()
-            .with_udp(udp_factory)
-            .with_ip(tun_device)
-            .with_private_key(private_key)
-            .with_listen_port(config.interface.listen_port.unwrap_or(0));
-
-        #[cfg(target_os = "linux")]
-        if let Some(fwmark) = config.interface.fwmark {
-            builder = builder.with_fwmark(fwmark);
-        }
-
-        // Add peers
-        for peer_config in &config.peers {
-            let gotatun_peer = convert_peer(peer_config);
-            builder = builder.with_peer(gotatun_peer);
-        }
-
-        let device = builder
-            .build()
+        let plane = data_plane("nym-wg")?;
+        let tun_device = tun_device(tun)?;
+        let device = plane
+            .run(async move {
+                let builder = device::build()
+                    .with_udp(socket_udp(&config.interface))
+                    .with_ip(tun_device);
+                configure(builder, &config).build().await
+            })
             .await
             .map_err(|e| Error::DeviceBuild(e.to_string()))?;
 
         tracing::info!("gotatun WireGuard tunnel started");
-        Ok(Self {
+        Ok(Self::new(AnyDevice::Socket(device), plane))
+    }
+
+    /// Start the two tunnels of a two-hop connection, linked in-process.
+    ///
+    /// The exit tunnel's WireGuard datagrams never touch the entry
+    /// interface: they are handed to the entry tunnel directly. `entry_tun`
+    /// keeps carrying everything else the entry tunnel allows.
+    ///
+    /// `exit_tun` uses segmentation offload when it was created with
+    /// [`crate::enable_tun_offload`].
+    ///
+    /// Returns the entry and the exit tunnel.
+    pub async fn start_two_hop(
+        entry_config: Config,
+        entry_tun: tun::AsyncDevice,
+        exit_config: Config,
+        exit_tun: tun::AsyncDevice,
+        link: TwoHopLink,
+    ) -> Result<(Self, Self)> {
+        // One thread for both devices: a packet passes through both, and
+        // handing it from one thread to another costs more than either
+        // device spends on it.
+        let entry_plane = data_plane("nym-wg")?;
+        let exit_plane = Arc::clone(&entry_plane);
+
+        let (entry_ip_tx, entry_ip_rx, exit_udp) =
+            crate::two_hop::split(link, tun_device(entry_tun)?).await;
+
+        let entry_device = entry_plane
+            .run(async move {
+                let builder = device::build()
+                    .with_udp(socket_udp(&entry_config.interface))
+                    .with_ip_pair(entry_ip_tx, entry_ip_rx);
+                configure(builder, &entry_config).build().await
+            })
+            .await
+            .map_err(|e| Error::DeviceBuild(e.to_string()))?;
+        let entry = Self::new(AnyDevice::Entry(entry_device), entry_plane);
+
+        let exit_device = exit_plane
+            .run(async move {
+                let (exit_ip_tx, exit_ip_rx) = crate::offload_tun::open(exit_tun)
+                    .map_err(|e| Error::TunFromFd(e.to_string()))?;
+                let builder = device::build()
+                    .with_udp(exit_udp)
+                    .with_ip_pair(exit_ip_tx, exit_ip_rx);
+                configure(builder, &exit_config)
+                    .build()
+                    .await
+                    .map_err(|e| Error::DeviceBuild(e.to_string()))
+            })
+            .await;
+        let exit_device = match exit_device {
+            Ok(device) => device,
+            Err(e) => {
+                entry.stop().await;
+                return Err(e);
+            }
+        };
+
+        tracing::info!("gotatun two-hop WireGuard tunnels started, linked in-process");
+        Ok((entry, Self::new(AnyDevice::Exit(exit_device), exit_plane)))
+    }
+
+    fn new(device: AnyDevice, plane: Arc<DataPlane>) -> Self {
+        Self {
             device: Arc::new(tokio::sync::RwLock::new(Some(device))),
-        })
+            plane,
+        }
     }
 
     /// Stop the tunnel.
@@ -159,7 +262,7 @@ impl Tunnel {
         tracing::info!("Stopping gotatun WireGuard tunnel");
         let device = self.device.write().await.take();
         match device {
-            Some(device) => device.stop().await,
+            Some(device) => self.plane.run(device.stop()).await,
             None => tracing::debug!("gotatun device already stopped"),
         }
     }
@@ -167,18 +270,18 @@ impl Tunnel {
     /// Update the endpoints of peers matched by public key.
     pub async fn update_peers(&mut self, peer_updates: &[PeerEndpointUpdate]) -> Result<()> {
         for update in peer_updates {
-            let pub_key =
-                x25519_dalek::PublicKey::from(*update.public_key.as_bytes());
+            let pub_key = x25519_dalek::PublicKey::from(*update.public_key.as_bytes());
             let endpoint = update.endpoint;
-            let guard = self.device.read().await;
-            let Some(device) = guard.as_ref() else {
-                return Err(Error::UpdatePeers("device already stopped".to_string()));
-            };
-            device.write(async |device| {
-                device.modify_peer(&pub_key, |peer_mut| {
-                    peer_mut.set_endpoint(Some(endpoint));
-                }).await;
-            }).await.map_err(|e| Error::UpdatePeers(e.to_string()))?;
+            let device = Arc::clone(&self.device);
+            self.plane
+                .run(async move {
+                    let guard = device.read().await;
+                    let Some(device) = guard.as_ref() else {
+                        return Err(Error::UpdatePeers("device already stopped".to_string()));
+                    };
+                    device.set_endpoint(&pub_key, endpoint).await
+                })
+                .await?;
         }
         Ok(())
     }
@@ -200,7 +303,7 @@ impl Tunnel {
 /// then on rather than keeping the device alive.
 #[derive(Clone)]
 pub struct StatsReader {
-    device: Arc<tokio::sync::RwLock<Option<device::Device<DeviceTransports>>>>,
+    device: SharedDevice,
 }
 
 impl StatsReader {
@@ -213,17 +316,7 @@ impl StatsReader {
         let Some(device) = guard.as_ref() else {
             return false;
         };
-        let last_handshakes = device
-            .read(async |device| {
-                device
-                    .peers()
-                    .await
-                    .into_iter()
-                    .map(|peer_stats| peer_stats.stats.last_handshake)
-                    .collect::<Vec<_>>()
-            })
-            .await;
-        all_peers_handshaken(last_handshakes)
+        all_peers_handshaken(device.last_handshakes().await)
     }
 }
 
@@ -237,6 +330,57 @@ fn all_peers_handshaken(last_handshakes: impl IntoIterator<Item = Option<Duratio
         any = true;
     }
     any
+}
+
+fn data_plane(thread_name: &str) -> Result<Arc<DataPlane>> {
+    DataPlane::start(thread_name)
+        .map(Arc::new)
+        .map_err(|e| Error::DeviceBuild(format!("failed to start the device thread: {e}")))
+}
+
+fn tun_device(tun: tun::AsyncDevice) -> Result<TunDevice> {
+    TunDevice::from_tun_device(tun).map_err(|e| Error::TunFromFd(e.to_string()))
+}
+
+/// The UDP socket factory of a device that reaches its peer over the network.
+fn socket_udp(interface: &InterfaceConfig) -> SocketUdp {
+    let socket_factory = gotatun::udp::socket::UdpSocketFactory {
+        recv_buffer_size: Some(UDP_SOCKET_BUFFER_SIZE),
+        send_buffer_size: Some(UDP_SOCKET_BUFFER_SIZE),
+    };
+
+    #[cfg(feature = "amnezia")]
+    return crate::amnezia_udp::AmneziaUdpFactory::new(
+        socket_factory,
+        interface.azwg_config.as_ref(),
+    );
+
+    #[cfg(not(feature = "amnezia"))]
+    {
+        let _ = interface;
+        socket_factory
+    }
+}
+
+/// Applies the key, port, fwmark and peers of `config` to a device builder.
+fn configure<Udp, IpTx, IpRx>(
+    builder: device::DeviceBuilder<Udp, IpTx, IpRx>,
+    config: &Config,
+) -> device::DeviceBuilder<Udp, IpTx, IpRx> {
+    let private_key = x25519_dalek::StaticSecret::from(config.interface.private_key.to_bytes());
+    let mut builder = builder
+        .with_private_key(private_key)
+        .with_listen_port(config.interface.listen_port.unwrap_or(0));
+
+    #[cfg(target_os = "linux")]
+    if let Some(fwmark) = config.interface.fwmark {
+        builder = builder.with_fwmark(fwmark);
+    }
+
+    for peer_config in &config.peers {
+        builder = builder.with_peer(convert_peer(peer_config));
+    }
+    builder
 }
 
 /// Convert our PeerConfig to gotatun's Peer type.

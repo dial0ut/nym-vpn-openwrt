@@ -40,6 +40,22 @@ the GitHub release notes.
   on the connection panel replaces it.
 - The Nym network libraries moved from the `2026.11-xynomizithra` release to
   `2026.22-istanbul`, the release upstream NymVPN builds on.
+- Fast mode needs much less CPU for the same traffic: on an x86 test router
+  about a fifth of before for downloads and just over a third for uploads.
+  Three changes add up to this:
+  - The two WireGuard hops hand packets to each other inside the daemon.
+    Before, every packet of the exit hop crossed the entry tunnel interface
+    (`nym0`) as a UDP datagram. `nym0` stays and carries only the daemon's
+    own traffic to the entry gateway, so its packet counters no longer
+    follow your traffic.
+  - Both hops run on one thread of their own (`nym-wg`) instead of waking
+    the daemon's worker threads for every packet. The fast tunnel therefore
+    uses one CPU core at most.
+  - The tunnel interface (`nym1`) uses the kernel's segmentation offload. A
+    burst of TCP segments is handed to the kernel, and forwarded to your
+    devices, as one large packet; on Linux 6.2 or newer (OpenWrt 24.10) so
+    is a burst of UDP datagrams, such as a QUIC download. `nym1` counts
+    these large packets, so its packet counters read lower than before.
 - In Fast mode the LuCI gateway pickers list the WireGuard gateways with
   their WireGuard scores, the ones Fast mode actually connects through. They
   showed the mixnet lists before.
