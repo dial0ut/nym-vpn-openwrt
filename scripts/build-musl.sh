@@ -163,7 +163,9 @@ echo -e "${GREEN}Project root: ${PROJECT_ROOT}${NC}"
 if $TIER3; then
     if ! docker image inspect "${DOCKER_IMAGE}" &> /dev/null; then
         echo -e "${YELLOW}Building custom Docker image (one-time)...${NC}"
+        source "${PROJECT_ROOT}/scripts/versions.sh"
         docker build -f "${PROJECT_ROOT}/docker/tier3-musl/${DOCKERFILE}" \
+            --build-arg RUST_NIGHTLY="${RUST_NIGHTLY}" \
             -t "${DOCKER_IMAGE}" \
             "${PROJECT_ROOT}/docker/tier3-musl"
         echo ""
