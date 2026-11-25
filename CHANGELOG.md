@@ -38,6 +38,8 @@ the GitHub release notes.
 
 - The Two-Hop switch left LuCI's Tunnel Settings; the Fast | Mixnet switch
   on the connection panel replaces it.
+- The Nym network libraries moved from the `2026.11-xynomizithra` release to
+  `2026.22-istanbul`, the release upstream NymVPN builds on.
 - In Fast mode the LuCI gateway pickers list the WireGuard gateways with
   their WireGuard scores, the ones Fast mode actually connects through. They
   showed the mixnet lists before.
