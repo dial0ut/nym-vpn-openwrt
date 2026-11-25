@@ -41,7 +41,13 @@ static INFO_TARGETS: [&str; 14] = [
     "tonic::transport::server",
 ];
 
-static WARN_TARGETS: [&str; 2] = ["hickory_server", "quinn::connection"];
+// The bandwidth controller lists every stored ticketbook each time a session
+// starts one.
+static WARN_TARGETS: [&str; 3] = [
+    "hickory_server",
+    "quinn::connection",
+    "nym_bandwidth_controller::controller",
+];
 
 pub struct Options {
     pub verbosity_level: Level,

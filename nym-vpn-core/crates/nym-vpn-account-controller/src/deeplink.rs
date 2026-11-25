@@ -5,7 +5,7 @@ use aes_gcm::{
 use hkdf::Hkdf;
 use nym_crypto::asymmetric::x25519::{KeyPair, PublicKey};
 use nym_vpn_lib_types::DeeplinkKind;
-use rand::{RngCore, rngs::OsRng};
+use rand010::Rng as _;
 use sha2::Sha256;
 use std::collections::HashMap;
 use tokio::time::{Duration, Instant};
@@ -23,7 +23,7 @@ impl Deeplink {
     const TTL_SECS: u64 = 300;
 
     pub fn new(params: &CreateDeeplinkParams) -> Self {
-        let mut rng = OsRng;
+        let mut rng = rand010::rng();
         let keypair = KeyPair::new(&mut rng);
         let id = rng.next_u64();
         let expiry_time = Instant::now() + Duration::from_secs(Self::TTL_SECS);

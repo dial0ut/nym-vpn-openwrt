@@ -5,15 +5,14 @@ use time::{Date, OffsetDateTime};
 
 use super::models::PendingCredentialRequestStored;
 
-use nym_sqlx_pool_guard::SqlitePoolGuard;
 
 #[derive(Clone)]
 pub struct SqliteZkNymRequestsStorageManager {
-    connection_pool: SqlitePoolGuard,
+    connection_pool: sqlx::SqlitePool,
 }
 
 impl SqliteZkNymRequestsStorageManager {
-    pub fn new(connection_pool: SqlitePoolGuard) -> Self {
+    pub fn new(connection_pool: sqlx::SqlitePool) -> Self {
         Self { connection_pool }
     }
 
@@ -25,7 +24,7 @@ impl SqliteZkNymRequestsStorageManager {
         &self,
     ) -> Result<Vec<PendingCredentialRequestStored>, sqlx::Error> {
         sqlx::query_as("SELECT * FROM pending_zk_nym_requests")
-            .fetch_all(&*self.connection_pool)
+            .fetch_all(&self.connection_pool)
             .await
     }
 
@@ -34,7 +33,7 @@ impl SqliteZkNymRequestsStorageManager {
             "DELETE FROM pending_zk_nym_requests WHERE timestamp < ?",
             cutoff
         )
-        .execute(&*self.connection_pool)
+        .execute(&self.connection_pool)
         .await?
         .rows_affected();
         tracing::debug!("Removed {} stale pending requests", affected);
@@ -47,7 +46,7 @@ impl SqliteZkNymRequestsStorageManager {
     ) -> Result<Option<PendingCredentialRequestStored>, sqlx::Error> {
         sqlx::query_as("SELECT * FROM pending_zk_nym_requests WHERE id = ?")
             .bind(id)
-            .fetch_optional(&*self.connection_pool)
+            .fetch_optional(&self.connection_pool)
             .await
     }
 
@@ -63,14 +62,14 @@ impl SqliteZkNymRequestsStorageManager {
             expiration_date,
             request_info,
         )
-        .execute(&*self.connection_pool)
+        .execute(&self.connection_pool)
         .await?;
         Ok(())
     }
 
     pub async fn remove_pending_request(&self, id: &str) -> Result<(), sqlx::Error> {
         sqlx::query!("DELETE FROM pending_zk_nym_requests WHERE id = ?", id)
-            .execute(&*self.connection_pool)
+            .execute(&self.connection_pool)
             .await?;
         Ok(())
     }

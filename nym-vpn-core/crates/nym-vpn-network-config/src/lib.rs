@@ -52,6 +52,10 @@ const MAX_FILE_AGE: Duration = Duration::from_secs(60 * 60);
 
 pub type ApiUrl = nym_vpn_api_client::response::ApiUrl;
 
+fn non_empty<T>(items: Vec<T>) -> Option<Vec<T>> {
+    (!items.is_empty()).then_some(items)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Network {
     pub nym_network: NymNetwork,
@@ -120,11 +124,11 @@ impl Network {
     }
 
     pub fn nym_api_urls(&self) -> Option<Vec<nym_network_defaults::ApiUrl>> {
-        self.nym_network.network.nym_api_urls.clone()
+        non_empty(self.nym_network.network.nym_api_urls())
     }
 
     pub fn nym_api_urls_as_urls(&self) -> Option<Vec<url::Url>> {
-        self.nym_network.network.nym_api_urls.as_ref().map(|urls| {
+        self.nym_api_urls().map(|urls| {
             urls.iter()
                 .filter_map(|api_url| url::Url::parse(&api_url.url).ok())
                 .collect()
@@ -132,7 +136,7 @@ impl Network {
     }
 
     pub fn nym_vpn_api_urls(&self) -> Option<Vec<nym_network_defaults::ApiUrl>> {
-        self.nym_network.network.nym_vpn_api_urls.clone()
+        non_empty(self.nym_network.network.nym_vpn_api_urls())
     }
 
     /// Whether any Nym API URL carries cover domains; Stealth API has nothing
@@ -148,17 +152,13 @@ impl Network {
             || self
                 .nym_network
                 .network
-                .nym_api_urls
+                .nym_api_urls()
                 .iter()
-                .flatten()
                 .any(has_front)
     }
 
     pub fn nym_vpn_api_urls_as_urls(&self) -> Option<Vec<url::Url>> {
-        self.nym_network
-            .network
-            .nym_vpn_api_urls
-            .as_ref()
+        self.nym_vpn_api_urls()
             .map(|urls| {
                 urls.iter()
                     .filter_map(|api_url| url::Url::parse(&api_url.url).ok())
@@ -279,13 +279,13 @@ pub async fn network_from_discovery(config_path: &Path, discovery: Discovery) ->
     // previous environment (mainnet URLs in sandbox mode, or vice versa).
     let discovery_nym_api_urls = discovery.nym_api_urls();
     if !discovery_nym_api_urls.is_empty() {
-        nym_network.network.nym_api_urls = Some(discovery_nym_api_urls);
+        nym_network.network.set_nym_api_urls(discovery_nym_api_urls);
     }
 
     // TODO: remove once network details contain domain fronting data.
     let discovery_vpn_api_urls = discovery.nym_vpn_api_urls();
     if !discovery_vpn_api_urls.is_empty() {
-        nym_network.network.nym_vpn_api_urls = Some(discovery_vpn_api_urls);
+        nym_network.network.set_nym_vpn_api_urls(discovery_vpn_api_urls);
     }
 
     let endpoint = nym_network

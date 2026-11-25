@@ -22,9 +22,11 @@ hkdf.workspace = true
 nym-common.workspace = true
 nym-credential-proxy-requests.workspace = true
 nym-credential-storage.workspace = true
+nym-bandwidth-controller.workspace = true
+nym-bandwidth-fetcher.workspace = true
+rand010.workspace = true
 nym-credentials-interface.workspace = true
 nym-credentials.workspace = true
-nym-credential-utils.workspace = true
 nym-crypto = { workspace = true, features = ["asymmetric", "rand"] }
 nym-ecash-time.workspace = true
 nym-network-defaults.workspace = true
@@ -37,12 +39,11 @@ nym-vpn-network-config.workspace = true
 nym-validator-client.workspace = true
 nym-vpn-store.workspace = true
 rand.workspace = true
-nym-sqlx-pool-guard.workspace = true
 serde.workspace = true
 sha2.workspace = true
 si-scale.workspace = true
 sqlx = { workspace = true, features = [
-    "runtime-tokio-rustls",
+    "runtime-tokio",
     "sqlite",
     "time",
 ] }
@@ -57,7 +58,7 @@ zeroize.workspace = true
 url.workspace = true
 
 [build-dependencies]
-sqlx = { workspace = true, features = ["runtime-tokio-rustls", "sqlite"] }
+sqlx = { workspace = true, features = ["runtime-tokio", "sqlite"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
 [dev-dependencies]

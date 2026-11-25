@@ -4,6 +4,7 @@
 pub mod storage;
 
 mod bandwidth_controller;
+mod ticket_provider;
 pub mod cache_refresh;
 #[cfg(target_os = "linux")]
 pub(crate) mod clock_bootstrap;

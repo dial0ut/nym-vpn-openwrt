@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::shared_state::SharedAccountState;
-use nym_credential_utils::utils::issue_credential;
+use nym_bandwidth_controller::{CredentialFetcher, NymCredential};
+use nym_bandwidth_fetcher::NyxdCredentialFetcher;
 use nym_credentials_interface::TicketType;
 use nym_offline_monitor::ConnectivityMonitor;
-use nym_validator_client::nyxd::{Coin, CosmWasmClient, contract_traits::EcashQueryClient};
+use nym_validator_client::nyxd::{Coin, TendermintRpcClientExt, contract_traits::EcashQueryClient};
 use nym_vpn_lib_types::AccountCommandError;
 use tracing::{debug, info, warn};
 
@@ -63,7 +64,17 @@ pub(crate) async fn handle_obtain_ticketbooks<C: ConnectivityMonitor>(
         return Err(AccountCommandError::InsufficientFunds);
     }
 
-    let credential_storage = shared_state.credential_storage.credential_storage();
+    let fetcher = NyxdCredentialFetcher::new(
+        client.clone(),
+        shared_state.credential_storage.nyxd_pending_deposits_path(),
+        ecash_seed,
+    )
+    .await
+    .map_err(|err| {
+        AccountCommandError::Internal(format!(
+            "failed to construct the nyxd credential fetcher: {err}"
+        ))
+    })?;
 
     // TODO: future optimisation:
     // technically we could make all deposits in a single transaction thus making the whole thing an order
@@ -76,12 +87,34 @@ pub(crate) async fn handle_obtain_ticketbooks<C: ConnectivityMonitor>(
     for i in 0..amount {
         for ticket_type in TICKET_TYPES {
             info!("obtaining ticketbook set {}/{amount}: {ticket_type}", i + 1);
-            issue_credential(client, credential_storage, &ecash_seed, *ticket_type)
-                .await
-                .map_err(|err| AccountCommandError::ZkNymAcquisitionFailure(err.to_string()))?;
+            let credentials = match fetcher.fetch_ticketbooks(*ticket_type).await {
+                Ok(credentials) => credentials,
+                Err(err) => {
+                    fetcher.cleanup().await;
+                    return Err(AccountCommandError::ZkNymAcquisitionFailure(
+                        err.to_string(),
+                    ));
+                }
+            };
+            for credential in credentials {
+                let NymCredential::Ticketbook(ticketbook) = credential else {
+                    continue;
+                };
+                if let Err(err) = shared_state
+                    .credential_storage
+                    .insert_issued_ticketbook(&ticketbook)
+                    .await
+                {
+                    fetcher.cleanup().await;
+                    return Err(AccountCommandError::ZkNymAcquisitionFailure(
+                        err.to_string(),
+                    ));
+                }
+            }
         }
     }
 
+    fetcher.cleanup().await;
     Ok(())
 }
 

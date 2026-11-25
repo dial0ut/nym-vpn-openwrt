@@ -27,7 +27,7 @@ mod tests {
 
     #[test]
     fn parse_vpn_mnemonic() {
-        let mnemonic = Mnemonic::generate(24).unwrap();
+        let mnemonic = Mnemonic::generate(bip39::WordCount::Words24).unwrap();
         let parsed_mnemonic = parse_account_request(&StoreAccountRequest::Vpn {
             mnemonic: mnemonic.to_string(),
         })
@@ -44,7 +44,7 @@ mod tests {
 
     #[test]
     fn parse_decentralised_mnemonic() {
-        let mnemonic = Mnemonic::generate(24).unwrap();
+        let mnemonic = Mnemonic::generate(bip39::WordCount::Words24).unwrap();
         let parsed_mnemonic = parse_account_request(&StoreAccountRequest::Decentralised {
             mnemonic: mnemonic.to_string(),
         })

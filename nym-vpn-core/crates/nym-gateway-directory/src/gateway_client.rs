@@ -10,7 +10,7 @@ use std::{
 use nym_network_defaults::ApiUrl;
 use nym_sdk::UserAgent;
 use nym_validator_client::{
-    models::NymNodeDescriptionV2, nym_api::NymApiClientExt, nym_nodes::SkimmedNodesWithMetadata,
+    models::described::v2::NymNodeDescriptionV2, nym_api::NymApiClientExt, nym_nodes::SkimmedNodesWithMetadata,
 };
 use nym_vpn_api_client::{
     ResolverOverrides, api_urls_to_urls, fronted_http_client, prefer_fronted_base_url,
@@ -602,16 +602,8 @@ mod test {
             .first()
             .expect("rust sdk mainnet default incorrectly configured")
             .nyxd_url();
-        let default_api_urls = mainnet_network_defaults
-            .nym_api_urls
-            .as_ref()
-            .expect("rust sdk mainnet default incorrectly configured")
-            .clone();
-        let default_nym_vpn_api_urls = mainnet_network_defaults
-            .nym_vpn_api_urls
-            .as_ref()
-            .expect("rust sdk mainnet default incorrectly configured")
-            .clone();
+        let default_api_urls = mainnet_network_defaults.nym_api_urls();
+        let default_nym_vpn_api_urls = mainnet_network_defaults.nym_vpn_api_urls();
         Config {
             nyxd_url: default_nyxd_url,
             nym_api_urls: default_api_urls,

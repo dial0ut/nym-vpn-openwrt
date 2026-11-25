@@ -14,47 +14,25 @@
 
 use std::sync::Arc;
 
-use nym_bandwidth_controller::{BandwidthController, BandwidthTicketProvider};
-use nym_credential_storage::ephemeral_storage::EphemeralCredentialStorage;
 use nym_credentials_interface::TicketType;
 use nym_lp::peer::{DHKeyPair, LpRemotePeer};
 use nym_registration_client::{
-    LpClientError, LpRegistrationClient, NestedLpSession, RegistrationClientBuilderConfig,
-    RegistrationClientError, RegistrationNymNode, RegistrationResult,
+    LpClientError, LpDvpnRegistrationClient, LpGatewayClient, NestedLpDvpnRegistrationClient,
+    NestedLpSession, RegistrationClientBuilderConfig, RegistrationClientError,
+    RegistrationNymNode, RegistrationResult,
 };
 use nym_registration_common::NymNodeLPInformation;
-use nym_sdk::NymNetworkDetails;
-use nym_validator_client::{
-    QueryHttpRpcNyxdClient,
-    nyxd::{Config as NyxdClientConfig, NyxdClient},
-};
-use rand09::SeedableRng;
+use rand010::{SeedableRng, rngs::SysRng};
 use tokio::net::TcpStream;
 
 /// Built before any gateway is contacted, so its errors are local ones.
 pub(crate) struct ParallelLpRegistration {
     config: RegistrationClientBuilderConfig,
-    bandwidth_controller: Box<dyn BandwidthTicketProvider>,
 }
 
 impl ParallelLpRegistration {
-    pub(crate) async fn new(
-        config: RegistrationClientBuilderConfig,
-    ) -> Result<Self, RegistrationClientError> {
-        let nyxd_client = nyxd_client(&config.network_env)?;
-        let bandwidth_controller: Box<dyn BandwidthTicketProvider> =
-            match config.setup_credential_storage().await? {
-                Some(storage) => Box::new(BandwidthController::new(storage, nyxd_client)),
-                None => Box::new(BandwidthController::new(
-                    EphemeralCredentialStorage::default(),
-                    nyxd_client,
-                )),
-            };
-
-        Ok(Self {
-            config,
-            bandwidth_controller,
-        })
+    pub(crate) fn new(config: RegistrationClientBuilderConfig) -> Self {
+        Self { config }
     }
 
     pub(crate) async fn register(self) -> Result<RegistrationResult, RegistrationClientError> {
@@ -83,12 +61,13 @@ impl ParallelLpRegistration {
         let entry_lp = lp_data(entry)?;
         let exit_lp = lp_data(exit)?;
         let lp_config = self.config.lp_registration_config;
-        let bandwidth_controller = &*self.bandwidth_controller;
+        let bandwidth_controller = &self.config.bandwidth_request_sender;
+        let spend_time_skew = self.config.spend_time_skew;
 
-        let entry_lp_keypair = Arc::new(DHKeyPair::new(&mut rand09::rng()));
-        let exit_lp_keypair = Arc::new(DHKeyPair::new(&mut rand09::rng()));
+        let entry_lp_keypair = lp_keypair()?;
+        let exit_lp_keypair = lp_keypair()?;
         // Two sessions to the entry at once, so each gets its own key.
-        let forwarding_lp_keypair = Arc::new(DHKeyPair::new(&mut rand09::rng()));
+        let forwarding_lp_keypair = lp_keypair()?;
 
         let entry_error = |source: LpClientError| RegistrationClientError::EntryGatewayRegisterLp {
             gateway_id: entry.node.identity.to_base58_string(),
@@ -102,7 +81,7 @@ impl ParallelLpRegistration {
         };
 
         let exit_leg = async {
-            let mut forwarding_client = LpRegistrationClient::<TcpStream>::new(
+            let mut forwarding_client = LpGatewayClient::<TcpStream>::new(
                 forwarding_lp_keypair,
                 remote_peer(entry_lp),
                 entry_lp.address,
@@ -122,24 +101,29 @@ impl ParallelLpRegistration {
                 exit_lp.ciphersuite,
                 exit_lp.lp_protocol_version,
             );
-            let mut rng = rand09::rngs::StdRng::from_os_rng();
-            let exit_gateway_data = nested_session
-                .handshake_and_register_dvpn(
-                    &mut forwarding_client,
-                    &mut rng,
-                    &exit.keys,
-                    &exit.node.identity,
-                    bandwidth_controller,
-                    TicketType::V1WireguardExit,
-                )
+            nested_session
+                .perform_handshake(&mut forwarding_client)
                 .await
                 .map_err(exit_error)?;
+            let mut rng = rand010::rngs::StdRng::try_from_rng(&mut SysRng)?;
+            let exit_gateway_data =
+                NestedLpDvpnRegistrationClient::new(&mut nested_session, &mut forwarding_client)
+                    .register(
+                        &mut rng,
+                        &exit.keys,
+                        &exit.node.identity,
+                        bandwidth_controller,
+                        spend_time_skew,
+                        TicketType::V1WireguardExit,
+                    )
+                    .await
+                    .map_err(exit_error)?;
             tracing::info!("Exit gateway registration completed via forwarding");
             Ok::<_, RegistrationClientError>(exit_gateway_data)
         };
 
         let entry_leg = async {
-            let mut entry_client = LpRegistrationClient::<TcpStream>::new(
+            let mut entry_client = LpGatewayClient::<TcpStream>::new(
                 entry_lp_keypair.clone(),
                 remote_peer(entry_lp),
                 entry_lp.address,
@@ -152,13 +136,14 @@ impl ParallelLpRegistration {
                 .await
                 .map_err(entry_error)?;
 
-            let mut rng = rand09::rngs::StdRng::from_os_rng();
-            let entry_gateway_data = entry_client
-                .register_dvpn(
+            let mut rng = rand010::rngs::StdRng::try_from_rng(&mut SysRng)?;
+            let entry_gateway_data = LpDvpnRegistrationClient::new(&mut entry_client)
+                .register(
                     &mut rng,
                     &entry.keys,
                     &entry.node.identity,
                     bandwidth_controller,
+                    spend_time_skew,
                     TicketType::V1WireguardEntry,
                 )
                 .await
@@ -176,7 +161,6 @@ impl ParallelLpRegistration {
             exit_gateway_data,
             entry_lp_keypair,
             exit_lp_keypair,
-            self.bandwidth_controller,
         ))
     }
 }
@@ -194,18 +178,8 @@ fn remote_peer(data: &NymNodeLPInformation) -> LpRemotePeer {
     LpRemotePeer::new(data.x25519).with_key_digests(data.expected_kem_key_hashes.clone())
 }
 
-/// Same client upstream's builder makes for the bandwidth controller.
-fn nyxd_client(
-    network: &NymNetworkDetails,
-) -> Result<QueryHttpRpcNyxdClient, RegistrationClientError> {
-    let config = NyxdClientConfig::try_from_nym_network_details(network)
-        .map_err(RegistrationClientError::FailedToCreateNyxdClientConfig)?;
-    let nyxd_url = network
-        .endpoints
-        .first()
-        .map(|ep| ep.nyxd_url())
-        .ok_or(RegistrationClientError::InvalidNyxdUrl)?;
-
-    NyxdClient::connect(config, nyxd_url.as_str())
-        .map_err(RegistrationClientError::FailedToConnectUsingNyxdClient)
+fn lp_keypair() -> Result<Arc<DHKeyPair>, RegistrationClientError> {
+    DHKeyPair::new(&mut rand010::rng())
+        .map(Arc::new)
+        .map_err(|_| RegistrationClientError::KeyGenerationFailure)
 }

@@ -96,7 +96,7 @@ impl VpnAccount {
     }
 
     pub fn generate_new() -> Result<(Self, bip39::Mnemonic), Error> {
-        let mnemonic = bip39::Mnemonic::generate(24).unwrap();
+        let mnemonic = bip39::Mnemonic::generate(bip39::WordCount::Words24).unwrap();
         let wallet = DirectSecp256k1HdWallet::checked_from_mnemonic("n", mnemonic.clone())?;
         let account = Self::derive_from_wallet(wallet, VpnAccountMode::Api)?;
         Ok((account, mnemonic))
@@ -158,14 +158,13 @@ impl VpnAccount {
 
     pub fn ecash_keypair_seed(&self) -> Result<Zeroizing<Vec<u8>>, Error> {
         let hd_path = cosmos_derivation_path();
-        // TODO: private key is NOT zeroized here
+        // `XPrv` zeroizes its key on drop; the copy taken here is zeroized too.
         let extended_private_key = self
             .wallet
             .derive_extended_private_key_with_password(&hd_path, "")?; // No password is used
+        let private_key = Zeroizing::new(extended_private_key.private_key().to_bytes());
 
-        Ok(Zeroizing::new(
-            extended_private_key.private_key().to_bytes().to_vec(),
-        ))
+        Ok(Zeroizing::new(private_key.to_vec()))
     }
 
     pub fn get_mnemonic(&self) -> Zeroizing<String> {
@@ -311,6 +310,21 @@ mod tests {
     }
 
     #[test]
+    fn ecash_keypair_seed_is_stable() {
+        let account = VpnAccount::new(
+            bip39::Mnemonic::parse(TEST_DEFAULT_MNEMONIC).unwrap(),
+            VpnAccountMode::Api,
+        )
+        .unwrap();
+        let seed = account.ecash_keypair_seed().unwrap();
+        let hex: String = seed.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(
+            hex,
+            "9bbeaa761f384aff8532cf8f8f78e9cbbebea1f37bc9461d163163cb87fd2f9e"
+        );
+    }
+
+    #[test]
     fn create_random_account() {
         let (_, mnemonic) = VpnAccount::generate_new().unwrap();
         assert_eq!(mnemonic.word_count(), 24);
@@ -318,7 +332,7 @@ mod tests {
 
     #[test]
     fn derive_wallets() {
-        for word_count in [12, 24] {
+        for word_count in [bip39::WordCount::Words12, bip39::WordCount::Words24] {
             let wallet = DirectSecp256k1HdWallet::generate("n", word_count).unwrap();
             VpnAccount::derive_from_wallet(wallet, VpnAccountMode::Api).unwrap();
         }

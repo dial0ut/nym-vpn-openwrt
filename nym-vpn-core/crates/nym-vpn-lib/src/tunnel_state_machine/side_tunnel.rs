@@ -294,13 +294,22 @@ impl SideTunnel {
             .network
             .clone();
 
+        let ticket_provider = crate::ticket_provider::spawn(
+            self.nym_config.data_path.as_deref(),
+            &nym_network,
+            session_token,
+        )
+        .await?;
         let config = RegistrationClientBuilderConfig::builder()
             .entry_node(entry_node)
             .exit_node(exit_node)
             // The two-hop tunnel's identity and, with it, its credentials.
             // Its gateways are excluded above, so the identity never meets
             // a gateway a kept-alive authenticator client is connected to.
-            .data_path(self.nym_config.data_path.clone())
+            .data_path(crate::ticket_provider::registration_data_path(
+                self.nym_config.data_path.as_deref(),
+            ))
+            .bandwidth_request_sender(ticket_provider)
             .mixnet_client_config(
                 self.tunnel_settings
                     .mixnet_client_config

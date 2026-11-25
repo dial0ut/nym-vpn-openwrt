@@ -38,6 +38,8 @@ the GitHub release notes.
 
 - The Two-Hop switch left LuCI's Tunnel Settings; the Fast | Mixnet switch
   on the connection panel replaces it.
+- The Nym network libraries moved from the `2026.11-xynomizithra` release to
+  `2026.22-istanbul`, the release upstream NymVPN builds on.
 - In Fast mode the LuCI gateway pickers list the WireGuard gateways with
   their WireGuard scores, the ones Fast mode actually connects through. They
   showed the mixnet lists before.
@@ -48,6 +50,13 @@ the GitHub release notes.
   could hang for 30 seconds on a connection left over from the old tunnel.
   The mixnet tunnel of the dual tunnel often took about 35 seconds instead
   of a few to come back after a reconnect.
+- The mixnet gateway lists in `nym-vpnc` and LuCI showed each gateway's Fast
+  score in place of its mixnet score.
+- A failed "downloaded" confirmation to the VPN API no longer fails a
+  ticketbook import that already succeeded.
+- LuCI said mixnet routes have no connection while the VPN is disconnected;
+  with the kill-switch off they use the normal connection, and the note now
+  says so.
 
 ## [1.36.1] - 2026-10-05
 

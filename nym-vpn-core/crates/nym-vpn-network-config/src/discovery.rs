@@ -11,7 +11,7 @@ use crate::{
     AccountManagement, Error, FeatureFlags, MAX_FILE_AGE, Result, SystemMessages,
     nym_network::NymNetwork, system_configuration::SystemConfiguration,
 };
-use nym_api_requests::NymNetworkDetailsResponse;
+use nym_api_requests::NymNetworkDetailsV1Response as NymNetworkDetailsResponse;
 use nym_common::trace_err_chain;
 use nym_sdk::UserAgent;
 use nym_validator_client::nym_api::NymApiClientExt;
@@ -278,7 +278,7 @@ impl Discovery {
 
         if network_details.network.network_name == self.network_name {
             Ok(NymNetwork {
-                network: network_details.network,
+                network: network_details.network.into(),
             })
         } else {
             Err(Error::NetworkNameMismatch {

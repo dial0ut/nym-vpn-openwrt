@@ -28,6 +28,7 @@ use nym_connection_monitor::{
     ConnectionEvent, ConnectionMonitor, ConnectionStatusEvent, IcmpProbe, IcmpProbeConfig,
     TcpProbe, TcpProbeConfig, TimingConfig,
 };
+use nym_bandwidth_controller::requests::BandwidthControllerRequestSender;
 use nym_registration_client::{
     MixnetRegistrationResult, RegistrationClientBuilder, RegistrationClientBuilderConfig,
     RegistrationMode, RegistrationNymNode, RegistrationResult, WireguardRegistrationResult,
@@ -447,11 +448,22 @@ impl TunnelMonitor {
             TunnelType::Mixnet => RegistrationMode::Mixnet,
             TunnelType::Wireguard => RegistrationMode::Wireguard,
         };
+        // Spends the account's ticketbooks for this session: registration
+        // now, top-ups while the tunnel is up.
+        let ticket_provider = crate::ticket_provider::spawn(
+            self.tunnel_parameters.nym_config.data_path.as_deref(),
+            &nym_network,
+            &self.shutdown_token,
+        )
+        .await?;
         let rcb_config_builder = RegistrationClientBuilderConfig::builder()
             .entry_node(entry_node)
             .exit_node(exit_node)
             .enable_lp_registration(true)
-            .data_path(self.tunnel_parameters.nym_config.data_path.clone())
+            .data_path(crate::ticket_provider::registration_data_path(
+                self.tunnel_parameters.nym_config.data_path.as_deref(),
+            ))
+            .bandwidth_request_sender(ticket_provider.clone())
             .mixnet_client_config(mixnet_client_config)
             .mixnet_client_startup_timeout(REGISTRATION_CLIENT_STARTUP_TIMEOUT)
             .mode(mode)
@@ -473,8 +485,7 @@ impl TunnelMonitor {
         let mut rc_builder = RegistrationClientBuilder::new(rc_builder_config);
 
         let registration = if rc_builder.use_lp() {
-            let lp_registration = Box::pin(ParallelLpRegistration::new(rc_builder.config)).await?;
-            Box::pin(lp_registration.register()).await
+            Box::pin(ParallelLpRegistration::new(rc_builder.config).register()).await
         } else {
             // Already decided and warned about by `use_lp`.
             rc_builder.config.enable_lp_registration = false;
@@ -576,6 +587,7 @@ impl TunnelMonitor {
                 let (mut connection_data, mut wg_tunnel_runtime) = self
                     .setup_wireguard_tunnel(
                         *inner_result,
+                        ticket_provider,
                         entry_metadata_rx,
                         exit_metadata_rx,
                         &selected_gateways,
@@ -955,6 +967,7 @@ impl TunnelMonitor {
     async fn setup_wireguard_tunnel(
         &self,
         registration_result: WireguardRegistrationResult,
+        ticket_provider: BandwidthControllerRequestSender,
         entry_metadata_rx: MetadataReceiver,
         exit_metadata_rx: MetadataReceiver,
         selected_gateways: &SelectedGateways,
@@ -981,7 +994,6 @@ impl TunnelMonitor {
             entry_gateway_data,
             exit_gateway_data,
             authenticator_listener_handle,
-            bw_controller,
         ) = match registration_result {
             WireguardRegistrationResult::Legacy(res) => (
                 Some(res.entry_gateway_client),
@@ -989,7 +1001,6 @@ impl TunnelMonitor {
                 res.entry_gateway_data,
                 res.exit_gateway_data,
                 Some(res.authenticator_listener_handle),
-                res.bw_controller,
             ),
             WireguardRegistrationResult::LewesProtocol(res) => (
                 None,
@@ -997,7 +1008,6 @@ impl TunnelMonitor {
                 res.entry_gateway_data,
                 res.exit_gateway_data,
                 None,
-                res.bw_controller,
             ),
         };
 
@@ -1009,7 +1019,7 @@ impl TunnelMonitor {
             .gw_update_version();
 
         let bw = BandwidthController::create(
-            bw_controller,
+            Box::new(ticket_provider),
             self.account_command_tx.clone(),
             selected_gateways,
             entry_gateway_client,
@@ -1248,7 +1258,7 @@ impl TunnelMonitor {
             let mut tun_config = tun::Configuration::default();
 
             tun_config
-                .name(name)
+                .tun_name(name)
                 .address(interface_ipv4)
                 // Newer `tun` crate versions skip configuring the IPv4 address
                 // when no netmask is set, which silently drops IPv4 on the
@@ -1284,7 +1294,7 @@ impl TunnelMonitor {
         let mut tun_config = tun::Configuration::default();
 
         tun_config
-            .name(name)
+            .tun_name(name)
             .address(interface_ipv4)
             .netmask(Ipv4Addr::BROADCAST)
             .mtu(mtu)

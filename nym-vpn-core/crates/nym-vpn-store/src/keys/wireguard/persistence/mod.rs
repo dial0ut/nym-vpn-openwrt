@@ -13,8 +13,7 @@ const MIN_TTL: Duration = Duration::weeks(1);
 const MAX_TTL: Duration = Duration::weeks(2);
 
 fn random_keys() -> WireguardKeys {
-    let mut rng = rand::rngs::OsRng;
-    WireguardKeys::generate_new(&mut rng)
+    WireguardKeys::generate_new(&mut rand010::rng())
 }
 
 fn random_timestamp_from(start: OffsetDateTime) -> OffsetDateTime {

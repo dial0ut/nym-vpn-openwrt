@@ -124,7 +124,7 @@ pub async fn fronted_http_client_builder(
             }
         }
         if !preresolve.is_empty() {
-            let mut resolver = HickoryDnsResolver::default();
+            let resolver: HickoryDnsResolver = HickoryDnsResolver::default();
             resolver.set_static_preresolve(preresolve);
             builder = builder.dns_resolver(Arc::new(resolver));
         }

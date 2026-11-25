@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use nym_crypto::asymmetric::ed25519;
-use rand::{CryptoRng, RngCore};
+use rand010::CryptoRng;
 use zeroize::ZeroizeOnDrop;
 
 use super::key_store::DeviceKeyStore;
@@ -17,7 +17,7 @@ pub struct DeviceKeys {
 impl DeviceKeys {
     pub fn generate_new<R>(rng: &mut R) -> Self
     where
-        R: RngCore + CryptoRng,
+        R: CryptoRng,
     {
         DeviceKeys {
             device_keypair: Arc::new(ed25519::KeyPair::new(rng)),
