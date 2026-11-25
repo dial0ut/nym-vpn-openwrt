@@ -27,7 +27,7 @@ hickory-resolver = { workspace = true, features = [
 ipnetwork.workspace = true
 itertools.workspace = true
 rand.workspace = true
-rand09.workspace = true
+rand010.workspace = true
 serial_test.workspace = true
 semver = { workspace = true }
 surge-ping.workspace = true
@@ -46,6 +46,7 @@ tun = { workspace = true, features = ["async"] }
 typed-builder.workspace = true
 url.workspace = true
 nym-bandwidth-controller.workspace = true
+nym-bandwidth-fetcher.workspace = true
 nym-bin-common.workspace = true
 nym-client-core.workspace = true
 nym-config.workspace = true

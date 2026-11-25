@@ -12,10 +12,7 @@ use nym_sdk::{
     mixnet::{DisconnectedMixnetClient, Ephemeral, MixnetClient, MixnetClientBuilder, x25519},
 };
 use nym_topology::HardcodedTopologyProvider;
-use nym_validator_client::{
-    client::NymApiClientExt,
-    nyxd::{Config as NyxdClientConfig, NyxdClient},
-};
+use nym_validator_client::client::NymApiClientExt;
 use nym_vpn_lib::{Recipient, StoragePaths, new_user_agent};
 use nym_vpn_lib_types::{DiagnosticRegisterParams, DiagnosticResult, RegistrationReport};
 use nym_vpn_network_config::Network;
@@ -184,6 +181,7 @@ impl RegistrationDiagnostic {
         let auth_res = auth_client
             .register_wireguard(
                 &*wg_registration_config.bandwidth_provider,
+                None,
                 TicketType::V1WireguardEntry,
             )
             .await;
@@ -218,14 +216,7 @@ async fn setup_topology(network: &Network) -> anyhow::Result<HardcodedTopologyPr
         ignore_egress_epoch_role: true,
     };
 
-    let base_urls: Vec<url::Url> = api_client
-        .base_urls()
-        .iter()
-        .cloned()
-        .map(Into::into)
-        .collect();
-
-    let mut topology_provider = NymApiTopologyProvider::new(DEFAULT_CONFIG, base_urls, api_client);
+    let mut topology_provider = NymApiTopologyProvider::new(DEFAULT_CONFIG, api_client);
 
     let topology = topology_provider
         .get_new_topology()
@@ -254,8 +245,7 @@ async fn setup_registration(
         .ok_or(anyhow::anyhow!("Gateway requested not found"))?
         .clone();
 
-    let mut rng = rand::rngs::OsRng;
-    let gateway_keypair = Arc::new(x25519::KeyPair::new(&mut rng));
+    let gateway_keypair = Arc::new(x25519::KeyPair::new(&mut rand010::rng()));
 
     let gateway_version = gateway.version().to_string();
     let authenticator_address = gateway
@@ -274,7 +264,7 @@ async fn setup_registration(
             "Chosen gateway does not have announced IP addresses",
         ))?;
 
-    let bandwidth_provider = setup_bandwidth_provider(network, storage_path)
+    let bandwidth_provider = setup_bandwidth_provider(storage_path)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to setup bandwidth provider : {e}"))?;
 
@@ -288,19 +278,8 @@ async fn setup_registration(
 }
 
 async fn setup_bandwidth_provider(
-    network: &Network,
     storage_path: &PathBuf,
 ) -> anyhow::Result<Box<dyn BandwidthTicketProvider>> {
-    let config = NyxdClientConfig::try_from_nym_network_details(network.nym_network_details())
-        .map_err(|e| anyhow::anyhow!("Nyx config error : {e}"))?;
-
-    let nyxd_url = network
-        .nym_network_details()
-        .endpoints
-        .first()
-        .map(|ep| ep.nyxd_url())
-        .ok_or(anyhow::anyhow!("Invalid Nyxd URl"))?;
-
     let storage_paths = StoragePaths::new_from_dir(storage_path)
         .map_err(|e| anyhow::anyhow!("Storage setup error : {e}"))?;
     if !storage_paths.credential_database_path.exists() {
@@ -313,11 +292,6 @@ async fn setup_bandwidth_provider(
         .await
         .map_err(|e| anyhow::anyhow!("Credential database : {e}"))?;
 
-    let nyxd_client = NyxdClient::connect(config, nyxd_url.as_str())
-        .map_err(|e| anyhow::anyhow!("NyxdClient connection : {e}"))?;
-
-    Ok(Box::new(BandwidthController::new(
-        credential_storage,
-        nyxd_client,
-    )))
+    // No public data fetcher: ticketbooks are imported with their signing material.
+    Ok(Box::new(BandwidthController::new(credential_storage)))
 }

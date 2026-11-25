@@ -5,6 +5,7 @@ use std::{net::IpAddr, time::Duration};
 
 use nym_authenticator_client::AuthenticatorClient;
 use nym_bandwidth_controller::{BandwidthTicketProvider, DEFAULT_TICKETS_TO_SPEND};
+use time::OffsetDateTime;
 use nym_registration_common::WireguardConfiguration;
 use tokio::time::Instant;
 use tokio_stream::{StreamExt, wrappers::IntervalStream};
@@ -819,6 +820,7 @@ impl BandwidthController {
                 ticketbook_type,
                 bw_client.gateway_id(),
                 DEFAULT_TICKETS_TO_SPEND,
+                OffsetDateTime::now_utc(),
             )
             .await
             .map_err(|source| {
@@ -830,6 +832,19 @@ impl BandwidthController {
                     gateway_id: bw_client.gateway_id().to_string(),
                     ticketbook_type,
                     source: Box::new(source),
+                }
+            })?
+            .ok_or_else(|| {
+                tracing::error!(
+                    "No {ticketbook_type} ticket left for {side} gateway {}",
+                    bw_client.gateway_id()
+                );
+                SpecificGatewayError::RequestCredential {
+                    gateway_id: bw_client.gateway_id().to_string(),
+                    ticketbook_type,
+                    source: Box::new(
+                        nym_bandwidth_controller::error::BandwidthControllerError::TicketbooksUnavailable,
+                    ),
                 }
             })?
             .data;
@@ -1302,7 +1317,7 @@ mod tests {
             gateway_id: "gw".to_owned(),
             ticketbook_type: TicketType::V1WireguardEntry,
             source: Box::new(
-                nym_bandwidth_controller::error::BandwidthControllerError::NoCredentialsAvailable,
+                nym_bandwidth_controller::error::BandwidthControllerError::TicketbooksUnavailable,
             ),
         };
 

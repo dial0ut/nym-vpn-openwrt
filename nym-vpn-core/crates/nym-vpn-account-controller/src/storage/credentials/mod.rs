@@ -28,6 +28,8 @@ use time::{Date, OffsetDateTime};
 
 use crate::{AvailableTicketbooks, error::Error};
 
+pub(crate) const NYXD_PENDING_DEPOSITS_DB: &str = "pending_nyxd_deposits.db";
+
 #[derive(Clone)]
 pub(crate) struct VpnCredentialStorage {
     data_dir: PathBuf,
@@ -57,8 +59,9 @@ impl VpnCredentialStorage {
         })
     }
 
-    pub fn credential_storage(&self) -> &PersistentCredentialStorage {
-        &self.credential_storage
+    /// Recovery store of the on-chain (decentralised) credential fetcher.
+    pub(crate) fn nyxd_pending_deposits_path(&self) -> PathBuf {
+        self.data_dir.join(NYXD_PENDING_DEPOSITS_DB)
     }
 
     pub async fn close(&self) {
@@ -240,11 +243,6 @@ impl VpnCredentialStorage {
             } else {
                 tracing::info!("Ticketbook: {ticketbook}");
             }
-        }
-
-        let pending_ticketbooks = self.credential_storage.get_pending_ticketbooks().await?;
-        for pending in pending_ticketbooks {
-            tracing::info!("Pending ticketbook id: {}", pending.pending_id);
         }
         Ok(())
     }

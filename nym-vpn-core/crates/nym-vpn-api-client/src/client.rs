@@ -157,15 +157,14 @@ impl VpnApiClient {
         user_agent: UserAgent,
         resolver_overrides: Option<&ResolverOverrides>,
     ) -> Result<Self> {
-        #[allow(deprecated)]
-        let api_urls = network.nym_vpn_api_urls.as_ref().ok_or_else(|| {
-            let err: HttpClientError = HttpClientError::GenericRequestFailure(
-                "No Nym VPN API URLs configured in network details".to_string(),
-            );
-            VpnApiClientError::CreateVpnApiClient(Box::new(err))
-        })?;
+        let api_urls = network.nym_vpn_api_urls();
+        if api_urls.is_empty() {
+            return Err(VpnApiClientError::CreateVpnApiClient(Box::new(
+                HttpClientError::NoUrlsProvided,
+            )));
+        }
 
-        let urls = api_urls_to_urls(api_urls)?;
+        let urls = api_urls_to_urls(&api_urls)?;
 
         let inner = fronted_http_client(
             urls.clone(),

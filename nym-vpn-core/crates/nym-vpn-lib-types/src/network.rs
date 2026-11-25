@@ -346,6 +346,8 @@ impl From<nym_vpn_network_config::FlagValue> for FlagValue {
 #[cfg(feature = "nym-type-conversions")]
 impl From<nym_vpn_network_config::NymNetwork> for NymNetworkDetails {
     fn from(value: nym_vpn_network_config::NymNetwork) -> Self {
+        let nym_api_urls = value.network.nym_api_urls();
+        let nym_vpn_api_urls = value.network.nym_vpn_api_urls();
         Self {
             network_name: value.network.network_name,
             chain_details: ChainDetails::from(value.network.chain_details),
@@ -356,15 +358,15 @@ impl From<nym_vpn_network_config::NymNetwork> for NymNetworkDetails {
                 .map(ValidatorDetails::from)
                 .collect(),
             contracts: NymContracts::from(value.network.contracts),
-            nym_vpn_api_url: value.network.nym_vpn_api_url,
-            nym_api_urls: value
-                .network
-                .nym_api_urls
-                .map(|v| v.into_iter().map(ApiUrl::from).collect::<Vec<_>>()),
-            nym_vpn_api_urls: value
-                .network
-                .nym_vpn_api_urls
-                .map(|v| v.into_iter().map(ApiUrl::from).collect::<Vec<_>>()),
+            nym_vpn_api_url: nym_vpn_api_urls.first().map(|api_url| api_url.url.clone()),
+            nym_api_urls: (!nym_api_urls.is_empty())
+                .then(|| nym_api_urls.into_iter().map(ApiUrl::from).collect::<Vec<_>>()),
+            nym_vpn_api_urls: (!nym_vpn_api_urls.is_empty()).then(|| {
+                nym_vpn_api_urls
+                    .into_iter()
+                    .map(ApiUrl::from)
+                    .collect::<Vec<_>>()
+            }),
         }
     }
 }

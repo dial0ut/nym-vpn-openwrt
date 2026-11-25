@@ -16,7 +16,7 @@ use nym_vpn_store::keys::{
     wireguard::DB_NAME,
 };
 
-use crate::Error;
+use crate::{Error, storage::credentials::NYXD_PENDING_DEPOSITS_DB};
 
 // TODO: implement functionality where the owning code of these files delete them instead. To
 // protect us against the names drifting out of sync.
@@ -29,6 +29,7 @@ pub async fn remove_files_for_account(
     let mut vpn_paths = vec![
         DEFAULT_PRIVATE_DEVICE_KEY_FILENAME,
         DEFAULT_PUBLIC_DEVICE_KEY_FILENAME,
+        NYXD_PENDING_DEPOSITS_DB,
     ];
 
     if remove_wireguard_keys_db {

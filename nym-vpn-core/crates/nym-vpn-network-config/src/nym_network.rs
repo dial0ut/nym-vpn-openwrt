@@ -40,7 +40,17 @@ impl NymNetwork {
         let path = Self::path(config_dir, network_name);
         tracing::debug!("Reading network details from: {}", path.display());
 
-        let network: NymNetworkDetails = crate::serialization::deserialize_from_json_file(path)?;
+        // Files written before the v2 network details carry the v1 layout.
+        let network: NymNetworkDetails =
+            match crate::serialization::deserialize_from_json_file(&path) {
+                Ok(network) => network,
+                Err(v2_err) => crate::serialization::deserialize_from_json_file::<
+                    _,
+                    nym_network_defaults::v1::NymNetworkDetails,
+                >(&path)
+                .map(Into::into)
+                .map_err(|_| v2_err)?,
+            };
 
         Ok(Self { network })
     }

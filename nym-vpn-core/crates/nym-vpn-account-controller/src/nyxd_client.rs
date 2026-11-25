@@ -3,18 +3,18 @@
 
 use nym_validator_client::{
     DirectSigningHttpRpcNyxdClient,
-    nyxd::{Coin, Config, CosmWasmClient, cosmwasm_client::types::Account},
+    nyxd::{Coin, Config, TendermintRpcClientExt, cosmwasm_client::types::Account},
 };
 use nym_vpn_lib_types::AccountCommandError;
 use nym_vpn_network_config::Network;
 use nym_vpn_store::account::Mnemonic;
-use std::str::FromStr;
+use std::{str::FromStr, sync::Arc};
 
 pub struct NyxdClient {
     network: Network,
 
     // TODO: does it need locking or are we guaranteed sequential access?
-    client: Option<DirectSigningHttpRpcNyxdClient>,
+    client: Option<Arc<DirectSigningHttpRpcNyxdClient>>,
 }
 
 impl NyxdClient {
@@ -45,7 +45,7 @@ impl NyxdClient {
         )
         .map_err(|err| AccountCommandError::NyxdConnectionFailure(err.to_string()))?;
 
-        self.client = Some(client);
+        self.client = Some(Arc::new(client));
         Ok(())
     }
 
@@ -86,11 +86,11 @@ impl NyxdClient {
     pub(crate) fn inner_client(
         &mut self,
         mnemonic: &str,
-    ) -> Result<&mut DirectSigningHttpRpcNyxdClient, AccountCommandError> {
+    ) -> Result<Arc<DirectSigningHttpRpcNyxdClient>, AccountCommandError> {
         self.ensure_connected(mnemonic)?;
         // SAFETY: we just connected
         #[allow(clippy::unwrap_used)]
-        let client = self.client.as_mut().unwrap();
+        let client = self.client.clone().unwrap();
         Ok(client)
     }
 }
