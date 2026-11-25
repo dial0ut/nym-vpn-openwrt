@@ -48,6 +48,13 @@ the GitHub release notes.
   could hang for 30 seconds on a connection left over from the old tunnel.
   The mixnet tunnel of the dual tunnel often took about 35 seconds instead
   of a few to come back after a reconnect.
+- The mixnet gateway lists in `nym-vpnc` and LuCI showed each gateway's Fast
+  score in place of its mixnet score.
+- A failed "downloaded" confirmation to the VPN API no longer fails a
+  ticketbook import that already succeeded.
+- LuCI said mixnet routes have no connection while the VPN is disconnected;
+  with the kill-switch off they use the normal connection, and the note now
+  says so.
 
 ## [1.36.1] - 2026-10-05
 
